@@ -59,8 +59,12 @@ const char* kIndexHtml = R"HTML(
     .app-shell { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 12px; align-items: start; }
     .sidebar { position: sticky; top: 16px; }
     .workspace-list { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; max-height: 45vh; overflow: auto; }
+    .workspace-row { display: grid; grid-template-columns: minmax(0,1fr) auto auto; gap: 6px; align-items: center; }
     .workspace-item { text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .workspace-item.active { background: #1f4fa3; color: #fff; border-color: #1f4fa3; }
+    .workspace-meta { font-size: 11px; color: #70809f; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .icon-btn { border: 1px solid #cfd9ea; background: #fff; border-radius: 6px; padding: 4px 6px; cursor: pointer; }
+    .icon-btn:hover { background: #f2f6ff; }
     .row { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; }
     .panel { background: #fff; border: 1px solid #dde3f0; border-radius: 10px; padding: 12px; margin-bottom: 12px; }
     .tabs { display: flex; gap: 8px; }
@@ -116,6 +120,7 @@ const char* kIndexHtml = R"HTML(
       <div class="row" style="margin-bottom:8px;">
         <button id="workspace-add" class="btn">Open Workspace</button>
       </div>
+      <div class="muted" style="margin-bottom:8px;">Shortcut: Alt+1..9 switch workspace</div>
       <div id="workspace-list" class="workspace-list"></div>
     </aside>
 
@@ -190,11 +195,42 @@ R"HTML(  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></scrip
       allItems: []
     };
     const lanes = ['Backlog', 'Doing', 'Blocked', 'Review', 'Done'];
-    const workspaceStorageKey = 'kano_webview_workspaces_v1';
+    const workspaceStorageKey = 'kano_webview_workspaces_v2';
 
     async function getJson(url) {
       const resp = await fetch(url);
       return resp.json();
+    }
+
+    function nowIso() {
+      return new Date().toISOString();
+    }
+
+    function normalizeWorkspaceEntry(entry) {
+      if (typeof entry === 'string') {
+        const clean = entry.trim();
+        if (!clean) return null;
+        return { path: clean, label: clean.split(/[\\/]/).filter(Boolean).pop() || clean, lastUsed: '' };
+      }
+      if (!entry || typeof entry !== 'object') {
+        return null;
+      }
+      const path = String(entry.path || '').trim();
+      if (!path) {
+        return null;
+      }
+      const labelRaw = String(entry.label || '').trim();
+      const label = labelRaw || path.split(/[\\/]/).filter(Boolean).pop() || path;
+      const lastUsed = String(entry.lastUsed || '');
+      return { path, label, lastUsed };
+    }
+
+    function sortedWorkspaces() {
+      return [...state.workspaces].sort((a, b) => {
+        if (a.path === state.workspace) return -1;
+        if (b.path === state.workspace) return 1;
+        return (b.lastUsed || '').localeCompare(a.lastUsed || '');
+      });
     }
 
     function loadSavedWorkspaces() {
@@ -207,7 +243,14 @@ R"HTML(  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></scrip
         if (!Array.isArray(parsed)) {
           return [];
         }
-        return parsed.filter((x) => typeof x === 'string' && x.trim().length > 0);
+        const normalized = parsed
+          .map(normalizeWorkspaceEntry)
+          .filter((x) => x && x.path);
+        const dedup = new Map();
+        for (const w of normalized) {
+          dedup.set(w.path, w);
+        }
+        return [...dedup.values()];
       } catch (_e) {
         return [];
       }
@@ -220,24 +263,70 @@ R"HTML(  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></scrip
       }
     }
 
-    function addWorkspace(path) {
+    function saveWorkspaces() {
+      try {
+        localStorage.setItem(workspaceStorageKey, JSON.stringify(state.workspaces));
+      } catch (_e) {
+      }
+    }
+
+    function upsertWorkspace(path, updates = {}) {
       const clean = String(path || '').trim();
       if (!clean) {
         return;
       }
-      if (!state.workspaces.includes(clean)) {
-        state.workspaces.unshift(clean);
-        if (state.workspaces.length > 12) {
-          state.workspaces = state.workspaces.slice(0, 12);
-        }
-        saveWorkspaces();
+      const idx = state.workspaces.findIndex((w) => w.path === clean);
+      if (idx >= 0) {
+        state.workspaces[idx] = {
+          ...state.workspaces[idx],
+          ...updates,
+          path: clean,
+        };
+      } else {
+        const baseLabel = clean.split(/[\\/]/).filter(Boolean).pop() || clean;
+        state.workspaces.push({
+          path: clean,
+          label: String(updates.label || baseLabel),
+          lastUsed: String(updates.lastUsed || ''),
+        });
       }
+      const sorted = sortedWorkspaces();
+      state.workspaces = sorted.slice(0, 20);
+      saveWorkspaces();
+    }
+
+    function touchWorkspace(path) {
+      upsertWorkspace(path, { lastUsed: nowIso() });
+    }
+
+    function removeWorkspace(path) {
+      state.workspaces = state.workspaces.filter((w) => w.path !== path);
+      saveWorkspaces();
+      renderWorkspaceList();
+    }
+
+    function renameWorkspace(path) {
+      const current = state.workspaces.find((w) => w.path === path);
+      if (!current) return;
+      const renamed = prompt('Workspace label', current.label || '');
+      if (renamed === null) return;
+      const cleanLabel = renamed.trim();
+      if (!cleanLabel) return;
+      upsertWorkspace(path, { label: cleanLabel });
+      renderWorkspaceList();
+    }
+
+    function addWorkspace(path) {
+      upsertWorkspace(path, { lastUsed: nowIso() });
     }
 
     function renderWorkspaceList() {
-      const html = state.workspaces.map((path) => {
-        const active = path === state.workspace ? 'active' : '';
-        return `<button class="btn workspace-item ${active}" data-workspace-path="${escAttr(path)}" title="${escAttr(path)}">${esc(path)}</button>`;
+      const list = sortedWorkspaces();
+      const html = list.map((w, i) => {
+        const active = w.path === state.workspace ? 'active' : '';
+        const title = `${w.label}\n${w.path}`;
+        const shortcut = i < 9 ? `<div class=\"workspace-meta\">Alt+${i + 1}</div>` : '<div class="workspace-meta"></div>';
+        return `<div class="workspace-row"><button class="btn workspace-item ${active}" data-workspace-path="${escAttr(w.path)}" title="${escAttr(title)}">${esc(w.label)}</button><button class="icon-btn" data-workspace-rename="${escAttr(w.path)}" title="Rename">✎</button><button class="icon-btn" data-workspace-remove="${escAttr(w.path)}" title="Remove">✕</button>${shortcut}</div>`;
       }).join('');
       document.getElementById('workspace-list').innerHTML =
           html || '<div class="muted">No saved workspaces</div>';
@@ -251,6 +340,24 @@ R"HTML(  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></scrip
           await switchWorkspace(path, false);
         });
       });
+
+      document.querySelectorAll('#workspace-list [data-workspace-rename]').forEach((btn) => {
+        btn.addEventListener('click', (event) => {
+          event.stopPropagation();
+          const path = btn.getAttribute('data-workspace-rename');
+          if (!path) return;
+          renameWorkspace(path);
+        });
+      });
+
+      document.querySelectorAll('#workspace-list [data-workspace-remove]').forEach((btn) => {
+        btn.addEventListener('click', (event) => {
+          event.stopPropagation();
+          const path = btn.getAttribute('data-workspace-remove');
+          if (!path) return;
+          removeWorkspace(path);
+        });
+      });
     }
 
     function showWorkspaceCurrent(path) {
@@ -262,7 +369,7 @@ R"HTML(  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></scrip
       const result = await getJson('/api/workspace/info');
       const ws = result?.data?.workspace_root || '';
       state.workspace = ws;
-      addWorkspace(ws);
+      touchWorkspace(ws);
       showWorkspaceCurrent(ws);
       renderWorkspaceList();
     }
@@ -280,7 +387,7 @@ R"HTML(  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></scrip
       }
       const ws = result?.data?.workspace_root || clean;
       state.workspace = ws;
-      addWorkspace(ws);
+      touchWorkspace(ws);
       showWorkspaceCurrent(ws);
       renderWorkspaceList();
       if (updateInput) {
@@ -558,6 +665,23 @@ R"HTML(    function typeIcon(type) {
         event.preventDefault();
         await switchWorkspace(document.getElementById('workspace-input').value);
       }
+    });
+
+    document.addEventListener('keydown', async (event) => {
+      if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
+        return;
+      }
+      const idx = Number.parseInt(event.key, 10);
+      if (!Number.isFinite(idx) || idx < 1 || idx > 9) {
+        return;
+      }
+      const list = sortedWorkspaces();
+      const target = list[idx - 1];
+      if (!target) {
+        return;
+      }
+      event.preventDefault();
+      await switchWorkspace(target.path, true);
     });
 
     document.querySelectorAll('.tab-btn[data-tab]').forEach((btn) => {

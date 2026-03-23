@@ -1,0 +1,16 @@
+{
+  "quartz": {
+    "version": "v4.4.0",
+    "repository": "https://github.com/jackyzha0/quartz.git"
+  },
+  "repositories": {
+    "skill": "https://github.com/dorgonman/kano-agent-backlog-skill.git"
+  },
+  "deployment": {
+    "site_url": "https://dorgonman.github.io/kano-agent-backlog-skill/",
+    "branch": "gh-pages"
+  },
+  "build": {
+    "node_version": "22"
+  }
+}

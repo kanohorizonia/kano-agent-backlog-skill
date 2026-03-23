@@ -545,13 +545,13 @@ Vector Index (.cache/vectors/repo_chunks.<hash>.sqlite3)
 
 ```bash
 # 1. Build indices
-kano-backlog chunks build-repo
-kano-backlog chunks build-repo-vectors
+kob chunks build-repo
+kob chunks build-repo-vectors
 
 # 2. Run benchmarks
 time grep -r "embed" skills/kano-agent-backlog-skill/src/ | wc -l
-time kano-backlog chunks query-repo "embed" --k 20
-time kano-backlog search hybrid "embed" --corpus repo --fts-k 20 --top-k 5
+time kob chunks query-repo "embed" --k 20
+time kob search hybrid "embed" --corpus repo --fts-k 20 --top-k 5
 ```
 
 ### Expected Results

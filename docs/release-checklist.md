@@ -10,7 +10,7 @@ This checklist ensures consistent release process and catches issues before publ
 - [ ] Run type checking: `mypy src/`
 - [ ] Run linting: `black --check src/ && isort --check src/`
 - [ ] Test CLI commands manually
-- [ ] Verify `kano-backlog doctor` works
+- [ ] Verify `kob doctor` works
 - [ ] Test multi-product workflow
 - [ ] Review and update documentation
 
@@ -25,9 +25,9 @@ This checklist ensures consistent release process and catches issues before publ
 
 - [ ] Create fresh venv: `python -m venv test-venv`
 - [ ] Install from wheel: `pip install dist/*.whl`
-- [ ] Verify CLI available: `which kano-backlog` (or `where kano-backlog` on Windows)
-- [ ] Run `kano-backlog --version`
-- [ ] Run `kano-backlog doctor`
+- [ ] Verify CLI available: `which kob` (or `where kob` on Windows)
+- [ ] Run `bash scripts/internal/show-version.sh`
+- [ ] Run `kob doctor`
 - [ ] Test basic workflow (init, create item, update state)
 
 ## Upload to Test PyPI

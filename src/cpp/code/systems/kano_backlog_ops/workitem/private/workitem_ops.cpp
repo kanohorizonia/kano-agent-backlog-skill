@@ -53,7 +53,7 @@ CreateItemResult WorkitemOps::create_item(
     // 4. Calculate path and write file
     // Note: CanonicalStore should have a way to calculate path without internal knowledge
     // For now we'll use a hack or implement it in store.
-    std::filesystem::path item_path = backlog_root / "items" / (item.id + ".md"); 
+    std::filesystem::path item_path = *item.file_path;
     std::filesystem::create_directories(item_path.parent_path());
     
     std::ofstream ofs(item_path);

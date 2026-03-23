@@ -28,32 +28,32 @@ Each corpus has its own rebuildable SQLite DB and separate embedding space to pr
 
 ```bash
 # Build FTS index (items + ADRs + topics)
-kano-backlog chunks build --product <product> --force
+kob chunks build --product <product> --force
 
 # Build vector index
-kano-backlog embedding build --product <product> --force
+kob embedding build --product <product> --force
 
 # Query FTS only
-kano-backlog chunks query "embedding search" --product <product> --k 10
+kob chunks query "embedding search" --product <product> --k 10
 
 # Query hybrid (FTS + vector rerank)
-kano-backlog search hybrid "semantic search for backlog items" --corpus backlog --product <product> --k 10
+kob search hybrid "semantic search for backlog items" --corpus backlog --product <product> --k 10
 ```
 
 ### Repo Corpus
 
 ```bash
 # Build FTS index (docs + code)
-kano-backlog chunks build-repo --force
+kob chunks build-repo --force
 
 # Build vector index
-kano-backlog chunks build-repo-vectors --force
+kob chunks build-repo-vectors --force
 
 # Query FTS only
-kano-backlog chunks query-repo "error message" --k 10
+kob chunks query-repo "error message" --k 10
 
 # Query hybrid (FTS + vector rerank)
-kano-backlog search hybrid "where is the embedding pipeline implemented" --corpus repo --k 10 --fts-k 200
+kob search hybrid "where is the embedding pipeline implemented" --corpus repo --k 10 --fts-k 200
 ```
 
 ## Cache Freshness Policy
@@ -114,10 +114,10 @@ ls -lh .cache/vectors/
 **Rebuild workflow:**
 ```bash
 # Full rebuild (backlog + repo)
-kano-backlog chunks build --product <product> --force
-kano-backlog embedding build --product <product> --force
-kano-backlog chunks build-repo --force
-kano-backlog chunks build-repo-vectors --force
+kob chunks build --product <product> --force
+kob embedding build --product <product> --force
+kob chunks build-repo --force
+kob chunks build-repo-vectors --force
 ```
 
 ## Configuration
@@ -161,12 +161,12 @@ metric = "cosine"
 ## Troubleshooting
 
 **"Chunks DB not found"**
-- Run `kano-backlog chunks build --product <product>` (backlog)
-- Run `kano-backlog chunks build-repo` (repo)
+- Run `kob chunks build --product <product>` (backlog)
+- Run `kob chunks build-repo` (repo)
 
 **"Vector backend not found"**
-- Run `kano-backlog embedding build --product <product>` (backlog)
-- Run `kano-backlog chunks build-repo-vectors` (repo)
+- Run `kob embedding build --product <product>` (backlog)
+- Run `kob chunks build-repo-vectors` (repo)
 
 **Stale results**
 - Use `--force` flag to rebuild indexes

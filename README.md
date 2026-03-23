@@ -50,27 +50,28 @@ pip install kano-agent-backlog-skill
 
 **Verify installation:**
 ```bash
-kano-backlog --version
-kano-backlog doctor
+bash scripts/internal/show-version.sh
+kob
+kob doctor
 ```
 
 ## Minimal Usage Example
 
 ```bash
 # Initialize a backlog for your product
-kano-backlog admin init --product my-app --agent kiro
+kob admin init --product my-app --agent kiro
 
 # IMPORTANT: Add cache and logs to .gitignore
 echo ".kano/cache" >> .gitignore
 echo "_kano/backlog/_shared/logs" >> .gitignore
 
 # Create a task with required fields
-kano-backlog item create --type task \
+kob item create --type task \
   --title "Add user authentication" \
   --agent kiro --product my-app
 
 # Set task to Ready state (enforces required fields)
-kano-backlog item set-ready MYAPP-TSK-0001 --product my-app \
+kob workitem set-ready MYAPP-TSK-0001 --product my-app \
   --context "Users need secure login" \
   --goal "Implement JWT-based authentication" \
   --approach "Use bcrypt for passwords, JWT for sessions" \
@@ -78,11 +79,11 @@ kano-backlog item set-ready MYAPP-TSK-0001 --product my-app \
   --risks "Token expiration handling needs testing"
 
 # Start work with a workset to prevent drift
-kano-backlog workset init --item MYAPP-TSK-0001 --agent kiro
-kano-backlog workset next --item MYAPP-TSK-0001
+kob workset init --item MYAPP-TSK-0001 --agent kiro
+kob workset next --item MYAPP-TSK-0001
 
 # Update state when done
-kano-backlog item update-state MYAPP-TSK-0001 --state Done \
+kob workitem update-state MYAPP-TSK-0001 --state Done \
   --agent kiro --product my-app
 ```
 
@@ -163,7 +164,7 @@ Capture significant technical decisions:
 
 ## CLI Commands
 
-The `kano-backlog` CLI provides comprehensive commands for backlog management:
+The `kob` CLI provides comprehensive commands for backlog management:
 
 - **`admin`** - Backlog bootstrap and maintenance (init, adr, index, schema, release)
 - **`item` / `workitem`** - Create and manage work items (Epic/Feature/UserStory/Task/Bug)
@@ -180,7 +181,7 @@ The `kano-backlog` CLI provides comprehensive commands for backlog management:
 - **`changelog`** - Generate changelog from backlog
 - **`doctor`** - Environment and backlog health checks
 
-Run `kano-backlog --help` or `kano-backlog <command> --help` for detailed usage.
+Run `kob` or the thin repo wrappers under `scripts/core/` for current local usage guidance.
 
 ## Workset Usage
 
@@ -188,19 +189,19 @@ Worksets prevent agent drift during task execution by providing a structured wor
 
 ```bash
 # Initialize workset for a task
-kano-backlog workset init --item TASK-0042 --agent kiro
+kob workset init --item TASK-0042 --agent kiro
 
 # Get next action from plan
-kano-backlog workset next --item TASK-0042
+kob workset next --item TASK-0042
 
 # Detect decisions that should become ADRs
-kano-backlog workset detect-adr --item TASK-0042
+kob workset detect-adr --item TASK-0042
 
 # Promote deliverables to canonical artifacts
-kano-backlog workset promote --item TASK-0042 --agent kiro
+kob workset promote --item TASK-0042 --agent kiro
 
 # Clean up expired worksets
-kano-backlog workset cleanup --ttl-hours 72
+kob workset cleanup --ttl-hours 72
 ```
 
 See [docs/workset.md](docs/workset.md) for complete documentation.
@@ -211,30 +212,30 @@ Topics enable rapid context switching when focus areas change:
 
 ```bash
 # Create a topic for related work
-kano-backlog topic create auth-refactor --agent kiro
+kob topic create auth-refactor --agent kiro
 
 # Add items to the topic
-kano-backlog topic add auth-refactor --item TASK-0042
-kano-backlog topic add auth-refactor --item BUG-0012
+kob topic add auth-refactor --item TASK-0042
+kob topic add auth-refactor --item BUG-0012
 
 # Pin relevant documents
-kano-backlog topic pin auth-refactor --doc _kano/backlog/decisions/ADR-0015.md
+kob topic pin auth-refactor --doc _kano/backlog/decisions/ADR-0015.md
 
 # Collect a code snippet reference
-kano-backlog topic add-snippet auth-refactor --file src/auth.py --start 10 --end 25 --agent kiro
+kob topic add-snippet auth-refactor --file src/auth.py --start 10 --end 25 --agent kiro
 
 # Distill deterministic brief from materials
-kano-backlog topic distill auth-refactor
+kob topic distill auth-refactor
 
 # Switch active topic
-kano-backlog topic switch auth-refactor --agent kiro
+kob topic switch auth-refactor --agent kiro
 
 # Export context bundle
-kano-backlog topic export-context auth-refactor --format json
+kob topic export-context auth-refactor --format json
 
 # Close and cleanup
-kano-backlog topic close auth-refactor --agent kiro
-kano-backlog topic cleanup --ttl-days 14 --apply
+kob topic close auth-refactor --agent kiro
+kob topic cleanup --ttl-days 14 --apply
 ```
 
 See [docs/topic.md](docs/topic.md) for complete documentation.
@@ -261,8 +262,8 @@ root = "/mnt/nas/shared-cache/backlog"
 ### Using CLI Override
 
 ```bash
-kano-backlog embedding build --product my-product --cache-root /mnt/nas/cache
-kano-backlog search query "authentication" --product my-product --cache-root /mnt/nas/cache
+kob embedding build --product my-product --cache-root /mnt/nas/cache
+kob search query "authentication" --product my-product --cache-root /mnt/nas/cache
 ```
 
 ## The Dual-Readability Principle

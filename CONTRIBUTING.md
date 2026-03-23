@@ -47,8 +47,9 @@ Thank you for your interest in contributing to kano-agent-backlog-skill! This do
 
 4. **Verify installation**:
    ```bash
-   kano-backlog --version
-   kano-backlog doctor
+   bash scripts/internal/show-version.sh
+   kob
+   kob doctor
    ```
 
 ## Code Style Guidelines
@@ -212,7 +213,7 @@ This project uses kano-agent-backlog-skill for planning and tracking work.
 
 1. **Create or update backlog items** before writing code:
    ```bash
-   kano-backlog item create \
+   kob item create \
      --type task \
      --title "Implement X feature" \
      --product kano-agent-backlog-skill \
@@ -225,10 +226,10 @@ This project uses kano-agent-backlog-skill for planning and tracking work.
 
 3. **Update item state** when starting work:
    ```bash
-   kano-backlog item update-state \
-     --id KABSD-TSK-0146 \
-     --state InProgress \
-     --agent <your-agent-id>
+    kob workitem update-state \
+      KABSD-TSK-0146 \
+      --state InProgress \
+      --product kano-agent-backlog-skill
    ```
 
 ### Worklog Discipline
@@ -276,14 +277,14 @@ source test-venv/bin/activate  # or test-venv\Scripts\activate on Windows
 pip install dist/kano_agent_backlog_skill-*.whl
 
 # Verify CLI is available
-which kano-backlog
-kano-backlog --version
-kano-backlog doctor
+which kob
+bash scripts/internal/show-version.sh
+kob doctor
 
 # Test basic workflow
-kano-backlog admin init --product test-product --agent test-agent
-kano-backlog item create --type task --title "Test task" --product test-product --agent test-agent
-kano-backlog item list --product test-product
+kob admin init --product test-product --agent test-agent
+kob item create --type task --title "Test task" --product test-product --agent test-agent
+kob item list --product test-product
 
 # Clean up
 deactivate

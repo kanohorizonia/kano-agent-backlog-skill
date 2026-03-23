@@ -1,7 +1,30 @@
 #include "kano/backlog_core/models/models.hpp"
+#include <algorithm>
+#include <cctype>
 #include <regex>
 
 namespace kano::backlog_core {
+
+namespace {
+
+std::string normalize_token(std::string value) {
+    value.erase(
+        std::remove_if(
+            value.begin(),
+            value.end(),
+            [](unsigned char ch) {
+                return std::isspace(ch) || ch == '_' || ch == '-';
+            }),
+        value.end());
+    std::transform(
+        value.begin(),
+        value.end(),
+        value.begin(),
+        [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    return value;
+}
+
+}  // namespace
 
 std::string to_string(ItemType type) {
     switch (type) {
@@ -15,11 +38,12 @@ std::string to_string(ItemType type) {
 }
 
 std::optional<ItemType> parse_item_type(const std::string& str) {
-    if (str == "Epic" || str == "epic") return ItemType::Epic;
-    if (str == "Feature" || str == "feature") return ItemType::Feature;
-    if (str == "UserStory" || str == "userstory") return ItemType::UserStory;
-    if (str == "Task" || str == "task") return ItemType::Task;
-    if (str == "Bug" || str == "bug") return ItemType::Bug;
+    const std::string normalized = normalize_token(str);
+    if (normalized == "epic") return ItemType::Epic;
+    if (normalized == "feature") return ItemType::Feature;
+    if (normalized == "userstory") return ItemType::UserStory;
+    if (normalized == "task") return ItemType::Task;
+    if (normalized == "bug") return ItemType::Bug;
     return std::nullopt;
 }
 
@@ -39,15 +63,16 @@ std::string to_string(ItemState state) {
 }
 
 std::optional<ItemState> parse_item_state(const std::string& str) {
-    if (str == "New" || str == "new") return ItemState::New;
-    if (str == "Proposed" || str == "proposed") return ItemState::Proposed;
-    if (str == "Planned" || str == "planned") return ItemState::Planned;
-    if (str == "Ready" || str == "ready") return ItemState::Ready;
-    if (str == "InProgress" || str == "inprogress") return ItemState::InProgress;
-    if (str == "Review" || str == "review") return ItemState::Review;
-    if (str == "Done" || str == "done") return ItemState::Done;
-    if (str == "Blocked" || str == "blocked") return ItemState::Blocked;
-    if (str == "Dropped" || str == "dropped") return ItemState::Dropped;
+    const std::string normalized = normalize_token(str);
+    if (normalized == "new") return ItemState::New;
+    if (normalized == "proposed") return ItemState::Proposed;
+    if (normalized == "planned") return ItemState::Planned;
+    if (normalized == "ready") return ItemState::Ready;
+    if (normalized == "inprogress") return ItemState::InProgress;
+    if (normalized == "review") return ItemState::Review;
+    if (normalized == "done") return ItemState::Done;
+    if (normalized == "blocked") return ItemState::Blocked;
+    if (normalized == "dropped") return ItemState::Dropped;
     return std::nullopt;
 }
 

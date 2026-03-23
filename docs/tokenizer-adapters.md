@@ -20,36 +20,36 @@ The tokenizer adapter system provides pluggable, accurate token counting for dif
 
 ```bash
 # Check overall tokenizer system health
-kano-backlog tokenizer status
+kob tokenizer status
 
 # Check which adapters are available
-kano-backlog tokenizer adapter-status
+kob tokenizer adapter-status
 
 # Check dependencies
-kano-backlog tokenizer dependencies
+kob tokenizer dependencies
 ```
 
 ### 2. Test Tokenization
 
 ```bash
 # Test with default settings
-kano-backlog tokenizer test --text "This is a sample text for tokenization testing."
+kob tokenizer test --text "This is a sample text for tokenization testing."
 
 # Test specific adapter
-kano-backlog tokenizer test --adapter tiktoken --model gpt-4
+kob tokenizer test --adapter tiktoken --model gpt-4
 
 # Compare adapters
-kano-backlog tokenizer compare "Sample text to compare across different tokenizers"
+kob tokenizer benchmark --text "Sample text to compare across different tokenizers"
 ```
 
 ### 3. Create Configuration
 
 ```bash
 # Create example configuration file
-kano-backlog tokenizer create-example --output tokenizer_config.toml
+kob tokenizer create-example --output tokenizer_config.toml
 
 # Validate configuration
-kano-backlog tokenizer validate --config tokenizer_config.toml
+kob tokenizer validate --config tokenizer_config.toml
 ```
 
 ## User Guide
@@ -69,8 +69,8 @@ Tokenizer adapters provide accurate token counting for different model providers
 #### For OpenAI Models (GPT, text-embedding-*)
 ```bash
 # Recommended: TikToken for exact tokenization
-kano-backlog tokenizer recommend gpt-4
-kano-backlog tokenizer recommend text-embedding-3-small
+kob tokenizer recommend gpt-4
+kob tokenizer recommend text-embedding-3-small
 ```
 
 **Use TikToken when:**
@@ -81,8 +81,8 @@ kano-backlog tokenizer recommend text-embedding-3-small
 #### For HuggingFace Models (BERT, sentence-transformers, etc.)
 ```bash
 # Recommended: HuggingFace for exact tokenization
-kano-backlog tokenizer recommend sentence-transformers/all-MiniLM-L6-v2
-kano-backlog tokenizer recommend bert-base-uncased
+kob tokenizer recommend sentence-transformers/all-MiniLM-L6-v2
+kob tokenizer recommend bert-base-uncased
 ```
 
 **Use HuggingFace when:**
@@ -93,7 +93,7 @@ kano-backlog tokenizer recommend bert-base-uncased
 #### For Development and Fallback
 ```bash
 # Heuristic adapter works with any model
-kano-backlog tokenizer test --adapter heuristic --model any-model-name
+kob tokenizer test --adapter heuristic --model any-model-name
 ```
 
 **Use Heuristic when:**
@@ -111,10 +111,10 @@ The system uses an intelligent fallback chain:
 
 ```bash
 # Check what adapter will be used
-kano-backlog tokenizer diagnose --model your-model-name
+kob tokenizer adapter-status --model your-model-name
 
 # Test fallback behavior
-kano-backlog tokenizer test --adapter nonexistent-adapter
+kob tokenizer test --adapter nonexistent-adapter
 ```
 
 ### Model Support
@@ -122,7 +122,7 @@ kano-backlog tokenizer test --adapter nonexistent-adapter
 #### OpenAI Models
 ```bash
 # List supported OpenAI models
-kano-backlog tokenizer list-models --adapter tiktoken
+kob tokenizer list-models --adapter tiktoken
 ```
 
 Supported models include:
@@ -133,7 +133,7 @@ Supported models include:
 #### HuggingFace Models
 ```bash
 # List supported HuggingFace models
-kano-backlog tokenizer list-models --adapter huggingface
+kob tokenizer list-models --adapter huggingface
 ```
 
 Supported model families:
@@ -148,12 +148,12 @@ The tokenizer adapters integrate seamlessly with the embedding pipeline:
 
 ```bash
 # Use specific tokenizer in embedding commands
-kano-backlog embedding build --tokenizer-adapter tiktoken --tokenizer-model gpt-4
+kob embedding build --tokenizer-adapter tiktoken --tokenizer-model gpt-4
 
 # Configure via environment variables
 export KANO_TOKENIZER_ADAPTER=huggingface
 export KANO_TOKENIZER_MODEL=sentence-transformers/all-MiniLM-L6-v2
-kano-backlog embedding build
+kob embedding build
 ```
 
 ## Configuration Reference
@@ -253,7 +253,7 @@ export KANO_TOKENIZER_HUGGINGFACE_TRUST_REMOTE_CODE=false
 
 View all available environment variables:
 ```bash
-kano-backlog tokenizer env
+kob tokenizer env-vars
 ```
 
 ### Configuration Examples
@@ -314,16 +314,16 @@ trust_remote_code = false
 
 ```bash
 # Create example configuration
-kano-backlog tokenizer create-example --output my_config.toml
+kob tokenizer create-example --output my_config.toml
 
 # Validate configuration
-kano-backlog tokenizer validate --config my_config.toml
+kob tokenizer validate --config my_config.toml
 
 # Show current configuration (with environment overrides)
-kano-backlog tokenizer config --config my_config.toml --format json
+kob tokenizer config --config my_config.toml --format json
 
 # Migrate old configuration format
-kano-backlog tokenizer migrate old_config.json --output new_config.toml
+kob tokenizer migrate old_config.json --output new_config.toml
 ```
 
 ## Troubleshooting Guide
@@ -348,14 +348,14 @@ pip install tiktoken
 pip install transformers
 
 # Check installation
-kano-backlog tokenizer dependencies
+kob tokenizer dependencies
 ```
 
 **Option B: Use Heuristic Adapter**
 ```bash
 # Force heuristic adapter
 export KANO_TOKENIZER_ADAPTER=heuristic
-kano-backlog tokenizer test
+kob tokenizer test
 
 # Or in configuration
 [tokenizer]
@@ -364,7 +364,7 @@ adapter = "heuristic"
 
 **Option C: Check Installation Guide**
 ```bash
-kano-backlog tokenizer install-guide
+kob tokenizer install-guide
 ```
 
 #### 2. TikToken Import Errors
@@ -384,7 +384,7 @@ pip install tiktoken
 python -c "import tiktoken; print('TikToken available')"
 
 # Test adapter
-kano-backlog tokenizer health tiktoken
+kob tokenizer health-check tiktoken
 ```
 
 **Check Python Environment:**
@@ -429,10 +429,10 @@ python -c "import transformers; print('Transformers available')"
 **Check Model Name:**
 ```bash
 # List supported models
-kano-backlog tokenizer list-models --adapter huggingface
+kob tokenizer list-models --adapter huggingface
 
 # Test with known model
-kano-backlog tokenizer test --adapter huggingface --model bert-base-uncased
+kob tokenizer test --adapter huggingface --model bert-base-uncased
 ```
 
 **Network/Cache Issues:**
@@ -465,7 +465,7 @@ trust_remote_code = false  # Must be boolean
 
 **Validate Configuration:**
 ```bash
-kano-backlog tokenizer validate --config your_config.toml
+kob tokenizer validate --config your_config.toml
 ```
 
 **Check Environment Variables:**
@@ -487,19 +487,19 @@ export KANO_TOKENIZER_HUGGINGFACE_USE_FAST=true      # Not "True"
 **Compare Adapters:**
 ```bash
 # Compare token counts across adapters
-kano-backlog tokenizer compare "Your sample text here"
+kob tokenizer benchmark --text "Your sample text here"
 
 # Benchmark adapters
-kano-backlog tokenizer benchmark --text "Your sample text" --iterations 5
+kob tokenizer benchmark --text "Your sample text" --iterations 5
 ```
 
 **Check Model Configuration:**
 ```bash
 # Verify model settings
-kano-backlog tokenizer diagnose --model your-model-name
+kob tokenizer adapter-status --model your-model-name
 
 # Check model max tokens
-kano-backlog tokenizer list-models | grep your-model
+kob tokenizer list-models | grep your-model
 ```
 
 **Use Exact Adapters:**
@@ -531,13 +531,13 @@ export KANO_TOKENIZER_HUGGINGFACE_USE_FAST=true
 
 **Benchmark Performance:**
 ```bash
-kano-backlog tokenizer benchmark --adapters heuristic,tiktoken --iterations 10
+kob tokenizer benchmark --adapters heuristic,tiktoken --iterations 10
 ```
 
 **Check System Resources:**
 ```bash
 # Monitor during tokenization
-kano-backlog tokenizer test --text "$(cat large_file.txt)" &
+kob tokenizer test --text "$(cat large_file.txt)" &
 top -p $!
 ```
 
@@ -546,37 +546,37 @@ top -p $!
 #### System Health Check
 ```bash
 # Comprehensive status
-kano-backlog tokenizer status --verbose
+kob tokenizer status --verbose
 
 # Check specific adapter
-kano-backlog tokenizer health tiktoken
+kob tokenizer health-check tiktoken
 
 # Dependency report
-kano-backlog tokenizer dependencies --verbose
+kob tokenizer dependencies --verbose
 ```
 
 #### Configuration Debugging
 ```bash
 # Show effective configuration
-kano-backlog tokenizer config --format json
+kob tokenizer config --format json
 
 # Validate configuration
-kano-backlog tokenizer validate --config your_config.toml
+kob tokenizer validate --config your_config.toml
 
 # Test configuration
-kano-backlog tokenizer test --config your_config.toml
+kob tokenizer test --config your_config.toml
 ```
 
 #### Performance Analysis
 ```bash
 # Benchmark all adapters
-kano-backlog tokenizer benchmark
+kob tokenizer benchmark
 
 # Compare specific adapters
-kano-backlog tokenizer compare "test text" --adapters tiktoken,heuristic
+kob tokenizer benchmark --text "test text" --adapters tiktoken,heuristic
 
 # Profile memory usage
-kano-backlog tokenizer benchmark --text "$(cat large_file.txt)" --format json
+kob tokenizer benchmark --text "$(cat large_file.txt)" --format json
 ```
 
 ### Getting Help
@@ -584,26 +584,26 @@ kano-backlog tokenizer benchmark --text "$(cat large_file.txt)" --format json
 #### Built-in Help
 ```bash
 # Command help
-kano-backlog tokenizer --help
-kano-backlog tokenizer test --help
+kob tokenizer --help
+kob tokenizer test --help
 
 # Environment variables
-kano-backlog tokenizer env
+kob tokenizer env-vars
 
 # Installation guide
-kano-backlog tokenizer install-guide
+kob tokenizer install-guide
 ```
 
 #### Diagnostic Information
 ```bash
 # System information for bug reports
-kano-backlog tokenizer status --format json > tokenizer_status.json
+kob tokenizer status --format json > tokenizer_status.json
 
 # Dependency information
-kano-backlog tokenizer dependencies --verbose > dependencies.txt
+kob tokenizer dependencies --verbose > dependencies.txt
 
 # Configuration dump
-kano-backlog tokenizer config --format json > current_config.json
+kob tokenizer config --format json > current_config.json
 ```
 
 ## Performance Tuning
@@ -623,27 +623,27 @@ Understanding the performance trade-offs helps choose the right adapter:
 #### Basic Performance Test
 ```bash
 # Test with your typical text
-kano-backlog tokenizer benchmark --text "Your typical document content here"
+kob tokenizer benchmark --text "Your typical document content here"
 
 # Test with different text sizes
-kano-backlog tokenizer benchmark --text "$(head -c 1000 large_file.txt)"   # 1KB
-kano-backlog tokenizer benchmark --text "$(head -c 10000 large_file.txt)"  # 10KB
-kano-backlog tokenizer benchmark --text "$(head -c 100000 large_file.txt)" # 100KB
+kob tokenizer benchmark --text "$(head -c 1000 large_file.txt)"   # 1KB
+kob tokenizer benchmark --text "$(head -c 10000 large_file.txt)"  # 10KB
+kob tokenizer benchmark --text "$(head -c 100000 large_file.txt)" # 100KB
 ```
 
 #### Comprehensive Benchmark
 ```bash
 # Benchmark all available adapters
-kano-backlog tokenizer benchmark --iterations 20 --format json > benchmark_results.json
+kob tokenizer benchmark --iterations 20 --format json > benchmark_results.json
 
 # Compare specific adapters
-kano-backlog tokenizer benchmark --adapters tiktoken,heuristic --iterations 50
+kob tokenizer benchmark --adapters tiktoken,heuristic --iterations 50
 ```
 
 #### Memory Profiling
 ```bash
 # Monitor memory usage during tokenization
-kano-backlog tokenizer benchmark --text "$(cat very_large_file.txt)" &
+kob tokenizer benchmark --text "$(cat very_large_file.txt)" &
 PID=$!
 while kill -0 $PID 2>/dev/null; do
     ps -o pid,vsz,rss,comm -p $PID
@@ -704,7 +704,7 @@ trust_remote_code = false
 for ratio in 3.0 3.5 4.0 4.5 5.0; do
     export KANO_TOKENIZER_HEURISTIC_CHARS_PER_TOKEN=$ratio
     echo "Ratio $ratio:"
-    kano-backlog tokenizer compare "Your typical content" --adapters heuristic,tiktoken
+    kob tokenizer benchmark --text "Your typical content" --adapters heuristic,tiktoken
 done
 ```
 
@@ -735,7 +735,7 @@ pip install --upgrade tiktoken transformers
 **System Resources:**
 ```bash
 # Monitor resource usage
-kano-backlog tokenizer benchmark --verbose
+kob tokenizer benchmark --verbose
 
 # For large documents, ensure adequate memory
 free -h
@@ -746,10 +746,10 @@ free -h
 #### Built-in Metrics
 ```bash
 # Get performance statistics
-kano-backlog tokenizer benchmark --format json | jq '.results[] | {adapter, avg_time_ms, avg_tokens}'
+kob tokenizer benchmark --format json | jq '.results[] | {adapter, avg_time_ms, avg_tokens}'
 
 # Monitor consistency
-kano-backlog tokenizer benchmark --iterations 100 | grep "Consistent"
+kob tokenizer benchmark --iterations 100 | grep "Consistent"
 ```
 
 #### Custom Monitoring
@@ -797,13 +797,13 @@ trust_remote_code = false  # Security best practice
 #### Monitoring in Production
 ```bash
 # Regular health checks
-kano-backlog tokenizer status --format json
+kob tokenizer status --format json
 
 # Performance monitoring
-kano-backlog tokenizer benchmark --adapters auto --iterations 10
+kob tokenizer benchmark --adapters auto --iterations 10
 
 # Dependency monitoring
-kano-backlog tokenizer dependencies --format json
+kob tokenizer dependencies --format json
 ```
 
 #### Scaling Considerations
@@ -828,11 +828,11 @@ kano-backlog tokenizer dependencies --format json
 
 ### Core Commands
 
-#### `kano-backlog tokenizer status`
+#### `kob tokenizer status`
 Show comprehensive system status including configuration, adapters, dependencies, and health.
 
 ```bash
-kano-backlog tokenizer status [OPTIONS]
+kob tokenizer status [OPTIONS]
 
 Options:
   --config PATH     Configuration file path
@@ -840,11 +840,11 @@ Options:
   --format FORMAT   Output format (markdown, json)
 ```
 
-#### `kano-backlog tokenizer test`
+#### `kob tokenizer test`
 Test tokenizer adapters with sample text.
 
 ```bash
-kano-backlog tokenizer test [OPTIONS]
+kob tokenizer test [OPTIONS]
 
 Options:
   --config PATH     Configuration file path
@@ -853,11 +853,11 @@ Options:
   --model NAME      Model name to use
 ```
 
-#### `kano-backlog tokenizer compare`
+#### `kob tokenizer benchmark --text`
 Compare tokenization results across different adapters.
 
 ```bash
-kano-backlog tokenizer compare TEXT [OPTIONS]
+kob tokenizer benchmark --text TEXT [OPTIONS]
 
 Arguments:
   TEXT              Text to tokenize and compare
@@ -870,43 +870,43 @@ Options:
 
 ### Configuration Commands
 
-#### `kano-backlog tokenizer config`
+#### `kob tokenizer config`
 Show current configuration with environment overrides.
 
 ```bash
-kano-backlog tokenizer config [OPTIONS]
+kob tokenizer config [OPTIONS]
 
 Options:
   --config PATH     Configuration file path
   --format FORMAT   Output format (json, toml, yaml)
 ```
 
-#### `kano-backlog tokenizer validate`
+#### `kob tokenizer validate`
 Validate tokenizer configuration.
 
 ```bash
-kano-backlog tokenizer validate [OPTIONS]
+kob tokenizer validate [OPTIONS]
 
 Options:
   --config PATH     Configuration file path
 ```
 
-#### `kano-backlog tokenizer create-example`
+#### `kob tokenizer create-example`
 Create example configuration file.
 
 ```bash
-kano-backlog tokenizer create-example [OPTIONS]
+kob tokenizer create-example [OPTIONS]
 
 Options:
   --output PATH     Output file path
   --force           Overwrite existing file
 ```
 
-#### `kano-backlog tokenizer migrate`
+#### `kob tokenizer migrate`
 Migrate configuration from old format to TOML.
 
 ```bash
-kano-backlog tokenizer migrate INPUT_PATH [OPTIONS]
+kob tokenizer migrate INPUT_PATH [OPTIONS]
 
 Arguments:
   INPUT_PATH        Input configuration file
@@ -918,11 +918,11 @@ Options:
 
 ### Diagnostic Commands
 
-#### `kano-backlog tokenizer diagnose`
+#### `kob tokenizer adapter-status`
 Run comprehensive tokenizer diagnostics.
 
 ```bash
-kano-backlog tokenizer diagnose [OPTIONS]
+kob tokenizer adapter-status [OPTIONS]
 
 Options:
   --config PATH     Configuration file path
@@ -930,11 +930,11 @@ Options:
   --verbose         Show detailed diagnostic information
 ```
 
-#### `kano-backlog tokenizer health`
+#### `kob tokenizer health`
 Check health of specific tokenizer adapter.
 
 ```bash
-kano-backlog tokenizer health ADAPTER [OPTIONS]
+kob tokenizer health-check ADAPTER [OPTIONS]
 
 Arguments:
   ADAPTER           Adapter name (heuristic, tiktoken, huggingface)
@@ -943,22 +943,22 @@ Options:
   --model NAME      Model name to test with
 ```
 
-#### `kano-backlog tokenizer dependencies`
+#### `kob tokenizer dependencies`
 Check status of tokenizer dependencies.
 
 ```bash
-kano-backlog tokenizer dependencies [OPTIONS]
+kob tokenizer dependencies [OPTIONS]
 
 Options:
   --verbose         Show detailed dependency information
   --refresh         Force refresh of dependency cache
 ```
 
-#### `kano-backlog tokenizer adapter-status`
+#### `kob tokenizer adapter-status`
 Show status of tokenizer adapters.
 
 ```bash
-kano-backlog tokenizer adapter-status [OPTIONS]
+kob tokenizer adapter-status [OPTIONS]
 
 Options:
   --adapter NAME    Show status for specific adapter only
@@ -966,11 +966,11 @@ Options:
 
 ### Performance Commands
 
-#### `kano-backlog tokenizer benchmark`
+#### `kob tokenizer benchmark`
 Benchmark tokenizer adapter performance.
 
 ```bash
-kano-backlog tokenizer benchmark [OPTIONS]
+kob tokenizer benchmark [OPTIONS]
 
 Options:
   --text TEXT       Text for benchmarking
@@ -982,36 +982,36 @@ Options:
 
 ### Utility Commands
 
-#### `kano-backlog tokenizer env`
+#### `kob tokenizer env-vars`
 Show available environment variables.
 
 ```bash
-kano-backlog tokenizer env
+kob tokenizer env-vars
 ```
 
-#### `kano-backlog tokenizer install-guide`
+#### `kob tokenizer install-guide`
 Show installation guide for missing dependencies.
 
 ```bash
-kano-backlog tokenizer install-guide
+kob tokenizer install-guide
 ```
 
-#### `kano-backlog tokenizer list-models`
+#### `kob tokenizer list-models`
 List supported models and token limits.
 
 ```bash
-kano-backlog tokenizer list-models [OPTIONS]
+kob tokenizer list-models [OPTIONS]
 
 Options:
   --adapter NAME    Show models for specific adapter
   --format FORMAT   Output format (markdown, json, csv)
 ```
 
-#### `kano-backlog tokenizer recommend`
+#### `kob tokenizer recommend`
 Get adapter recommendation for specific model.
 
 ```bash
-kano-backlog tokenizer recommend MODEL [OPTIONS]
+kob tokenizer recommend MODEL [OPTIONS]
 
 Arguments:
   MODEL             Model name
@@ -1193,10 +1193,10 @@ if stats["total_recovery_attempts"] > 0:
 
 ### Getting Help
 
-1. **Check Status**: `kano-backlog tokenizer status --verbose`
-2. **Run Diagnostics**: `kano-backlog tokenizer diagnose`
-3. **Check Dependencies**: `kano-backlog tokenizer dependencies`
-4. **Review Configuration**: `kano-backlog tokenizer config --format json`
+1. **Check Status**: `kob tokenizer status --verbose`
+2. **Run Diagnostics**: `kob tokenizer adapter-status`
+3. **Check Dependencies**: `kob tokenizer dependencies`
+4. **Review Configuration**: `kob tokenizer config --format json`
 
 ### Reporting Issues
 
@@ -1204,16 +1204,16 @@ When reporting issues, please include:
 
 ```bash
 # System information
-kano-backlog tokenizer status --format json > system_status.json
+kob tokenizer status --format json > system_status.json
 
 # Dependency information  
-kano-backlog tokenizer dependencies --verbose > dependencies.txt
+kob tokenizer dependencies --verbose > dependencies.txt
 
 # Configuration
-kano-backlog tokenizer config --format json > config.json
+kob tokenizer config --format json > config.json
 
 # Test results
-kano-backlog tokenizer test --verbose > test_results.txt 2>&1
+kob tokenizer test --verbose > test_results.txt 2>&1
 ```
 
 ### Contributing

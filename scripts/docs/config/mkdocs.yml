@@ -1,0 +1,43 @@
+# MkDocs Configuration for Python API Documentation
+# 
+# This file configures MkDocs to generate Python API documentation
+# using mkdocstrings plugin. It's used as a preprocessing step
+# before Quartz builds the final site.
+# 
+# @see https://www.mkdocs.org/user-guide/configuration/
+
+site_name: Kano Agent Backlog Skill API
+site_description: Python API documentation for Kano Agent Backlog Skill
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: blue
+      accent: blue
+    - scheme: slate
+      primary: blue
+      accent: blue
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            docstring_style: google
+            show_source: true
+            show_root_heading: true
+            show_root_toc_entry: true
+            show_object_full_path: false
+            show_category_heading: true
+
+# Navigation will be generated dynamically from publish.config.yml
+
+markdown_extensions:
+  - admonition
+  - codehilite
+  - pymdownx.superfences
+  - pymdownx.tabbed
+  - toc:
+      permalink: true

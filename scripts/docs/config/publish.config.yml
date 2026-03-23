@@ -1,0 +1,158 @@
+# Documentation Publishing Configuration
+# Defines content mapping and navigation structure for documentation website
+# Base directories:
+#   source: ${REPO_ROOT}/_ws/src
+#   target: ${REPO_ROOT}/_ws/build/content
+
+navigation:
+  Demo:
+    title: "Demo & Examples"
+    description: "Demonstration repository and usage examples"
+    items:
+      - source: "demo/README.md"
+        target: "demo/overview.md"
+        title: "Demo Overview"
+      - source: "demo/AGENTS.md"
+        target: "demo/agents.md"
+        title: "Agent Guidelines"
+      - source: "demo/CLAUDE.md"
+        target: "demo/claude.md"
+        title: "Claude Integration"
+
+  Skill:
+    title: "Skill Documentation"
+    description: "Core skill implementation and reference"
+    items:
+      - source: "skill/SKILL.md"
+        target: "skill/guide.md"
+        title: "Skill Guide"
+      - source: "skill/README.md"
+        target: "skill/readme.md"
+        title: "Skill README"
+      - source: "skill/REFERENCE.md"
+        target: "skill/reference.md"
+        title: "API Reference"
+      - source: "skill/CHANGELOG.md"
+        target: "skill/changelog.md"
+        title: "Changelog"
+
+  ADR:
+    title: "Architecture Decisions"
+    description: "Architecture Decision Records and design rationale"
+    items:
+      - source: "demo/_kano/backlog/products/kano-agent-backlog-skill/decisions/README.md"
+        target: "adr/overview.md"
+        title: "ADR Overview"
+      - source: "demo/_kano/backlog/products/kano-agent-backlog-skill/decisions/**/*.md"
+        target: "adr/"
+        title_from_frontmatter: "title"
+        sort_by: "id"
+
+  Examples:
+    title: "Examples & Templates"
+    description: "Code examples and templates"
+    items:
+      - source: "skill/examples/**/*.py"
+        target: "examples/"
+        preserve_structure: true
+      - source: "skill/templates/**/*.md"
+        target: "templates/"
+        preserve_structure: true
+
+  References:
+    title: "Technical References"
+    description: "Technical documentation and references"
+    items:
+      - source: "skill/references/**/*.md"
+        target: "references/"
+        preserve_structure: true
+      - source: "skill/references/**/*.json"
+        target: "references/"
+        preserve_structure: true
+
+  CLI:
+    title: "CLI Reference"
+    description: "Command-line interface documentation"
+    items:
+      - target: "cli/commands.md"
+        title: "CLI Commands"
+
+  API:
+    title: "API Reference"
+    description: "Python API documentation"
+    items:
+      - target: "api/overview.md"
+        title: "API Overview"
+      - target: "api/mkdocs.md"
+        title: "Full API Documentation"
+
+# Global exclusions
+exclude:
+  - "docs/internal/"
+  - "docs/drafts/"
+  - "docs/**/*-draft.md"
+  - "docs/**/*-wip.md"
+  - "skill/htmlcov/"
+  - "skill/.hypothesis/"
+  - "skill/.pytest_cache/"
+  - "skill/.kano/"
+  - "skill/src/"
+  - "skill/tests/"
+
+# Site configuration
+site:
+  title: "Kano Agent Backlog Skill"
+  description: "AI Agent Skills for Spec-Driven Agentic Programming"
+  generate_indexes: true
+  flatten_deep_paths: true
+
+# MkDocs API documentation configuration
+api_navigation:
+  site_name: "Kano Agent Backlog Skill API"
+  site_description: "Python API documentation for Kano Agent Backlog Skill"
+  site_url: "https://dorgonman.github.io/kano-agent-backlog-skill/api-docs/"
+  
+  # Main page content
+  home_content: |
+    # Kano Agent Backlog Skill API
+    
+    Complete Python API reference for the Kano Agent Backlog Skill.
+    
+    ## Quick Start
+    
+    ```python
+    from kano_backlog_core import BacklogManager
+    from kano_backlog_ops import WorkItem
+    
+    # Initialize backlog operations
+    manager = BacklogManager()
+    
+    # Create work items
+    item = WorkItem.create(title="New feature", type="task")
+    ```
+    
+    ## Core Modules
+    
+    - [Core](api/core/) - Core backlog management (`kano_backlog_core`)
+    - [CLI](api/cli/) - Command-line interface (`kano_backlog_cli`) 
+    - [Operations](api/ops/) - Business operations (`kano_backlog_ops`)
+    
+    ## Navigation
+    
+    Use the navigation menu to explore the complete API reference.
+  
+  # Navigation structure
+  nav:
+    - title: "Home"
+      file: "index.md"
+    - title: "API Reference"
+      items:
+        - title: "Core"
+          file: "api/core.md"
+          module: "kano_backlog_core"
+        - title: "CLI"
+          file: "api/cli.md"
+          module: "kano_backlog_cli"
+        - title: "Operations"
+          file: "api/ops.md"
+          module: "kano_backlog_ops"

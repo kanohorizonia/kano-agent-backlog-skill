@@ -49,14 +49,15 @@ Use this skill to:
 
 2. **Verify installation:**
    ```bash
-   kano-backlog --version
-   kano-backlog doctor
+   bash scripts/internal/show-version.sh
+   kob
+   kob doctor
    ```
 
 3. **Initialize backlog:**
    ```bash
    cd /path/to/user/project
-   kano-backlog admin init --product <product-name> --agent <your-agent-id>
+   kob admin init --product <product-name> --agent <your-agent-id>
    ```
 
 **See [docs/agent-quick-start.md](docs/agent-quick-start.md) for complete setup instructions.**
@@ -115,14 +116,13 @@ Use this skill to:
   - Do not guess model names; if unknown, omit the `[model=...]` segment.
 - **Agent Identity Protocol**: Supply `--agent <ID>` with your real product name (e.g., `cursor`, `copilot`, `windsurf`, `antigravity`).
   - **Forbidden (Placeholders)**: `auto`, `user`, `assistant`, `<AGENT_NAME>`, `$AGENT_NAME`.
-- File operations for backlog/skill artifacts must go through the `kano-backlog` CLI
-  (`python skills/kano-agent-backlog-skill/scripts/kano-backlog <command>`) so audit logs capture the action.
+- File operations for backlog/skill artifacts must go through the supported local CLI surface (`kob` or repo-local wrappers under `scripts/core/`) so audit logs capture the action.
 - Skill scripts only operate on paths under `_kano/backlog/` or `_kano/backlog_sandbox/`;
   refuse other paths.
 - After modifying backlog items, refresh the plain Markdown views immediately using
-  `python skills/kano-agent-backlog-skill/scripts/kano-backlog view refresh --agent <agent-id> --backlog-root <path>` so the dashboards stay current.
-  - Persona summaries/reports are available via `python skills/kano-agent-backlog-skill/scripts/kano-backlog admin persona summary|report ...`.
-- `python skills/kano-agent-backlog-skill/scripts/kano-backlog workitem update-state ...` auto-syncs parent states forward-only by default; use `--no-sync-parent`
+  `kob view refresh --agent <agent-id> --backlog-root <path>` so the dashboards stay current.
+  - Persona summaries/reports are available via `kob persona summary|report ...`.
+- `kob workitem update-state ...` auto-syncs parent states forward-only by default; use `--no-sync-parent`
   for manual re-plans where parent state should stay put.
 - Add Obsidian `[[wikilink]]` references in the body (e.g., a `## Links` section) so Graph/backlinks work; frontmatter alone does not create graph edges.
 - Artifacts storage: Demo reports, implementation summaries, analysis documents, and other work outputs should be stored in `artifacts/<item-id>/` for the corresponding work item to maintain traceability and context.
@@ -169,7 +169,7 @@ Violating these boundaries will be flagged in code review.
 ### Prerequisite install (Python)
 
 Detect:
-- Run `python skills/kano-agent-backlog-skill/scripts/kano-backlog doctor --format plain`.
+- Run `kob doctor`.
 
 If packages are missing, install once (recommended):
 - **Default**: `python -m pip install -e skills/kano-agent-backlog-skill`
@@ -191,7 +191,7 @@ image with Python + pip available.
 ```bash
 python -m venv .venv
 ./.venv/Scripts/python -m pip install -e skills/kano-agent-backlog-skill
-./.venv/Scripts/python skills/kano-agent-backlog-skill/scripts/kano-backlog admin init --product <product> --agent <agent-id>
+./kob admin init --product <product> --agent <agent-id>
 ```
 
 If your container cannot install packages (no pip / no build tools), do **not** run the CLI there.
@@ -199,7 +199,7 @@ Instead, run the CLI in a proper Python environment and mount the generated `_ka
 `.kano/backlog_config.toml` into the container.
 
 **Say this to your agent**:
-"I'm in a container without pip. Please run `kano-backlog admin init` in a Python environment that has pip, then copy/mount `_kano/backlog` and `.kano/backlog_config.toml` into the container. If pip is available, install the skill in a venv and run `admin init` inside the container."
+"I'm in a container without pip. Please run `kob admin init` in a Python environment that has pip, then copy/mount `_kano/backlog` and `.kano/backlog_config.toml` into the container. If pip is available, install the skill in a venv and run `admin init` inside the container."
 
 ### Backlog initialization (file scaffold + config + dashboards)
 
@@ -209,8 +209,8 @@ Detect (multi-product / platform layout):
   - `[products.<product>]` is present with a valid `backlog_root` pointing at an existing directory.
 
 Bootstrap:
-- Run `kano-backlog admin init --product <product> --agent <agent-id> [--backlog-root <path>]` to scaffold backlog directories and write/update `.kano/backlog_config.toml`.
-- Manual fallback (only if automation is unavailable): follow `_kano/backlog/README.md` to copy the template scaffold, then refresh views via `kano-backlog view refresh`.
+- Run `kob admin init --product <product> --agent <agent-id> [--backlog-root <path>]` to scaffold backlog directories and write/update `.kano/backlog_config.toml`.
+- Manual fallback (only if automation is unavailable): follow `_kano/backlog/README.md` to copy the template scaffold, then refresh views via `kob view refresh`.
 
 ## Optional LLM analysis over deterministic reports
 
@@ -286,10 +286,10 @@ The DB sequence must be synchronized with the filesystem after certain operation
 
 ```bash
 # Preview changes (dry run)
-python skills/kano-agent-backlog-skill/scripts/kano-backlog admin sync-sequences --product <product> --dry-run
+kob admin sync-sequences --product <product> --dry-run
 
 # Apply synchronization
-python skills/kano-agent-backlog-skill/scripts/kano-backlog admin sync-sequences --product <product>
+kob admin sync-sequences --product <product>
 ```
 
 Output example:
@@ -308,10 +308,10 @@ Updated sequences:
 
 ```bash
 # Step 1: Sync sequences (if not done recently)
-python skills/kano-agent-backlog-skill/scripts/kano-backlog admin sync-sequences --product <product>
+kob admin sync-sequences --product <product>
 
 # Step 2: Create item (system auto-assigns next available ID)
-python skills/kano-agent-backlog-skill/scripts/kano-backlog item create \
+kob item create \
   --type task \
   --title "Your task title" \
   --agent <agent-id> \
@@ -334,20 +334,18 @@ If you encounter "Ambiguous item reference" errors (multiple items with same Dis
 **Option 1: Use UID instead of Display ID**
 ```bash
 # Reference by UID (always unambiguous)
-python skills/kano-agent-backlog-skill/scripts/kano-backlog item update-state \
+kob workitem update-state \
   019c11e6-de87-7218-b89b-38c2e4e9cabd \
   --state Done \
-  --agent <agent-id> \
   --product <product>
 ```
 
 **Option 2: Trash the incorrect item**
 ```bash
 # Move incorrect item to _trash/ (recoverable)
-python skills/kano-agent-backlog-skill/scripts/kano-backlog admin items trash \
+kob items trash \
   <UID> \
   --agent <agent-id> \
-  --reason "ID conflict - incorrect duplicate" \
   --product <product> \
   --apply
 ```
@@ -467,8 +465,8 @@ find _kano/backlog -type f -name "KG-*.md"
 - **Discovery phase**: Exploring unfamiliar codebase or backlog areas
 
 **Commands (unified interface):**
-- Backlog corpus: `python skills/kano-agent-backlog-skill/scripts/kano-backlog search hybrid "text" --corpus backlog --product <product> --k 10`
-- Repo corpus: `python skills/kano-agent-backlog-skill/scripts/kano-backlog search hybrid "text" --corpus repo --k 10 --fts-k 200`
+- Backlog corpus: `kob search hybrid "text" --corpus backlog --product <product> --k 10`
+- Repo corpus: `kob search hybrid "text" --corpus repo --k 10 --fts-k 200`
 
 **Note**: The `--corpus` parameter provides extensibility for future corpus types (logs, metrics, external-docs, etc.).
 
@@ -490,22 +488,22 @@ find _kano/backlog -type f -name "KG-*.md"
 3. **Rebuild indexes when stale**: Use `--force` flag if results seem outdated
 
 ### Index maintenance:
-- **Build backlog index**: `python skills/kano-agent-backlog-skill/scripts/kano-backlog embedding build --product <product> --force`
-- **Build repo index**: `python skills/kano-agent-backlog-skill/scripts/kano-backlog chunks build-repo-vectors --force`
+- **Build backlog index**: `kob embedding build --product <product> --force`
+- **Build repo index**: `kob chunks build-repo-vectors --force`
 - **Check status**: `ls -lh _kano/backlog/products/<product>/.cache/chunks.sqlite3 .cache/repo_chunks.sqlite3`
 - **When to rebuild**: After major refactoring, file moves, or when search results seem outdated
 
 **Unified CLI:**
-- Backlog: `kano-backlog search hybrid "text" --corpus backlog --product <product> --k 10`
-- Repo: `kano-backlog search hybrid "text" --corpus repo --k 10 --fts-k 200`
-- Both commands: `kano-backlog search {query|hybrid} "text" --corpus {backlog|repo} [options]`
+- Backlog: `kob search hybrid "text" --corpus backlog --product <product> --k 10`
+- Repo: `kob search hybrid "text" --corpus repo --k 10 --fts-k 200`
+- Both commands: `kob search {query|hybrid} "text" --corpus {backlog|repo} [options]`
 - Future: `--corpus all` for cross-corpus search
 
 **See also**: `docs/multi-corpus-search.md` for detailed hybrid search documentation.
 
 ## Kano CLI entrypoints (current surface)
 
-`scripts/` exposes a single executable: `scripts/kano-backlog`. The CLI is intentionally organized as nested command groups so agents can discover operations via `--help` on-demand (instead of hard-coding the full command surface into this skill).
+Repo-local usage now centers on `kob` plus thin wrappers under `scripts/core/`. The CLI is intentionally organized as nested command groups so agents can discover operations by running `kob` and the wrapper help surfaces on demand.
 
 ## Profile overlays (user-facing config presets)
 
@@ -518,11 +516,11 @@ embedding provider) without editing the repo’s main `.kano/backlog_config.toml
   - Example: `.kano/backlog_config/embedding/local-sentence-transformers-minilm.toml`
 
 **How to use a profile**
-- Pass `--profile <group>/<name>` to `scripts/kano-backlog` (global option).
+- Pass `--profile <group>/<name>` to `kob` (global option).
   - Example:
-    - `python skills/kano-agent-backlog-skill/scripts/kano-backlog --profile embedding/local-noop config show --product <product> --agent <agent-id>`
-    - `python skills/kano-agent-backlog-skill/scripts/kano-backlog --profile embedding/local-sentence-transformers-minilm embedding build --product <product>`
-    - `python skills/kano-agent-backlog-skill/scripts/kano-backlog --profile embedding/gemini-embedding-001 embedding build --product <product>`
+    - `kob --profile embedding/local-noop config show --product <product>`
+    - `kob --profile embedding/local-sentence-transformers-minilm embedding build --product <product>`
+    - `kob --profile embedding/gemini-embedding-001 embedding build --product <product>`
 
 **Optional: set a default profile in `.kano/backlog_config.toml`**
 - Add either:
@@ -548,29 +546,29 @@ embedding provider) without editing the repo’s main `.kano/backlog_config.toml
 
 Run these in order, expanding only what you need:
 
-- `python skills/kano-agent-backlog-skill/scripts/kano-backlog --help`
-  - Shows top-level groups (e.g., `backlog`, `item`, `state`, `worklog`, `view`) and global options.
-- `python skills/kano-agent-backlog-skill/scripts/kano-backlog <group> --help`
-  - Shows subcommands for that group.
-- `python skills/kano-agent-backlog-skill/scripts/kano-backlog <group> <command> --help`
-  - Shows required args/options for that command.
+- `kob`
+  - Shows the top-level command surface.
+- `bash scripts/core/status.sh`
+  - Shows grouped repo-local operational checks for common flows.
+- `bash scripts/core/create-workitem.sh --help`
+  - Shows a thin, task-oriented wrapper for one common operation.
 
 Guideline: do not paste large `--help` output into chat; inspect it locally and run the command.
 
 ### Canonical examples (keep these few memorized)
 
 - Bootstrap:
-  - `python skills/kano-agent-backlog-skill/scripts/kano-backlog doctor --format plain`
-  - `python skills/kano-agent-backlog-skill/scripts/kano-backlog admin init --product <name> --agent <id>`
+  - `kob doctor`
+  - `kob admin init --product <name> --agent <id>`
 - Daily workflow:
-  - `python skills/kano-agent-backlog-skill/scripts/kano-backlog workitem create --type task --title "..." --agent <id> --product <name>`
-  - `python skills/kano-agent-backlog-skill/scripts/kano-backlog workitem set-ready <item-id> --context "..." --goal "..." --approach "..." --acceptance-criteria "..." --risks "..." --product <name>`
-  - `python skills/kano-agent-backlog-skill/scripts/kano-backlog workitem check-ready <item-id> --product <name>`
-  - `python skills/kano-agent-backlog-skill/scripts/kano-backlog workitem update-state <item-ref> --state InProgress --agent <id> --message "..." --product <name>`
-  - `python skills/kano-agent-backlog-skill/scripts/kano-backlog workitem attach-artifact <item-id> --path <file> --shared --agent <id> --product <name> [--note "..."]`
-  - `python skills/kano-agent-backlog-skill/scripts/kano-backlog view refresh --agent <id> --product <name>`
+  - `kob item create --type task --title "..." --agent <id> --product <name>`
+  - `kob workitem set-ready <item-id> --context "..." --goal "..." --approach "..." --acceptance-criteria "..." --risks "..." --product <name>`
+  - `kob workitem check-ready <item-id> --product <name>`
+  - `kob workitem update-state <item-ref> --state InProgress --product <name>`
+  - `kob workitem attach-artifact <item-id> --path <file> --shared --agent <id> --product <name> [--note "..."]`
+  - `kob view refresh --agent <id> --product <name>`
 - Backlog integrity checks:
-  - `python skills/kano-agent-backlog-skill/scripts/kano-backlog admin validate uids --product <name>`
+  - `kob validate uids --product <name>`
 
 ## Conflict handling policy (configurable)
 
@@ -585,8 +583,8 @@ such as `admin links normalize-ids`.
 ### Sandbox workflow (isolated experimentation)
 
 For testing, prototyping, or demos without affecting production backlog:
-- Create: `python skills/kano-agent-backlog-skill/scripts/kano-backlog admin sandbox init <sandbox-name> --product <source-product> --agent <id>`
-- Use: `python skills/kano-agent-backlog-skill/scripts/kano-backlog workitem create --product <sandbox-name> ...` (same CLI, different product)
+- Create: `kob sandbox init <sandbox-name> --product <source-product> --agent <id>`
+- Use: `kob item create --product <sandbox-name> ...` (same CLI, different product)
 - Cleanup: `rm -rf _kano/backlog_sandbox/<sandbox-name>` (git will ignore this directory)
 - Rationale: Sandboxes mirror production structure but live in `_kano/backlog_sandbox/`, so changes never leak into `_kano/backlog/`.
 
@@ -607,9 +605,9 @@ For testing, prototyping, or demos without affecting production backlog:
 
 ## State update helper
 
-- Use `python skills/kano-agent-backlog-skill/scripts/kano-backlog workitem update-state ...` to update state + append Worklog.
-- Prefer `--action` on `kano-backlog state transition` for the common transitions (`start`, `ready`, `review`, `done`, `block`, `drop`).
-- Use `python skills/kano-agent-backlog-skill/scripts/kano-backlog workitem validate <item-id>` to check the Ready gate explicitly.
+- Use `kob workitem update-state ...` to update state + append Worklog.
+- Prefer `--action` on `kob state transition` for the common transitions (`start`, `ready`, `review`, `done`, `block`, `drop`).
+- Use `kob workitem check-ready <item-id>` to check the Ready gate explicitly.
 
 ## Topic and Workset workflow (context management)
 
@@ -656,32 +654,32 @@ After creating a Topic, always print this (fill in values):
 - Topic: <topic-name>
 - Path: _kano/backlog/topics/<topic-name>/
 - Human brief: _kano/backlog/topics/<topic-name>/brief.md (and brief.generated.md)
-- List: python skills/kano-agent-backlog-skill/scripts/kano-backlog topic list --agent <agent-id>
+- List: kob topic list --agent <agent-id>
 
 **Topic lifecycle**:
-1. **Create**: `python skills/kano-agent-backlog-skill/scripts/kano-backlog topic create <topic-name> --agent <id>`
+1. **Create**: `kob topic create <topic-name> --agent <id>`
    - Creates `_kano/backlog/topics/<topic>/` with `manifest.json`, `brief.md`, `brief.generated.md`, `notes.md`, and `materials/` subdirectories
 2. **Collect materials**:
    - Add items: `topic add <topic-name> --item <ITEM_ID>`
    - Add code snippets: `topic add-snippet <topic-name> --file <path> --start <line> --end <line> --agent <id>`
    - Pin docs: `topic pin <topic-name> --doc <path>`
-3. **Distill**: `python skills/kano-agent-backlog-skill/scripts/kano-backlog topic distill <topic-name>`
+3. **Distill**: `kob topic distill <topic-name>`
   - Generates/overwrites deterministic `brief.generated.md` from collected materials
   - `brief.md` is a stable, human-maintained brief (do not overwrite it automatically)
-4. **Switch context**: `python skills/kano-agent-backlog-skill/scripts/kano-backlog topic switch <topic-name> --agent <id>`
+4. **Switch context**: `kob topic switch <topic-name> --agent <id>`
    - Sets active topic (affects config overlays and workset behavior)
-5. **Close**: `python skills/kano-agent-backlog-skill/scripts/kano-backlog topic close <topic-name> --agent <id>`
+5. **Close**: `kob topic close <topic-name> --agent <id>`
    - Marks topic as closed; eligible for TTL cleanup
-6. **Cleanup**: `python skills/kano-agent-backlog-skill/scripts/kano-backlog topic cleanup --ttl-days <N> [--dry-run]`
+6. **Cleanup**: `kob topic cleanup --ttl-days <N> [--dry-run]`
    - Removes raw materials from closed topics older than TTL
 
 **Oh My OpenCode plan integration**:
 - Resolve plan path from topic without requiring `.sisyphus`:
-  - `python skills/kano-agent-backlog-skill/scripts/kano-backlog topic resolve-opencode-plan <topic-name> --provider backlog --oh-my-opencode --format json`
+  - `kob topic resolve-opencode-plan <topic-name> --provider backlog --oh-my-opencode --format json`
 - Keep legacy `/start-work` compatibility only when needed:
-  - `python skills/kano-agent-backlog-skill/scripts/kano-backlog topic resolve-opencode-plan <topic-name> --provider backlog --sync-compat --set-active-compat --oh-my-opencode --format json`
+  - `kob topic resolve-opencode-plan <topic-name> --provider backlog --sync-compat --set-active-compat --oh-my-opencode --format json`
 - One-shot import/sync from existing `.sisyphus/plans/*.md` into topic then back to compatibility layer:
-  - `python skills/kano-agent-backlog-skill/scripts/kano-backlog topic sync-opencode-plan <topic-name> --import-sisyphus-plan <plan-file.md> --oh-my-opencode --format json`
+  - `kob topic sync-opencode-plan <topic-name> --import-sisyphus-plan <plan-file.md> --oh-my-opencode --format json`
 
 **When to write back `.sisyphus`**:
 - Write back (`--sync-compat`) only if you will run builtin `/start-work` or any tool that hardcodes `.sisyphus/plans` + `.sisyphus/boulder.json`.
@@ -692,7 +690,7 @@ After creating a Topic, always print this (fill in values):
 - Snapshots are intended for **milestone checkpoints** (pre-merge/split/restore, risky bulk edits), not every small edit.
 - To prevent noise, keep only the **latest snapshot per topic** in this demo repo.
 - After creating a snapshot (or periodically), prune all but the newest snapshot:
-  - `python skills/kano-agent-backlog-skill/scripts/kano-backlog topic snapshot cleanup <topic-name> --ttl-days 0 --keep-latest 1 --apply`
+  - `kob topic snapshot cleanup <topic-name> --ttl-days 0 --keep-latest 1 --apply`
 
 **Topic structure**:
 ```
@@ -721,12 +719,12 @@ Use Worksets when:
 - Want item-specific config overrides (rare)
 
 **Workset lifecycle**:
-1. **Initialize**: `python skills/kano-agent-backlog-skill/scripts/kano-backlog workset init <ITEM_ID> --agent <id> [--ttl-hours <N>]`
+1. **Initialize**: `kob workset init <ITEM_ID> --agent <id> [--ttl-hours <N>]`
    - Creates `_kano/backlog/.cache/worksets/items/<ITEM_ID>/` with `meta.json`, `plan.md`, `notes.md`, `deliverables/`
 2. **Work**: Store scratch files in `deliverables/` (patches, test outputs, etc.)
-3. **Refresh**: `python skills/kano-agent-backlog-skill/scripts/kano-backlog workset refresh <ITEM_ID> --agent <id>`
+3. **Refresh**: `kob workset refresh <ITEM_ID> --agent <id>`
    - Updates `refreshed_at` timestamp
-4. **Cleanup**: `python skills/kano-agent-backlog-skill/scripts/kano-backlog workset cleanup --ttl-hours <N> [--dry-run]`
+4. **Cleanup**: `kob workset cleanup --ttl-hours <N> [--dry-run]`
    - Removes stale worksets older than TTL
 
 **Workset structure**:
@@ -774,13 +772,13 @@ _kano/backlog/.cache/worksets/items/<ITEM_ID>/
   - **Shorthand** prefers `.kano/backlog_config/<ref>.toml` first.
   - If no project-local profile exists, shorthand falls back to `<repo_root>/<ref>.toml`.
 - Use `--profile ...` on commands like:
-  - `kano-backlog config show --product <product> --profile .kano/backlog_config/embedding/local-noop.toml`
-  - `kano-backlog embedding build --product <product> --profile embedding/local-noop`
+  - `kob config show --product <product> --profile .kano/backlog_config/embedding/local-noop.toml`
+  - `kob embedding build --product <product> --profile embedding/local-noop`
 - List and inspect profiles:
-  - `kano-backlog config profiles list --product <product>`
-  - `kano-backlog config profiles show <profile> --product <product>`
-- Inspect active topic: `python skills/kano-agent-backlog-skill/scripts/kano-backlog topic list --agent <id>`
-- Inspect shared topic state: `python skills/kano-agent-backlog-skill/scripts/kano-backlog topic show-state --agent <id> --format json`
+  - `kob config profiles list --product <product>`
+  - `kob config profiles show <profile> --product <product>`
+- Inspect active topic: `kob topic list --agent <id>`
+- Inspect shared topic state: `kob topic show-state --agent <id> --format json`
 
 ### Materials buffer (Topic-specific)
 

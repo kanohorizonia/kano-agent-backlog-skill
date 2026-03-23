@@ -2,13 +2,67 @@
 #include "kano/backlog_core/frontmatter/frontmatter.hpp"
 #include "kano/backlog_core/validation/validator.hpp"
 #include "kano/backlog_core/models/errors.hpp"
+#include <algorithm>
 #include <fstream>
+#include <cctype>
 #include <regex>
 #include <chrono>
 #include <random>
 #include <iomanip>
 
 namespace kano::backlog_core {
+
+namespace {
+
+bool is_blank(const std::string& value) {
+    return std::all_of(
+        value.begin(),
+        value.end(),
+        [](unsigned char ch) { return std::isspace(ch); });
+}
+
+bool is_null_like(const YAML::Node& node) {
+    if (!node || node.IsNull()) {
+        return true;
+    }
+    if (!node.IsScalar()) {
+        return false;
+    }
+
+    std::string value = node.as<std::string>();
+    if (value.empty() || is_blank(value)) {
+        return true;
+    }
+
+    std::transform(
+        value.begin(),
+        value.end(),
+        value.begin(),
+        [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    return value == "null" || value == "none";
+}
+
+std::optional<std::string> parse_optional_string(const YAML::Node& node) {
+    if (is_null_like(node)) {
+        return std::nullopt;
+    }
+    return node.as<std::string>();
+}
+
+std::vector<std::string> parse_string_list(const YAML::Node& node) {
+    std::vector<std::string> values;
+    if (!node || node.IsNull() || !node.IsSequence()) {
+        return values;
+    }
+    for (const auto& entry : node) {
+        if (!entry.IsNull()) {
+            values.push_back(entry.as<std::string>());
+        }
+    }
+    return values;
+}
+
+}  // namespace
 
 CanonicalStore::CanonicalStore(const std::filesystem::path& product_root) 
     : product_root_(product_root), items_root_(product_root / "items") {}
@@ -43,18 +97,29 @@ BacklogItem CanonicalStore::read(const std::filesystem::path& item_path) const {
         item.title = ctx.metadata["title"].as<std::string>();
         item.state = parse_item_state(ctx.metadata["state"].as<std::string>()).value();
 
-        if (ctx.metadata["priority"]) item.priority = ctx.metadata["priority"].as<std::string>();
-        if (ctx.metadata["parent"]) item.parent = ctx.metadata["parent"].as<std::string>();
-        if (ctx.metadata["owner"]) item.owner = ctx.metadata["owner"].as<std::string>();
-        if (ctx.metadata["area"]) item.area = ctx.metadata["area"].as<std::string>();
-        if (ctx.metadata["iteration"]) item.iteration = ctx.metadata["iteration"].as<std::string>();
+        item.priority = parse_optional_string(ctx.metadata["priority"]);
+        item.parent = parse_optional_string(ctx.metadata["parent"]);
+        item.owner = parse_optional_string(ctx.metadata["owner"]);
+        item.area = parse_optional_string(ctx.metadata["area"]);
+        item.iteration = parse_optional_string(ctx.metadata["iteration"]);
         item.created = ctx.metadata["created"].as<std::string>();
         item.updated = ctx.metadata["updated"].as<std::string>();
-        
-        if (ctx.metadata["tags"].IsSequence()) {
-            for (const auto& tag : ctx.metadata["tags"]) {
-                item.tags.push_back(tag.as<std::string>());
+
+        item.tags = parse_string_list(ctx.metadata["tags"]);
+        item.decisions = parse_string_list(ctx.metadata["decisions"]);
+
+        if (auto external = ctx.metadata["external"]; external && external.IsMap()) {
+            for (const auto& entry : external) {
+                if (!entry.first.IsNull() && !entry.second.IsNull()) {
+                    item.external[entry.first.as<std::string>()] = entry.second.as<std::string>();
+                }
             }
+        }
+
+        if (auto links = ctx.metadata["links"]; links && links.IsMap()) {
+            item.links.relates = parse_string_list(links["relates"]);
+            item.links.blocks = parse_string_list(links["blocks"]);
+            item.links.blocked_by = parse_string_list(links["blocked_by"]);
         }
 
         // Body sections
@@ -108,13 +173,35 @@ void CanonicalStore::write(BacklogItem& item) const {
     metadata["type"] = to_string(item.type);
     metadata["title"] = item.title;
     metadata["state"] = to_string(item.state);
-    if (item.priority) metadata["priority"] = *item.priority;
-    if (item.parent) metadata["parent"] = *item.parent;
-    if (item.owner) metadata["owner"] = *item.owner;
-    if (item.area) metadata["area"] = *item.area;
-    if (item.iteration) metadata["iteration"] = *item.iteration;
+    metadata["priority"] = item.priority ? YAML::Node(*item.priority) : YAML::Node(YAML::NodeType::Null);
+    metadata["parent"] = item.parent ? YAML::Node(*item.parent) : YAML::Node(YAML::NodeType::Null);
+    metadata["owner"] = item.owner ? YAML::Node(*item.owner) : YAML::Node(YAML::NodeType::Null);
+    metadata["area"] = item.area ? YAML::Node(*item.area) : YAML::Node(YAML::NodeType::Null);
+    metadata["iteration"] = item.iteration ? YAML::Node(*item.iteration) : YAML::Node(YAML::NodeType::Null);
     metadata["created"] = item.created;
     metadata["updated"] = item.updated;
+
+    YAML::Node external(YAML::NodeType::Map);
+    for (const auto& [key, value] : item.external) {
+        external[key] = value;
+    }
+    metadata["external"] = external;
+
+    YAML::Node links(YAML::NodeType::Map);
+    YAML::Node relates(YAML::NodeType::Sequence);
+    for (const auto& value : item.links.relates) relates.push_back(value);
+    YAML::Node blocks(YAML::NodeType::Sequence);
+    for (const auto& value : item.links.blocks) blocks.push_back(value);
+    YAML::Node blocked_by(YAML::NodeType::Sequence);
+    for (const auto& value : item.links.blocked_by) blocked_by.push_back(value);
+    links["relates"] = relates;
+    links["blocks"] = blocks;
+    links["blocked_by"] = blocked_by;
+    metadata["links"] = links;
+
+    YAML::Node decisions(YAML::NodeType::Sequence);
+    for (const auto& value : item.decisions) decisions.push_back(value);
+    metadata["decisions"] = decisions;
     
     YAML::Node tags(YAML::NodeType::Sequence);
     for (const auto& t : item.tags) tags.push_back(t);

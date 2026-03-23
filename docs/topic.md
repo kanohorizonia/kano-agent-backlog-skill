@@ -50,7 +50,7 @@ After creating a Topic, always tell the human where to find it:
 - Topic: <topic-name>
 - Path: _kano/backlog/topics/<topic-name>/
 - Human brief: _kano/backlog/topics/<topic-name>/brief.md (and brief.generated.md)
-- List: kano-backlog topic list --agent <agent-id>
+- List: kob topic list --agent <agent-id>
 
 ## Directory Layout
 
@@ -60,7 +60,7 @@ Topics live in the backlog tree so the deterministic brief can be shared:
 _kano/backlog/topics/<topic-name>/
   manifest.json     # Topic metadata: seed_items, pinned_docs, snippet_refs, timestamps, status
   brief.md          # Stable, human-maintained brief (do not overwrite automatically)
-  brief.generated.md# Deterministic distilled brief (generated/overwritten by `kano-backlog topic distill`)
+  brief.generated.md# Deterministic distilled brief (generated/overwritten by `kob topic distill`)
   notes.md          # Human-oriented notes/decision pack (freeform; intended for collaboration)
   materials/        # Raw collected materials (treated as cache; typically gitignored)
     clips/
@@ -107,12 +107,12 @@ Suggested `notes.md` sections:
 
 ## CLI Commands
 
-All topic commands are accessed via `kano-backlog topic <subcommand>`.
+All topic commands are accessed via `kob topic <subcommand>`.
 
 ### Create a Topic
 
 ```bash
-kano-backlog topic create <topic-name> --agent <agent-name> \
+kob topic create <topic-name> --agent <agent-name> \
   [--template <name> | --list-templates] [--var key=value ...] \
   [--no-notes] [--with-spec] [--format plain|json]
 ```
@@ -126,7 +126,7 @@ Creates a new topic:
 ### Create a Topic with Spec
 
 ```bash
-kano-backlog topic create complex-feature --agent kiro --with-spec
+kob topic create complex-feature --agent kiro --with-spec
 ```
 This generates the **Spec Triad** (Requirements, Design, Tasks) in a specific `spec/` subdirectory, enabling rigorous feature definition (Medium-Term Memory).
 
@@ -135,20 +135,20 @@ This generates the **Spec Triad** (Requirements, Design, Tasks) in a specific `s
 List available templates:
 
 ```bash
-kano-backlog topic template list
+kob topic template list
 ```
 
 Create from a template:
 
 ```bash
-kano-backlog topic create <topic-name> --agent <agent-name> --template <template-name> \
+kob topic create <topic-name> --agent <agent-name> --template <template-name> \
   --var key=value --var other=value
 ```
 
 ### Add Items to Topic
 
 ```bash
-kano-backlog topic add <topic-name> --item <id> [--format plain|json]
+kob topic add <topic-name> --item <id> [--format plain|json]
 ```
 
 Adds a backlog item to the topic:
@@ -160,7 +160,7 @@ Adds a backlog item to the topic:
 ### Pin Documents
 
 ```bash
-kano-backlog topic pin <topic-name> --doc <path> [--format plain|json]
+kob topic pin <topic-name> --doc <path> [--format plain|json]
 ```
 
 Pins a document to the topic:
@@ -172,7 +172,7 @@ Pins a document to the topic:
 ### Switch Active Topic
 
 ```bash
-kano-backlog topic switch <topic-name> --agent <agent-name> [--format plain|json]
+kob topic switch <topic-name> --agent <agent-name> [--format plain|json]
 ```
 
 Switches the active topic for an agent:
@@ -183,7 +183,7 @@ Switches the active topic for an agent:
 ### Collect a Code Snippet
 
 ```bash
-kano-backlog topic add-snippet <topic-name> --file <path> --start <line> --end <line> [--agent <agent>] [--snapshot]
+kob topic add-snippet <topic-name> --file <path> --start <line> --end <line> [--agent <agent>] [--snapshot]
 ```
 
 Collects a reference-first code snippet into the topic manifest:
@@ -193,7 +193,7 @@ Collects a reference-first code snippet into the topic manifest:
 ### Distill Deterministic Brief
 
 ```bash
-kano-backlog topic distill <topic-name>
+kob topic distill <topic-name>
 ```
 
 Generates/overwrites `brief.generated.md` deterministically from the manifest + materials index.
@@ -208,8 +208,8 @@ This workflow helps humans verify that topic decisions were written back.
 1) Generate a decision audit report for a topic:
 
 ```bash
-kano-backlog topic decision-audit <topic-name>
-kano-backlog topic decision-audit <topic-name> --format json
+kob topic decision-audit <topic-name>
+kob topic decision-audit <topic-name> --format json
 ```
 
 This writes a deterministic report to:
@@ -221,7 +221,7 @@ _kano/backlog/topics/<topic-name>/publish/decision-audit.md
 2) Write back a decision to a work item:
 
 ```bash
-kano-backlog workitem add-decision <ITEM_ID_OR_PATH> \
+kob workitem add-decision <ITEM_ID_OR_PATH> \
   --decision "<English decision text>" \
   --source "_kano/backlog/topics/<topic-name>/synthesis/<file>.md" \
   --agent <agent-id> \
@@ -233,9 +233,9 @@ This appends the decision under a `## Decisions` section in the item body (creat
 ### Close and Cleanup
 
 ```bash
-kano-backlog topic close <topic-name> --agent <agent-name>
-kano-backlog topic cleanup --ttl-days 14
-kano-backlog topic cleanup --ttl-days 14 --apply
+kob topic close <topic-name> --agent <agent-name>
+kob topic cleanup --ttl-days 14
+kob topic cleanup --ttl-days 14 --apply
 ```
 
 Closing marks the topic as closed; cleanup removes raw materials after TTL (and may optionally delete closed topics depending on implementation flags).
@@ -251,11 +251,11 @@ _kano/backlog/topics/<topic-name>/snapshots/
 Commands:
 
 ```bash
-kano-backlog topic snapshot create <topic-name> <snapshot-name> --agent <agent-id> [--description "..."] [--no-materials]
-kano-backlog topic snapshot list <topic-name>
-kano-backlog topic snapshot restore <topic-name> <snapshot-name> --agent <agent-id>
-kano-backlog topic snapshot cleanup <topic-name> --ttl-days 14 --keep-latest 5
-kano-backlog topic snapshot cleanup <topic-name> --ttl-days 14 --keep-latest 5 --apply
+kob topic snapshot create <topic-name> <snapshot-name> --agent <agent-id> [--description "..."] [--no-materials]
+kob topic snapshot list <topic-name>
+kob topic snapshot restore <topic-name> <snapshot-name> --agent <agent-id>
+kob topic snapshot cleanup <topic-name> --ttl-days 14 --keep-latest 5
+kob topic snapshot cleanup <topic-name> --ttl-days 14 --keep-latest 5 --apply
 ```
 
 ### Cross-References (related_topics)
@@ -263,8 +263,8 @@ kano-backlog topic snapshot cleanup <topic-name> --ttl-days 14 --keep-latest 5 -
 Topics can be linked bidirectionally to support navigation and later graph-assisted retrieval.
 
 ```bash
-kano-backlog topic add-reference <topic-a> --to <topic-b>
-kano-backlog topic remove-reference <topic-a> --to <topic-b>
+kob topic add-reference <topic-a> --to <topic-b>
+kob topic remove-reference <topic-a> --to <topic-b>
 ```
 
 ### Merge and Split
@@ -272,14 +272,14 @@ kano-backlog topic remove-reference <topic-a> --to <topic-b>
 Merge multiple topics into a target topic:
 
 ```bash
-kano-backlog topic merge <target-topic> <source-topic-1> <source-topic-2> --agent <agent-id> --dry-run
-kano-backlog topic merge <target-topic> <source-topic-1> <source-topic-2> --agent <agent-id>
+kob topic merge <target-topic> <source-topic-1> <source-topic-2> --agent <agent-id> --dry-run
+kob topic merge <target-topic> <source-topic-1> <source-topic-2> --agent <agent-id>
 ```
 
 Split a topic into multiple subtopics:
 
 ```bash
-kano-backlog topic split <source-topic> --agent <agent-id> \
+kob topic split <source-topic> --agent <agent-id> \
   --new-topic "new-topic-a:ITEM-1,ITEM-2" \
   --new-topic "new-topic-b:ITEM-3"
 ```
@@ -294,21 +294,21 @@ Active topic pointers are stored in shared cache state:
 Inspect shared state:
 
 ```bash
-kano-backlog topic show-state
-kano-backlog topic list-active
+kob topic show-state
+kob topic list-active
 ```
 
 Migrate legacy pointers (if you still have `active_topic.<agent>.txt` files):
 
 ```bash
-kano-backlog topic migrate
-kano-backlog topic cleanup-legacy --no-dry-run
+kob topic migrate
+kob topic cleanup-legacy --no-dry-run
 ```
 
 ### Export Context Bundle
 
 ```bash
-kano-backlog topic export-context <topic-name> [--format markdown|json]
+kob topic export-context <topic-name> [--format markdown|json]
 ```
 
 Exports topic context as a bundle:
@@ -320,7 +320,7 @@ Exports topic context as a bundle:
 ### List Topics
 
 ```bash
-kano-backlog topic list [--agent <agent-name>] [--format plain|json]
+kob topic list [--agent <agent-name>] [--format plain|json]
 ```
 
 Lists all topics:
@@ -345,10 +345,10 @@ Say this to your agent:
 "Create a topic named <topic-name> for <problem>, add items <ITEM_1>, <ITEM_2>, pin <DOC_PATH>, then distill a generated brief." 
 
 The agent will do:
-- `kano-backlog topic create <topic-name> --agent <agent-id>`
-- `kano-backlog topic add <topic-name> --item <ITEM_1>` (repeat for other items)
-- `kano-backlog topic pin <topic-name> --doc <DOC_PATH>` (optional)
-- `kano-backlog topic distill <topic-name>`
+- `kob topic create <topic-name> --agent <agent-id>`
+- `kob topic add <topic-name> --item <ITEM_1>` (repeat for other items)
+- `kob topic pin <topic-name> --doc <DOC_PATH>` (optional)
+- `kob topic distill <topic-name>`
 
 Expected output:
 - `_kano/backlog/topics/<topic-name>/manifest.json` updated with seed items/pinned docs
@@ -360,7 +360,7 @@ Say this to your agent:
 "Run a decision write-back audit for topic <topic-name> and show which work items are missing decisions. Save the report under publish/." 
 
 The agent will do:
-- `kano-backlog topic decision-audit <topic-name> --format plain`
+- `kob topic decision-audit <topic-name> --format plain`
 
 Expected output:
 - `_kano/backlog/topics/<topic-name>/publish/decision-audit.md`
@@ -385,42 +385,42 @@ Expected output:
 
 ```bash
 # 1. Create topic for your work area
-kano-backlog topic create auth-refactor --agent kiro
+kob topic create auth-refactor --agent kiro
 
 # 2. Add related items
-kano-backlog topic add auth-refactor --item TASK-0042
-kano-backlog topic add auth-refactor --item TASK-0043
-kano-backlog topic add auth-refactor --item BUG-0012
+kob topic add auth-refactor --item TASK-0042
+kob topic add auth-refactor --item TASK-0043
+kob topic add auth-refactor --item BUG-0012
 
 # 3. Pin relevant documents
-kano-backlog topic pin auth-refactor --doc _kano/backlog/decisions/ADR-0015.md
-kano-backlog topic pin auth-refactor --doc docs/auth-design.md
+kob topic pin auth-refactor --doc _kano/backlog/decisions/ADR-0015.md
+kob topic pin auth-refactor --doc docs/auth-design.md
 
 # 4. Switch to the topic
-kano-backlog topic switch auth-refactor --agent kiro
+kob topic switch auth-refactor --agent kiro
 ```
 
 ### Context Switching
 
 ```bash
 # Check current topics
-kano-backlog topic list --agent kiro
+kob topic list --agent kiro
 
 # Switch to different focus area
-kano-backlog topic switch payment-flow --agent kiro
+kob topic switch payment-flow --agent kiro
 
 # Export context for agent consumption
-kano-backlog topic export-context payment-flow --format json
+kob topic export-context payment-flow --format json
 ```
 
 ### Loading Context into Agent
 
 ```bash
 # Export as markdown for human review
-kano-backlog topic export-context auth-refactor
+kob topic export-context auth-refactor
 
 # Export as JSON for programmatic use
-kano-backlog topic export-context auth-refactor --format json
+kob topic export-context auth-refactor --format json
 ```
 
 ## Integration with Worksets
@@ -433,13 +433,13 @@ Topics and worksets work together:
 Typical flow:
 ```bash
 # Switch to topic
-kano-backlog topic switch auth-refactor --agent kiro
+kob topic switch auth-refactor --agent kiro
 
 # Initialize workset for specific item
-kano-backlog workset init --item TASK-0042 --agent kiro
+kob workset init --item TASK-0042 --agent kiro
 
 # Work on item with workset
-kano-backlog workset next --item TASK-0042
+kob workset next --item TASK-0042
 
 # When done, switch topic or continue with next item
 ```

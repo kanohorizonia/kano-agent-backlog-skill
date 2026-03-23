@@ -6,9 +6,9 @@ This document lists features that are experimental and may change or be removed 
 
 ### Stable (Core CLI)
 These features are stable and ready for production use:
-- Backlog initialization (`kano-backlog admin init`)
-- Item creation and management (`kano-backlog item create/list/update-state`)
-- ADR creation (`kano-backlog adr create`)
+- Backlog initialization (`kob admin init`)
+- Item creation and management (`kob item create/list/update-state`)
+- ADR creation (`kob adr create`)
 - Basic configuration management
 - Doctor command for environment validation
 
@@ -25,7 +25,7 @@ These features are under active development and may change significantly:
 
 #### Vector Search
 - **Status**: Experimental
-- **Commands**: `kano-backlog search semantic`, `kano-backlog embedding`
+- **Commands**: `kob search hybrid`, `kob embedding`
 - **Why experimental**: Performance optimization ongoing, API may change
 - **Dependencies**: Requires `[vector]` extras: `pip install kano-agent-backlog-skill[vector]`
 - **Known limitations**: 
@@ -35,7 +35,7 @@ These features are under active development and may change significantly:
 
 #### Advanced Querying
 - **Status**: Experimental
-- **Commands**: `kano-backlog item query --filter`, complex filters
+- **Commands**: `kob item list`, complex filters
 - **Why experimental**: Query language design in progress
 - **Known limitations**:
   - Limited filter operators
@@ -44,7 +44,7 @@ These features are under active development and may change significantly:
 
 #### Tokenizer Diagnostics
 - **Status**: Experimental
-- **Commands**: `kano-backlog tokenizer diagnose`
+- **Commands**: `kob tokenizer adapter-status`
 - **Why experimental**: Diagnostic output format evolving
 - **Known limitations**:
   - Output format may change

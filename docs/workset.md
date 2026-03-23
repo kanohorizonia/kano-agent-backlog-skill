@@ -29,12 +29,12 @@ _kano/backlog/.cache/worksets/items/<item-id>/
 
 ## CLI Commands
 
-All workset commands are accessed via `kano-backlog workset <subcommand>`.
+All workset commands are accessed via `kob workset <subcommand>`.
 
 ### Initialize a Workset
 
 ```bash
-kano-backlog workset init --item <id> --agent <agent-name> [--ttl-hours 72] [--format plain|json]
+kob workset init --item <id> --agent <agent-name> [--ttl-hours 72] [--format plain|json]
 ```
 
 Creates a workset for the specified item:
@@ -49,7 +49,7 @@ If workset already exists, returns existing path (idempotent).
 ### Refresh from Canonical
 
 ```bash
-kano-backlog workset refresh --item <id> --agent <agent-name> [--format plain|json]
+kob workset refresh --item <id> --agent <agent-name> [--format plain|json]
 ```
 
 Updates workset metadata from canonical files:
@@ -60,7 +60,7 @@ Updates workset metadata from canonical files:
 ### Get Next Action
 
 ```bash
-kano-backlog workset next --item <id> [--format plain|json]
+kob workset next --item <id> [--format plain|json]
 ```
 
 Returns the next unchecked step from `plan.md`:
@@ -71,7 +71,7 @@ Returns the next unchecked step from `plan.md`:
 ### Promote Deliverables
 
 ```bash
-kano-backlog workset promote --item <id> --agent <agent-name> [--dry-run] [--format plain|json]
+kob workset promote --item <id> --agent <agent-name> [--dry-run] [--format plain|json]
 ```
 
 Promotes files from `deliverables/` to canonical artifacts:
@@ -82,7 +82,7 @@ Promotes files from `deliverables/` to canonical artifacts:
 ### Cleanup Expired Worksets
 
 ```bash
-kano-backlog workset cleanup [--ttl-hours 72] [--agent <agent-name>] [--dry-run] [--format plain|json]
+kob workset cleanup [--ttl-hours 72] [--agent <agent-name>] [--dry-run] [--format plain|json]
 ```
 
 Deletes worksets older than TTL:
@@ -93,7 +93,7 @@ Deletes worksets older than TTL:
 ### List Worksets
 
 ```bash
-kano-backlog workset list [--format plain|json]
+kob workset list [--format plain|json]
 ```
 
 Lists all item worksets with metadata:
@@ -104,7 +104,7 @@ Lists all item worksets with metadata:
 ### Detect ADR Candidates
 
 ```bash
-kano-backlog workset detect-adr --item <id> [--format plain|json]
+kob workset detect-adr --item <id> [--format plain|json]
 ```
 
 Scans `notes.md` for `Decision:` markers:
@@ -118,10 +118,10 @@ Scans `notes.md` for `Decision:` markers:
 
 ```bash
 # 1. Initialize workset
-kano-backlog workset init --item TASK-0042 --agent kiro
+kob workset init --item TASK-0042 --agent kiro
 
 # 2. Check what to do first
-kano-backlog workset next --item TASK-0042
+kob workset next --item TASK-0042
 
 # 3. Work on the task, updating plan.md as you go
 # 4. Add notes with Decision: markers for important decisions
@@ -131,36 +131,36 @@ kano-backlog workset next --item TASK-0042
 
 ```bash
 # 1. Check all steps are done
-kano-backlog workset next --item TASK-0042
+kob workset next --item TASK-0042
 # Output: "✓ All steps complete!"
 
 # 2. Promote any deliverables
-kano-backlog workset promote --item TASK-0042 --agent kiro --dry-run
-kano-backlog workset promote --item TASK-0042 --agent kiro
+kob workset promote --item TASK-0042 --agent kiro --dry-run
+kob workset promote --item TASK-0042 --agent kiro
 
 # 3. Check for ADR candidates
-kano-backlog workset detect-adr --item TASK-0042
+kob workset detect-adr --item TASK-0042
 ```
 
 ### Maintenance
 
 ```bash
 # List all worksets
-kano-backlog workset list
+kob workset list
 
 # Preview cleanup
-kano-backlog workset cleanup --ttl-hours 48 --dry-run
+kob workset cleanup --ttl-hours 48 --dry-run
 
 # Run cleanup
-kano-backlog workset cleanup --ttl-hours 48
+kob workset cleanup --ttl-hours 48
 ```
 
 ## ADR Promotion
 
 When `Decision:` markers are found in `notes.md`:
 
-1. Run `kano-backlog workset detect-adr --item <id>` to find candidates
-2. Create ADR using `kano-backlog admin adr create ...`
+1. Run `kob workset detect-adr --item <id>` to find candidates
+2. Create ADR using `kob adr create ...`
 3. Link ADR to item via `decisions:` frontmatter
 4. Worklog entry is appended automatically
 

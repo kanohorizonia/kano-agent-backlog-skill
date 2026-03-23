@@ -54,7 +54,7 @@ std::vector<std::string> RefResolver::get_references(const BacklogItem& item) {
     for (const auto& d : item.decisions) refs.insert(d);
 
     // From body sections
-    static const std::regex pattern(R"(\b(?:KABSD-[A-Z]+-\d{4}|ADR-\d{4}|[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\b)");
+    static const std::regex pattern(R"(\b(?:[A-Z][A-Z0-9]{1,15}-(?:EPIC|FTR|USR|TSK|BUG)-\d{4}|ADR-\d{4}|[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\b)");
     
     auto extract = [&](const std::optional<std::string>& section) {
         if (!section) return;

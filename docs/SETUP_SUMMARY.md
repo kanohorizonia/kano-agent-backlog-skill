@@ -11,12 +11,13 @@ Quick reference for different installation scenarios.
 pip install kano-agent-backlog-skill
 
 # Verify
-kano-backlog --version
-kano-backlog doctor
+bash scripts/internal/show-version.sh
+kob
+kob doctor
 
 # Initialize backlog
 cd /path/to/your/project
-kano-backlog admin init --product my-app --agent <your-agent>
+kob admin init --product my-app --agent <your-agent>
 
 # Add cache and logs to .gitignore (IMPORTANT)
 echo ".kano/cache" >> .gitignore
@@ -39,12 +40,13 @@ cd skills/kano-agent-backlog-skill
 pip install -e ".[dev]"
 
 # Verify installation
-kano-backlog --version
-kano-backlog doctor
+bash scripts/internal/show-version.sh
+kob
+kob doctor
 
 # Initialize backlog in your project
 cd /path/to/your/project
-kano-backlog admin init --product my-app --agent <your-agent>
+kob admin init --product my-app --agent <your-agent>
 
 # Add cache and logs to .gitignore (IMPORTANT)
 echo ".kano/cache" >> .gitignore
@@ -73,14 +75,15 @@ See: [Agent Quick Start Guide](agent-quick-start.md)
 
 3. **Verify:**
    ```bash
-   kano-backlog --version
-   kano-backlog doctor
+   bash scripts/internal/show-version.sh
+   kob
+   kob doctor
    ```
 
 4. **Initialize:**
    ```bash
    cd /path/to/project
-   kano-backlog admin init --product <product> --agent <agent-id>
+   kob admin init --product <product> --agent <agent-id>
    
    # Add cache and logs to .gitignore (IMPORTANT)
    echo ".kano/cache" >> .gitignore
@@ -141,13 +144,14 @@ See: [Publishing to PyPI Guide](publishing-to-pypi.md)
 
 ### Installation Verification
 ```bash
-kano-backlog --version    # Check version
-kano-backlog doctor       # Validate environment
+bash scripts/internal/show-version.sh    # Check version
+kob                              # Inspect command surface
+kob doctor                       # Validate environment
 ```
 
 ### Backlog Initialization
 ```bash
-kano-backlog admin init --product <name> --agent <agent>
+kob admin init --product <name> --agent <agent>
 
 # IMPORTANT: Add cache and logs to .gitignore after initialization
 echo ".kano/cache" >> .gitignore
@@ -157,16 +161,16 @@ echo "_kano/backlog/_shared/logs" >> .gitignore
 ### Common Operations
 ```bash
 # Create item
-kano-backlog item create --type task --title "<title>" --product <product> --agent <agent>
+kob item create --type task --title "<title>" --product <product> --agent <agent>
 
 # List items
-kano-backlog item list --product <product>
+kob item list --product <product>
 
 # Update state
-kano-backlog item update-state <ID> --state <state> --agent <agent> --product <product>
+kob workitem update-state <ID> --state <state> --product <product>
 
 # Create ADR
-kano-backlog admin adr create --title "<title>" --product <product> --agent <agent>
+kob adr create --title "<title>" --product <product> --agent <agent>
 ```
 
 ## Documentation Index

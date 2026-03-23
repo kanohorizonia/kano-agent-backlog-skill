@@ -1,42 +1,16 @@
-#!/usr/bin/env python3
-"""
-kano-backlog - Backlog management CLI for kano-agent-backlog-skill operations.
+#!/usr/bin/env bash
+set -euo pipefail
 
-Per ADR-0013, this is the ONLY executable entrypoint agents should call.
-All backlog operations are exposed as subcommands.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SKILL_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+WORKSPACE_ROOT="$(cd "$SKILL_ROOT/../../../.." && pwd)"
+NATIVE_BIN="$SKILL_ROOT/src/cpp/build/windows-ninja-msvc/kano-backlog.exe"
 
-Usage:
-    kano-backlog doctor                        # Check environment health
-    kano-backlog item create ...               # Create work item
-    kano-backlog item update-state ...         # Update item state
-    kano-backlog item validate ...             # Validate Ready gate
-    kano-backlog view refresh ...              # Refresh dashboards
-    kano-backlog admin init ...                # Initialize backlog
-    ...
+if [[ ! -f "$NATIVE_BIN" ]]; then
+  echo "Native CLI not found: $NATIVE_BIN" >&2
+  echo "Build it first with: bash .agents/skills/kano/kano-agent-backlog-skill/scripts/internal/self-build.sh" >&2
+  exit 1
+fi
 
-For full help:
-    kano-backlog --help
-    kano-backlog <command> --help
-"""
-
-if __name__ == "__main__":
-    import sys
-    from pathlib import Path
-    
-    # Add src/ to Python path for imports
-    scripts_dir = Path(__file__).parent
-    skill_root = scripts_dir.parent
-    src_dir = skill_root / "src"
-    
-    if str(src_dir) not in sys.path:
-        sys.path.insert(0, str(src_dir))
-
-    # Ensure Windows console encoding issues never crash the CLI.
-    from kano_backlog_cli.util import configure_stdio
-
-    configure_stdio()
-    
-    # Import and run the CLI app
-    from kano_backlog_cli.cli import app
-    
-    app()
+cd "$WORKSPACE_ROOT"
+exec "$NATIVE_BIN" "$@"

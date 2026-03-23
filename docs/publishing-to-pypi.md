@@ -120,12 +120,12 @@ source test-venv/bin/activate  # or test-venv\Scripts\activate on Windows
 pip install dist/kano_agent_backlog_skill-0.1.0-py3-none-any.whl
 
 # Verify CLI works
-kano-backlog --version
-kano-backlog doctor
+bash scripts/internal/show-version.sh
+kob doctor
 
 # Test basic workflow
-kano-backlog admin init --product test --agent test-agent
-kano-backlog item create --type task --title "Test" --product test --agent test-agent
+kob admin init --product test --agent test-agent
+kob item create --type task --title "Test" --product test --agent test-agent
 
 # Clean up
 deactivate
@@ -153,8 +153,8 @@ source test-pypi-venv/bin/activate
 pip install --index-url https://test.pypi.org/simple/ kano-agent-backlog-skill
 
 # Verify it works
-kano-backlog --version
-kano-backlog doctor
+bash scripts/internal/show-version.sh
+kob doctor
 
 # Clean up
 deactivate
@@ -203,8 +203,8 @@ source verify-venv/bin/activate
 pip install kano-agent-backlog-skill
 
 # Verify
-kano-backlog --version
-kano-backlog doctor
+bash scripts/internal/show-version.sh
+kob doctor
 
 # Clean up
 deactivate

@@ -37,21 +37,19 @@ if(MSVC)
 endif()
 
 # ---------------------------------------------------------------------------
-# CLI11 — submodule (default) or system
+# CLI11 — FetchContent (default) or system
 # ---------------------------------------------------------------------------
-set(KANO_CLI11_SOURCE_MODE "submodule" CACHE STRING "CLI11 source mode: submodule|system")
-set_property(CACHE KANO_CLI11_SOURCE_MODE PROPERTY STRINGS submodule system)
+set(KANO_CLI11_SOURCE_MODE "fetch" CACHE STRING "CLI11 source mode: fetch|system")
+set_property(CACHE KANO_CLI11_SOURCE_MODE PROPERTY STRINGS fetch system)
 
-set(KANO_CLI11_SUBMODULE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/code/thirdparty/cli11")
-set(KANO_CLI11_BINARY_DIR "${CMAKE_BINARY_DIR}/thirdparty/cli11-build")
-
-if(KANO_CLI11_SOURCE_MODE STREQUAL "submodule")
-    if(EXISTS "${KANO_CLI11_SUBMODULE_SOURCE_DIR}/CMakeLists.txt")
-        add_subdirectory("${KANO_CLI11_SUBMODULE_SOURCE_DIR}" "${KANO_CLI11_BINARY_DIR}" EXCLUDE_FROM_ALL)
-        set(cli11_SOURCE_DIR "${KANO_CLI11_SUBMODULE_SOURCE_DIR}")
-    else()
-        message(FATAL_ERROR "CLI11 submodule missing: ${KANO_CLI11_SUBMODULE_SOURCE_DIR}. Run: git submodule update --init --recursive")
-    endif()
+if(KANO_CLI11_SOURCE_MODE STREQUAL "fetch")
+    include(FetchContent)
+    FetchContent_Declare(
+        cli11
+        GIT_REPOSITORY https://github.com/CLIUtils/CLI11.git
+        GIT_TAG v2.4.2
+    )
+    FetchContent_MakeAvailable(cli11)
 else()
     find_package(CLI11 CONFIG REQUIRED)
 endif()

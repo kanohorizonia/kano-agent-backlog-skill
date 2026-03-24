@@ -1,13 +1,17 @@
+// Smoke test for workitem_ops using new layer (code/systems/kano_backlog_ops)
+// Updated 2026-03-24 to properly test the Ready gate flow
+
 #include <filesystem>
 #include <iostream>
-#include <memory>
 #include <random>
 #include <sstream>
 #include <stdexcept>
 
-#include "backlog_adapters/fs/filesystem.hpp"
-#include "backlog_core/model/backlog_item.hpp"
-#include "backlog_ops/workitem/workitem_ops.hpp"
+#include "kano/backlog_core/models/models.hpp"
+#include "kano/backlog_core/frontmatter/canonical_store.hpp"
+#include "kano/backlog_core/state/state_machine.hpp"
+#include "kano/backlog_ops/index/backlog_index.hpp"
+#include "kano/backlog_ops/workitem/workitem_ops.hpp"
 
 namespace {
 
@@ -34,45 +38,61 @@ std::filesystem::path make_temp_root() {
 } // namespace
 
 int main() {
-    using kano::backlog::adapters::LocalFilesystem;
-    using kano::backlog::core::ItemState;
-    using kano::backlog::core::ItemType;
-    using kano::backlog::ops::WorkitemOps;
+    using kano::backlog_core::BacklogItem;
+    using kano::backlog_core::CanonicalStore;
+    using kano::backlog_core::ItemState;
+    using kano::backlog_core::ItemType;
+    using kano::backlog_ops::BacklogIndex;
+    using kano::backlog_ops::WorkitemOps;
 
     std::filesystem::path root;
+    std::filesystem::path db_path;
 
     try {
         root = make_temp_root();
-        auto fs = std::make_shared<LocalFilesystem>();
-        WorkitemOps workitems(fs, root);
+        db_path = root / ".cache" / "index.db";
+        std::filesystem::create_directories(db_path.parent_path());
 
-        auto created = workitems.create_item(ItemType::Task, "Native workitem smoke", "guide-test", "opencode");
-        expect(created.state == ItemState::Proposed, "new item should start Proposed");
+        BacklogIndex index(db_path);
+        index.initialize();
 
-        auto loaded = workitems.get_item(created.id);
-        expect(loaded.has_value(), "created item should be readable");
-        expect(loaded->title == "Native workitem smoke", "loaded title mismatch");
+        // Create item - starts in Proposed state
+        auto created = WorkitemOps::create_item(
+            index, root, "GT", ItemType::Task, "Native workitem smoke", "opencode");
+        expect(!created.id.empty(), "create_item should return non-empty id");
+        expect(std::filesystem::exists(created.path), "created item file should exist");
 
-        const bool ready_fields_ok = workitems.set_ready_fields(
-            created.id,
-            std::string("Need deterministic native workitem coverage."),
-            std::string("Exercise create, ready, update, and worklog flows."),
-            std::string("Use isolated temp directories in smoke tests."),
-            std::string("Smoke test passes through native code paths."),
-            std::string("Low."),
-            "opencode");
-        expect(ready_fields_ok, "set_ready_fields should succeed");
+        // Verify initial state is Proposed
+        CanonicalStore store(root);
+        BacklogItem item = store.read(created.path);
+        expect(item.state == ItemState::Proposed, "new item should start in Proposed state");
 
-        expect(workitems.update_state(created.id, ItemState::Ready), "Ready transition should succeed");
-        expect(workitems.update_state(created.id, ItemState::InProgress), "InProgress transition should succeed");
-        expect(workitems.append_worklog(created.id, "Ran native smoke validation", "opencode"),
-            "append_worklog should succeed");
+        // Set required Ready gate fields
+        item.context = "Need deterministic native workitem coverage.";
+        item.goal = "Exercise create, ready, update, and worklog flows.";
+        item.approach = "Use isolated temp directories in smoke tests.";
+        item.acceptance_criteria = "Smoke test passes through native code paths.";
+        item.risks = "Low risk - isolated temp directories.";
 
-        auto updated = workitems.get_item(created.id);
-        expect(updated.has_value(), "updated item should be readable");
-        expect(updated->state == ItemState::InProgress, "updated state mismatch");
-        expect(updated->context.has_value(), "context should be populated after set_ready_fields");
-        expect(updated->worklog.size() >= 2, "worklog should include appended entry");
+        // Write back with updated fields
+        store.write(item);
+        index.index_item(item);
+
+        // Transition to Ready (requires all fields)
+        auto ready_result = WorkitemOps::update_state(
+            index, root, created.id, ItemState::Ready, "opencode");
+        expect(ready_result.new_state == ItemState::Ready, "state should be Ready");
+
+        // Transition to InProgress
+        auto progress_result = WorkitemOps::update_state(
+            index, root, created.id, ItemState::InProgress, "opencode");
+        expect(progress_result.new_state == ItemState::InProgress, "state should be InProgress");
+
+        // Verify final state by reading back
+        BacklogItem final_item = store.read(created.path);
+        expect(final_item.state == ItemState::InProgress, "final state should be InProgress");
+        expect(final_item.context.has_value(), "context should be set");
+        expect(final_item.worklog.size() >= 3, "worklog should have at least 3 entries (created + ready + inprogress)");
 
         std::cout << "workitem_ops_smoke_test: PASS\n";
         std::filesystem::remove_all(root);

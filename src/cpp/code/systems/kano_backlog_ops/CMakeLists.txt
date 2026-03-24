@@ -53,6 +53,11 @@ target_include_directories(kano_backlog_ops
 target_link_libraries(kano_backlog_ops 
     PUBLIC 
       kano::backlog_core
-      SQLite3
+      ${_sqlite3_target}
       ${_jsoncpp_target}
+)
+
+target_include_directories(kano_backlog_ops
+    PRIVATE
+      ${_jsoncpp_include_dir}
 )

@@ -161,6 +161,19 @@ endforeach()
 option(KANO_BUILD_TESTS "Build kano-backlog C++ test targets" ON)
 
 # ---------------------------------------------------------------------------
+# Optional: Code coverage (MSVC /PROFILE flag — linker only, compiler instrumentation)
+# NOTE: /PROFILE is a LINKER flag only. MSVC coverage requires:
+#   1. /PROFILE at link time (enables profiling instrumentation)
+#   2. Microsoft.CodeCoverage.Console collect at runtime
+# See: https://learn.microsoft.com/en-us/visualstudio/profiling/
+# ---------------------------------------------------------------------------
+option(KANO_ENABLE_COVERAGE "Enable code coverage instrumentation (MSVC /PROFILE)" OFF)
+
+if(KANO_ENABLE_COVERAGE AND MSVC)
+    add_link_options("$<$<LINK_LANGUAGE:CXX>:/PROFILE>")
+endif()
+
+# ---------------------------------------------------------------------------
 # Core layers (new code/ tree — replaces old systems/ layer)
 # ---------------------------------------------------------------------------
 add_subdirectory(code/systems/kano_backlog_core)

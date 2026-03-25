@@ -112,16 +112,23 @@ target_include_directories(SQLite3 INTERFACE $<BUILD_INTERFACE:${sqlite3_SOURCE_
 set(_sqlite3_target SQLite3)
 
 # ---------------------------------------------------------------------------
-# jsoncpp — FetchContent fallback
+# jsoncpp — FetchContent with explicit option control
 # ---------------------------------------------------------------------------
+# NOTE: FetchContent_MakeAvailable() calls project() internally which can
+# reset/override cache options. We use FetchContent_Populate() + manual
+# add_subdirectory() so we control option values before project() runs.
+# jsoncpp's option() reads JSONCPP_BUILD_TESTS from cache; if not set,
+# it defaults from BUILD_TESTING (parent scope).
+# ---------------------------------------------------------------------------
+set(JSONCPP_BUILD_TESTS OFF)
+set(JSONCPP_BUILD_SHARED_LIBS OFF)
 FetchContent_Declare(
     jsoncpp
     GIT_REPOSITORY https://github.com/open-source-parsers/jsoncpp.git
     GIT_TAG 1.9.7
 )
-set(JSONCPP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(JSONCPP_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(jsoncpp)
+FetchContent_Populate(jsoncpp)
+add_subdirectory(${jsoncpp_SOURCE_DIR} ${jsoncpp_BINARY_DIR} EXCLUDE_FROM_ALL)
 if(TARGET jsoncpp_lib)
     set(_jsoncpp_target jsoncpp_lib)
 elseif(TARGET jsoncpp_static)

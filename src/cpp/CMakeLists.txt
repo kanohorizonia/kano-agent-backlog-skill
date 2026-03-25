@@ -114,14 +114,15 @@ set(_sqlite3_target SQLite3)
 # ---------------------------------------------------------------------------
 # jsoncpp — FetchContent with explicit option control
 # ---------------------------------------------------------------------------
-# NOTE: FetchContent_MakeAvailable() calls project() internally which can
-# reset/override cache options. We use FetchContent_Populate() + manual
-# add_subdirectory() so we control option values before project() runs.
-# jsoncpp's option() reads JSONCPP_BUILD_TESTS from cache; if not set,
-# it defaults from BUILD_TESTING (parent scope).
+# jsoncpp CMakeLists.txt reads BUILD_SHARED_LIBS (global CMake variable),
+# not JSONCPP_BUILD_SHARED_LIBS. Set it before add_subdirectory to ensure
+# only the static library is built. jsoncpp defaults all three (shared,
+# static, object) to ON, so we must explicitly disable shared here.
 # ---------------------------------------------------------------------------
-set(JSONCPP_BUILD_TESTS OFF)
-set(JSONCPP_BUILD_SHARED_LIBS OFF)
+set(BUILD_SHARED_LIBS OFF)
+set(BUILD_STATIC_LIBS ON)
+set(JSONCPP_WITH_TESTS OFF)
+set(JSONCPP_WITH_POST_BUILD_UNITTEST OFF)
 FetchContent_Declare(
     jsoncpp
     GIT_REPOSITORY https://github.com/open-source-parsers/jsoncpp.git
@@ -129,10 +130,10 @@ FetchContent_Declare(
 )
 FetchContent_Populate(jsoncpp)
 add_subdirectory(${jsoncpp_SOURCE_DIR} ${jsoncpp_BINARY_DIR} EXCLUDE_FROM_ALL)
-if(TARGET jsoncpp_lib)
-    set(_jsoncpp_target jsoncpp_lib)
-elseif(TARGET jsoncpp_static)
+if(TARGET jsoncpp_static)
     set(_jsoncpp_target jsoncpp_static)
+elseif(TARGET jsoncpp_lib)
+    set(_jsoncpp_target jsoncpp_lib)
 elseif(TARGET JsonCpp::JsonCpp)
     set(_jsoncpp_target JsonCpp::JsonCpp)
 endif()

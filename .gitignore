@@ -90,7 +90,14 @@ Thumbs.db
 .venv/
 .vscode/
 __pycache__/
-build/
+
+# >>> kano-cpp-dev: track build scripts, ignore build output
+src/cpp/build/**
+!src/cpp/build/
+!src/cpp/build/script/
+!src/cpp/build/script/**
+# <<< kano-cpp-dev
+
 coverage/
 dist/
 node_modules/

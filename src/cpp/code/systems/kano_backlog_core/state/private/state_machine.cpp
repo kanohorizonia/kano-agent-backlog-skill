@@ -85,7 +85,11 @@ void StateMachine::transition(
     // 4. Update timestamp (ISO 8601 YYYY-MM-DD)
     auto now_t = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
     struct tm buf;
+#ifdef _WIN32
     localtime_s(&buf, &now_t);
+#else
+    localtime_r(&now_t, &buf);
+#endif
     std::stringstream date_ss;
     date_ss << std::put_time(&buf, "%Y-%m-%d");
     item.updated = date_ss.str();
@@ -116,7 +120,11 @@ void StateMachine::record_worklog(
 ) {
     auto now_t = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
     struct tm buf;
+#ifdef _WIN32
     localtime_s(&buf, &now_t);
+#else
+    localtime_r(&now_t, &buf);
+#endif
     
     std::stringstream time_ss;
     time_ss << std::put_time(&buf, "%Y-%m-%d %H:%M");

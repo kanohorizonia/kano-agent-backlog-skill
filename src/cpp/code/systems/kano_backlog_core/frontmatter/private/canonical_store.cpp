@@ -161,7 +161,11 @@ void CanonicalStore::write(BacklogItem& item) const {
     // Update timestamp
     auto now_t = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
     struct tm buf;
+#ifdef _WIN32
     localtime_s(&buf, &now_t);
+#else
+    localtime_r(&now_t, &buf);
+#endif
     std::stringstream date_ss;
     date_ss << std::put_time(&buf, "%Y-%m-%d");
     item.updated = date_ss.str();
@@ -261,7 +265,11 @@ BacklogItem CanonicalStore::create(const std::string& prefix, ItemType type, con
 
     auto now_t = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
     struct tm buf;
+#ifdef _WIN32
     localtime_s(&buf, &now_t);
+#else
+    localtime_r(&now_t, &buf);
+#endif
     std::stringstream date_ss;
     date_ss << std::put_time(&buf, "%Y-%m-%d");
     item.created = date_ss.str();

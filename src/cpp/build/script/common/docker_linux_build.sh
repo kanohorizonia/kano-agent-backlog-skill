@@ -24,5 +24,5 @@ kob_run_linux_preset_via_docker() {
   RepoRootWin="$(cd "$KOB_CPP_ROOT/../.." && pwd -W)"
   RepoRootWin="${RepoRootWin//\'/\'\'}"
 
-  powershell -NoProfile -ExecutionPolicy Bypass -Command "& { docker run --rm -v '$RepoRootWin:/work' -w /work/src/cpp ubuntu:25.10 bash -lc 'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y cmake ninja-build gcc-15 g++-15 git && rm -rf /work/src/cpp/build/_intermediate/$InConfigurePreset && cmake --preset $InConfigurePreset && cmake --build --preset $InBuildPreset'; exit \$LASTEXITCODE }"
+  powershell -NoProfile -ExecutionPolicy Bypass -Command "& { docker run --rm -v '$RepoRootWin:/work' -w /work/src/cpp ubuntu:25.10 bash -lc 'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y cmake ninja-build gcc-15 g++-15 git && ln -sf /usr/bin/gcc-15 /usr/bin/gcc && ln -sf /usr/bin/g++-15 /usr/bin/g++ && rm -rf /work/src/cpp/build/_intermediate/$InConfigurePreset && cmake --preset $InConfigurePreset && cmake --build --preset $InBuildPreset'; exit \$LASTEXITCODE }"
 }

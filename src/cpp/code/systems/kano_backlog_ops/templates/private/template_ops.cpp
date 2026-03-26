@@ -20,7 +20,11 @@ std::string TemplateOps::render_item_body(
     // Get timestamp
     auto now_t = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
     struct tm buf;
+#ifdef _WIN32
     localtime_s(&buf, &now_t);
+#else
+    localtime_r(&now_t, &buf);
+#endif
     
     ss << "\n# Context\n\n";
     ss << "# Goal\n\n";

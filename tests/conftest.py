@@ -3,18 +3,22 @@ import warnings
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
-from hypothesis import settings
+try:
+    from hypothesis import settings
 
-# Silence expected deprecation warnings emitted when intentionally using legacy JSON configs in tests.
-warnings.filterwarnings(
-    "ignore",
-    message=r"JSON config is deprecated; migrate to TOML",
-    category=DeprecationWarning,
-)
+    # Silence expected deprecation warnings emitted when intentionally using legacy JSON configs in tests.
+    warnings.filterwarnings(
+        "ignore",
+        message=r"JSON config is deprecated; migrate to TOML",
+        category=DeprecationWarning,
+    )
 
-# Prevent Hypothesis from writing a local example database (e.g. `.hypothesis/`) during tests.
-settings.register_profile("kano-tests", database=None)
-settings.load_profile("kano-tests")
+    # Prevent Hypothesis from writing a local example database (e.g. `.hypothesis/`) during tests.
+    settings.register_profile("kano-tests", database=None)
+    settings.load_profile("kano-tests")
+except ImportError:
+    # hypothesis is optional; tests can still run without it
+    pass
 
 
 def write_project_backlog_config(

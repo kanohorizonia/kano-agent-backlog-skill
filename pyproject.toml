@@ -82,6 +82,7 @@ version = {attr = "kano_backlog_core.__version__.__version__"}
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["src/python"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]

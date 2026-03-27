@@ -1,0 +1,9 @@
+[self]
+# compiler_launcher = "sccache"
+
+[remote_build.macos]
+# route = "auto"
+# remote_dir = "/tmp/kob-build"
+# host = "user@example-mac-host"
+# local_host = "user@macbuilder.local"
+# tailnet_host = "user@macbuilder.example.ts.net"

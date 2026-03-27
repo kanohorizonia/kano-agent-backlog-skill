@@ -1,0 +1,9 @@
+{
+  "name": "kano-backlog",
+  "version-string": "0.1.0-beta",
+  "description": "Kano Agent Backlog — ticket-first AI agent collaboration",
+  "dependencies": [
+    "cli11",
+    "tomlplusplus"
+  ]
+}

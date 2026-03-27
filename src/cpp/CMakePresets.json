@@ -1,143 +1,571 @@
 {
-  "version": 6,
-  "cmakeMinimumRequired": {
-    "major": 3,
-    "minor": 24,
-    "patch": 0
-  },
-  "configurePresets": [
-    {
-      "name": "windows-ninja-msvc",
-      "displayName": "Windows Ninja Multi-Config (MSVC)",
-      "description": "Uses Ninja Multi-Config with default MSVC compiler (requires vcvars64.bat)",
-      "generator": "Ninja Multi-Config",
-      "binaryDir": "${sourceDir}/build/_intermediate/windows-ninja-msvc",
-      "cacheVariables": {
-        "KB_PRESET_NAME": "windows-ninja-msvc"
-      }
+    "version": 3,
+    "cmakeMinimumRequired": {
+        "major": 3,
+        "minor": 21,
+        "patch": 0
     },
-    {
-      "name": "windows-ninja-clang",
-      "displayName": "Windows Ninja Multi-Config (Clang)",
-      "description": "Uses Ninja Multi-Config with LLVM Clang compiler",
-      "generator": "Ninja Multi-Config",
-      "binaryDir": "${sourceDir}/build/_intermediate/windows-ninja-clang",
-      "cacheVariables": {
-        "CMAKE_C_COMPILER": "clang-cl",
-        "CMAKE_CXX_COMPILER": "clang-cl",
-        "KB_PRESET_NAME": "windows-ninja-clang"
-      }
-    },
-    {
-      "name": "linux-ninja-gcc",
-      "displayName": "Linux Ninja Multi-Config (GCC)",
-      "description": "Uses Ninja Multi-Config with GCC compiler",
-      "generator": "Ninja Multi-Config",
-      "binaryDir": "${sourceDir}/build/_intermediate/linux-ninja-gcc",
-      "cacheVariables": {
-        "CMAKE_C_COMPILER": "gcc",
-        "CMAKE_CXX_COMPILER": "g++",
-        "KB_PRESET_NAME": "linux-ninja-gcc"
-      }
-    },
-    {
-      "name": "linux-ninja-clang",
-      "displayName": "Linux Ninja Multi-Config (Clang)",
-      "description": "Uses Ninja Multi-Config with Clang compiler",
-      "generator": "Ninja Multi-Config",
-      "binaryDir": "${sourceDir}/build/_intermediate/linux-ninja-clang",
-      "cacheVariables": {
-        "CMAKE_C_COMPILER": "clang",
-        "CMAKE_CXX_COMPILER": "clang++",
-        "KB_PRESET_NAME": "linux-ninja-clang"
-      }
-    },
-    {
-      "name": "macos-ninja-clang",
-      "displayName": "macOS Ninja Multi-Config (Clang)",
-      "description": "Uses Ninja Multi-Config with Apple Clang compiler",
-      "generator": "Ninja Multi-Config",
-      "binaryDir": "${sourceDir}/build/_intermediate/macos-ninja-clang",
-      "cacheVariables": {
-        "CMAKE_C_COMPILER": "clang",
-        "CMAKE_CXX_COMPILER": "clang++",
-        "KB_PRESET_NAME": "macos-ninja-clang"
-      }
-    },
-    {
-      "name": "macos-ninja-clang-arm64",
-      "displayName": "macOS Ninja Multi-Config (Clang arm64)",
-      "description": "Uses Ninja Multi-Config with Apple Clang targeting Apple Silicon arm64",
-      "generator": "Ninja Multi-Config",
-      "binaryDir": "${sourceDir}/build/_intermediate/macos-ninja-clang-arm64",
-      "cacheVariables": {
-        "CMAKE_C_COMPILER": "clang",
-        "CMAKE_CXX_COMPILER": "clang++",
-        "CMAKE_OSX_ARCHITECTURES": "arm64",
-        "KB_PRESET_NAME": "macos-ninja-clang-arm64"
-      }
-    }
-  ],
-  "buildPresets": [
-    {
-      "name": "windows-ninja-msvc-debug",
-      "configurePreset": "windows-ninja-msvc",
-      "configuration": "Debug"
-    },
-    {
-      "name": "windows-ninja-msvc-release",
-      "configurePreset": "windows-ninja-msvc",
-      "configuration": "Release"
-    },
-    {
-      "name": "windows-ninja-clang-debug",
-      "configurePreset": "windows-ninja-clang",
-      "configuration": "Debug"
-    },
-    {
-      "name": "windows-ninja-clang-release",
-      "configurePreset": "windows-ninja-clang",
-      "configuration": "Release"
-    },
-    {
-      "name": "linux-ninja-gcc-debug",
-      "configurePreset": "linux-ninja-gcc",
-      "configuration": "Debug"
-    },
-    {
-      "name": "linux-ninja-gcc-release",
-      "configurePreset": "linux-ninja-gcc",
-      "configuration": "Release"
-    },
-    {
-      "name": "linux-ninja-clang-debug",
-      "configurePreset": "linux-ninja-clang",
-      "configuration": "Debug"
-    },
-    {
-      "name": "linux-ninja-clang-release",
-      "configurePreset": "linux-ninja-clang",
-      "configuration": "Release"
-    },
-    {
-      "name": "macos-ninja-clang-debug",
-      "configurePreset": "macos-ninja-clang",
-      "configuration": "Debug"
-    },
-    {
-      "name": "macos-ninja-clang-release",
-      "configurePreset": "macos-ninja-clang",
-      "configuration": "Release"
-    },
-    {
-      "name": "macos-ninja-clang-arm64-debug",
-      "configurePreset": "macos-ninja-clang-arm64",
-      "configuration": "Debug"
-    },
-    {
-      "name": "macos-ninja-clang-arm64-release",
-      "configurePreset": "macos-ninja-clang-arm64",
-      "configuration": "Release"
-    }
-  ]
+    "configurePresets": [
+        {
+            "name": "kb-fetch-thirdparty-defaults",
+            "hidden": true,
+            "cacheVariables": {
+                "KB_CLI11_SOURCE_MODE": "fetch",
+                "KB_FTXUI_SOURCE_MODE": "fetch"
+            }
+        },
+        {
+            "name": "windows-msbuild",
+            "displayName": "Windows MSBuild",
+            "description": "Uses Visual Studio 17 2022 generator",
+            "inherits": "kb-fetch-thirdparty-defaults",
+            "generator": "Visual Studio 17 2022",
+            "cacheVariables": {
+                "CMAKE_CXX_FLAGS": "/experimental:external-",
+                "KB_PRESET_NAME": "windows-msbuild"
+            },
+            "architecture": {
+                "value": "x64",
+                "strategy": "set"
+            },
+            "toolset": {
+                "value": "v143,version=14.44.35207",
+                "strategy": "set"
+            },
+            "binaryDir": "${sourceDir}/out/obj/windows-msbuild"
+        },
+        {
+            "name": "windows-ninja-msvc",
+            "displayName": "Windows Ninja Multi-Config (MSVC)",
+            "description": "Uses Ninja Multi-Config with default MSVC compiler (requires vcvars64.bat)",
+            "inherits": "kb-fetch-thirdparty-defaults",
+            "generator": "Ninja Multi-Config",
+            "binaryDir": "${sourceDir}/out/obj/windows-ninja-msvc",
+            "cacheVariables": {
+                "KB_PRESET_NAME": "windows-ninja-msvc"
+            }
+        },
+        {
+            "name": "windows-ninja-msvc-arm64",
+            "displayName": "Windows Ninja Multi-Config (MSVC ARM64)",
+            "description": "Uses Ninja Multi-Config with MSVC cross-compile toolchain (amd64_arm64)",
+            "inherits": "kb-fetch-thirdparty-defaults",
+            "generator": "Ninja Multi-Config",
+            "binaryDir": "${sourceDir}/out/obj/windows-ninja-msvc-arm64",
+            "cacheVariables": {
+                "KB_PRESET_NAME": "windows-ninja-msvc-arm64"
+            }
+        },
+        {
+            "name": "windows-fastbuild-msvc",
+            "displayName": "Windows FASTBuild (MSVC)",
+            "description": "Uses FASTBuild generator with MSVC compiler (requires vcvars64.bat and CMake 4.2+)",
+            "inherits": "kb-fetch-thirdparty-defaults",
+            "generator": "FASTBuild",
+            "binaryDir": "${sourceDir}/out/obj/windows-fastbuild-msvc",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_CXX_SCAN_FOR_MODULES": "OFF",
+                "KB_ENABLE_MODULES": "OFF",
+                "KB_COMPILER_LAUNCHER": "none",
+                "KB_PRESET_NAME": "windows-fastbuild-msvc"
+            }
+        },
+        {
+            "name": "windows-ninja-clang",
+            "displayName": "Windows Ninja Multi-Config (Clang)",
+            "description": "Uses Ninja Multi-Config with LLVM Clang compiler",
+            "inherits": "kb-fetch-thirdparty-defaults",
+            "generator": "Ninja Multi-Config",
+            "binaryDir": "${sourceDir}/out/obj/windows-ninja-clang",
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "clang-cl",
+                "CMAKE_CXX_COMPILER": "clang-cl",
+                "KB_PRESET_NAME": "windows-ninja-clang"
+            }
+        },
+        {
+            "name": "linux-ninja-gcc",
+            "displayName": "Linux Ninja Multi-Config (GCC)",
+            "description": "Uses Ninja Multi-Config with GCC 15 compiler",
+            "inherits": "kb-fetch-thirdparty-defaults",
+            "generator": "Ninja Multi-Config",
+            "binaryDir": "${sourceDir}/out/obj/linux-ninja-gcc",
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "gcc-15",
+                "CMAKE_CXX_COMPILER": "g++-15",
+                "KB_ENABLE_MODULES": "OFF",
+                "KB_PRESET_NAME": "linux-ninja-gcc"
+            }
+        },
+        {
+            "name": "linux-ninja-clang",
+            "displayName": "Linux Ninja Multi-Config (Clang)",
+            "description": "Uses Ninja Multi-Config with Clang compiler",
+            "inherits": "kb-fetch-thirdparty-defaults",
+            "generator": "Ninja Multi-Config",
+            "binaryDir": "${sourceDir}/out/obj/linux-ninja-clang",
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "clang",
+                "CMAKE_CXX_COMPILER": "clang++",
+                "KB_ENABLE_MODULES": "OFF",
+                "KB_PRESET_NAME": "linux-ninja-clang"
+            }
+        },
+        {
+            "name": "linux-ninja-gcc-tsan",
+            "displayName": "Linux Ninja Multi-Config (GCC + ThreadSanitizer)",
+            "description": "Inherits linux-ninja-gcc with -fsanitize=thread for data-race detection",
+            "inherits": "linux-ninja-gcc",
+            "binaryDir": "${sourceDir}/out/obj/linux-ninja-gcc-tsan",
+            "cacheVariables": {
+                "CMAKE_C_FLAGS": "-fsanitize=thread",
+                "CMAKE_CXX_FLAGS": "-fsanitize=thread",
+                "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=thread",
+                "KB_PRESET_NAME": "linux-ninja-gcc-tsan"
+            }
+        },
+        {
+            "name": "macos-ninja-clang",
+            "displayName": "macOS Ninja Multi-Config (Clang)",
+            "description": "Uses Ninja Multi-Config with Apple Clang compiler",
+            "inherits": "kb-fetch-thirdparty-defaults",
+            "generator": "Ninja Multi-Config",
+            "binaryDir": "${sourceDir}/out/obj/macos-ninja-clang",
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "clang",
+                "CMAKE_CXX_COMPILER": "clang++",
+                "KB_ENABLE_MODULES": "OFF",
+                "KB_PRESET_NAME": "macos-ninja-clang"
+            }
+        },
+        {
+            "name": "macos-ninja-clang-x64",
+            "displayName": "macOS Ninja Multi-Config (Clang x64)",
+            "description": "Uses Ninja Multi-Config with Apple Clang targeting Intel x86_64",
+            "inherits": "kb-fetch-thirdparty-defaults",
+            "generator": "Ninja Multi-Config",
+            "binaryDir": "${sourceDir}/out/obj/macos-ninja-clang-x64",
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "clang",
+                "CMAKE_CXX_COMPILER": "clang++",
+                "CMAKE_OSX_ARCHITECTURES": "x86_64",
+                "KB_ENABLE_MODULES": "OFF",
+                "KB_PRESET_NAME": "macos-ninja-clang-x64"
+            }
+        },
+        {
+            "name": "macos-ninja-clang-arm64",
+            "displayName": "macOS Ninja Multi-Config (Clang arm64)",
+            "description": "Uses Ninja Multi-Config with Apple Clang targeting Apple Silicon arm64",
+            "inherits": "kb-fetch-thirdparty-defaults",
+            "generator": "Ninja Multi-Config",
+            "binaryDir": "${sourceDir}/out/obj/macos-ninja-clang-arm64",
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "clang",
+                "CMAKE_CXX_COMPILER": "clang++",
+                "CMAKE_OSX_ARCHITECTURES": "arm64",
+                "KB_ENABLE_MODULES": "OFF",
+                "KB_PRESET_NAME": "macos-ninja-clang-arm64"
+            }
+        },
+        {
+            "name": "macos-ninja-clang-pgo-collect",
+            "displayName": "macOS Ninja Clang (PGO Collect)",
+            "description": "macOS Clang with PGO instrumentation - run tests to collect profile data",
+            "inherits": "macos-ninja-clang",
+            "binaryDir": "${sourceDir}/out/obj/macos-ninja-clang-pgo-collect",
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "clang",
+                "CMAKE_CXX_COMPILER": "clang++",
+                "KB_ENABLE_MODULES": "OFF",
+                "KB_PGO_MODE": "collect",
+                "KB_BUILD_TYPE": "Debug",
+                "KB_PRESET_NAME": "macos-ninja-clang-pgo-collect"
+            }
+        },
+        {
+            "name": "macos-ninja-clang-pgo-use",
+            "displayName": "macOS Ninja Clang (PGO Use)",
+            "description": "macOS Clang with PGO optimization for CI production builds",
+            "inherits": "macos-ninja-clang",
+            "binaryDir": "${sourceDir}/out/obj/macos-ninja-clang-pgo-use",
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "clang",
+                "CMAKE_CXX_COMPILER": "clang++",
+                "KB_ENABLE_MODULES": "OFF",
+                "KB_PGO_MODE": "use",
+                "KB_BUILD_TYPE": "Release",
+                "KB_PRESET_NAME": "macos-ninja-clang-pgo-use"
+            }
+        },
+        {
+            "name": "macos-ninja-clang-arm64-pgo-collect",
+            "displayName": "macOS Ninja Clang ARM64 (PGO Collect)",
+            "description": "macOS Clang ARM64 with PGO instrumentation - run tests to collect profile data",
+            "inherits": "macos-ninja-clang-arm64",
+            "binaryDir": "${sourceDir}/out/obj/macos-ninja-clang-arm64-pgo-collect",
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "clang",
+                "CMAKE_CXX_COMPILER": "clang++",
+                "CMAKE_OSX_ARCHITECTURES": "arm64",
+                "KB_ENABLE_MODULES": "OFF",
+                "KB_PGO_MODE": "collect",
+                "KB_BUILD_TYPE": "Debug",
+                "KB_PRESET_NAME": "macos-ninja-clang-arm64-pgo-collect"
+            }
+        },
+        {
+            "name": "macos-ninja-clang-arm64-pgo-use",
+            "displayName": "macOS Ninja Clang ARM64 (PGO Use)",
+            "description": "macOS Clang ARM64 with PGO optimization for CI production builds",
+            "inherits": "macos-ninja-clang-arm64",
+            "binaryDir": "${sourceDir}/out/obj/macos-ninja-clang-arm64-pgo-use",
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "clang",
+                "CMAKE_CXX_COMPILER": "clang++",
+                "CMAKE_OSX_ARCHITECTURES": "arm64",
+                "KB_ENABLE_MODULES": "OFF",
+                "KB_PGO_MODE": "use",
+                "KB_BUILD_TYPE": "Release",
+                "KB_PRESET_NAME": "macos-ninja-clang-arm64-pgo-use"
+            }
+        },
+        {
+            "name": "macos-ninja-clang-coverage",
+            "displayName": "macOS Ninja Clang (Coverage)",
+            "description": "macOS Clang with coverage instrumentation for collecting test coverage data (unified with PGO collect)",
+            "inherits": "macos-ninja-clang",
+            "binaryDir": "${sourceDir}/out/obj/macos-ninja-clang-coverage",
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "clang",
+                "CMAKE_CXX_COMPILER": "clang++",
+                "KB_ENABLE_MODULES": "OFF",
+                "KB_ENABLE_COVERAGE": "ON",
+                "KB_BUILD_TYPE": "Debug",
+                "KB_PRESET_NAME": "macos-ninja-clang-coverage"
+            }
+        },
+        {
+            "name": "macos-ninja-clang-arm64-coverage",
+            "displayName": "macOS Ninja Clang ARM64 (Coverage)",
+            "description": "macOS Clang ARM64 with coverage instrumentation for collecting test coverage data (unified with PGO collect)",
+            "inherits": "macos-ninja-clang-arm64",
+            "binaryDir": "${sourceDir}/out/obj/macos-ninja-clang-arm64-coverage",
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "clang",
+                "CMAKE_CXX_COMPILER": "clang++",
+                "CMAKE_OSX_ARCHITECTURES": "arm64",
+                "KB_ENABLE_MODULES": "OFF",
+                "KB_ENABLE_COVERAGE": "ON",
+                "KB_BUILD_TYPE": "Debug",
+                "KB_PRESET_NAME": "macos-ninja-clang-arm64-coverage"
+            }
+        },
+        {
+            "name": "linux-ninja-gcc-coverage",
+            "displayName": "Linux Ninja GCC (Coverage)",
+            "description": "Linux GCC with coverage instrumentation for collecting test coverage data",
+            "inherits": "linux-ninja-gcc",
+            "binaryDir": "${sourceDir}/out/obj/linux-ninja-gcc-coverage",
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "gcc-15",
+                "CMAKE_CXX_COMPILER": "g++-15",
+                "KB_ENABLE_MODULES": "OFF",
+                "KB_ENABLE_COVERAGE": "ON",
+                "KB_BUILD_TYPE": "Debug",
+                "KB_PRESET_NAME": "linux-ninja-gcc-coverage"
+            }
+        },
+        {
+            "name": "linux-ninja-clang-coverage",
+            "displayName": "Linux Ninja Clang (Coverage)",
+            "description": "Linux Clang with coverage instrumentation for collecting test coverage data",
+            "inherits": "linux-ninja-clang",
+            "binaryDir": "${sourceDir}/out/obj/linux-ninja-clang-coverage",
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "clang",
+                "CMAKE_CXX_COMPILER": "clang++",
+                "KB_ENABLE_MODULES": "OFF",
+                "KB_ENABLE_COVERAGE": "ON",
+                "KB_BUILD_TYPE": "Debug",
+                "KB_PRESET_NAME": "linux-ninja-clang-coverage"
+            }
+        },
+        {
+            "name": "windows-ninja-msvc-coverage",
+            "displayName": "Windows Ninja MSVC (Coverage)",
+            "description": "Windows MSVC with /PROFILE for coverage instrumentation",
+            "inherits": "windows-ninja-msvc",
+            "binaryDir": "${sourceDir}/out/obj/windows-ninja-msvc-coverage",
+            "cacheVariables": {
+                "KB_ENABLE_COVERAGE": "ON",
+                "KB_BUILD_TYPE": "Debug",
+                "KB_PRESET_NAME": "windows-ninja-msvc-coverage"
+            }
+        },
+        {
+            "name": "linux-ninja-gcc-pgo-collect",
+            "displayName": "Linux Ninja GCC (PGO Collect)",
+            "description": "Linux GCC with PGO instrumentation - run tests to collect profile data",
+            "inherits": "linux-ninja-gcc",
+            "binaryDir": "${sourceDir}/out/obj/linux-ninja-gcc-pgo-collect",
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "gcc-15",
+                "CMAKE_CXX_COMPILER": "g++-15",
+                "KB_ENABLE_MODULES": "OFF",
+                "KB_PGO_MODE": "collect",
+                "KB_BUILD_TYPE": "Debug",
+                "KB_PRESET_NAME": "linux-ninja-gcc-pgo-collect"
+            }
+        },
+        {
+            "name": "linux-ninja-gcc-pgo-use",
+            "displayName": "Linux Ninja GCC (PGO Use + LTO)",
+            "description": "Linux GCC with PGO optimization + LTO for CI production builds",
+            "inherits": "linux-ninja-gcc",
+            "binaryDir": "${sourceDir}/out/obj/linux-ninja-gcc-pgo-use",
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "gcc-15",
+                "CMAKE_CXX_COMPILER": "g++-15",
+                "KB_ENABLE_MODULES": "OFF",
+                "KB_PGO_MODE": "use",
+                "KB_PGO_LTCG": "auto",
+                "KB_BUILD_TYPE": "Release",
+                "KB_PRESET_NAME": "linux-ninja-gcc-pgo-use"
+            }
+        },
+        {
+            "name": "linux-ninja-clang-pgo-collect",
+            "displayName": "Linux Ninja Clang (PGO Collect)",
+            "description": "Linux Clang with PGO instrumentation - run tests to collect profile data",
+            "inherits": "linux-ninja-clang",
+            "binaryDir": "${sourceDir}/out/obj/linux-ninja-clang-pgo-collect",
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "clang",
+                "CMAKE_CXX_COMPILER": "clang++",
+                "KB_ENABLE_MODULES": "OFF",
+                "KB_PGO_MODE": "collect",
+                "KB_BUILD_TYPE": "Debug",
+                "KB_PRESET_NAME": "linux-ninja-clang-pgo-collect"
+            }
+        },
+        {
+            "name": "linux-ninja-clang-pgo-use",
+            "displayName": "Linux Ninja Clang (PGO Use + LTO)",
+            "description": "Linux Clang with PGO optimization + thin LTO for CI production builds",
+            "inherits": "linux-ninja-clang",
+            "binaryDir": "${sourceDir}/out/obj/linux-ninja-clang-pgo-use",
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "clang",
+                "CMAKE_CXX_COMPILER": "clang++",
+                "KB_ENABLE_MODULES": "OFF",
+                "KB_PGO_MODE": "use",
+                "KB_PGO_LTCG": "auto",
+                "KB_BUILD_TYPE": "Release",
+                "KB_PRESET_NAME": "linux-ninja-clang-pgo-use"
+            }
+        },
+        {
+            "name": "windows-ninja-msvc-pgo-collect",
+            "displayName": "Windows Ninja MSVC (PGO Collect)",
+            "description": "Windows MSVC with /PROFILE - run tests to collect profile data",
+            "inherits": "windows-ninja-msvc",
+            "binaryDir": "${sourceDir}/out/obj/windows-ninja-msvc-pgo-collect",
+            "cacheVariables": {
+                "KB_PGO_MODE": "collect",
+                "KB_BUILD_TYPE": "Debug",
+                "KB_PRESET_NAME": "windows-ninja-msvc-pgo-collect"
+            }
+        },
+        {
+            "name": "windows-ninja-msvc-pgo-use",
+            "displayName": "Windows Ninja MSVC (PGO Use + LTCG)",
+            "description": "Windows MSVC with /PROFILE:Optimize + /LTCG for CI production builds",
+            "inherits": "windows-ninja-msvc",
+            "binaryDir": "${sourceDir}/out/obj/windows-ninja-msvc-pgo-use",
+            "cacheVariables": {
+                "KB_PGO_MODE": "use",
+                "KB_PGO_LTCG": "auto",
+                "KB_BUILD_TYPE": "Release",
+                "KB_PRESET_NAME": "windows-ninja-msvc-pgo-use"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "windows-msbuild-debug",
+            "configurePreset": "windows-msbuild",
+            "configuration": "Debug"
+        },
+        {
+            "name": "windows-msbuild-release",
+            "configurePreset": "windows-msbuild",
+            "configuration": "Release"
+        },
+        {
+            "name": "windows-ninja-msvc-debug",
+            "configurePreset": "windows-ninja-msvc",
+            "configuration": "Debug"
+        },
+        {
+            "name": "windows-ninja-msvc-release",
+            "configurePreset": "windows-ninja-msvc",
+            "configuration": "Release"
+        },
+        {
+            "name": "windows-ninja-msvc-arm64-debug",
+            "configurePreset": "windows-ninja-msvc-arm64",
+            "configuration": "Debug"
+        },
+        {
+            "name": "windows-ninja-msvc-arm64-release",
+            "configurePreset": "windows-ninja-msvc-arm64",
+            "configuration": "Release"
+        },
+        {
+            "name": "windows-fastbuild-msvc-release",
+            "configurePreset": "windows-fastbuild-msvc"
+        },
+        {
+            "name": "windows-ninja-clang-debug",
+            "configurePreset": "windows-ninja-clang",
+            "configuration": "Debug"
+        },
+        {
+            "name": "windows-ninja-clang-release",
+            "configurePreset": "windows-ninja-clang",
+            "configuration": "Release"
+        },
+        {
+            "name": "linux-ninja-gcc-debug",
+            "configurePreset": "linux-ninja-gcc",
+            "configuration": "Debug"
+        },
+        {
+            "name": "linux-ninja-gcc-release",
+            "configurePreset": "linux-ninja-gcc",
+            "configuration": "Release"
+        },
+        {
+            "name": "linux-ninja-gcc-tsan-debug",
+            "configurePreset": "linux-ninja-gcc-tsan",
+            "configuration": "Debug"
+        },
+        {
+            "name": "linux-ninja-clang-debug",
+            "configurePreset": "linux-ninja-clang",
+            "configuration": "Debug"
+        },
+        {
+            "name": "linux-ninja-clang-release",
+            "configurePreset": "linux-ninja-clang",
+            "configuration": "Release"
+        },
+        {
+            "name": "macos-ninja-clang-debug",
+            "configurePreset": "macos-ninja-clang",
+            "configuration": "Debug"
+        },
+        {
+            "name": "macos-ninja-clang-release",
+            "configurePreset": "macos-ninja-clang",
+            "configuration": "Release"
+        },
+        {
+            "name": "macos-ninja-clang-x64-debug",
+            "configurePreset": "macos-ninja-clang-x64",
+            "configuration": "Debug"
+        },
+        {
+            "name": "macos-ninja-clang-x64-release",
+            "configurePreset": "macos-ninja-clang-x64",
+            "configuration": "Release"
+        },
+        {
+            "name": "macos-ninja-clang-arm64-debug",
+            "configurePreset": "macos-ninja-clang-arm64",
+            "configuration": "Debug"
+        },
+        {
+            "name": "macos-ninja-clang-arm64-release",
+            "configurePreset": "macos-ninja-clang-arm64",
+            "configuration": "Release"
+        },
+        {
+            "name": "macos-ninja-clang-pgo-collect-debug",
+            "configurePreset": "macos-ninja-clang-pgo-collect",
+            "configuration": "Debug"
+        },
+        {
+            "name": "macos-ninja-clang-pgo-use-release",
+            "configurePreset": "macos-ninja-clang-pgo-use",
+            "configuration": "Release"
+        },
+        {
+            "name": "macos-ninja-clang-arm64-pgo-collect-debug",
+            "configurePreset": "macos-ninja-clang-arm64-pgo-collect",
+            "configuration": "Debug"
+        },
+        {
+            "name": "macos-ninja-clang-arm64-pgo-use-release",
+            "configurePreset": "macos-ninja-clang-arm64-pgo-use",
+            "configuration": "Release"
+        },
+        {
+            "name": "macos-ninja-clang-coverage-debug",
+            "configurePreset": "macos-ninja-clang-coverage",
+            "configuration": "Debug"
+        },
+        {
+            "name": "macos-ninja-clang-arm64-coverage-debug",
+            "configurePreset": "macos-ninja-clang-arm64-coverage",
+            "configuration": "Debug"
+        },
+        {
+            "name": "linux-ninja-gcc-coverage-debug",
+            "configurePreset": "linux-ninja-gcc-coverage",
+            "configuration": "Debug"
+        },
+        {
+            "name": "linux-ninja-clang-coverage-debug",
+            "configurePreset": "linux-ninja-clang-coverage",
+            "configuration": "Debug"
+        },
+        {
+            "name": "windows-ninja-msvc-coverage-debug",
+            "configurePreset": "windows-ninja-msvc-coverage",
+            "configuration": "Debug"
+        },
+        {
+            "name": "linux-ninja-gcc-pgo-collect-debug",
+            "configurePreset": "linux-ninja-gcc-pgo-collect",
+            "configuration": "Debug"
+        },
+        {
+            "name": "linux-ninja-gcc-pgo-use-release",
+            "configurePreset": "linux-ninja-gcc-pgo-use",
+            "configuration": "Release"
+        },
+        {
+            "name": "linux-ninja-clang-pgo-collect-debug",
+            "configurePreset": "linux-ninja-clang-pgo-collect",
+            "configuration": "Debug"
+        },
+        {
+            "name": "linux-ninja-clang-pgo-use-release",
+            "configurePreset": "linux-ninja-clang-pgo-use",
+            "configuration": "Release"
+        },
+        {
+            "name": "windows-ninja-msvc-pgo-collect-debug",
+            "configurePreset": "windows-ninja-msvc-pgo-collect",
+            "configuration": "Debug"
+        },
+        {
+            "name": "windows-ninja-msvc-pgo-use-release",
+            "configurePreset": "windows-ninja-msvc-pgo-use",
+            "configuration": "Release"
+        }
+    ]
 }

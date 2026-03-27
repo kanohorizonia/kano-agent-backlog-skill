@@ -1,89 +1,150 @@
 #pragma once
+#include <kano_build_info.h>
 #include <string>
 #include <string_view>
 
 namespace kano::backlog {
 
-constexpr std::string_view GetBuildVersion() {
+namespace detail {
+
+struct InfraBuildInfoSnapshot {
+    std::string version;
+    std::string vcs;
+    std::string branch;
+    std::string revision;
+    std::string revision_hash_short;
+    std::string revision_hash;
+    std::string dirty;
+    std::string host;
+    std::string platform;
+    std::string toolchain;
+};
+
+inline std::string CopyOrFallback(const char* value, std::string_view fallback) {
+    if (value != nullptr && value[0] != '\0') {
+        return value;
+    }
+    return std::string(fallback);
+}
+
+inline const InfraBuildInfoSnapshot& GetInfraBuildInfoSnapshot() {
+    static const InfraBuildInfoSnapshot snapshot = [] {
+        KanoBuildInfo info = kano_build_info_discover();
+
+        InfraBuildInfoSnapshot out{
+            CopyOrFallback(kano_build_info_get_version(info),
 #ifdef KB_BUILD_VERSION
-    return KB_BUILD_VERSION;
+                KB_BUILD_VERSION
 #elif defined(KB_VERSION)
-    return KB_VERSION;
+                KB_VERSION
 #else
-    return "unknown";
+                "unknown"
 #endif
-}
-
-constexpr std::string_view GetBuildVCS() {
+            ),
+            CopyOrFallback(kano_build_info_get_vcs_status(info),
 #ifdef KB_BUILD_VCS
-    return KB_BUILD_VCS;
+                KB_BUILD_VCS
 #else
-    return "unknown";
+                "unknown"
 #endif
-}
-
-constexpr std::string_view GetBuildBranch() {
+            ),
+            CopyOrFallback(kano_build_info_get_vcs_branch(info),
 #ifdef KB_BUILD_BRANCH
-    return KB_BUILD_BRANCH;
+                KB_BUILD_BRANCH
 #else
-    return "unknown";
+                "unknown"
 #endif
-}
-
-constexpr std::string_view GetBuildRevision() {
+            ),
+            CopyOrFallback(kano_build_info_get_vcs_revision(info),
 #ifdef KB_BUILD_REVISION
-    return KB_BUILD_REVISION;
+                KB_BUILD_REVISION
 #else
-    return "unknown";
+                "unknown"
 #endif
-}
-
-constexpr std::string_view GetBuildRevisionHashShort() {
+            ),
 #ifdef KB_BUILD_REVISION_HASH_SHORT
-    return KB_BUILD_REVISION_HASH_SHORT;
+            std::string(KB_BUILD_REVISION_HASH_SHORT),
 #else
-    return "unknown";
+            std::string("unknown"),
 #endif
-}
-
-constexpr std::string_view GetBuildRevisionHash() {
 #ifdef KB_BUILD_REVISION_HASH
-    return KB_BUILD_REVISION_HASH;
+            std::string(KB_BUILD_REVISION_HASH),
 #else
-    return "unknown";
+            std::string("unknown"),
 #endif
-}
-
-constexpr std::string_view GetBuildDirty() {
+            CopyOrFallback(kano_build_info_get_vcs_status(info),
 #ifdef KB_BUILD_DIRTY
-    return KB_BUILD_DIRTY;
+                KB_BUILD_DIRTY
 #else
-    return "unknown";
+                "unknown"
 #endif
-}
-
-constexpr std::string_view GetBuildHostName() {
+            ),
 #ifdef KB_BUILD_HOST_NAME
-    return KB_BUILD_HOST_NAME;
+            std::string(KB_BUILD_HOST_NAME),
 #else
-    return "unknown";
+            std::string("unknown"),
 #endif
-}
-
-constexpr std::string_view GetBuildPlatform() {
 #ifdef KB_BUILD_PLATFORM
-    return KB_BUILD_PLATFORM;
+            std::string(KB_BUILD_PLATFORM),
 #else
-    return "unknown";
+            std::string("unknown"),
 #endif
+            CopyOrFallback(kano_build_info_get_compiler(info),
+#ifdef KB_BUILD_TOOLCHAIN
+                KB_BUILD_TOOLCHAIN
+#else
+                "unknown"
+#endif
+            )
+        };
+
+        kano_build_info_free(info);
+        return out;
+    }();
+
+    return snapshot;
 }
 
-constexpr std::string_view GetBuildToolchain() {
-#ifdef KB_BUILD_TOOLCHAIN
-    return KB_BUILD_TOOLCHAIN;
-#else
-    return "unknown";
-#endif
+} // namespace detail
+
+inline std::string_view GetBuildVersion() {
+    return detail::GetInfraBuildInfoSnapshot().version;
+}
+
+inline std::string_view GetBuildVCS() {
+    return detail::GetInfraBuildInfoSnapshot().vcs;
+}
+
+inline std::string_view GetBuildBranch() {
+    return detail::GetInfraBuildInfoSnapshot().branch;
+}
+
+inline std::string_view GetBuildRevision() {
+    return detail::GetInfraBuildInfoSnapshot().revision;
+}
+
+inline std::string_view GetBuildRevisionHashShort() {
+    return detail::GetInfraBuildInfoSnapshot().revision_hash_short;
+}
+
+inline std::string_view GetBuildRevisionHash() {
+    return detail::GetInfraBuildInfoSnapshot().revision_hash;
+}
+
+inline std::string_view GetBuildDirty() {
+    return detail::GetInfraBuildInfoSnapshot().dirty;
+}
+
+inline std::string_view GetBuildHostName() {
+    return detail::GetInfraBuildInfoSnapshot().host;
+}
+
+inline std::string_view GetBuildPlatform() {
+    return detail::GetInfraBuildInfoSnapshot().platform;
+}
+
+inline std::string_view GetBuildToolchain() {
+    return detail::GetInfraBuildInfoSnapshot().toolchain;
 }
 
 inline std::string GetBuildInfo() {
@@ -112,7 +173,7 @@ inline std::string GetBuildInfo() {
     return out;
 }
 
-constexpr std::string_view GetVersion() {
+inline std::string_view GetVersion() {
     return GetBuildVersion();
 }
 

@@ -2,6 +2,7 @@
 #include "kano/backlog_core/models/errors.hpp"
 #include <stdexcept>
 #include <iostream>
+#include <sstream>
 
 namespace kano::backlog_ops {
 

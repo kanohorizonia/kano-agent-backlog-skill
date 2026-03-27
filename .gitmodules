@@ -1,0 +1,4 @@
+[submodule "src/cpp/shared/infra"]
+	path = src/cpp/shared/infra
+	url = https://github.com/kanohorizonia/kano-cpp-infra.git
+	branch = main

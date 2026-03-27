@@ -58,5 +58,4 @@ build-dev = "bash src/cpp/build/script/linux/build_linux_ninja_clang_debug.sh"
 # Release build (optimized)
 build-release = "bash src/cpp/build/script/linux/build_linux_ninja_gcc_release.sh"
 
-# Tests
-quick-test = "bash src/cpp/build/script/linux/run_tests.sh linux-ninja-clang"
+# Tests: linux-64 test runner TBD (no src/cpp/build/script/linux/run_tests.sh)

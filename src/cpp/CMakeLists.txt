@@ -337,6 +337,37 @@ set(_jsoncpp_include_dir ${jsoncpp_SOURCE_DIR}/include)
 enable_testing()
 
 # =============================================================================
+# Shared infra submodule
+# =============================================================================
+set(KB_INFRA_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/code/shared/infra")
+if(EXISTS "${KB_INFRA_SOURCE_DIR}/CMakeLists.txt")
+    add_subdirectory("${KB_INFRA_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/shared/infra")
+    if(TARGET kano_infra_build_info)
+        if(CMAKE_CXX_COMPILER_ID STREQUAL "")
+            set(_kb_infra_compiler "unknown")
+        else()
+            set(_kb_infra_compiler "${CMAKE_CXX_COMPILER_ID}")
+        endif()
+
+        if(CMAKE_BUILD_TYPE STREQUAL "")
+            set(_kb_infra_build_type "unknown")
+        else()
+            set(_kb_infra_build_type "${CMAKE_BUILD_TYPE}")
+        endif()
+
+        target_compile_definitions(kano_infra_build_info PRIVATE
+            KANO_INFRA_BUILD_VERSION="${KB_VERSION_STR}"
+            KANO_INFRA_BUILD_REVISION="unknown"
+            KANO_INFRA_BUILD_BRANCH="unknown"
+            KANO_INFRA_BUILD_TYPE="${_kb_infra_build_type}"
+            KANO_INFRA_BUILD_COMPILER="${_kb_infra_compiler}"
+            KANO_INFRA_BUILD_TIMESTAMP="unknown"
+            KANO_INFRA_BUILD_VCS_STATUS="unknown"
+        )
+    endif()
+endif()
+
+# =============================================================================
 # Add subsystems (order matters: core before ops before cli)
 # =============================================================================
 add_subdirectory(code/systems/kano_backlog_core)

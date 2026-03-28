@@ -381,7 +381,11 @@ endif()
 # =============================================================================
 add_subdirectory(code/systems/kano_backlog_core)
 add_subdirectory(code/systems/kano_backlog_ops)
-add_subdirectory(code/systems/kano_backlog_webview_core)
+
+option(KB_BUILD_WEBVIEW "Build kano-backlog webview targets (requires drogon)" OFF)
+if(KB_BUILD_WEBVIEW)
+    add_subdirectory(code/systems/kano_backlog_webview_core)
+endif()
 
 # =============================================================================
 # CLI executable
@@ -391,7 +395,7 @@ add_subdirectory(code/apps/kano_backlog_cli)
 # =============================================================================
 # Test targets
 # =============================================================================
-option(KB_BUILD_TESTS "Build kano-backlog C++ test targets" ON)
+option(KB_BUILD_TESTS "Build kano-backlog C++ test targets" OFF)
 if(KB_BUILD_TESTS)
     add_subdirectory(code/tests)
 endif()

@@ -8,7 +8,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BACKLOG_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+BACKLOG_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 
 : "${KOG_BUILD_ROOT:=${BACKLOG_ROOT}/src/cpp/out}"
 : "${KOG_PRESET_NAME:=unknown-preset}"

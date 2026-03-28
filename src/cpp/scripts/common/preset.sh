@@ -8,7 +8,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BACKLOG_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+BACKLOG_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 
 resolve_preset_file() {
   local preset_name="${1:-}"

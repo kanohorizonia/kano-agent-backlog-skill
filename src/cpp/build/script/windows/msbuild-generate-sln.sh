@@ -6,8 +6,6 @@ export KOB_CPP_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 
 source "$SCRIPT_DIR/../common/windows_preset_build.sh"
 
-kabsd_run_windows_preset "windows-ninja-msvc" "windows-ninja-msvc-release" "x64"
-
-echo
-echo "Primary local command surface: ./kob"
-echo "Preset build dir: src/cpp/out/obj/windows-ninja-msvc"
+echo "Configuring Visual Studio solution with automatic vcvarsall bootstrap..."
+kabsd_configure_windows_preset "windows-msbuild" "x64"
+echo "Generated solution under: $KOB_CPP_ROOT/out/obj/windows-msbuild"

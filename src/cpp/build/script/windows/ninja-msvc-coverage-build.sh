@@ -10,42 +10,12 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export KOB_CPP_ROOT="${KOB_CPP_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
-
-KOB_WINDOWS_PS_HELPER="$SCRIPT_DIR/../common/windows_preset_helper.ps1"
-
-kob_powershell_bin() {
-  local candidate
-  for candidate in powershell powershell.exe pwsh pwsh.exe; do
-    if command -v "$candidate" >/dev/null 2>&1; then
-      printf '%s\n' "$candidate"
-      return 0
-    fi
-  done
-  return 1
-}
+source "$SCRIPT_DIR/../common/windows_preset_build.sh"
 
 echo "[coverage-build] KOB_CPP_ROOT: $KOB_CPP_ROOT"
 echo "[coverage-build] Config: Debug (coverage requires debug symbols)"
 
-COVERAGE_BUILD_DIR="${KOB_COVERAGE_BUILD_DIR:-build/_intermediate/windows-ninja-msvc-coverage}"
-
-PowerShellBin="$(kob_powershell_bin)" || {
-  echo "PowerShell is required." >&2
-  exit 1
-}
-
-# Source build metadata for version info
-if [[ -f "$SCRIPT_DIR/../common/build_metadata.sh" ]]; then
-  source "$SCRIPT_DIR/../common/build_metadata.sh"
-fi
-
 echo "[coverage-build] Running coverage build..."
-"$PowerShellBin" -NoProfile -ExecutionPolicy Bypass -File "$KOB_WINDOWS_PS_HELPER" \
-  -Action run-coverage-build \
-  -Root "$KOB_CPP_ROOT" \
-  -CoverageBuildDir "$COVERAGE_BUILD_DIR" \
-  -Config Debug \
-  -Generator "Ninja Multi-Config" \
-  -Arch x64
+kabsd_run_windows_preset "windows-ninja-msvc-coverage" "windows-ninja-msvc-coverage-debug" "x64"
 
-echo "[coverage-build] Done. Binary: $KOB_CPP_ROOT/$COVERAGE_BUILD_DIR/out/bin/debug/"
+echo "[coverage-build] Done. Build dir: $KOB_CPP_ROOT/out/obj/windows-ninja-msvc-coverage"

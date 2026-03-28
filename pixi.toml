@@ -59,3 +59,19 @@ build-dev = "bash src/cpp/build/script/linux/build_linux_ninja_clang_debug.sh"
 build-release = "bash src/cpp/build/script/linux/build_linux_ninja_gcc_release.sh"
 
 # Tests: linux-64 test runner TBD (no src/cpp/build/script/linux/run_tests.sh)
+
+# =============================================================================
+# macOS Intel-specific (osx-64)
+# =============================================================================
+[target.osx-64.tasks]
+build = "bash src/cpp/build/script/macos/build_macos_ninja_clang_x64_debug.sh"
+build-dev = "bash src/cpp/build/script/macos/build_macos_ninja_clang_x64_debug.sh"
+build-release = "bash src/cpp/build/script/macos/build_macos_ninja_clang_x64_release.sh"
+
+# =============================================================================
+# macOS Apple Silicon-specific (osx-arm64)
+# =============================================================================
+[target.osx-arm64.tasks]
+build = "bash src/cpp/build/script/macos/build_macos_ninja_clang_arm64_debug.sh"
+build-dev = "bash src/cpp/build/script/macos/build_macos_ninja_clang_arm64_debug.sh"
+build-release = "bash src/cpp/build/script/macos/build_macos_ninja_clang_arm64_release.sh"

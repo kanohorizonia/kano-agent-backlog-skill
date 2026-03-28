@@ -28,21 +28,21 @@ env-summary = "git --version && cmake --version && ninja --version"
 # =============================================================================
 [target.win-64.tasks]
 # Development build (Debug preset - fast iteration)
-build = "KOB_CPP_ROOT=src/cpp bash src/cpp/shared/infra/scripts/backlog/windows/ninja-msvc-debug.sh"
-build-dev = "KOB_CPP_ROOT=src/cpp bash src/cpp/shared/infra/scripts/backlog/windows/ninja-msvc-debug.sh"
-build-dev-win = "KOB_CPP_ROOT=src/cpp bash src/cpp/shared/infra/scripts/backlog/windows/ninja-msvc-debug.sh"
+build = "KOB_CPP_ROOT=src/cpp KABSD_BUILD_PREFIX=KOB KABSD_CMAKE_VAR_PREFIX=KB bash src/cpp/shared/infra/scripts/windows/ninja-msvc-debug.sh"
+build-dev = "KOB_CPP_ROOT=src/cpp KABSD_BUILD_PREFIX=KOB KABSD_CMAKE_VAR_PREFIX=KB bash src/cpp/shared/infra/scripts/windows/ninja-msvc-debug.sh"
+build-dev-win = "KOB_CPP_ROOT=src/cpp KABSD_BUILD_PREFIX=KOB KABSD_CMAKE_VAR_PREFIX=KB bash src/cpp/shared/infra/scripts/windows/ninja-msvc-debug.sh"
 
 # Release build (optimized)
-build-release = "KOB_CPP_ROOT=src/cpp bash src/cpp/shared/infra/scripts/backlog/windows/ninja-msvc-release.sh"
-build-release-win = "KOB_CPP_ROOT=src/cpp bash src/cpp/shared/infra/scripts/backlog/windows/ninja-msvc-release.sh"
+build-release = "KOB_CPP_ROOT=src/cpp KABSD_BUILD_PREFIX=KOB KABSD_CMAKE_VAR_PREFIX=KB bash src/cpp/shared/infra/scripts/windows/ninja-msvc-release.sh"
+build-release-win = "KOB_CPP_ROOT=src/cpp KABSD_BUILD_PREFIX=KOB KABSD_CMAKE_VAR_PREFIX=KB bash src/cpp/shared/infra/scripts/windows/ninja-msvc-release.sh"
 
 # Coverage workflow (CI-ready) - all steps use infra scripts
-build-coverage = "KOB_CPP_ROOT=src/cpp bash src/cpp/shared/infra/scripts/backlog/windows/ninja-msvc-coverage-build.sh"
+build-coverage = "KOB_CPP_ROOT=src/cpp KABSD_BUILD_PREFIX=KOB KABSD_CMAKE_VAR_PREFIX=KB bash src/cpp/shared/infra/scripts/windows/ninja-msvc-coverage-build.sh"
 test-coverage = "bash src/cpp/build/script/windows/ninja-msvc-coverage-run.sh"
 report-coverage = "bash src/cpp/build/script/windows/ninja-msvc-coverage-report.sh"
 
 # Full coverage workflow: build + test + report
-coverage-all = "KOB_CPP_ROOT=src/cpp bash src/cpp/shared/infra/scripts/backlog/windows/ninja-msvc-coverage-build.sh && bash src/cpp/build/script/windows/ninja-msvc-coverage-run.sh && bash src/cpp/build/script/windows/ninja-msvc-coverage-report.sh"
+coverage-all = "KOB_CPP_ROOT=src/cpp KABSD_BUILD_PREFIX=KOB KABSD_CMAKE_VAR_PREFIX=KB bash src/cpp/shared/infra/scripts/windows/ninja-msvc-coverage-build.sh && bash src/cpp/build/script/windows/ninja-msvc-coverage-run.sh && bash src/cpp/build/script/windows/ninja-msvc-coverage-report.sh"
 
 # Tests
 quick-test = "bash src/cpp/build/script/windows/run_tests.sh windows-ninja-msvc"

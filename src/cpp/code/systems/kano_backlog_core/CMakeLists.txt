@@ -52,7 +52,11 @@ target_include_directories(kano_backlog_core
       refs/private
 )
 
-target_link_libraries(kano_backlog_core PUBLIC tomlplusplus::tomlplusplus yaml-cpp)
+target_link_libraries(kano_backlog_core PUBLIC
+    KanoInfra::build_info
+    tomlplusplus::tomlplusplus
+    yaml-cpp
+)
 
 if(MSVC AND TARGET CLI11::CLI11)
     get_target_property(_cli11_inc CLI11::CLI11 INTERFACE_INCLUDE_DIRECTORIES)

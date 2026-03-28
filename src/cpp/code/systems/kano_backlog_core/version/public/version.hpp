@@ -1,5 +1,7 @@
 #pragma once
-#include <kano_build_info.h>
+
+#include <kano_build_info.hpp>
+
 #include <string>
 #include <string_view>
 
@@ -7,99 +9,44 @@ namespace kano::backlog {
 
 namespace detail {
 
-struct InfraBuildInfoSnapshot {
-    std::string version;
-    std::string vcs;
-    std::string branch;
-    std::string revision;
-    std::string revision_hash_short;
-    std::string revision_hash;
-    std::string dirty;
-    std::string host;
-    std::string platform;
-    std::string toolchain;
-};
-
-inline std::string CopyOrFallback(const char* value, std::string_view fallback) {
-    if (value != nullptr && value[0] != '\0') {
-        return value;
-    }
-    return std::string(fallback);
-}
+using InfraBuildInfoSnapshot = kano::infra::build_info::Snapshot;
 
 inline const InfraBuildInfoSnapshot& GetInfraBuildInfoSnapshot() {
     static const InfraBuildInfoSnapshot snapshot = [] {
-        KanoBuildInfo info = kano_build_info_discover();
-
-        InfraBuildInfoSnapshot out{
-            CopyOrFallback(kano_build_info_get_version(info),
+        return kano::infra::build_info::discover_snapshot({
 #ifdef KB_BUILD_VERSION
-                KB_BUILD_VERSION
+            .version = KB_BUILD_VERSION,
 #elif defined(KB_VERSION)
-                KB_VERSION
-#else
-                "unknown"
+            .version = KB_VERSION,
 #endif
-            ),
-            CopyOrFallback(kano_build_info_get_vcs_status(info),
 #ifdef KB_BUILD_VCS
-                KB_BUILD_VCS
-#else
-                "unknown"
+            .vcs = KB_BUILD_VCS,
 #endif
-            ),
-            CopyOrFallback(kano_build_info_get_vcs_branch(info),
 #ifdef KB_BUILD_BRANCH
-                KB_BUILD_BRANCH
-#else
-                "unknown"
+            .branch = KB_BUILD_BRANCH,
 #endif
-            ),
-            CopyOrFallback(kano_build_info_get_vcs_revision(info),
 #ifdef KB_BUILD_REVISION
-                KB_BUILD_REVISION
-#else
-                "unknown"
+            .revision = KB_BUILD_REVISION,
 #endif
-            ),
 #ifdef KB_BUILD_REVISION_HASH_SHORT
-            std::string(KB_BUILD_REVISION_HASH_SHORT),
-#else
-            std::string("unknown"),
+            .revisionHashShort = KB_BUILD_REVISION_HASH_SHORT,
 #endif
 #ifdef KB_BUILD_REVISION_HASH
-            std::string(KB_BUILD_REVISION_HASH),
-#else
-            std::string("unknown"),
+            .revisionHash = KB_BUILD_REVISION_HASH,
 #endif
-            CopyOrFallback(kano_build_info_get_vcs_status(info),
 #ifdef KB_BUILD_DIRTY
-                KB_BUILD_DIRTY
-#else
-                "unknown"
+            .dirty = KB_BUILD_DIRTY,
 #endif
-            ),
 #ifdef KB_BUILD_HOST_NAME
-            std::string(KB_BUILD_HOST_NAME),
-#else
-            std::string("unknown"),
+            .host = KB_BUILD_HOST_NAME,
 #endif
 #ifdef KB_BUILD_PLATFORM
-            std::string(KB_BUILD_PLATFORM),
-#else
-            std::string("unknown"),
+            .platform = KB_BUILD_PLATFORM,
 #endif
-            CopyOrFallback(kano_build_info_get_compiler(info),
 #ifdef KB_BUILD_TOOLCHAIN
-                KB_BUILD_TOOLCHAIN
-#else
-                "unknown"
+            .toolchain = KB_BUILD_TOOLCHAIN,
 #endif
-            )
-        };
-
-        kano_build_info_free(info);
-        return out;
+        });
     }();
 
     return snapshot;
@@ -124,11 +71,11 @@ inline std::string_view GetBuildRevision() {
 }
 
 inline std::string_view GetBuildRevisionHashShort() {
-    return detail::GetInfraBuildInfoSnapshot().revision_hash_short;
+    return detail::GetInfraBuildInfoSnapshot().revisionHashShort;
 }
 
 inline std::string_view GetBuildRevisionHash() {
-    return detail::GetInfraBuildInfoSnapshot().revision_hash;
+    return detail::GetInfraBuildInfoSnapshot().revisionHash;
 }
 
 inline std::string_view GetBuildDirty() {

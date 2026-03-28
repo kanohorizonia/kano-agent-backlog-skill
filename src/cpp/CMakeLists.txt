@@ -25,7 +25,7 @@ endif()
 # These mirror the kano-git-master-skill conventions.
 # Override on CMake command line or in CMakePresets.json cacheVariables.
 
-option(KB_ENABLE_MODULES "Enable C++20 modules" OFF)
+option(KB_ENABLE_MODULES "Enable C++23 modules" OFF)
 option(KB_ENABLE_UNITY_BUILD "Enable unity build for eligible targets" OFF)
 set(KB_UNITY_BUILD_MODE "full" CACHE STRING "Unity build mode: full|changed")
 set_property(CACHE KB_UNITY_BUILD_MODE PROPERTY STRINGS full changed)
@@ -348,7 +348,7 @@ enable_testing()
 # =============================================================================
 # Shared infra submodule
 # =============================================================================
-set(KB_INFRA_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/code/shared/infra")
+set(KB_INFRA_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/shared/infra")
 if(EXISTS "${KB_INFRA_SOURCE_DIR}/CMakeLists.txt")
     add_subdirectory("${KB_INFRA_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/shared/infra")
     if(TARGET kano_infra_build_info)

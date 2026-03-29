@@ -108,6 +108,7 @@
             "cacheVariables": {
                 "CMAKE_C_COMPILER": "clang",
                 "CMAKE_CXX_COMPILER": "clang++",
+                "CMAKE_LIBRARY_PATH": "/usr/lib/gcc/x86_64-linux-gnu/15",
                 "KB_ENABLE_MODULES": "OFF",
                 "KB_PRESET_NAME": "linux-ninja-clang"
             }

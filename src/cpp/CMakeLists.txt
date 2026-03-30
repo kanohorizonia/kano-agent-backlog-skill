@@ -15,8 +15,10 @@ if(MSVC)
         "$<$<COMPILE_LANGUAGE:CXX>:/GR>"
         "$<$<COMPILE_LANGUAGE:CXX>:/utf-8>"
     )
-    # Workaround MSVC SDK bug: <string>/<optional> missing from SYSTEM includes
-    set(CMAKE_INCLUDE_SYSTEM_FLAG_CXX "/I ")
+    # Tell CMake to pass /I before system include paths for TryCompile tests.
+    # Without this, external projects (yaml-cpp, sqlite3) can't find STL headers.
+    set(CMAKE_INCLUDE_SYSTEM_FLAG_CXX "/I")
+    set(CMAKE_INCLUDE_SYSTEM_FLAG_C "/I")
 endif()
 
 # =============================================================================

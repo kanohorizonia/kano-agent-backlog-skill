@@ -1,12 +1,104 @@
 #include "kano/backlog_ops/index/backlog_index.hpp"
 #include "kano/backlog_core/models/errors.hpp"
+#include "kano/backlog_core/frontmatter/canonical_store.hpp"
 #include <stdexcept>
 #include <iostream>
 #include <sstream>
+#include <chrono>
+#include <fstream>
 
 namespace kano::backlog_ops {
 
 using namespace kano::backlog_core;
+
+BuildIndexResult build_index(
+    const std::filesystem::path& product_root,
+    const std::filesystem::path& index_path,
+    bool force
+) {
+    BuildIndexResult result;
+    result.index_path = index_path;
+
+    auto start = std::chrono::high_resolution_clock::now();
+
+    // Create index
+    std::filesystem::create_directories(index_path.parent_path());
+    BacklogIndex index(index_path);
+    index.initialize();
+
+    // Scan and index all items
+    CanonicalStore store(product_root);
+    auto item_paths = store.list_items();
+
+    for (const auto& item_path : item_paths) {
+        try {
+            auto item = store.read(item_path);
+            index.index_item(item);
+            result.items_indexed++;
+        } catch (const std::exception& e) {
+            std::cerr << "Warning: Failed to index " << item_path << ": " << e.what() << "\n";
+        }
+    }
+
+    auto end = std::chrono::high_resolution_clock::now();
+    result.build_time_ms = std::chrono::duration<double, std::milli>(end - start).count();
+
+    return result;
+}
+
+RefreshIndexResult refresh_index(
+    const std::filesystem::path& product_root,
+    const std::filesystem::path& index_path
+) {
+    RefreshIndexResult result;
+    result.index_path = index_path;
+
+    auto start = std::chrono::high_resolution_clock::now();
+
+    // For MVP, refresh = full rebuild
+    auto build_result = build_index(product_root, index_path, true);
+    result.items_added = build_result.items_indexed;
+    result.items_updated = 0;
+    result.items_removed = 0;
+
+    auto end = std::chrono::high_resolution_clock::now();
+    result.refresh_time_ms = std::chrono::duration<double, std::milli>(end - start).count();
+
+    return result;
+}
+
+GetIndexStatusResult get_index_status(
+    const std::filesystem::path& product_root,
+    const std::optional<std::string>& product_name
+) {
+    GetIndexStatusResult result;
+
+    std::filesystem::path cache_root = product_root / ".cache" / "index";
+    std::filesystem::path index_path = cache_root / "backlog.db";
+
+    IndexStatusEntry entry;
+    entry.product = product_name.value_or("default");
+    entry.index_path = index_path;
+
+    if (std::filesystem::exists(index_path)) {
+        entry.exists = true;
+        entry.size_bytes = std::filesystem::file_size(index_path);
+
+        // Get item count
+        BacklogIndex idx(index_path);
+        auto items = idx.query_items();
+        entry.item_count = static_cast<int>(items.size());
+
+        // Get last modified
+        auto mod_time = std::filesystem::last_write_time(index_path);
+        auto epoch_time = mod_time.time_since_epoch();
+        auto seconds = std::chrono::duration_cast<std::chrono::seconds>(epoch_time).count();
+        entry.last_modified = std::to_string(seconds);
+    }
+
+    result.indexes.push_back(entry);
+    return result;
+}
 
 BacklogIndex::BacklogIndex(const std::filesystem::path& db_path) : db_path_(db_path) {
     std::filesystem::create_directories(db_path.parent_path());

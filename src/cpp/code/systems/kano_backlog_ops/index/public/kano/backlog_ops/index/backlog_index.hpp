@@ -70,4 +70,62 @@ private:
     void execute(const std::string& sql);
 };
 
+// ============================================================
+// Index operations (free functions)
+// ============================================================
+
+struct BuildIndexResult {
+    std::filesystem::path index_path;
+    int items_indexed = 0;
+    int links_indexed = 0;
+    double build_time_ms = 0.0;
+};
+
+struct RefreshIndexResult {
+    std::filesystem::path index_path;
+    int items_added = 0;
+    int items_updated = 0;
+    int items_removed = 0;
+    double refresh_time_ms = 0.0;
+};
+
+struct IndexStatusEntry {
+    std::string product;
+    std::filesystem::path index_path;
+    bool exists = false;
+    int item_count = 0;
+    size_t size_bytes = 0;
+    std::string last_modified;
+};
+
+struct GetIndexStatusResult {
+    std::vector<IndexStatusEntry> indexes;
+};
+
+/**
+ * Build the SQLite index from all markdown items under product_root.
+ * Drops and recreates the items table.
+ */
+BuildIndexResult build_index(
+    const std::filesystem::path& product_root,
+    const std::filesystem::path& index_path,
+    bool force = false
+);
+
+/**
+ * Refresh the index (MVP = full rebuild).
+ */
+RefreshIndexResult refresh_index(
+    const std::filesystem::path& product_root,
+    const std::filesystem::path& index_path
+);
+
+/**
+ * Get index status and statistics.
+ */
+GetIndexStatusResult get_index_status(
+    const std::filesystem::path& product_root,
+    const std::optional<std::string>& product_name = std::nullopt
+);
+
 } // namespace kano::backlog_ops

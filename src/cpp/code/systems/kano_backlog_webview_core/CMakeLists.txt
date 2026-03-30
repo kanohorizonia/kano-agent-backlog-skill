@@ -1,5 +1,8 @@
 add_library(kano_backlog_webview_core STATIC)
 
+target_compile_features(kano_backlog_webview_core PUBLIC cxx_std_23)
+set_target_properties(kano_backlog_webview_core PROPERTIES CXX_SCAN_FOR_MODULES ON)
+
 target_sources(kano_backlog_webview_core
   PRIVATE
     private/BacklogWebviewService.cpp

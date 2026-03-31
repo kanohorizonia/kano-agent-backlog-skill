@@ -1841,7 +1841,7 @@ int main(int InArgc, char* InArgv[]) {
                     char since_buf[32];
                     std::strftime(since_buf, sizeof(since_buf), "%Y-%m-%d", std::localtime(&time_t_since));
 
-                    std::string cmd = "git log --since=" + std::string(since_buf) + " --pretty=format:%h|%ai|%s 2>NUL";
+                    std::string cmd = "cmd /c \"git log --since=" + std::string(since_buf) + " --pretty=format:\"%%h|%%ad|%%s\" --date=short 2>NUL\"";
                     std::vector<std::tuple<std::string, std::string, std::string>> commits;
                     std::vector<std::tuple<std::string, std::string, std::string>> orphans;
                     std::vector<std::tuple<std::string, std::string, std::string>> trivial;

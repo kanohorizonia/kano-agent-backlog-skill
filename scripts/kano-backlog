@@ -3,11 +3,36 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-WORKSPACE_ROOT="$(cd "$SKILL_ROOT/../../../.." && pwd)"
-NATIVE_BIN="$SKILL_ROOT/src/cpp/build/windows-ninja-msvc/kano-backlog.exe"
 
-if [[ ! -f "$NATIVE_BIN" ]]; then
-  echo "Native CLI not found: $NATIVE_BIN" >&2
+resolve_workspace_root() {
+  local start_dir="${PWD}"
+  while [[ "$start_dir" != "/" && ! -f "$start_dir/.kano/backlog_config.toml" ]]; do
+    start_dir="$(dirname "$start_dir")"
+  done
+
+  if [[ -f "$start_dir/.kano/backlog_config.toml" ]]; then
+    printf '%s\n' "$start_dir"
+    return 0
+  fi
+
+  printf '%s\n' "$PWD"
+}
+
+WORKSPACE_ROOT="$(resolve_workspace_root)"
+
+NATIVE_BIN=""
+for candidate in \
+  "$SKILL_ROOT/src/cpp/out/bin/windows-ninja-msvc/debug/kano-backlog.exe" \
+  "$SKILL_ROOT/src/cpp/out/bin/windows-ninja-msvc/release/kano-backlog.exe"
+do
+  if [[ -f "$candidate" ]]; then
+    NATIVE_BIN="$candidate"
+    break
+  fi
+done
+
+if [[ -z "$NATIVE_BIN" ]]; then
+  echo "Native CLI not found under: $SKILL_ROOT/src/cpp/out/bin/windows-ninja-msvc/{debug,release}/kano-backlog.exe" >&2
   echo "Build it first with: bash .agents/skills/kano/kano-agent-backlog-skill/scripts/internal/self-build.sh" >&2
   exit 1
 fi

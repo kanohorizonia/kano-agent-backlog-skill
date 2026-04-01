@@ -19,24 +19,25 @@ esac
 
 case "$(uname -s 2>/dev/null || printf 'unknown')" in
   MINGW*|MSYS*|CYGWIN*)
+    rm -rf "$SKILL_ROOT/src/cpp/out/obj/windows-ninja-msvc"
     if [[ "$MODE" == "release" ]]; then
-      rm -rf "$SKILL_ROOT/src/cpp/build/windows-ninja-msvc-release"
+      rm -rf "$SKILL_ROOT/src/cpp/out/bin/windows-ninja-msvc/release"
     else
-      rm -rf "$SKILL_ROOT/src/cpp/build/windows-ninja-msvc"
+      rm -rf "$SKILL_ROOT/src/cpp/out/bin/windows-ninja-msvc/debug"
     fi
     ;;
   Linux)
     if [[ "$MODE" == "release" ]]; then
-      rm -rf "$SKILL_ROOT/src/cpp/build/linux-ninja-gcc-release"
+      rm -rf "$SKILL_ROOT/src/cpp/out/obj/linux-ninja-gcc" "$SKILL_ROOT/src/cpp/out/bin/linux-ninja-gcc/release"
     else
-      rm -rf "$SKILL_ROOT/src/cpp/build/linux-ninja-gcc-debug"
+      rm -rf "$SKILL_ROOT/src/cpp/out/obj/linux-ninja-gcc" "$SKILL_ROOT/src/cpp/out/bin/linux-ninja-gcc/debug"
     fi
     ;;
   Darwin)
     if [[ "$MODE" == "release" ]]; then
-      rm -rf "$SKILL_ROOT/src/cpp/build/macos-ninja-clang-release"
+      rm -rf "$SKILL_ROOT/src/cpp/out/obj/macos-ninja-clang" "$SKILL_ROOT/src/cpp/out/bin/macos-ninja-clang/release"
     else
-      rm -rf "$SKILL_ROOT/src/cpp/build/macos-ninja-clang-debug"
+      rm -rf "$SKILL_ROOT/src/cpp/out/obj/macos-ninja-clang" "$SKILL_ROOT/src/cpp/out/bin/macos-ninja-clang/debug"
     fi
     ;;
   *)

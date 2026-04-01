@@ -1841,7 +1841,7 @@ int main(int InArgc, char* InArgv[]) {
                     char since_buf[32];
                     std::strftime(since_buf, sizeof(since_buf), "%Y-%m-%d", std::localtime(&time_t_since));
 
-                    std::string cmd = "cmd /c \"git log --since=" + std::string(since_buf) + " --pretty=format:\"%%h|%%ad|%%s\" --date=short 2>NUL\"";
+                     std::string cmd = "git log --since=" + std::string(since_buf) + " --pretty=format:%h=%ad=%s --date=short 2>NUL";
                     std::vector<std::tuple<std::string, std::string, std::string>> commits;
                     std::vector<std::tuple<std::string, std::string, std::string>> orphans;
                     std::vector<std::tuple<std::string, std::string, std::string>> trivial;
@@ -1865,8 +1865,8 @@ int main(int InArgc, char* InArgv[]) {
                         std::string line(buf);
                         line.erase(line.find_last_not_of("\r\n") + 1);
                         if (line.empty()) continue;
-                        size_t p1 = line.find('|');
-                        size_t p2 = line.find('|', p1 + 1);
+                        size_t p1 = line.find('=');
+                        size_t p2 = line.find('=', p1 + 1);
                         if (p1 == std::string::npos || p2 == std::string::npos) continue;
                         std::string hash = line.substr(0, p1);
                         std::string date = line.substr(p1 + 1, 10);

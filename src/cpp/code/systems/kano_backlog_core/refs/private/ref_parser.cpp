@@ -1,5 +1,6 @@
 #include "kano/backlog_core/refs/ref_parser.hpp"
 #include <regex>
+#include <cctype>
 
 namespace kano::backlog_core {
 
@@ -12,6 +13,9 @@ static std::string trim(const std::string& s) {
 }
 
 std::optional<ParsedRef> RefParser::parse(const std::string& ref) {
+    auto p_ref = parse_path(ref);
+    if (p_ref) return *p_ref;
+
     auto d_ref = parse_display_id(ref);
     if (d_ref) return *d_ref;
 
@@ -20,6 +24,29 @@ std::optional<ParsedRef> RefParser::parse(const std::string& ref) {
 
     auto u_ref = parse_uuid(ref);
     if (u_ref) return *u_ref;
+
+    return std::nullopt;
+}
+
+std::optional<PathRef> RefParser::parse_path(const std::string& ref) {
+    std::string s = trim(ref);
+    if (s.empty()) {
+        return std::nullopt;
+    }
+
+    const bool looks_like_windows_drive =
+        s.size() >= 3 && std::isalpha(static_cast<unsigned char>(s[0])) && s[1] == ':' && (s[2] == '\\' || s[2] == '/');
+    const bool looks_like_relative =
+        s.rfind("./", 0) == 0 || s.rfind("../", 0) == 0 || s.rfind(".\\", 0) == 0 || s.rfind("..\\", 0) == 0;
+    const bool has_separator = s.find('/') != std::string::npos || s.find('\\') != std::string::npos;
+    const bool looks_like_markdown_file = s.size() >= 3 && s.substr(s.size() - 3) == ".md";
+
+    if (looks_like_windows_drive || looks_like_relative || has_separator || looks_like_markdown_file) {
+        PathRef res;
+        res.path = s;
+        res.raw = s;
+        return res;
+    }
 
     return std::nullopt;
 }

@@ -1,6 +1,7 @@
 #include "kano/backlog_ops/index/backlog_index.hpp"
 #include "kano/backlog_core/models/errors.hpp"
 #include "kano/backlog_core/frontmatter/canonical_store.hpp"
+#include <map>
 #include <stdexcept>
 #include <iostream>
 #include <sstream>
@@ -193,6 +194,65 @@ int BacklogIndex::get_next_number(const std::string& prefix, const std::string& 
     
     execute("COMMIT");
     return number;
+}
+
+BacklogIndex::SyncSequencesResult BacklogIndex::sync_sequences(const std::filesystem::path& product_root) {
+    SyncSequencesResult result;
+    result.max_number_found = 0;
+
+    std::map<std::pair<std::string, std::string>, int> max_numbers;
+
+    CanonicalStore store(product_root);
+    auto item_paths = store.list_items();
+
+    for (const auto& item_path : item_paths) {
+        try {
+            auto item = store.read(item_path);
+            const std::string& id = item.id;
+            size_t last_dash = id.rfind('-');
+            if (last_dash == std::string::npos) {
+                continue;
+            }
+
+            std::string seq_str = id.substr(last_dash + 1);
+            std::string rest = id.substr(0, last_dash);
+            size_t second_dash = rest.rfind('-');
+            if (second_dash == std::string::npos) {
+                continue;
+            }
+
+            std::string type_code = rest.substr(second_dash + 1);
+            std::string prefix = rest.substr(0, second_dash);
+
+            try {
+                int num = std::stoi(seq_str);
+                auto key = std::make_pair(prefix, type_code);
+                auto it = max_numbers.find(key);
+                if (it == max_numbers.end() || num > it->second) {
+                    max_numbers[key] = num;
+                }
+                if (num > result.max_number_found) {
+                    result.max_number_found = num;
+                }
+            } catch (...) {
+            }
+        } catch (...) {
+        }
+    }
+
+    for (const auto& [key, max_num] : max_numbers) {
+        const std::string& prefix = key.first;
+        const std::string& type_code = key.second;
+
+        std::string upsert_sql =
+            "INSERT INTO id_sequences (prefix, type_code, next_number) VALUES ('" + prefix + "', '" + type_code + "', " + std::to_string(max_num + 1) + ") "
+            "ON CONFLICT(prefix, type_code) DO UPDATE SET next_number = MAX(next_number, " + std::to_string(max_num + 1) + ")";
+        execute(upsert_sql);
+
+        result.synced_pairs.push_back(prefix + "-" + type_code + " -> " + std::to_string(max_num + 1));
+    }
+
+    return result;
 }
 
 std::optional<std::filesystem::path> BacklogIndex::get_path_by_id(const std::string& id) {

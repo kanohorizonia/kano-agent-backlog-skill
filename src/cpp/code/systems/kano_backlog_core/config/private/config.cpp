@@ -1,7 +1,46 @@
 #include "kano/backlog_core/config/config.hpp"
 #include "kano/backlog_core/models/errors.hpp"
-#include <toml++/toml.hpp>
-#include <iostream>
+
+#include <kano_config.h>
+
+#include <cstdlib>
+
+namespace {
+
+using kano::backlog_core::ProductDefinition;
+using kano::backlog_core::ProjectConfig;
+
+std::optional<std::string> get_optional_string(KanoConfig cfg, const std::string& key) {
+    if (const char* value = kano_config_get(cfg, key.c_str())) {
+        return std::string(value);
+    }
+    return std::nullopt;
+}
+
+std::optional<bool> get_optional_bool(KanoConfig cfg, const std::string& key) {
+    bool value = false;
+    if (kano_config_get_bool(cfg, key.c_str(), &value)) {
+        return value;
+    }
+    return std::nullopt;
+}
+
+std::optional<int> get_optional_int(KanoConfig cfg, const std::string& key) {
+    int value = 0;
+    if (kano_config_get_int(cfg, key.c_str(), &value)) {
+        return value;
+    }
+    return std::nullopt;
+}
+
+std::filesystem::path infer_project_root(const std::filesystem::path& config_file_path) {
+    if (config_file_path.parent_path().filename() == ".kano") {
+        return config_file_path.parent_path().parent_path();
+    }
+    return config_file_path.parent_path();
+}
+
+}  // namespace
 
 namespace kano::backlog_core {
 
@@ -11,44 +50,45 @@ std::optional<ProjectConfig> ProjectConfig::load_from_toml(const std::filesystem
         return std::nullopt;
     }
 
-    try {
-        auto tbl = toml::parse_file(file_path.string());
-        ProjectConfig config;
-
-        if (auto products_node = tbl.get_as<toml::table>("products")) {
-            for (auto it = products_node->begin(); it != products_node->end(); ++it) {
-                if (auto product_tbl = it->second.as_table()) {
-                    ProductDefinition pd;
-                    std::string key = std::string(it->first.str());
-                    
-                    pd.name = product_tbl->get_as<std::string>("name") ? product_tbl->get_as<std::string>("name")->get() : key;
-                    pd.prefix = product_tbl->get_as<std::string>("prefix") ? product_tbl->get_as<std::string>("prefix")->get() : "";
-                    pd.backlog_root = product_tbl->get_as<std::string>("backlog_root") ? product_tbl->get_as<std::string>("backlog_root")->get() : "";
-
-                    // Optional fields
-                    if (auto n = product_tbl->get_as<bool>("vector_enabled")) pd.vector_enabled = n->get();
-                    if (auto n = product_tbl->get_as<std::string>("vector_backend")) pd.vector_backend = n->get();
-                    if (auto n = product_tbl->get_as<std::string>("vector_metric")) pd.vector_metric = n->get();
-                    if (auto n = product_tbl->get_as<bool>("analysis_llm_enabled")) pd.analysis_llm_enabled = n->get();
-                    if (auto n = product_tbl->get_as<std::string>("cache_root")) pd.cache_root = n->get();
-                    if (auto n = product_tbl->get_as<bool>("log_debug")) pd.log_debug = n->get();
-                    if (auto n = product_tbl->get_as<std::string>("log_verbosity")) pd.log_verbosity = n->get();
-                    if (auto n = product_tbl->get_as<std::string>("embedding_provider")) pd.embedding_provider = n->get();
-                    if (auto n = product_tbl->get_as<std::string>("embedding_model")) pd.embedding_model = n->get();
-                    if (auto n = product_tbl->get_as<int64_t>("embedding_dimension")) pd.embedding_dimension = static_cast<int>(n->get());
-                    if (auto n = product_tbl->get_as<int64_t>("chunking_target_tokens")) pd.chunking_target_tokens = static_cast<int>(n->get());
-                    if (auto n = product_tbl->get_as<int64_t>("chunking_max_tokens")) pd.chunking_max_tokens = static_cast<int>(n->get());
-                    if (auto n = product_tbl->get_as<std::string>("tokenizer_adapter")) pd.tokenizer_adapter = n->get();
-                    if (auto n = product_tbl->get_as<std::string>("tokenizer_model")) pd.tokenizer_model = n->get();
-
-                    config.products[key] = pd;
-                }
-            }
-        }
-        return config;
-    } catch (const toml::parse_error& err) {
-        throw ConfigError("Failed to parse TOML from " + file_path.string() + ": " + std::string(err.description()));
+    KanoConfig cfg = kano_config_load(file_path.string().c_str());
+    if (!cfg) {
+        throw ConfigError("Failed to parse TOML from " + file_path.string());
     }
+
+    ProjectConfig config;
+
+    size_t product_count = 0;
+    char** product_names = kano_config_list_children(cfg, "products", &product_count);
+    for (size_t index = 0; index < product_count; ++index) {
+        const std::string key = product_names[index];
+        const std::string prefix = "products." + key + ".";
+
+        ProductDefinition product;
+        product.name = get_optional_string(cfg, prefix + "name").value_or(key);
+        product.prefix = get_optional_string(cfg, prefix + "prefix").value_or("");
+        product.backlog_root = get_optional_string(cfg, prefix + "backlog_root").value_or("");
+
+        product.vector_enabled = get_optional_bool(cfg, prefix + "vector_enabled");
+        product.vector_backend = get_optional_string(cfg, prefix + "vector_backend");
+        product.vector_metric = get_optional_string(cfg, prefix + "vector_metric");
+        product.analysis_llm_enabled = get_optional_bool(cfg, prefix + "analysis_llm_enabled");
+        product.cache_root = get_optional_string(cfg, prefix + "cache_root");
+        product.log_debug = get_optional_bool(cfg, prefix + "log_debug");
+        product.log_verbosity = get_optional_string(cfg, prefix + "log_verbosity");
+        product.embedding_provider = get_optional_string(cfg, prefix + "embedding_provider");
+        product.embedding_model = get_optional_string(cfg, prefix + "embedding_model");
+        product.embedding_dimension = get_optional_int(cfg, prefix + "embedding_dimension");
+        product.chunking_target_tokens = get_optional_int(cfg, prefix + "chunking_target_tokens");
+        product.chunking_max_tokens = get_optional_int(cfg, prefix + "chunking_max_tokens");
+        product.tokenizer_adapter = get_optional_string(cfg, prefix + "tokenizer_adapter");
+        product.tokenizer_model = get_optional_string(cfg, prefix + "tokenizer_model");
+
+        config.products[key] = product;
+    }
+
+    kano_config_free_string_array(product_names, product_count);
+    kano_config_free(cfg);
+    return config;
 }
 
 std::optional<ProductDefinition> ProjectConfig::get_product(const std::string& name) const {
@@ -70,12 +110,7 @@ std::optional<std::filesystem::path> ProjectConfig::resolve_backlog_root(const s
         return backlog_root;
     }
 
-    std::filesystem::path project_root;
-    if (config_file_path.parent_path().filename() == ".kano") {
-        project_root = config_file_path.parent_path().parent_path();
-    } else {
-        project_root = config_file_path.parent_path();
-    }
+    std::filesystem::path project_root = infer_project_root(config_file_path);
 
     return std::filesystem::weakly_canonical(project_root / backlog_root);
 }
@@ -96,6 +131,21 @@ std::optional<std::filesystem::path> ConfigLoader::find_project_config(const std
         current = current.parent_path();
     }
     return std::nullopt;
+}
+
+std::optional<std::filesystem::path> ConfigLoader::resolve_project_root(const std::filesystem::path& config_file_path) {
+    KanoConfig cfg = kano_config_load(config_file_path.string().c_str());
+    if (!cfg) {
+        return std::nullopt;
+    }
+
+    const char* root_value = kano_config_root(cfg);
+    std::optional<std::filesystem::path> root;
+    if (root_value && *root_value) {
+        root = std::filesystem::path(root_value);
+    }
+    kano_config_free(cfg);
+    return root;
 }
 
 // BacklogContext Implementation
@@ -138,12 +188,7 @@ BacklogContext BacklogContext::resolve(
         throw ConfigError("Product '" + product_name + "' not found in project config");
     }
 
-    std::filesystem::path project_root;
-    if (config_path->parent_path().filename() == ".kano") {
-        project_root = config_path->parent_path().parent_path();
-    } else {
-        project_root = config_path->parent_path();
-    }
+    std::filesystem::path project_root = ConfigLoader::resolve_project_root(*config_path).value_or(infer_project_root(*config_path));
 
     std::filesystem::path backlog_root = *product_root;
     if (product_root->parent_path().filename() == "products" && product_root->parent_path().parent_path().filename() == "backlog") {

@@ -1,5 +1,9 @@
 #include "kano/backlog_ops/workset/workset_ops.hpp"
 #include "kano/backlog_ops/index/backlog_index.hpp"
+#include "kano/backlog_core/frontmatter/canonical_store.hpp"
+#include "kano/backlog_core/refs/ref_resolver.hpp"
+#include "kano/backlog_core/state/state_machine.hpp"
+#include <json/json.h>
 #include <fstream>
 #include <sstream>
 #include <algorithm>
@@ -7,6 +11,7 @@
 #include <cctype>
 
 namespace kano::backlog_ops {
+using namespace kano::backlog_core;
 namespace {
 
 std::string json_escape(const std::string& s) {
@@ -63,48 +68,111 @@ std::string trim(const std::string& s) {
     return s.substr(start, end - start + 1);
 }
 
-// Minimal JSON parser for meta.json
 std::optional<WorksetOps::WorksetMetadata> parse_meta(const std::string& content) {
+    Json::CharReaderBuilder builder;
+    builder["collectComments"] = false;
+
+    std::istringstream input(content);
+    Json::Value root;
+    std::string errors;
+    if (!Json::parseFromStream(builder, input, &root, &errors) || !root.isObject()) {
+        return std::nullopt;
+    }
+
     WorksetOps::WorksetMetadata meta;
-    std::istringstream iss(content);
-    std::string line;
-    bool in_object = false;
-
-    while (std::getline(iss, line)) {
-        line = trim(line);
-        if (line == "{") { in_object = true; continue; }
-        if (line == "}" || line == "},") { in_object = false; continue; }
-        if (!in_object) continue;
-
-        auto colon_pos = line.find(':');
-        if (colon_pos == std::string::npos) continue;
-        std::string key = trim(line.substr(0, colon_pos));
-        std::string val = trim(line.substr(colon_pos + 1));
-        if (!val.empty() && val.back() == ',') val = trim(val.substr(0, val.size() - 1));
-        if (!val.empty() && val.front() == '"') {
-            val = trim(val.substr(1));
-            if (!val.empty() && val.back() == '"') val = trim(val.substr(0, val.size() - 1));
-        } else if (val == "null" || val.empty()) {
-            val = "";
-        }
-
-        if (key == "workset_id") meta.workset_id = val;
-        else if (key == "item_id") meta.item_id = val;
-        else if (key == "item_uid") meta.item_uid = val;
-        else if (key == "item_path") meta.item_path = val;
-        else if (key == "agent") meta.agent = val;
-        else if (key == "created_at") meta.created_at = val;
-        else if (key == "refreshed_at") meta.refreshed_at = val;
-        else if (key == "ttl_hours") {
-            try { meta.ttl_hours = std::stoi(val); } catch (...) {}
-        }
-        else if (key == "source_commit" && !val.empty() && val != "null") {
-            meta.source_commit = val;
-        }
+    meta.workset_id = root.get("workset_id", "").asString();
+    meta.item_id = root.get("item_id", "").asString();
+    meta.item_uid = root.get("item_uid", "").asString();
+    meta.item_path = root.get("item_path", "").asString();
+    meta.agent = root.get("agent", "").asString();
+    meta.created_at = root.get("created_at", "").asString();
+    meta.refreshed_at = root.get("refreshed_at", "").asString();
+    meta.ttl_hours = root.get("ttl_hours", 72).asInt();
+    if (root.isMember("source_commit") && root["source_commit"].isString()) {
+        meta.source_commit = root["source_commit"].asString();
     }
 
     if (meta.workset_id.empty()) return std::nullopt;
     return meta;
+}
+
+struct ResolvedItemContext {
+    std::filesystem::path product_root;
+    BacklogItem item;
+};
+
+std::optional<std::filesystem::path> infer_product_root_from_item_path(
+    const std::filesystem::path& item_path,
+    const std::filesystem::path& backlog_root
+) {
+    if (!std::filesystem::exists(item_path)) {
+        return std::nullopt;
+    }
+
+    for (auto current = item_path.parent_path(); !current.empty(); current = current.parent_path()) {
+        if (current.filename() == "items") {
+            auto product_root = current.parent_path();
+            if (!product_root.empty()) {
+                return product_root;
+            }
+        }
+        if (current == current.root_path()) {
+            break;
+        }
+    }
+
+    if (std::filesystem::exists(backlog_root / "items") &&
+        item_path.string().find((backlog_root / "items").string()) == 0) {
+        return backlog_root;
+    }
+
+    return std::nullopt;
+}
+
+std::optional<ResolvedItemContext> resolve_item_context(
+    const std::string& item_ref,
+    const std::filesystem::path& backlog_root
+) {
+    if (item_ref.find('/') != std::string::npos ||
+        item_ref.find('\\') != std::string::npos ||
+        item_ref.find(".md") != std::string::npos) {
+        std::filesystem::path item_path(item_ref);
+        if (!item_path.is_absolute()) {
+            item_path = (backlog_root / item_path).lexically_normal();
+        }
+        if (std::filesystem::exists(item_path)) {
+            auto product_root = infer_product_root_from_item_path(item_path, backlog_root);
+            if (product_root) {
+                CanonicalStore store(*product_root);
+                return ResolvedItemContext{*product_root, store.read(item_path)};
+            }
+        }
+    }
+
+    std::vector<std::filesystem::path> candidate_product_roots;
+    if (std::filesystem::exists(backlog_root / "items")) {
+        candidate_product_roots.push_back(backlog_root);
+    }
+
+    auto products_dir = backlog_root / "products";
+    if (std::filesystem::exists(products_dir)) {
+        for (const auto& entry : std::filesystem::directory_iterator(products_dir)) {
+            if (entry.is_directory() && std::filesystem::exists(entry.path() / "items")) {
+                candidate_product_roots.push_back(entry.path());
+            }
+        }
+    }
+
+    for (const auto& product_root : candidate_product_roots) {
+        CanonicalStore store(product_root);
+        RefResolver resolver(store);
+        auto item = resolver.resolve_or_none(item_ref);
+        if (item) {
+            return ResolvedItemContext{product_root, *item};
+        }
+    }
+
+    return std::nullopt;
 }
 
 } // anonymous namespace
@@ -129,7 +197,8 @@ std::optional<std::filesystem::path> WorksetOps::resolve_workset_path(
         auto meta = load_meta(entry.path());
         if (!meta) continue;
         if (meta->item_id == item_ref || meta->item_uid == item_ref ||
-            meta->item_path == item_ref) {
+            meta->item_path == item_ref || meta->workset_id == item_ref ||
+            entry.path().filename().string() == item_ref) {
             return entry.path();
         }
     }
@@ -177,8 +246,18 @@ WorksetOps::WorksetInitResult WorksetOps::init_workset(
     const std::filesystem::path& backlog_root,
     int ttl_hours
 ) {
+    auto resolved = resolve_item_context(item_ref, backlog_root);
+    if (!resolved) {
+        throw std::runtime_error("Item not found for workset: " + item_ref);
+    }
+
+    auto item = resolved->item;
+    const std::string canonical_item_id = item.id;
+    const std::string canonical_item_uid = item.uid;
+    const std::string canonical_item_path = item.file_path ? item.file_path->string() : item_ref;
+
     // Check if workset already exists
-    auto existing = resolve_workset_path(item_ref, backlog_root);
+    auto existing = resolve_workset_path(canonical_item_id, backlog_root);
     bool created = false;
 
     WorksetMetadata meta;
@@ -189,16 +268,16 @@ WorksetOps::WorksetInitResult WorksetOps::init_workset(
         auto root = workset_root(backlog_root);
         std::filesystem::create_directories(root);
 
-        // Generate a unique workset ID using item_ref as base
-        std::string ws_id = "ws-" + item_ref + "-" + agent;
+        // Canonical layout: items/<ITEM_ID>/
+        std::string ws_id = canonical_item_id;
         workset_path = root / ws_id;
         std::filesystem::create_directories(workset_path);
         std::filesystem::create_directories(workset_path / "deliverables");
 
         meta.workset_id = ws_id;
-        meta.item_id = item_ref;
-        meta.item_uid = "";
-        meta.item_path = item_ref;
+        meta.item_id = canonical_item_id;
+        meta.item_uid = canonical_item_uid;
+        meta.item_path = canonical_item_path;
         meta.agent = agent;
         meta.created_at = current_iso_timestamp();
         meta.refreshed_at = meta.created_at;
@@ -209,12 +288,37 @@ WorksetOps::WorksetInitResult WorksetOps::init_workset(
         // Create plan.md (empty checklist)
         std::ofstream plan_ofs(workset_path / "plan.md");
         plan_ofs << "# Plan\n\n";
-        plan_ofs << "- [ ] (add acceptance criteria items here)\n";
+        if (item.acceptance_criteria && !trim(*item.acceptance_criteria).empty()) {
+            std::istringstream criteria_stream(*item.acceptance_criteria);
+            std::string criteria_line;
+            bool wrote_any = false;
+            while (std::getline(criteria_stream, criteria_line)) {
+                auto text = trim(criteria_line);
+                if (text.empty()) continue;
+                if (text.rfind("- ", 0) == 0 || text.rfind("* ", 0) == 0) {
+                    text = trim(text.substr(2));
+                }
+                plan_ofs << "- [ ] " << text << "\n";
+                wrote_any = true;
+            }
+            if (!wrote_any) {
+                plan_ofs << "- [ ] " << trim(*item.acceptance_criteria) << "\n";
+            }
+        } else {
+            plan_ofs << "- [ ] Review acceptance criteria\n";
+            plan_ofs << "- [ ] Implement required changes\n";
+            plan_ofs << "- [ ] Verify results\n";
+        }
 
         // Create notes.md
         std::ofstream notes_ofs(workset_path / "notes.md");
         notes_ofs << "# Notes\n\n";
-        notes_ofs << "Working notes for " << item_ref << "\n";
+        notes_ofs << "Working notes for " << canonical_item_id << "\n\n";
+        notes_ofs << "Decision: \n";
+
+        StateMachine::record_worklog(item, agent, "Initialized workset: " + workset_path.string());
+        CanonicalStore store(resolved->product_root);
+        store.write(item);
 
         created = true;
     } else {
@@ -285,8 +389,21 @@ WorksetOps::WorksetRefreshResult WorksetOps::refresh_workset(
 
     auto meta = load_meta(*ws_path);
     if (meta) {
+        auto resolved = resolve_item_context(meta->item_uid.empty() ? item_ref : meta->item_uid, backlog_root);
+        if (!resolved) {
+            throw std::runtime_error("Source item not found for workset: " + item_ref);
+        }
+
+        auto item = resolved->item;
+        meta->item_id = item.id;
+        meta->item_uid = item.uid;
+        meta->item_path = item.file_path ? item.file_path->string() : meta->item_path;
         meta->refreshed_at = current_iso_timestamp();
         save_meta(*ws_path, *meta);
+
+        StateMachine::record_worklog(item, agent, "Refreshed workset: " + ws_path->string());
+        CanonicalStore store(resolved->product_root);
+        store.write(item);
     }
 
     return {*ws_path, 0, 0, 1};
@@ -312,8 +429,11 @@ WorksetOps::WorksetPromoteResult WorksetOps::promote_deliverables(
     if (!meta) return {{}, {}, ""};
 
     // Target: _kano/backlog/products/<product>/artifacts/<item_id>/
-    auto target_path = backlog_root / ".." / "products" / ".." / "artifacts" / meta->item_id;
-    target_path = target_path.lexically_normal();
+    auto resolved = resolve_item_context(meta->item_uid.empty() ? meta->item_id : meta->item_uid, backlog_root);
+    if (!resolved) {
+        throw std::runtime_error("Source item not found for workset promotion: " + item_ref);
+    }
+    auto target_path = (resolved->product_root / "artifacts" / meta->item_id).lexically_normal();
 
     std::vector<std::string> promoted;
     if (!dry_run) {
@@ -331,6 +451,13 @@ WorksetOps::WorksetPromoteResult WorksetOps::promote_deliverables(
 
     std::string worklog_entry = current_iso_timestamp() + " [" + agent + "] Promoted " +
         std::to_string(promoted.size()) + " deliverables to artifacts";
+
+    if (!dry_run && !promoted.empty()) {
+        auto item = resolved->item;
+        StateMachine::record_worklog(item, agent, worklog_entry);
+        CanonicalStore store(resolved->product_root);
+        store.write(item);
+    }
 
     return {promoted, target_path, worklog_entry};
 }

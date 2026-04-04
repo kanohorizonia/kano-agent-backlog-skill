@@ -1,5 +1,6 @@
 #include "kano/backlog_ops/topic/topic_ops.hpp"
 #include "kano/backlog_core/models/models.hpp"
+#include <json/json.h>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -11,10 +12,6 @@
 
 namespace kano::backlog_ops {
 namespace {
-
-// ---------------------------------------------------------------------------
-// JSON helpers (ad-hoc, no external dependency)
-// ---------------------------------------------------------------------------
 
 std::string json_escape(const std::string& s) {
     std::string out;
@@ -32,24 +29,6 @@ std::string json_escape(const std::string& s) {
     return out;
 }
 
-void json_write_string(std::ostream& os, const std::string& key, const std::string& value) {
-    os << "    \"" << json_escape(key) << "\": \"" << json_escape(value) << "\"\n";
-}
-
-void json_write_bool(std::ostream& os, const std::string& key, bool value) {
-    os << "    \"" << json_escape(key) << "\": " << (value ? "true" : "false") << "\n";
-}
-
-void json_write_array(std::ostream& os, const std::string& key, const std::vector<std::string>& arr) {
-    os << "    \"" << json_escape(key) << "\": [\n";
-    for (size_t i = 0; i < arr.size(); ++i) {
-        os << "      \"" << json_escape(arr[i]) << "\"";
-        if (i + 1 < arr.size()) os << ",";
-        os << "\n";
-    }
-    os << "    ]\n";
-}
-
 std::string trim(const std::string& s) {
     auto start = s.find_first_not_of(" \t\r\n");
     if (start == std::string::npos) return "";
@@ -57,77 +36,40 @@ std::string trim(const std::string& s) {
     return s.substr(start, end - start + 1);
 }
 
-// Parse a simple JSON object with string fields and string arrays.
-// Only handles the manifest.json structure we write.
+std::vector<std::string> json_array_to_strings(const Json::Value& value) {
+    std::vector<std::string> result;
+    if (!value.isArray()) {
+        return result;
+    }
+    for (const auto& entry : value) {
+        if (entry.isString()) {
+            result.push_back(entry.asString());
+        }
+    }
+    return result;
+}
+
 std::optional<TopicOps::TopicManifest> parse_manifest(const std::string& content) {
-    TopicOps::TopicManifest m;
-    std::istringstream iss(content);
-    std::string line;
-    std::string current_key;
-    bool in_array = false;
-    std::vector<std::string>* array_ptr = nullptr;
+    Json::CharReaderBuilder builder;
+    builder["collectComments"] = false;
 
-    while (std::getline(iss, line)) {
-        line = trim(line);
-        if (line.empty()) continue;
-
-        // Start of object or end of object
-        if (line == "{" || line == "}," || line == "}") continue;
-
-        // Array start
-        if (line.find(":[") != std::string::npos) {
-            in_array = true;
-            auto key_start = line.find_first_of('"');
-            auto key_end = line.find_last_of('"');
-            if (key_start != std::string::npos && key_end != std::string::npos && key_start < key_end) {
-                current_key = line.substr(key_start + 1, key_end - key_start - 1);
-                if (current_key == "seed_items") array_ptr = &m.seed_items;
-                else if (current_key == "pinned_docs") array_ptr = &m.pinned_docs;
-                else array_ptr = nullptr;
-            }
-            continue;
-        }
-
-        // Array end
-        if (in_array && line == "]") {
-            in_array = false;
-            array_ptr = nullptr;
-            continue;
-        }
-
-        // Array item
-        if (in_array && array_ptr != nullptr) {
-            std::string val = trim(line);
-            if (!val.empty() && val.back() == ',') val = trim(val.substr(0, val.size() - 1));
-            if (!val.empty() && val.front() == '"') val = trim(val.substr(1));
-            if (!val.empty() && val.back() == '"') val = trim(val.substr(0, val.size() - 1));
-            if (!val.empty()) {
-                array_ptr->push_back(std::move(val));
-            }
-            continue;
-        }
-
-        // Key-value pair
-        auto colon_pos = line.find(':');
-        if (colon_pos == std::string::npos) continue;
-        std::string key = trim(line.substr(0, colon_pos));
-        std::string val = trim(line.substr(colon_pos + 1));
-        if (!val.empty() && val.back() == ',') val = trim(val.substr(0, val.size() - 1));
-        if (!val.empty() && val.front() == '"') {
-            val = trim(val.substr(1));
-            if (!val.empty() && val.back() == '"') val = trim(val.substr(0, val.size() - 1));
-        }
-
-        if (key == "topic") m.topic = val;
-        else if (key == "agent") m.agent = val;
-        else if (key == "created_at") m.created_at = val;
-        else if (key == "updated_at") m.updated_at = val;
-        else if (key == "status") m.status = val;
+    std::istringstream input(content);
+    Json::Value root;
+    std::string errors;
+    if (!Json::parseFromStream(builder, input, &root, &errors) || !root.isObject()) {
+        return std::nullopt;
     }
 
+    TopicOps::TopicManifest m;
+    m.topic = root.get("topic", "").asString();
+    m.agent = root.get("agent", "unknown").asString();
+    m.created_at = root.get("created_at", "").asString();
+    m.updated_at = root.get("updated_at", "").asString();
+    m.status = root.get("status", "open").asString();
+    m.seed_items = json_array_to_strings(root["seed_items"]);
+    m.pinned_docs = json_array_to_strings(root["pinned_docs"]);
+
     if (m.topic.empty()) return std::nullopt;
-    if (m.status.empty()) m.status = "open";
-    if (m.agent.empty()) m.agent = "unknown";
     return m;
 }
 
@@ -306,15 +248,28 @@ void TopicOps::save_manifest(
     std::ofstream ofs(manifest_path);
     if (!ofs.is_open()) return;
 
-    ofs << "{\n";
-    json_write_string(ofs, "topic", manifest.topic);
-    json_write_string(ofs, "agent", manifest.agent);
-    json_write_string(ofs, "created_at", manifest.created_at);
-    json_write_string(ofs, "updated_at", manifest.updated_at);
-    json_write_string(ofs, "status", manifest.status);
-    json_write_array(ofs, "seed_items", manifest.seed_items);
-    json_write_array(ofs, "pinned_docs", manifest.pinned_docs);
-    ofs << "}\n";
+    Json::Value root(Json::objectValue);
+    root["topic"] = manifest.topic;
+    root["agent"] = manifest.agent;
+    root["created_at"] = manifest.created_at;
+    root["updated_at"] = manifest.updated_at;
+    root["status"] = manifest.status;
+
+    Json::Value seed_items(Json::arrayValue);
+    for (const auto& item : manifest.seed_items) {
+        seed_items.append(item);
+    }
+    root["seed_items"] = seed_items;
+
+    Json::Value pinned_docs(Json::arrayValue);
+    for (const auto& doc : manifest.pinned_docs) {
+        pinned_docs.append(doc);
+    }
+    root["pinned_docs"] = pinned_docs;
+
+    Json::StreamWriterBuilder builder;
+    builder["indentation"] = "  ";
+    ofs << Json::writeString(builder, root) << "\n";
 }
 
 TopicOps::CreateResult TopicOps::create_topic(
@@ -329,6 +284,12 @@ TopicOps::CreateResult TopicOps::create_topic(
     }
 
     std::filesystem::create_directories(topic_path);
+    std::filesystem::create_directories(topic_path / "materials" / "clips");
+    std::filesystem::create_directories(topic_path / "materials" / "links");
+    std::filesystem::create_directories(topic_path / "materials" / "extracts");
+    std::filesystem::create_directories(topic_path / "materials" / "logs");
+    std::filesystem::create_directories(topic_path / "synthesis");
+    std::filesystem::create_directories(topic_path / "publish");
 
     TopicManifest manifest;
     manifest.topic = name;
@@ -340,6 +301,24 @@ TopicOps::CreateResult TopicOps::create_topic(
     manifest.pinned_docs = {};
 
     save_manifest(topic_path, manifest);
+
+    {
+        std::ofstream brief(topic_path / "brief.md");
+        if (brief.is_open()) {
+            brief << "# Topic Brief: " << name << "\n\n";
+            brief << "Human-maintained notes for this topic.\n";
+        }
+    }
+    {
+        std::ofstream notes(topic_path / "notes.md");
+        if (notes.is_open()) {
+            notes << "# Notes\n\n";
+            notes << "Decision to make:\n\n";
+            notes << "Options:\n\n";
+            notes << "Evidence:\n\n";
+            notes << "Recommendation:\n";
+        }
+    }
 
     return {name, topic_path, agent, manifest.created_at};
 }
@@ -361,15 +340,28 @@ TopicOps::AddItemResult TopicOps::add_item(
 
     bool added = false;
     auto& items = manifest->seed_items;
-    if (std::find(items.begin(), items.end(), item_ref) == items.end()) {
-        items.push_back(item_ref);
+    auto resolved = resolve_item_ref(item_ref, backlog_root);
+    if (!resolved) {
+        throw std::runtime_error("Item not found: " + item_ref);
+    }
+
+    const auto& resolved_pair = *resolved;
+    const auto& metadata = resolved_pair.second;
+    auto uid_it = metadata.find("uid");
+    auto id_it = metadata.find("id");
+    std::string manifest_ref = uid_it != metadata.end() && !uid_it->second.empty()
+        ? uid_it->second
+        : (id_it != metadata.end() ? id_it->second : item_ref);
+
+    if (std::find(items.begin(), items.end(), manifest_ref) == items.end()) {
+        items.push_back(manifest_ref);
         added = true;
     }
 
     manifest->updated_at = current_iso_timestamp();
     save_manifest(topic_path, *manifest);
 
-    return {topic_name, item_ref, added};
+    return {topic_name, manifest_ref, added};
 }
 
 std::vector<TopicOps::TopicStatus> TopicOps::list_topics(
@@ -455,7 +447,9 @@ std::filesystem::path TopicOps::distill(
     if (!manifest) return brief_path;
 
     std::ofstream ofs(brief_path);
-    if (!ofs.is_open()) return brief_path;
+    if (!ofs.is_open()) {
+        throw std::runtime_error("Failed to write brief.generated.md for topic: " + topic_name);
+    }
 
     ofs << "# Topic: " << manifest->topic << "\n\n";
     ofs << "**Generated**: " << current_iso_timestamp() << "\n";
@@ -475,6 +469,15 @@ std::filesystem::path TopicOps::distill(
             ofs << "- " << doc << "\n";
         }
         ofs << "\n";
+    }
+
+    ofs.flush();
+    if (!ofs.good()) {
+        throw std::runtime_error("Failed to flush brief.generated.md for topic: " + topic_name);
+    }
+
+    if (!std::filesystem::exists(brief_path)) {
+        throw std::runtime_error("brief.generated.md was not created for topic: " + topic_name);
     }
 
     return brief_path;

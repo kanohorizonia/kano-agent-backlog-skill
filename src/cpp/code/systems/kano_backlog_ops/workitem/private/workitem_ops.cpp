@@ -1,16 +1,28 @@
 #include "kano/backlog_ops/workitem/workitem_ops.hpp"
 #include "kano/backlog_core/frontmatter/canonical_store.hpp"
+#include "kano/backlog_core/refs/ref_resolver.hpp"
 #include "kano/backlog_core/state/state_machine.hpp"
 #include "kano/backlog_core/validation/validator.hpp"
+#include "kano/backlog_ops/view/view_ops.hpp"
 #include "kano/backlog_ops/templates/template_ops.hpp"
 #include <fstream>
 #include <iomanip>
 #include <chrono>
 #include <sstream>
+#include <cctype>
 
 namespace kano::backlog_ops {
 
 using namespace kano::backlog_core;
+
+namespace {
+
+BacklogItem resolve_item_or_throw(const CanonicalStore& store, const std::string& item_ref) {
+    RefResolver resolver(store);
+    return resolver.resolve(item_ref);
+}
+
+} // namespace
 
 CreateItemResult WorkitemOps::create_item(
     BacklogIndex& index,
@@ -76,14 +88,11 @@ UpdateStateResult WorkitemOps::update_state(
     std::optional<std::string> message,
     bool force
 ) {
-    // 1. Resolve path from index
-    auto path_opt = index.get_path_by_id(item_ref);
-    if (!path_opt) path_opt = index.get_path_by_uid(item_ref);
-    if (!path_opt) throw std::runtime_error("Item not found in index: " + item_ref);
-    
-    // 2. Read item
     CanonicalStore store(backlog_root);
-    BacklogItem item = store.read(*path_opt);
+    BacklogItem item = resolve_item_or_throw(store, item_ref);
+    if (!item.file_path) {
+        throw std::runtime_error("Resolved item has no file path: " + item_ref);
+    }
     
     ItemState old_state = item.state;
     if (old_state == new_state) {
@@ -178,11 +187,12 @@ UpdateStateResult WorkitemOps::update_state(
 
     // 8. Write back
     store.write(item);
+    auto refreshed = ViewOps::refresh_dashboards(backlog_root, agent);
     
     // 9. Update index
     index.index_item(item);
     
-    return {item.id, old_state, new_state, true, parent_synced, false};
+    return {item.id, old_state, new_state, true, parent_synced, !refreshed.views_refreshed.empty()};
 }
 
 TrashItemResult WorkitemOps::trash_item(
@@ -192,13 +202,14 @@ TrashItemResult WorkitemOps::trash_item(
     const std::string& agent,
     std::optional<std::string> reason
 ) {
-    // 1. Resolve item
-    auto path_opt = index.get_path_by_id(item_ref);
-    if (!path_opt) path_opt = index.get_path_by_uid(item_ref);
-    if (!path_opt) throw std::runtime_error("Item not found: " + item_ref);
-    
-    std::filesystem::path source_path = *path_opt;
-    
+    CanonicalStore store(backlog_root);
+    BacklogItem item = resolve_item_or_throw(store, item_ref);
+    if (!item.file_path) {
+        throw std::runtime_error("Resolved item has no file path: " + item_ref);
+    }
+
+    std::filesystem::path source_path = *item.file_path;
+
     // 2. Calculate trash path
     // Get YYYY-MM-DD
     auto now = std::chrono::system_clock::now();
@@ -212,8 +223,6 @@ TrashItemResult WorkitemOps::trash_item(
     std::filesystem::path trashed_path = backlog_root / "_trash" / stamp / rel_path;
     
     // 3. Update worklog before moving
-    CanonicalStore store(backlog_root);
-    BacklogItem item = store.read(source_path);
     StateMachine::record_worklog(item, agent, "Trashed item: " + reason.value_or("duplicate or obsolete"));
     store.write(item);
     
@@ -236,23 +245,15 @@ void WorkitemOps::remap_parent(
     const std::string& new_parent_ref,
     const std::string& agent
 ) {
-    // 1. Resolve item
-    auto path_opt = index.get_path_by_id(item_ref);
-    if (!path_opt) path_opt = index.get_path_by_uid(item_ref);
-    if (!path_opt) throw std::runtime_error("Item not found: " + item_ref);
-    
     CanonicalStore store(backlog_root);
-    BacklogItem item = store.read(*path_opt);
+    RefResolver resolver(store);
+    BacklogItem item = resolver.resolve(item_ref);
 
     // 2. Resolve parent
     if (new_parent_ref == "none" || new_parent_ref.empty() || new_parent_ref == "null") {
         item.parent = std::nullopt;
     } else {
-        auto parent_path = index.get_path_by_id(new_parent_ref);
-        if (!parent_path) parent_path = index.get_path_by_uid(new_parent_ref);
-        if (!parent_path) throw std::runtime_error("Parent item not found: " + new_parent_ref);
-        
-        BacklogItem parent_item = store.read(*parent_path);
+        BacklogItem parent_item = resolver.resolve(new_parent_ref);
         item.parent = parent_item.id;
     }
 
@@ -272,13 +273,11 @@ DecisionWritebackResult WorkitemOps::add_decision_writeback(
     const std::string& agent,
     std::optional<std::string> source
 ) {
-    // 1. Resolve item
-    auto path_opt = index.get_path_by_id(item_ref);
-    if (!path_opt) path_opt = index.get_path_by_uid(item_ref);
-    if (!path_opt) throw std::runtime_error("Item not found: " + item_ref);
-    
     CanonicalStore store(backlog_root);
-    BacklogItem item = store.read(*path_opt);
+    BacklogItem item = resolve_item_or_throw(store, item_ref);
+    if (!item.file_path) {
+        throw std::runtime_error("Resolved item has no file path: " + item_ref);
+    }
     
     // 2. Add decision
     std::string decision_text = decision;
@@ -305,7 +304,7 @@ DecisionWritebackResult WorkitemOps::add_decision_writeback(
     // 4. Write back
     store.write(item);
     
-    return {item.id, *path_opt, !exists, true};
+    return {item.id, *item.file_path, !exists, true};
 }
 
 RemapIdResult WorkitemOps::remap_id(
@@ -315,14 +314,13 @@ RemapIdResult WorkitemOps::remap_id(
     const std::string& new_id,
     const std::string& agent
 ) {
-    // 1. Resolve item
-    auto path_opt = index.get_path_by_id(item_ref);
-    if (!path_opt) path_opt = index.get_path_by_uid(item_ref);
-    if (!path_opt) throw std::runtime_error("Item not found: " + item_ref);
-    
-    std::filesystem::path old_path = *path_opt;
     CanonicalStore store(backlog_root);
-    BacklogItem item = store.read(old_path);
+    BacklogItem item = resolve_item_or_throw(store, item_ref);
+    if (!item.file_path) {
+        throw std::runtime_error("Resolved item has no file path: " + item_ref);
+    }
+
+    std::filesystem::path old_path = *item.file_path;
     std::string old_id = item.id;
     
     // 2. Calculate new path

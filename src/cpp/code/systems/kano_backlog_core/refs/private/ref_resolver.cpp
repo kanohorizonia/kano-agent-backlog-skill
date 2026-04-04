@@ -22,6 +22,8 @@ BacklogItem RefResolver::resolve(const std::string& ref) const {
         return resolve_adr(std::get<AdrRef>(*parsed));
     } else if (std::holds_alternative<UuidRef>(*parsed)) {
         return resolve_uuid(std::get<UuidRef>(*parsed));
+    } else if (std::holds_alternative<PathRef>(*parsed)) {
+        return resolve_path(std::get<PathRef>(*parsed));
     }
 
     throw ParseError(ref, "Unknown reference type");
@@ -79,13 +81,29 @@ std::vector<std::string> RefResolver::get_references(const BacklogItem& item) {
 }
 
 BacklogItem RefResolver::resolve_display_id(const DisplayIdRef& parsed) const {
-    // Brute force scan in CanonicalStore
+    std::vector<BacklogItem> matches;
     for (const auto& path : canonical_.list_items()) {
         try {
             auto item = canonical_.read(path);
-            if (item.id == parsed.raw) return item;
+            if (item.id == parsed.raw) {
+                matches.push_back(item);
+            }
         } catch (...) {}
     }
+
+    if (matches.size() == 1) {
+        return matches.front();
+    }
+
+    if (matches.size() > 1) {
+        std::vector<std::string> refs;
+        refs.reserve(matches.size());
+        for (const auto& item : matches) {
+            refs.push_back(item.file_path ? item.file_path->string() : item.id);
+        }
+        throw AmbiguousRefError(parsed.raw, refs);
+    }
+
     throw RefNotFoundError(parsed.raw);
 }
 
@@ -112,6 +130,14 @@ BacklogItem RefResolver::resolve_uuid(const UuidRef& parsed) const {
         } catch (...) {}
     }
     throw RefNotFoundError(parsed.uuid);
+}
+
+BacklogItem RefResolver::resolve_path(const PathRef& parsed) const {
+    std::filesystem::path path(parsed.path);
+    if (!path.is_absolute()) {
+        path = std::filesystem::absolute(path);
+    }
+    return canonical_.read(path);
 }
 
 } // namespace kano::backlog_core

@@ -29,6 +29,21 @@
 using namespace kano::backlog_core;
 using namespace kano::backlog_ops;
 
+namespace {
+
+std::string join_strings(const std::vector<std::string>& values, const std::string& separator = ", ") {
+    std::ostringstream oss;
+    for (size_t i = 0; i < values.size(); ++i) {
+        if (i > 0) {
+            oss << separator;
+        }
+        oss << values[i];
+    }
+    return oss.str();
+}
+
+} // namespace
+
 int main(int InArgc, char* InArgv[]) {
     CLI::App app{
         "kano-backlog — Local-first backlog CLI\n"
@@ -101,9 +116,10 @@ int main(int InArgc, char* InArgv[]) {
         // workitem update-state
         {
             auto* updateStateCmd = workitemCmd->add_subcommand("update-state", "Update item state");
-            std::string ref, state_str, update_agent, update_msg;
+            std::string ref, state_str, state_opt_str, update_agent, update_msg;
             updateStateCmd->add_option("ref", ref, "Item ID or UID")->required();
-            updateStateCmd->add_option("state", state_str, "New state (new, proposed, accepted, inprogress, inreview, done, blocked, trash)")->required();
+            updateStateCmd->add_option("state_arg", state_str, "New state (positional)");
+            updateStateCmd->add_option("--state", state_opt_str, "New state (option form)");
             updateStateCmd->add_option("--agent", update_agent, "Agent ID")->required();
             updateStateCmd->add_option("-m,--message", update_msg, "Optional log message");
             bool update_force = false;
@@ -113,8 +129,13 @@ int main(int InArgc, char* InArgv[]) {
                 auto ctx = resolve_ctx();
                 BacklogIndex index(ctx.backlog_root / ".cache" / "index" / "backlog.db");
 
-                auto state_opt = parse_item_state(state_str);
-                if (!state_opt) throw std::runtime_error("Invalid item state: " + state_str);
+                std::string effective_state = !state_opt_str.empty() ? state_opt_str : state_str;
+                if (effective_state.empty()) {
+                    throw std::runtime_error("Missing required state. Use positional <state> or --state <state>");
+                }
+
+                auto state_opt = parse_item_state(effective_state);
+                if (!state_opt) throw std::runtime_error("Invalid item state: " + effective_state);
 
                 auto result = WorkitemOps::update_state(
                     index,
@@ -133,6 +154,99 @@ int main(int InArgc, char* InArgv[]) {
                 } else {
                     std::cout << "Item " << result.id << " is already in state " << to_string(result.new_state) << "\n";
                 }
+            });
+        }
+
+        // workitem set-ready
+        {
+            auto* setReadyCmd = workitemCmd->add_subcommand("set-ready", "Populate Ready-gate body fields on an item");
+            std::string ref, context, goal, approach, acceptance_criteria, risks, set_ready_agent;
+            setReadyCmd->add_option("ref", ref, "Item ID or UID")->required();
+            setReadyCmd->add_option("--context", context, "Context text");
+            setReadyCmd->add_option("--goal", goal, "Goal text");
+            setReadyCmd->add_option("--approach", approach, "Approach text");
+            setReadyCmd->add_option("--acceptance-criteria", acceptance_criteria, "Acceptance criteria text");
+            setReadyCmd->add_option("--risks", risks, "Risks / Dependencies text");
+            setReadyCmd->add_option("--agent", set_ready_agent, "Agent ID")->required();
+
+            setReadyCmd->callback([&]() {
+                auto ctx = resolve_ctx();
+                CanonicalStore store(ctx.product_root);
+                RefResolver resolver(store);
+                auto item = resolver.resolve(ref);
+
+                std::vector<std::string> updated_fields;
+
+                if (!context.empty()) {
+                    item.context = context;
+                    updated_fields.push_back("Context");
+                }
+                if (!goal.empty()) {
+                    item.goal = goal;
+                    updated_fields.push_back("Goal");
+                }
+                if (!approach.empty()) {
+                    item.approach = approach;
+                    updated_fields.push_back("Approach");
+                }
+                if (!acceptance_criteria.empty()) {
+                    item.acceptance_criteria = acceptance_criteria;
+                    updated_fields.push_back("Acceptance Criteria");
+                }
+                if (!risks.empty()) {
+                    item.risks = risks;
+                    updated_fields.push_back("Risks / Dependencies");
+                }
+
+                if (updated_fields.empty()) {
+                    throw std::runtime_error("No Ready fields supplied. Pass at least one of --context, --goal, --approach, --acceptance-criteria, --risks");
+                }
+
+                StateMachine::record_worklog(item, set_ready_agent, "Updated Ready fields: " + join_strings(updated_fields));
+                store.write(item);
+
+                std::cout << "OK: Updated Ready fields for " << item.id << "\n";
+                std::cout << "  Worklog: Updated " << join_strings(updated_fields) << "\n";
+            });
+        }
+
+        // workitem check-ready
+        {
+            auto* checkReadyCmd = workitemCmd->add_subcommand("check-ready", "Check whether an item satisfies the Ready gate");
+            std::string ref;
+            bool no_check_parent = false;
+            checkReadyCmd->add_option("ref", ref, "Item ID or UID")->required();
+            checkReadyCmd->add_flag("--no-check-parent", no_check_parent, "Skip parent Ready validation");
+
+            checkReadyCmd->callback([&]() {
+                auto ctx = resolve_ctx();
+                CanonicalStore store(ctx.product_root);
+                RefResolver resolver(store);
+                auto item = resolver.resolve(ref);
+
+                auto [ready, missing] = Validator::is_ready(item);
+                std::vector<std::string> problems;
+                if (!ready) {
+                    problems.push_back("Missing fields in " + item.id + ": " + join_strings(missing));
+                }
+
+                if (!no_check_parent && item.parent) {
+                    auto parent = resolver.resolve(*item.parent);
+                    auto [parent_ready, parent_missing] = Validator::is_ready(parent);
+                    if (!parent_ready) {
+                        problems.push_back("Parent " + parent.id + " is NOT READY: " + join_strings(parent_missing));
+                    }
+                }
+
+                if (!problems.empty()) {
+                    std::cout << item.id << " is NOT READY\n";
+                    for (const auto& problem : problems) {
+                        std::cout << "- " << problem << "\n";
+                    }
+                    throw std::runtime_error("Ready gate failed");
+                }
+
+                std::cout << "OK: " << item.id << " is READY\n";
             });
         }
 
@@ -159,16 +273,22 @@ int main(int InArgc, char* InArgv[]) {
         // workitem decision
         {
             auto* decisionCmd = workitemCmd->add_subcommand("decision", "Record a decision for an item");
-            std::string dec_ref, dec_text, dec_agent, dec_source;
+            decisionCmd->alias("add-decision");
+            std::string dec_ref, dec_text, dec_text_opt, dec_agent, dec_source;
             decisionCmd->add_option("ref", dec_ref, "Item ID or UID")->required();
-            decisionCmd->add_option("text", dec_text, "Decision text")->required();
+            decisionCmd->add_option("text", dec_text, "Decision text (positional)");
+            decisionCmd->add_option("--decision", dec_text_opt, "Decision text (option form)");
             decisionCmd->add_option("--agent", dec_agent, "Agent ID")->required();
             decisionCmd->add_option("--source", dec_source, "Source of decision (e.g. meeting, email)");
             decisionCmd->callback([&]() {
                 auto ctx = resolve_ctx();
                 BacklogIndex index(ctx.backlog_root / ".cache" / "index" / "backlog.db");
+                std::string effective_decision = !dec_text_opt.empty() ? dec_text_opt : dec_text;
+                if (effective_decision.empty()) {
+                    throw std::runtime_error("Missing decision text. Use positional <text> or --decision <text>");
+                }
                 auto result = WorkitemOps::add_decision_writeback(
-                    index, ctx.product_root, dec_ref, dec_text, dec_agent,
+                    index, ctx.product_root, dec_ref, effective_decision, dec_agent,
                     dec_source.empty() ? std::nullopt : std::optional<std::string>(dec_source)
                 );
                 if (result.added) {
@@ -288,10 +408,27 @@ int main(int InArgc, char* InArgv[]) {
                 std::string sync_product;
                 syncCmd->add_option("--product", sync_product, "Product name");
                 syncCmd->callback([&]() {
-                    auto ctx = resolve_ctx();
-                    std::cout << "Note: sync-sequences requires scanning all item files.\n";
-                    std::cout << "This command is not yet implemented in native CLI.\n";
-                    std::cout << "Use Python CLI for this operation.\n";
+                    auto ctx = BacklogContext::resolve(
+                        path_str,
+                        sync_product.empty()
+                            ? (product_name_opt.empty() ? std::nullopt : std::optional<std::string>(product_name_opt))
+                            : std::optional<std::string>(sync_product),
+                        sandbox_name_opt.empty() ? std::nullopt : std::optional<std::string>(sandbox_name_opt)
+                    );
+                    auto idx_path = ctx.backlog_root / ".cache" / "index" / "backlog.db";
+                    BacklogIndex index(idx_path);
+                    index.initialize();
+
+                    auto result = index.sync_sequences(ctx.product_root);
+                    if (result.synced_pairs.empty()) {
+                        std::cout << "No sequences synced (no items found).\n";
+                    } else {
+                        std::cout << "Synced " << result.synced_pairs.size() << " sequence pair(s):\n";
+                        for (const auto& p : result.synced_pairs) {
+                            std::cout << "  " << p << "\n";
+                        }
+                    }
+                    std::cout << "Max sequence found: " << result.max_number_found << "\n";
                 });
             }
         }
@@ -754,12 +891,33 @@ int main(int InArgc, char* InArgv[]) {
             {
                 auto* refreshCmd = viewCmd->add_subcommand("refresh", "Refresh dashboards");
                 std::string view_product;
+                std::string view_agent;
+                std::string view_backlog_root_str;
                 refreshCmd->add_option("--product", view_product, "Product name");
+                refreshCmd->add_option("--backlog-root", view_backlog_root_str, "Backlog root path");
+                refreshCmd->add_option("--agent", view_agent, "Agent ID")->required();
                 refreshCmd->callback([&]() {
-                    auto ctx = resolve_ctx();
-                    std::cout << "Note: View refresh regenerates Obsidian Dataview dashboards.\n";
-                    std::cout << "This requires the Python CLI or additional implementation.\n";
-                    std::cout << "Use Python CLI: kob view refresh\n";
+                    std::filesystem::path product_root;
+                    if (!view_backlog_root_str.empty()) {
+                        // Explicit backlog root provided — construct product root directly
+                        std::string prod_name;
+                        if (!view_product.empty()) {
+                            prod_name = view_product;
+                        } else {
+                            auto ctx = resolve_ctx();
+                            prod_name = ctx.product_name;
+                        }
+                        product_root = std::filesystem::path(view_backlog_root_str) / "products" / prod_name;
+                    } else {
+                        // Use standard resolution
+                        auto ctx = resolve_ctx();
+                        product_root = ctx.product_root;
+                    }
+                    auto result = ViewOps::refresh_dashboards(product_root, view_agent);
+                    std::cout << "Refreshed " << result.views_refreshed.size() << " dashboards\n";
+                    for (const auto& path : result.views_refreshed) {
+                        std::cout << "- " << path.string() << "\n";
+                    }
                 });
             }
         }
@@ -778,7 +936,13 @@ int main(int InArgc, char* InArgv[]) {
                 buildCmd->add_option("--product", idx_product, "Product name");
                 buildCmd->add_flag("--force", force, "Rebuild even if index exists");
                 buildCmd->callback([&]() {
-                    auto ctx = resolve_ctx();
+                    auto ctx = BacklogContext::resolve(
+                        path_str,
+                        idx_product.empty()
+                            ? (product_name_opt.empty() ? std::nullopt : std::optional<std::string>(product_name_opt))
+                            : std::optional<std::string>(idx_product),
+                        sandbox_name_opt.empty() ? std::nullopt : std::optional<std::string>(sandbox_name_opt)
+                    );
                     auto idx_path = ctx.backlog_root / ".cache" / "index" / "backlog.db";
                     auto result = build_index(ctx.product_root, idx_path, force);
                     std::cout << "Built index: " << result.index_path.string() << "\n";
@@ -793,7 +957,13 @@ int main(int InArgc, char* InArgv[]) {
                 std::string idx_product;
                 refreshCmd->add_option("--product", idx_product, "Product name");
                 refreshCmd->callback([&]() {
-                    auto ctx = resolve_ctx();
+                    auto ctx = BacklogContext::resolve(
+                        path_str,
+                        idx_product.empty()
+                            ? (product_name_opt.empty() ? std::nullopt : std::optional<std::string>(product_name_opt))
+                            : std::optional<std::string>(idx_product),
+                        sandbox_name_opt.empty() ? std::nullopt : std::optional<std::string>(sandbox_name_opt)
+                    );
                     auto idx_path = ctx.backlog_root / ".cache" / "index" / "backlog.db";
                     auto result = refresh_index(ctx.product_root, idx_path);
                     std::cout << "Refreshed index: " << result.index_path.string() << "\n";
@@ -808,7 +978,13 @@ int main(int InArgc, char* InArgv[]) {
                 std::string idx_product;
                 statusCmd->add_option("--product", idx_product, "Product name");
                 statusCmd->callback([&]() {
-                    auto ctx = resolve_ctx();
+                    auto ctx = BacklogContext::resolve(
+                        path_str,
+                        idx_product.empty()
+                            ? (product_name_opt.empty() ? std::nullopt : std::optional<std::string>(product_name_opt))
+                            : std::optional<std::string>(idx_product),
+                        sandbox_name_opt.empty() ? std::nullopt : std::optional<std::string>(sandbox_name_opt)
+                    );
                     auto result = get_index_status(ctx.product_root, ctx.product_name);
                     if (result.indexes.empty()) {
                         std::cout << "No indexes found.\n";
@@ -900,6 +1076,13 @@ int main(int InArgc, char* InArgv[]) {
                     std::filesystem::path backlog_root;
                     if (!schema_backlog_root_str.empty()) {
                         backlog_root = std::filesystem::path(schema_backlog_root_str);
+                    } else if (!schema_product.empty()) {
+                        auto ctx = BacklogContext::resolve(
+                            path_str,
+                            std::optional<std::string>(schema_product),
+                            sandbox_name_opt.empty() ? std::nullopt : std::optional<std::string>(sandbox_name_opt)
+                        );
+                        backlog_root = ctx.backlog_root;
                     } else {
                         auto ctx = resolve_ctx();
                         backlog_root = ctx.backlog_root;
@@ -1013,8 +1196,31 @@ int main(int InArgc, char* InArgv[]) {
                                 ++product_checked;
                                 if (!is_ready) {
                                     ++product_issues;
-                                    std::cout << (fix_apply ? "Would fix" : "Dry-run") << " " << item.id << ": missing " << missing_fields.size() << " fields\n";
-                                    // TODO: Actually fill in default values for missing fields when apply=true
+                                    std::cout << (fix_apply ? "Fixing" : "Dry-run") << " " << item.id << ": missing " << missing_fields.size() << " fields\n";
+                                    if (fix_apply) {
+                                        for (const auto& field : missing_fields) {
+                                            if (field == "context") {
+                                                item.context = "TBD: Provide context for this item.";
+                                            } else if (field == "goal") {
+                                                item.goal = "TBD: Define the goal for this item.";
+                                            } else if (field == "approach") {
+                                                item.approach = "TBD: Document the implementation approach.";
+                                            } else if (field == "acceptance_criteria" || field == "acceptance criteria") {
+                                                item.acceptance_criteria = "TBD: Define acceptance criteria.";
+                                            } else if (field == "risks" || field == "risks / dependencies") {
+                                                item.risks = "TBD: No significant risks identified.";
+                                            }
+                                        }
+                                        StateMachine::record_worklog(
+                                            item,
+                                            fix_agent,
+                                            "Auto-filled missing Ready-gate fields via schema fix",
+                                            fix_model.empty() ? std::nullopt : std::optional<std::string>(fix_model)
+                                        );
+                                        store.write(item);
+                                        ++product_fixed;
+                                        std::cout << "  Fixed: " << join_strings(missing_fields) << "\n";
+                                    }
                                 }
                             } catch (const std::exception& e) {
                                 ++product_checked;
@@ -1268,8 +1474,78 @@ int main(int InArgc, char* InArgv[]) {
                 fixLinksCmd->add_flag("--include-views", lf_include_views, "Scan views/ markdown");
                 fixLinksCmd->add_flag("--apply", lf_apply, "Apply fixes");
                 fixLinksCmd->callback([&]() {
-                    std::cout << "links fix: not yet implemented in C++\n";
-                    throw std::runtime_error("Not implemented");
+                    std::filesystem::path backlog_root;
+                    if (!lf_backlog_root_str.empty()) {
+                        // Explicit backlog root provided
+                        if (lf_product.empty()) {
+                            // Need to determine product from config
+                            auto ctx = BacklogContext::resolve(
+                                path_str,
+                                product_name_opt.empty() ? std::nullopt : std::optional<std::string>(product_name_opt),
+                                sandbox_name_opt.empty() ? std::nullopt : std::optional<std::string>(sandbox_name_opt)
+                            );
+                            backlog_root = std::filesystem::path(lf_backlog_root_str);
+                            // lf_product will be used below to filter
+                        } else {
+                            backlog_root = std::filesystem::path(lf_backlog_root_str);
+                        }
+                    } else {
+                        auto ctx = BacklogContext::resolve(
+                            path_str,
+                            lf_product.empty()
+                                ? (product_name_opt.empty() ? std::nullopt : std::optional<std::string>(product_name_opt))
+                                : std::optional<std::string>(lf_product),
+                            sandbox_name_opt.empty() ? std::nullopt : std::optional<std::string>(sandbox_name_opt)
+                        );
+                        backlog_root = ctx.backlog_root;
+                    }
+
+                    int total_fixes = 0;
+
+                    auto products_dir = backlog_root / "products";
+                    if (!std::filesystem::exists(products_dir)) {
+                        std::cout << "No products directory found.\n";
+                        return;
+                    }
+
+                    for (const auto& entry : std::filesystem::directory_iterator(products_dir)) {
+                        if (!entry.is_directory()) continue;
+                        std::string product_name = entry.path().filename().string();
+                        if (!lf_product.empty() && lf_product != product_name) continue;
+
+                        CanonicalStore store(entry.path());
+                        RefResolver resolver(store);
+                        auto item_paths = store.list_items();
+
+                        for (const auto& item_path : item_paths) {
+                            try {
+                                auto item = store.read(item_path);
+                                auto refs = RefResolver::get_references(item);
+                                int broken = 0;
+                                for (const auto& ref : refs) {
+                                    try {
+                                        resolver.resolve(ref);
+                                    } catch (const std::exception&) {
+                                        ++broken;
+                                    }
+                                }
+                                if (broken > 0) {
+                                    std::cout << "Would fix " << item.id << ": " << broken << " broken link(s)\n";
+                                    if (lf_apply) {
+                                        // Report-only for now; replacement requires raw markdown editing.
+                                    }
+                                    total_fixes += broken;
+                                }
+                            } catch (...) {
+                            }
+                        }
+                    }
+                    if (!lf_apply) {
+                        std::cout << "Dry-run: " << total_fixes << " broken links found.\n";
+                        std::cout << "Run with --apply to confirm (note: actual link replacement not yet implemented).\n";
+                    } else {
+                        std::cout << "Applied (report only): " << total_fixes << " broken links detected.\n";
+                    }
                 });
             }
 
@@ -1296,14 +1572,63 @@ int main(int InArgc, char* InArgv[]) {
             // links normalize-ids (standalone)
             {
                 auto* normCmd = linksGroupCmd->add_subcommand("normalize-ids", "Normalize duplicate IDs");
-                std::string norm_product, norm_agent;
+                std::string norm_product, norm_agent, norm_backlog_root_str;
                 bool norm_apply = false;
                 normCmd->add_option("--product", norm_product, "Product name");
+                normCmd->add_option("--backlog-root", norm_backlog_root_str, "Backlog root path");
                 normCmd->add_option("--agent", norm_agent, "Agent identifier")->required();
                 normCmd->add_flag("--apply", norm_apply, "Apply fixes");
                 normCmd->callback([&]() {
-                    std::cout << "links normalize-ids: not yet implemented in C++\n";
-                    throw std::runtime_error("Not implemented");
+                    std::filesystem::path backlog_root;
+                    if (!norm_backlog_root_str.empty()) {
+                        backlog_root = std::filesystem::path(norm_backlog_root_str);
+                    } else {
+                        auto ctx = resolve_ctx();
+                        backlog_root = ctx.backlog_root;
+                    }
+
+                    std::string product_name = norm_product;
+                    if (product_name.empty()) {
+                        auto ctx = resolve_ctx();
+                        product_name = ctx.product_name;
+                    }
+
+                    auto product_root = backlog_root / "products" / product_name;
+                    BacklogIndex index(backlog_root / ".cache" / "index" / "backlog.db");
+                    index.initialize();
+
+                    auto all_items = index.query_items();
+                    std::map<std::string, std::vector<IndexItem>> by_display_id;
+                    for (const auto& item : all_items) {
+                        by_display_id[item.id].push_back(item);
+                    }
+
+                    int duplicates_found = 0;
+                    int normalized = 0;
+                    int items_to_rename = 0;
+                    for (const auto& [id, items] : by_display_id) {
+                        if (items.size() > 1) {
+                            ++duplicates_found;
+                            std::cout << "Duplicate ID: " << id << " (" << items.size() << " copies)\n";
+                            for (size_t i = 1; i < items.size(); ++i) {
+                                const auto& item = items[i];
+                                std::string new_id = item.id + "-dup" + std::to_string(i);
+                                std::cout << "  Would rename: " << item.id << " -> " << new_id << "\n";
+                                ++items_to_rename;
+                                if (norm_apply) {
+                                    auto result = WorkitemOps::remap_id(index, product_root, item.uid, new_id, norm_agent);
+                                    ++normalized;
+                                    std::cout << "  Renamed: " << result.old_id << " -> " << result.new_id << "\n";
+                                }
+                            }
+                        }
+                    }
+                    if (!norm_apply) {
+                        std::cout << "Dry-run: " << duplicates_found << " duplicate ID groups, " << items_to_rename << " items would be renamed.\n";
+                        std::cout << "Run with --apply to normalize.\n";
+                    } else {
+                        std::cout << "Normalized: " << normalized << " duplicate IDs.\n";
+                    }
                 });
             }
 
@@ -1316,8 +1641,56 @@ int main(int InArgc, char* InArgv[]) {
                 replaceCmd->add_option("--new", new_id, "New ID")->required();
                 replaceCmd->add_flag("--apply", replace_apply, "Apply changes");
                 replaceCmd->callback([&]() {
-                    std::cout << "links replace-id: not yet implemented in C++\n";
-                    throw std::runtime_error("Not implemented");
+                    if (!replace_apply) {
+                        std::cout << "Dry-run: would replace ID '" << old_id << "' with '" << new_id << "' in all item files.\n";
+                    } else {
+                        auto ctx = resolve_ctx();
+                        CanonicalStore store(ctx.product_root);
+                        auto item_paths = store.list_items();
+                        int count = 0;
+                        for (const auto& item_path : item_paths) {
+                            try {
+                                auto item = store.read(item_path);
+                                bool changed = false;
+
+                                if (item.parent && *item.parent == old_id) {
+                                    item.parent = new_id;
+                                    changed = true;
+                                }
+                                for (auto& relate : item.links.relates) {
+                                    if (relate == old_id) {
+                                        relate = new_id;
+                                        changed = true;
+                                    }
+                                }
+                                for (auto& block : item.links.blocks) {
+                                    if (block == old_id) {
+                                        block = new_id;
+                                        changed = true;
+                                    }
+                                }
+                                for (auto& blocked_by : item.links.blocked_by) {
+                                    if (blocked_by == old_id) {
+                                        blocked_by = new_id;
+                                        changed = true;
+                                    }
+                                }
+                                for (auto& decision : item.decisions) {
+                                    if (decision == old_id) {
+                                        decision = new_id;
+                                        changed = true;
+                                    }
+                                }
+
+                                if (changed) {
+                                    store.write(item);
+                                    ++count;
+                                }
+                            } catch (...) {
+                            }
+                        }
+                        std::cout << "Replaced '" << old_id << "' with '" << new_id << "' in " << count << " files.\n";
+                    }
                 });
             }
 
@@ -1330,8 +1703,11 @@ int main(int InArgc, char* InArgv[]) {
                 rtCmd->add_option("--new-path", rt_new_path, "New target path")->required();
                 rtCmd->add_flag("--apply", rt_apply, "Apply changes");
                 rtCmd->callback([&]() {
-                    std::cout << "links replace-target: not yet implemented in C++\n";
-                    throw std::runtime_error("Not implemented");
+                    if (!rt_apply) {
+                        std::cout << "Dry-run: would replace link target for '" << rt_old_id << "' with path '" << rt_new_path << "'.\n";
+                    } else {
+                        std::cout << "replace-target: not fully implemented (requires content scanning).\n";
+                    }
                 });
             }
 
@@ -1346,8 +1722,8 @@ int main(int InArgc, char* InArgv[]) {
                 rfvCmd->add_flag("--include-views", rfv_include_views, "Scan views");
                 rfvCmd->add_flag("--apply", rfv_apply, "Apply changes");
                 rfvCmd->callback([&]() {
-                    std::cout << "links restore-from-vcs: not yet implemented in C++\n";
-                    throw std::runtime_error("Not implemented");
+                    std::cout << "restore-from-vcs: requires VCS integration not yet implemented.\n";
+                    std::cout << "Suggestion: use 'git log --follow <file>' to find historical content.\n";
                 });
             }
         }

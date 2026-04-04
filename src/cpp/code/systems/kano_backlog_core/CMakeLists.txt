@@ -53,8 +53,8 @@ target_include_directories(kano_backlog_core
 )
 
 target_link_libraries(kano_backlog_core PUBLIC
+    KanoInfra::config
     KanoInfra::build_info
-    tomlplusplus::tomlplusplus
     yaml-cpp
 )
 

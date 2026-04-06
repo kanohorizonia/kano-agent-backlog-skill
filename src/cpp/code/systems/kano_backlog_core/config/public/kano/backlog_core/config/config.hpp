@@ -109,6 +109,7 @@ public:
 class ConfigLoader {
 public:
     static std::optional<std::filesystem::path> find_project_config(const std::filesystem::path& start_path);
+    static std::optional<std::filesystem::path> resolve_project_root(const std::filesystem::path& config_file_path);
 };
 
 } // namespace kano::backlog_core

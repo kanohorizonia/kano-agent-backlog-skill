@@ -41,6 +41,7 @@ private:
     BacklogItem resolve_display_id(const DisplayIdRef& parsed) const;
     BacklogItem resolve_adr(const AdrRef& parsed) const;
     BacklogItem resolve_uuid(const UuidRef& parsed) const;
+    BacklogItem resolve_path(const PathRef& parsed) const;
 };
 
 } // namespace kano::backlog_core

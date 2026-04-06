@@ -5,6 +5,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 export KANO_CPP_ROOT="$SKILL_ROOT/src/cpp"
 
+# Delegate to expert skill for canonical build infrastructure (prerequisites, vcvarsall, etc.)
+export KOG_EXPERT_SKILL_ROOT="C:/Users/dorgon.chang/.agents/skills/kano/kano-cpp-expert-skill"
+export KOG_CPP_ROOT="$KANO_CPP_ROOT"
+
 usage() {
   cat <<'EOF'
 Usage: self-build.sh [debug|release]

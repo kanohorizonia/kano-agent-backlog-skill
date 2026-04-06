@@ -5,8 +5,13 @@
 #include <string>
 #include <vector>
 #include <optional>
+#include <filesystem>
 
 namespace kano::backlog_ops {
+
+struct RefreshDashboardsResult {
+    std::vector<std::filesystem::path> views_refreshed;
+};
 
 struct ViewFilter {
     std::optional<kano::backlog_core::ItemType> type;
@@ -31,6 +36,14 @@ public:
      * Render a simple ASCII table of items for CLI output.
      */
     static std::string render_table(const std::vector<IndexItem>& items);
+
+    /**
+     * Refresh plain markdown dashboards from canonical files.
+     */
+    static RefreshDashboardsResult refresh_dashboards(
+        const std::filesystem::path& product_root,
+        const std::string& agent
+    );
 };
 
 } // namespace kano::backlog_ops

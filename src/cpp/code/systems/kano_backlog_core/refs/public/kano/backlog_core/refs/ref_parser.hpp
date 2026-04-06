@@ -11,6 +11,7 @@ enum class RefType {
     DisplayId,
     Adr,
     Uuid,
+    Path,
     Unknown
 };
 
@@ -32,7 +33,12 @@ struct UuidRef {
     std::string raw;
 };
 
-using ParsedRef = std::variant<DisplayIdRef, AdrRef, UuidRef>;
+struct PathRef {
+    std::string path;
+    std::string raw;
+};
+
+using ParsedRef = std::variant<DisplayIdRef, AdrRef, UuidRef, PathRef>;
 
 class RefParser {
 public:
@@ -42,6 +48,7 @@ public:
     static std::optional<DisplayIdRef> parse_display_id(const std::string& ref);
     static std::optional<AdrRef> parse_adr(const std::string& ref);
     static std::optional<UuidRef> parse_uuid(const std::string& ref);
+    static std::optional<PathRef> parse_path(const std::string& ref);
 };
 
 } // namespace kano::backlog_core

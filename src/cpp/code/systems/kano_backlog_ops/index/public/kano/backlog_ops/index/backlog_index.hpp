@@ -21,6 +21,11 @@ struct IndexItem {
 
 class BacklogIndex {
 public:
+    struct SyncSequencesResult {
+        std::vector<std::string> synced_pairs;
+        int max_number_found;
+    };
+
     explicit BacklogIndex(const std::filesystem::path& db_path);
     ~BacklogIndex();
 
@@ -44,6 +49,11 @@ public:
      * Atomically increments the counter in id_sequences table.
      */
     int get_next_number(const std::string& prefix, const std::string& type_code);
+
+    /**
+     * Scan existing item files and sync sequence counters.
+     */
+    SyncSequencesResult sync_sequences(const std::filesystem::path& product_root);
 
     /**
      * Lookup item path by ID.

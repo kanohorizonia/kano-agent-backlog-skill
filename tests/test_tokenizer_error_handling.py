@@ -368,38 +368,77 @@ class TestPerformanceUnderErrors:
     """Test performance characteristics under error conditions."""
     
     def test_error_handling_performance(self):
-        """Test that error handling doesn't significantly impact performance."""
+        """Test that error handling doesn't significantly impact performance.
+
+        Mocks adapters at the registry level (not module level) to avoid
+        network I/O from HuggingFace's ``from_pretrained`` which can take
+        seconds per call and causes flaky timing failures.  Only tiktoken
+        and huggingface are mocked to fail; heuristic remains as the valid
+        fallback so ``resolve()`` succeeds via the fallback chain.
+        """
         import time
-        
+
         registry = TokenizerRegistry()
-        
-        # Mock adapter that always fails quickly
-        with patch('kano_backlog_core.tokenizer.TiktokenAdapter') as mock_tiktoken:
-            mock_tiktoken.side_effect = ImportError("tiktoken not found")
-            
+
+        # Replace tiktoken and huggingface adapter factories in the registry
+        # with instantly-failing callables.  This mirrors the pattern used by
+        # the other tests in this module and avoids network/disk I/O that the
+        # module-level ``patch()`` cannot prevent (the registry captured the
+        # real class references at construction time).
+        original_adapters = registry._adapters.copy()
+
+        def mock_tiktoken_class(*args, **kwargs):
+            raise ImportError("tiktoken not found")
+
+        def mock_huggingface_class(*args, **kwargs):
+            raise ImportError("transformers not found")
+
+        registry._adapters["tiktoken"] = (mock_tiktoken_class, {})
+        registry._adapters["huggingface"] = (mock_huggingface_class, {})
+
+        try:
             start_time = time.time()
-            
+
             # Multiple fallback attempts should still be fast
             for _ in range(5):
                 try:
                     registry.resolve(adapter_name="tiktoken", model_name="gpt-4")
                 except Exception:
                     pass
-            
+
             elapsed = time.time() - start_time
-            
-            # Should complete quickly even with errors
-            assert elapsed < 1.0  # Less than 1 second for 5 attempts
+
+            # Should complete quickly even with errors -- the fallback chain
+            # (tiktoken fail -> huggingface fail -> heuristic succeed) must
+            # not involve any network or heavy I/O.
+            assert elapsed < 1.0, (
+                f"Fallback chain took {elapsed:.2f}s for 5 iterations "
+                f"(threshold 1.0s). Check for unexpected network or disk I/O "
+                f"in the adapter creation path."
+            )
+        finally:
+            registry._adapters = original_adapters
     
     def test_memory_usage_under_errors(self):
         """Test that error handling doesn't cause memory leaks."""
         import gc
         
         registry = TokenizerRegistry()
-        
-        with patch('kano_backlog_core.tokenizer.TiktokenAdapter') as mock_tiktoken:
-            mock_tiktoken.side_effect = ImportError("tiktoken not found")
-            
+
+        # Mock at the registry level to avoid network I/O from
+        # HuggingFaceAdapter.from_pretrained for unknown model names.
+        original_adapters = registry._adapters.copy()
+
+        def mock_tiktoken_class(*args, **kwargs):
+            raise ImportError("tiktoken not found")
+
+        def mock_huggingface_class(*args, **kwargs):
+            raise ImportError("transformers not found")
+
+        registry._adapters["tiktoken"] = (mock_tiktoken_class, {})
+        registry._adapters["huggingface"] = (mock_huggingface_class, {})
+
+        try:
             # Generate many errors
             for i in range(100):
                 try:
@@ -416,3 +455,5 @@ class TestPerformanceUnderErrors:
             # Should have reasonable limits on stored data
             assert stats["active_recovery_keys"] < 200  # Some reasonable limit
             assert len(registry._error_recovery.degradation_history) < 50  # Reasonable history size
+        finally:
+            registry._adapters = original_adapters

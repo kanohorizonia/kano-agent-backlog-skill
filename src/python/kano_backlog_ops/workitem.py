@@ -212,7 +212,7 @@ def _find_item_paths_by_id(items_root: Path, item_id: str) -> List[Path]:
     found: List[Path] = []
     for path in _iter_item_files(items_root):
         try:
-            post = py_frontmatter.load(path)
+            post = py_frontmatter.load(str(path))
         except Exception:
             continue
         if post.get("id") == item_id:
@@ -229,7 +229,7 @@ def _find_item_paths_by_uid(items_root: Path, uid: str) -> List[Path]:
     found: List[Path] = []
     for path in _iter_item_files(items_root):
         try:
-            post = py_frontmatter.load(path)
+            post = py_frontmatter.load(str(path))
         except Exception:
             continue
         if str(post.get("uid") or "").strip() == uid:
@@ -451,7 +451,7 @@ def _check_uid_uniqueness(uid: str, *, product_root: Path) -> bool:
         if path.name.endswith(".index.md") or path.name == "README.md":
             continue
         try:
-            post = py_frontmatter.load(path)
+            post = py_frontmatter.load(str(path))
             existing_uid = str(post.get("uid") or "").strip()
             if existing_uid == uid:
                 return False
@@ -574,8 +574,11 @@ def create_item(
     type_code = type_code_map[item_type]
     
     next_id = 0
-    ctx, effective = ConfigLoader.load_effective_config(backlog_root, product=product)
-    cache_dir = ConfigLoader.get_chunks_cache_root(ctx.backlog_root, effective)
+    try:
+        ctx, effective = ConfigLoader.load_effective_config(backlog_root, product=product)
+        cache_dir = ConfigLoader.get_chunks_cache_root(ctx.backlog_root, effective)
+    except Exception:
+        cache_dir = ConfigLoader.get_chunks_cache_root(backlog_root)
     db_path = cache_dir / f"backlog.{product}.chunks.v1.db"
     
     try:

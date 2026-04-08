@@ -3,7 +3,11 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Protocol, cast
+
+
+class _ReconfigurableStream(Protocol):
+    def reconfigure(self, *, errors: str) -> None: ...
 
 # Global variable to store custom config file path
 _global_config_file: Optional[Path] = None
@@ -35,7 +39,7 @@ def configure_stdio() -> None:
     for stream in (sys.stdout, sys.stderr):
         try:
             # Keep the current encoding, but make encoding errors non-fatal.
-            stream.reconfigure(errors="replace")
+            cast(_ReconfigurableStream, stream).reconfigure(errors="replace")
         except Exception:
             continue
 
@@ -172,6 +176,42 @@ def resolve_product_root(
     Only project-level configs (.kano/backlog_config.toml) are used.
     """
     try:
+        if backlog_root_override:
+            override_root = resolve_backlog_root(
+                start=start,
+                backlog_root_override=backlog_root_override,
+            )
+
+            if (override_root / "items").exists():
+                return override_root
+
+            if product:
+                override_product_root = override_root / "products" / product
+                if override_product_root.exists() and (override_product_root / "items").exists():
+                    return override_product_root
+
+                raise SystemExit(
+                    f"Product '{product}' not found under backlog root override: {override_root}"
+                )
+
+            product_roots = [
+                path
+                for path in (override_root / "products").iterdir()
+                if path.is_dir() and (path / "items").exists()
+            ] if (override_root / "products").exists() else []
+
+            if len(product_roots) == 1:
+                return product_roots[0]
+            if len(product_roots) > 1:
+                names = ", ".join(sorted(path.name for path in product_roots))
+                raise SystemExit(
+                    f"Multiple products found under backlog root override; specify --product: {names}"
+                )
+
+            raise SystemExit(
+                f"No product roots found under backlog root override: {override_root}"
+            )
+
         ensure_core_on_path()
         from kano_backlog_core.config import ConfigLoader
         from kano_backlog_core.project_config import ProjectConfigLoader
@@ -233,7 +273,7 @@ def find_item_path_by_id(items_root: Path, display_id: str) -> Path:
         if path.name.endswith(".index.md"):
             continue  # Skip index files
         try:
-            post = frontmatter.load(path)
+            post = frontmatter.load(str(path))
             if post.get("id") == display_id:
                 return path
         except Exception:

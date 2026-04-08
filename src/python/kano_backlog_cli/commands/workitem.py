@@ -228,7 +228,7 @@ def _run_create_command(
             effective_product = ctx.product_name
         product_to_use = effective_product or product
 
-        if not skip_sequence_check:
+        if not skip_sequence_check and backlog_root_override is None:
             from kano_backlog_ops import item_utils
 
             db_path, status_map = item_utils.check_sequence_health(
@@ -251,10 +251,10 @@ def _run_create_command(
                 )
                 if auto_sync:
                     item_utils.sync_id_sequences(
-                product=effective_product,
-                backlog_root=None,
-                dry_run=False,
-            )
+                        product=effective_product,
+                        backlog_root=None,
+                        dry_run=False,
+                    )
                     typer.echo("DB sequences synced automatically")
                     try:
                         from kano_backlog_core.audit import AuditLog
@@ -393,6 +393,7 @@ def set_ready(
     item = store.read(item_path)
 
     updated_fields = []
+    fields_str = ""
     if context is not None:
         item.context = context
         updated_fields.append("Context")

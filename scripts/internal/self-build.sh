@@ -13,7 +13,7 @@ usage() {
   cat <<'EOF'
 Usage: self-build.sh [debug|release]
 
-Build the active native kob surface for this demo repo using shared/infra directly.
+Build the active native kob surface for this demo repo using src/cpp/scripts.
 EOF
 }
 
@@ -24,26 +24,26 @@ case "$MODE" in
   *) echo "Unsupported mode: $MODE" >&2; usage >&2; exit 1 ;;
 esac
 
-INFRA_DIR="$SKILL_ROOT/src/cpp/shared/infra/scripts"
+CPP_SCRIPTS_DIR="$SKILL_ROOT/src/cpp/scripts"
 
 case "$(uname -s 2>/dev/null || printf 'unknown')" in
   MINGW*|MSYS*|CYGWIN*)
     if [[ "$MODE" == "release" ]]; then
-      exec bash "$INFRA_DIR/windows/ninja-msvc-release.sh"
+      exec bash "$CPP_SCRIPTS_DIR/windows/ninja-msvc-release.sh"
     fi
-    exec bash "$INFRA_DIR/windows/ninja-msvc-debug.sh"
+    exec bash "$CPP_SCRIPTS_DIR/windows/ninja-msvc-debug.sh"
     ;;
   Linux)
     if [[ "$MODE" == "release" ]]; then
-      exec bash "$INFRA_DIR/linux/native-build.sh" linux-ninja-gcc linux-ninja-gcc-release KANO
+      exec bash "$CPP_SCRIPTS_DIR/linux/ninja-gcc-release.sh"
     fi
-    exec bash "$INFRA_DIR/linux/native-build.sh" linux-ninja-gcc linux-ninja-gcc-debug KANO
+    exec bash "$CPP_SCRIPTS_DIR/linux/ninja-gcc-debug.sh"
     ;;
   Darwin)
     if [[ "$MODE" == "release" ]]; then
-      exec bash "$INFRA_DIR/macos/native-build.sh" macos-ninja-clang macos-ninja-clang-release KOG
+      exec bash "$CPP_SCRIPTS_DIR/macos/ninja-clang-x64-release.sh"
     fi
-    exec bash "$INFRA_DIR/macos/native-build.sh" macos-ninja-clang macos-ninja-clang-debug KOG
+    exec bash "$CPP_SCRIPTS_DIR/macos/ninja-clang-x64-debug.sh"
     ;;
   *)
     echo "Unsupported platform for self-build." >&2

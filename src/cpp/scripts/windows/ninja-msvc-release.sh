@@ -1,20 +1,9 @@
 #!/usr/bin/env bash
-# =============================================================================
-# ninja-msvc-release.sh — Windows MSVC Release build
-# =============================================================================
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BACKLOG_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
-SRC_CPP="$BACKLOG_ROOT/src/cpp"
+export KOG_CPP_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-source "$SRC_CPP/scripts/common/env.sh"
-source "$SRC_CPP/scripts/windows/prerequisite_windows.sh"
+source "$SCRIPT_DIR/../common/windows_preset_build.sh"
 
-: "${KOG_CONFIG:=Release}"
-: "${KOG_PRESET_NAME:=windows-ninja-msvc}"
-
-BUILD_DIR="$SRC_CPP/out/obj/$KOG_PRESET_NAME"
-
-cmake --preset "$KOG_PRESET_NAME" -B "$BUILD_DIR" -S "$SRC_CPP"
-cmake --build "$BUILD_DIR" --config "$KOG_CONFIG" --parallel
+kog_run_windows_preset "windows-ninja-msvc" "windows-ninja-msvc-release" "x64"

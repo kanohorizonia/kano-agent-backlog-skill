@@ -1627,6 +1627,7 @@ def merge_topics_cmd(
             target_topic,
             source_topics,
             agent=agent,
+            backlog_root=_get_backlog_root_override(),
             dry_run=dry_run,
             create_snapshots=not no_snapshots,
             delete_source_topics=delete_sources,

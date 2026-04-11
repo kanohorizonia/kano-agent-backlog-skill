@@ -90,6 +90,9 @@ from .commands import adr as adr_cmd  # noqa: E402
 from .commands import schema as schema_cmd  # noqa: E402
 from .commands import meta as meta_cmd  # noqa: E402
 from .commands import workset as workset_cmd  # noqa: E402
+from .commands import evidence as evidence_cmd  # noqa: E402
+from .commands import assumptions as assumptions_cmd  # noqa: E402
+from .commands import inspect as inspect_cmd  # noqa: E402
 from .commands import topic as topic_cmd  # noqa: E402
 from .commands import config_cmd as config_cmd  # noqa: E402
 from .commands import snapshot as snapshot_cmd  # noqa: E402
@@ -111,6 +114,9 @@ app.add_typer(worklog_cmd.app, name="worklog", help="Worklog operations")
 app.add_typer(view_cmd.app, name="view", help="View and dashboard operations")
 app.add_typer(snapshot_cmd.app, name="snapshot", help="Snapshot and evidence operations")
 app.add_typer(workset_cmd.app, name="workset", help="Workset cache operations")
+app.add_typer(evidence_cmd.app, name="evidence", help="Evidence record operations")
+app.add_typer(assumptions_cmd.app, name="assumptions", help="Assumptions registry operations")
+app.add_typer(inspect_cmd.app, name="inspect", help="Inspector operations")
 app.add_typer(topic_cmd.app, name="topic", help="Topic context operations")
 app.add_typer(config_cmd.app, name="config", help="Config inspection and validation")
 app.add_typer(changelog_cmd.app, name="changelog", help="Changelog generation from backlog")

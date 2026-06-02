@@ -5,7 +5,7 @@ This skill uses **Git tags** as the source of truth for released versions: `vX.Y
 ## Where to check the current version
 
 - File: `VERSION` (the intended version for the next release tag)
-- Command: `python -c "import pathlib; print((pathlib.Path('skills/kano-agent-backlog-skill') / 'VERSION').read_text().strip())"`
+- Command: `python -c "import pathlib; print(pathlib.Path('VERSION').read_text().strip())"`
 - Release notes: `CHANGELOG.md`
 
 ## Pre-1.0 policy
@@ -39,19 +39,19 @@ Non-exhaustive examples:
 - Docs reflect current behavior (`README*`, `REFERENCE.md`, `references/*`)
 - Release notes exist in both locations:
   - `docs/releases/<version>.md`
-  - `skills/kano-agent-backlog-skill/docs/releases/<version>.md`
+  - `docs/releases/<version>.md` in the repo checkout used for release validation
 - Release checks are run and reports are written:
   - Phase1 (version/docs checks):
-    - `python skills/kano-agent-backlog-skill/scripts/kano-backlog admin release check --version <version> --topic release-<version-dashed> --agent <id> --phase phase1 --product kano-agent-backlog-skill`
+    - `bash scripts/kob admin release check --version <version> --topic release-<version-dashed> --agent <id> --phase phase1 --product kano-agent-backlog-skill`
     - Expected report: `_kano/backlog/topics/release-<version-dashed>/publish/release_check_<version>_phase1.md`
   - Phase2 (doctor/pytest/smoke):
-    - `python skills/kano-agent-backlog-skill/scripts/kano-backlog admin release check --version <version> --topic release-<version-dashed> --agent <id> --phase phase2 --product kano-agent-backlog-skill --sandbox release-<version-dashed>-smoke`
+    - `bash scripts/kob admin release check --version <version> --topic release-<version-dashed> --agent <id> --phase phase2 --product kano-agent-backlog-skill --sandbox release-<version-dashed>-smoke`
     - Expected report: `_kano/backlog/topics/release-<version-dashed>/publish/release_check_<version>_phase2.md`
     - Expected artifacts: `_kano/backlog/topics/release-<version-dashed>/publish/phase2_*.txt`
 - Smoke topics must be sandboxed:
   - Smoke topics are disposable and must be created under `_kano/backlog_sandbox/<sandbox>/...`.
   - If you see `release-<version-dashed>-smoke-a/b` under `_kano/backlog/topics/`, delete them and re-run Phase2.
 - Canonical CLI commands run end-to-end:
-  - `python skills/kano-agent-backlog-skill/scripts/kano-backlog view refresh --agent <id>`
-  - `python skills/kano-agent-backlog-skill/scripts/kano-backlog workitem update-state <item> --state Done --agent <id>`
+  - `bash scripts/kob view refresh --agent <id>`
+  - `bash scripts/kob workitem update-state <item> --state Done --agent <id>`
 - Demo views are regenerated

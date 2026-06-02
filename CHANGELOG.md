@@ -16,26 +16,16 @@ Latest released OSS version: `0.0.2`.
 
 ### Overview
 
-**Future alpha milestone** - Planned transition from pre-alpha development tool to a broader distributable package milestone. These notes are retained as forward-looking planning, not as a released or currently tagged OSS version.
+**Future alpha milestone** - Native parity and broader release-hardening planning retained as forward-looking notes, not as a released or currently tagged OSS version.
 
 **Status**: Future / internal planning. API and packaging details may change before a `0.1.0` release is actually prepared.
 
 ### Added
 
-#### Package Distribution
-- **PyPI Distribution**: Package now available via `pip install kano-agent-backlog-skill`
-- **Console Script**: `kano-backlog` command automatically installed and available in PATH
-- **Python 3.8+ Support**: Compatible with Python 3.8, 3.9, 3.10, 3.11, and 3.12
-- **Modern Packaging**: Uses `pyproject.toml` (PEP 621) with proper metadata and classifiers
-- **Optional Dependencies**: Organized extras groups ([dev], [vector]) for flexible installation
-
-#### Documentation
-- **Quick Start Guide**: 5-10 minute walkthrough covering installation and first backlog creation
-- **Installation Guide**: System requirements, virtual environment setup, and troubleshooting
-- **Configuration Guide**: Profiles, layered config, environment variables, and multi-product setup
-- **Usage Examples**: Copy-paste commands for common workflows
-- **CONTRIBUTING.md**: Development setup, code style guidelines, testing approach, and release process
-- **README.md**: Project overview with key features, installation command, and minimal usage example
+#### Native parity and release hardening
+- **Native parity milestone**: Native CLI considered for broader public exposure only after command/documentation/test parity with the Python path
+- **Deterministic native build modes**: Stronger system/submodule/vcpkg guidance to reduce implicit network fetches in release CI
+- **Cross-platform native release gates**: Linux/Windows/macOS native build and smoke verification expanded beyond contributor-only use
 
 #### Core Features (Validated for Beta)
 - **Structured Work Items**: Hierarchical backlog (Epic → Feature → User Story → Task/Bug) with frontmatter metadata
@@ -53,10 +43,8 @@ Latest released OSS version: `0.0.2`.
 - **Release Checklist**: Documented process covering pre-release validation, build, test installation, PyPI upload, and post-release verification
 
 ### Changed
-- **Package Structure**: Reorganized to follow standard Python packaging conventions
-- **Entry Point**: CLI now installed as proper console script via setuptools entry_points
-- **Dependency Management**: Runtime dependencies use version ranges (not pinned) for flexibility
-- **Documentation Structure**: Consolidated user-facing docs in `docs/` directory
+- **Public contract review**: Python package behavior that already exists in `0.0.x` is no longer described as a future `0.1.0` addition
+- **Native direction**: Future notes focus on parity, distribution, and deterministic release gates rather than re-describing the current Python package path
 
 ### Known Limitations
 

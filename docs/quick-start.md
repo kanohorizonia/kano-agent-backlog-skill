@@ -28,7 +28,7 @@ kano-backlog
 kano-backlog doctor
 ```
 
-If you are working from a cloned repository, use the longer setup in [agent-quick-start.md](agent-quick-start.md) and [installation.md](installation.md).
+If you are working from a cloned repository, use the longer setup in [agent-quick-start.md](agent-quick-start.md) and [installation.md](installation.md). In a clone, the repo-local launcher is `bash scripts/kob` (native first, Python fallback).
 
 ## 2. Initialize a backlog
 

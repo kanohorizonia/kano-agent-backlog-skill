@@ -28,6 +28,6 @@ Release `0.0.3` tightens the effective config flow:
 ## References
 
 - [Tokenizer configuration](tokenizer-configuration.md)
-- [Skill reference](../skill/reference.md)
+- [Skill reference](../REFERENCE.md)
 - [Project config implementation notes](../references/project-config-implementation.md)
-- [0.0.3 release notes](../releases/0.0.3.md)
+- [0.0.3 release notes](releases/0.0.3.md)

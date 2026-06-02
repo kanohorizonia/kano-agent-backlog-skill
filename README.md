@@ -54,7 +54,7 @@ kano-backlog item create --type task --title "Add login" --product my-app --agen
 kano-backlog doctor
 ```
 
-If you are working from a clone, start with [docs/agent-quick-start.md](docs/agent-quick-start.md).
+If you are working from a clone, start with [docs/agent-quick-start.md](docs/agent-quick-start.md). The repo-local launcher is `bash scripts/kob`: it prefers a locally built native binary and falls back to the Python CLI from `src/python`.
 
 ## Documentation
 
@@ -63,6 +63,7 @@ If you are working from a clone, start with [docs/agent-quick-start.md](docs/age
 - [Installation](docs/installation.md)
 - [Configuration](docs/configuration.md)
 - [Version policy](docs/version-policy.md)
+- [Native CLI direction](docs/design/native-cli-direction.md)
 - [Maintainer automation](docs/maintainer-automation.md)
 - [Codex for OSS](docs/codex-for-oss.md)
 - [Agent quick start](docs/agent-quick-start.md)
@@ -110,9 +111,13 @@ Validation here means keeping execution tied to explicit acceptance and visible 
 Recommended commands:
 
 ```bash
-bash scripts/test/quick-test.sh
-bash scripts/test/lint.sh
-bash scripts/internal/show-version.sh
+bash src/shell/test/quick-test.sh
+bash src/shell/test/lint.sh
+bash src/shell/support/show-version.sh
+bash src/shell/support/self-build.sh debug
+bash src/shell/test/native-test.sh
+bash scripts/kob --version
+bash scripts/kob doctor
 ```
 
 ## Experimental areas

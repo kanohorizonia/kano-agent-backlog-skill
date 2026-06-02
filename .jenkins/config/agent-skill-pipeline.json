@@ -1,6 +1,6 @@
 {
   "projectName": "kano-agent-backlog-skill",
-  "bootstrapAgentLabel": "lightweight",
+  "bootstrapAgentLabel": "windows && lightweight",
   "windowsAgentLabel": "windows && lightweight",
   "bRunLinuxBuild": false,
   "bRunMacBuild": false,

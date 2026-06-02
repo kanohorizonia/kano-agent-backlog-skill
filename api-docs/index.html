@@ -296,28 +296,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#core-modules" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Core Modules
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#navigation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Navigation
-      
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -501,28 +479,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#core-modules" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Core Modules
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#navigation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Navigation
-      
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -543,15 +499,14 @@
 <h1 id="kano-agent-backlog-skill-api">Kano Agent Backlog Skill API<a class="headerlink" href="#kano-agent-backlog-skill-api" title="Permanent link">&para;</a></h1>
 <p>Complete Python API reference for the Kano Agent Backlog Skill.</p>
 <h2 id="quick-start">Quick Start<a class="headerlink" href="#quick-start" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">kano_backlog_core</span><span class="w"> </span><span class="kn">import</span> <span class="n">BacklogManager</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">kano_backlog_ops</span><span class="w"> </span><span class="kn">import</span> <span class="n">WorkItem</span>
-
-<span class="c1"># Initialize backlog operations</span>
-<span class="n">manager</span> <span class="o">=</span> <span class="n">BacklogManager</span><span class="p">()</span>
-
-<span class="c1"># Create work items</span>
-<span class="n">item</span> <span class="o">=</span> <span class="n">WorkItem</span><span class="o">.</span><span class="n">create</span><span class="p">(</span><span class="n">title</span><span class="o">=</span><span class="s2">&quot;New feature&quot;</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s2">&quot;task&quot;</span><span class="p">)</span>
-</code></pre></div>
+<p>```python
+from kano_backlog_core import BacklogManager
+from kano_backlog_ops import WorkItem</p>
+<h1 id="initialize-backlog-operations">Initialize backlog operations<a class="headerlink" href="#initialize-backlog-operations" title="Permanent link">&para;</a></h1>
+<p>manager = BacklogManager()</p>
+<h1 id="create-work-items">Create work items<a class="headerlink" href="#create-work-items" title="Permanent link">&para;</a></h1>
+<p>item = WorkItem.create(title="New feature", type="task")
+```</p>
 <h2 id="core-modules">Core Modules<a class="headerlink" href="#core-modules" title="Permanent link">&para;</a></h2>
 <ul>
 <li><a href="api/core/">Core</a> - Core backlog management (<code>kano_backlog_core</code>)</li>

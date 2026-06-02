@@ -21,7 +21,7 @@ pipeline {
                             bPublishSite               : false,
                             bCreateGitHubRelease       : false,
                             bRequireExplicitReleaseTag : false,
-                            provisionalBuildDisplayName: "#${env.BUILD_NUMBER ?: '0'} Build/Release queued",
+                            provisionalBuildDisplayName: "#${env.BUILD_NUMBER ?: '0'} Build_Shipping queued",
                             latestQueuedBuildLockName  : 'kano-agent-backlog-skill-build-release',
                         ]
                     )

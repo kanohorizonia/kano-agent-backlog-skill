@@ -11,6 +11,7 @@ Per ADR-0011 and ADR-0012, topics are derived data that can be deleted and rebui
 from __future__ import annotations
 
 import json
+import os
 import re
 import uuid
 from dataclasses import dataclass, field, asdict
@@ -1434,6 +1435,14 @@ def _workspace_root(backlog_root: Path) -> Path:
     return backlog_root.parent.parent
 
 
+def _workspace_relative_path(path: Path, workspace_root: Path) -> str:
+    """Return a stable workspace-relative path across Windows short/long temp paths."""
+    try:
+        return str(path.relative_to(workspace_root)).replace("\\", "/")
+    except ValueError:
+        return os.path.relpath(str(path), str(workspace_root)).replace("\\", "/")
+
+
 def _try_git_revision(workspace_root: Path) -> Optional[str]:
     git_dir = workspace_root / ".git"
     if not git_dir.exists():
@@ -1500,7 +1509,7 @@ def add_snippet_to_topic(
     snippet_text = "\n".join(raw_lines[start_line - 1 : end_line])
 
     sha = hashlib.sha256(snippet_text.encode("utf-8")).hexdigest()
-    rel_file = str(abs_path.relative_to(ws_root)).replace("\\", "/")
+    rel_file = _workspace_relative_path(abs_path, ws_root)
 
     snippet = SnippetRef(
         repo="local",

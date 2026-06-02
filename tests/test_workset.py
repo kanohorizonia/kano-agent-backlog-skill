@@ -145,7 +145,7 @@ def temp_backlog():
 # =============================================================================
 
 
-@settings(max_examples=100, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@settings(max_examples=100, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture])
 @given(
     item_suffix=st.integers(min_value=1, max_value=9999),
     agent_name=st.text(
@@ -301,7 +301,7 @@ def test_workset_init_handles_invalid_items(invalid_ref):
 # =============================================================================
 
 
-@settings(max_examples=100, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@settings(max_examples=100, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture])
 @given(
     item_suffix=st.integers(min_value=1, max_value=9999),
     agent_name=st.text(

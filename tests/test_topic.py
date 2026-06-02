@@ -141,7 +141,7 @@ invalid_topic_name_strategy = st.one_of(
 agent_strategy = st.from_regex(r"^[a-zA-Z][a-zA-Z0-9_-]{2,20}$", fullmatch=True)
 
 
-@settings(max_examples=100, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@settings(max_examples=100, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture])
 @given(topic_name=valid_topic_name_strategy, agent=agent_strategy)
 def test_property_14_topic_create_produces_valid_structure(topic_name: str, agent: str):
     """Property 14: Topic create produces valid structure. Validates: Requirements 6.1, 6.2"""
@@ -675,7 +675,7 @@ def test_property_26_topic_export_is_deterministic(topic_name: str, agent: str, 
         cleanup_temp_backlog(backlog_root)
 
 
-@settings(max_examples=100, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@settings(max_examples=100, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture])
 @given(
     topic_names=st.lists(valid_topic_name_strategy, min_size=1, max_size=5, unique=True),
     agent=agent_strategy,

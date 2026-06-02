@@ -4,13 +4,13 @@ This checklist ensures consistent release process and catches issues before publ
 
 ## Pre-Release
 
-- [ ] Update version in `src/kano_backlog_core/__version__.py`
+- [ ] Update `VERSION` and `src/python/kano_backlog_core/__version__.py`
 - [ ] Update CHANGELOG.md with release notes
 - [ ] Run full test suite: `pytest tests/`
 - [ ] Run type checking: `mypy src/`
 - [ ] Run linting: `black --check src/ && isort --check src/`
 - [ ] Test CLI commands manually
-- [ ] Verify `kob doctor` works
+- [ ] Verify `kano-backlog doctor` works
 - [ ] Test multi-product workflow
 - [ ] Review and update documentation
 
@@ -25,31 +25,37 @@ This checklist ensures consistent release process and catches issues before publ
 
 - [ ] Create fresh venv: `python -m venv test-venv`
 - [ ] Install from wheel: `pip install dist/*.whl`
-- [ ] Verify CLI available: `which kob` (or `where kob` on Windows)
+- [ ] Verify CLI available: `which kano-backlog` (or `where kano-backlog` on Windows)
 - [ ] Run `bash scripts/internal/show-version.sh`
-- [ ] Run `kob doctor`
+- [ ] Run `kano-backlog doctor`
 - [ ] Test basic workflow (init, create item, update state)
 
 ## Upload to Test PyPI
 
-- [ ] Upload: `twine upload --repository testpypi dist/*`
+- [ ] Upload with the maintainer script: `./scripts/publish_to_pypi.sh test` (or `.\scripts\publish_to_pypi.ps1 -Environment test` on Windows)
 - [ ] Create fresh venv for testing
 - [ ] Install from test.pypi: `pip install --index-url https://test.pypi.org/simple/ kano-agent-backlog-skill`
 - [ ] Verify installation and basic functionality
 
 ## Upload to PyPI
 
-- [ ] Upload: `twine upload dist/*`
+- [ ] Upload with the maintainer script: `./scripts/publish_to_pypi.sh prod` (or `.\scripts\publish_to_pypi.ps1 -Environment prod` on Windows)
 - [ ] Verify package appears on pypi.org
 - [ ] Create fresh venv
 - [ ] Install from PyPI: `pip install kano-agent-backlog-skill`
 - [ ] Verify installation and basic functionality
 
+## Publish GitHub Pages docs
+
+- [ ] If docs changed, merge the docs changes to `main` or run `.github/workflows/pages.yml` with `workflow_dispatch`
+- [ ] Confirm the `Publish docs to GitHub Pages` workflow completes successfully
+- [ ] Verify the updated site is live at `https://agentskill-backlog.kanohorizonia.com/`
+
 ## Git and GitHub
 
 - [ ] Commit all changes
-- [ ] Create git tag: `git tag -a v0.1.0 -m "Release 0.1.0 beta"`
-- [ ] Push tag: `git push origin v0.1.0`
+- [ ] Create git tag: `git tag -a v0.0.3 -m "Release 0.0.3"`
+- [ ] Push tag: `git push origin v0.0.3`
 - [ ] Create GitHub release with release notes
 - [ ] Attach dist files to GitHub release
 

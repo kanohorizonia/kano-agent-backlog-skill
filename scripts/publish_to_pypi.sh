@@ -49,7 +49,7 @@ if ! command -v twine &> /dev/null; then
 fi
 
 # Get version from __version__.py
-VERSION=$(python -c "import sys; sys.path.insert(0, 'src'); from kano_backlog_core.__version__ import __version__; print(__version__)")
+VERSION=$(python -c "import sys; sys.path.insert(0, 'src/python'); from kano_backlog_core.__version__ import __version__; print(__version__)")
 echo -e "${GREEN}Package version: $VERSION${NC}"
 echo ""
 

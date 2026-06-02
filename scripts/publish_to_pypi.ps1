@@ -39,7 +39,7 @@ try {
 }
 
 # Get version from __version__.py
-$Version = python -c "import sys; sys.path.insert(0, 'src'); from kano_backlog_core.__version__ import __version__; print(__version__)"
+$Version = python -c "import sys; sys.path.insert(0, 'src/python'); from kano_backlog_core.__version__ import __version__; print(__version__)"
 Write-Host "Package version: $Version" -ForegroundColor Green
 Write-Host ""
 

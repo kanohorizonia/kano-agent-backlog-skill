@@ -4,27 +4,26 @@ Quick reference for different installation scenarios.
 
 ## For End Users (PyPI Installation)
 
-**When available on PyPI:**
+**Current public PyPI line:**
 
 ```bash
 # Install from PyPI
 pip install kano-agent-backlog-skill
 
 # Verify
-bash scripts/internal/show-version.sh
-kob
-kob doctor
+kano-backlog --help
+kano-backlog doctor
 
 # Initialize backlog
 cd /path/to/your/project
-kob admin init --product my-app --agent <your-agent>
+kano-backlog admin init --product my-app --agent <your-agent>
 
 # Add cache and logs to .gitignore (IMPORTANT)
 echo ".kano/cache" >> .gitignore
 echo "_kano/backlog/_shared/logs" >> .gitignore
 ```
 
-**Status:** Not yet published to PyPI (alpha release)
+**Status:** `0.0.2` is released on PyPI. `0.0.3` is the current release being prepared.
 
 See: [Quick Start Guide](quick-start.md)
 
@@ -41,12 +40,12 @@ pip install -e ".[dev]"
 
 # Verify installation
 bash scripts/internal/show-version.sh
-kob
-kob doctor
+kano-backlog --help
+kano-backlog doctor
 
 # Initialize backlog in your project
 cd /path/to/your/project
-kob admin init --product my-app --agent <your-agent>
+kano-backlog admin init --product my-app --agent <your-agent>
 
 # Add cache and logs to .gitignore (IMPORTANT)
 echo ".kano/cache" >> .gitignore
@@ -75,15 +74,15 @@ See: [Agent Quick Start Guide](agent-quick-start.md)
 
 3. **Verify:**
    ```bash
-   bash scripts/internal/show-version.sh
-   kob
-   kob doctor
+bash scripts/internal/show-version.sh
+kano-backlog --help
+kano-backlog doctor
    ```
 
 4. **Initialize:**
    ```bash
    cd /path/to/project
-   kob admin init --product <product> --agent <agent-id>
+kano-backlog admin init --product <product> --agent <agent-id>
    
    # Add cache and logs to .gitignore (IMPORTANT)
    echo ".kano/cache" >> .gitignore
@@ -100,7 +99,7 @@ See: [Agent Quick Start Guide](agent-quick-start.md)
 
 ```bash
 # Clone repository
-git clone https://github.com/yourusername/kano-agent-backlog-skill.git
+git clone https://github.com/kanohorizonia/kano-agent-backlog-skill.git
 cd kano-agent-backlog-skill
 
 # Create virtual environment
@@ -138,6 +137,8 @@ pip install --index-url https://test.pypi.org/simple/ kano-agent-backlog-skill
 ./scripts/publish_to_pypi.sh prod
 ```
 
+Docs site publishing is separate. Merge docs changes to `main`, or run the `Publish docs to GitHub Pages` workflow manually with `workflow_dispatch`, and let `.github/workflows/pages.yml` deploy the Pages artifact.
+
 See: [Publishing to PyPI Guide](publishing-to-pypi.md)
 
 ## Quick Command Reference
@@ -145,13 +146,13 @@ See: [Publishing to PyPI Guide](publishing-to-pypi.md)
 ### Installation Verification
 ```bash
 bash scripts/internal/show-version.sh    # Check version
-kob                              # Inspect command surface
-kob doctor                       # Validate environment
+kano-backlog --help              # Inspect command surface
+kano-backlog doctor              # Validate environment
 ```
 
 ### Backlog Initialization
 ```bash
-kob admin init --product <name> --agent <agent>
+kano-backlog admin init --product <name> --agent <agent>
 
 # IMPORTANT: Add cache and logs to .gitignore after initialization
 echo ".kano/cache" >> .gitignore
@@ -161,16 +162,16 @@ echo "_kano/backlog/_shared/logs" >> .gitignore
 ### Common Operations
 ```bash
 # Create item
-kob item create --type task --title "<title>" --product <product> --agent <agent>
+kano-backlog item create --type task --title "<title>" --product <product> --agent <agent>
 
 # List items
-kob item list --product <product>
+kano-backlog item list --product <product>
 
 # Update state
-kob workitem update-state <ID> --state <state> --product <product>
+kano-backlog workitem update-state <ID> --state <state> --product <product>
 
 # Create ADR
-kob adr create --title "<title>" --product <product> --agent <agent>
+kano-backlog adr create --title "<title>" --product <product> --agent <agent>
 ```
 
 ## Documentation Index
@@ -185,9 +186,10 @@ kob adr create --title "<title>" --product <product> --agent <agent>
 
 ## Current Status
 
-- **Version:** 0.1.0
-- **Status:** Alpha (not yet on PyPI)
-- **Installation:** Development mode only (`pip install -e .`)
+- **Latest released version:** 0.0.2
+- **Current release target:** 0.0.3
+- **Status:** Public OSS release line in progress
+- **Installation:** Public install available via `pip install kano-agent-backlog-skill`, editable install still supported for local development
 - **Stability:** API may change significantly
 
 ---

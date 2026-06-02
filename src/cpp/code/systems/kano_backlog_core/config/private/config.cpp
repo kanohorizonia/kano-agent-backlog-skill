@@ -4,6 +4,7 @@
 #include <kano_config.h>
 
 #include <cstdlib>
+#include <set>
 
 namespace {
 
@@ -40,6 +41,32 @@ std::filesystem::path infer_project_root(const std::filesystem::path& config_fil
     return config_file_path.parent_path();
 }
 
+struct ChildKeyCollector {
+    std::string prefix;
+    std::set<std::string>* keys;
+};
+
+bool collect_child_keys(const KanoConfigEntryView* entry, void* user_data) {
+    if (!entry || !user_data || !entry->key) {
+        return false;
+    }
+
+    auto* collector = static_cast<ChildKeyCollector*>(user_data);
+    const std::string key = entry->key;
+    if (!key.starts_with(collector->prefix)) {
+        return true;
+    }
+
+    const std::string remainder = key.substr(collector->prefix.size());
+    const std::size_t separator = remainder.find('.');
+    const std::string child = separator == std::string::npos ? remainder : remainder.substr(0, separator);
+    if (!child.empty()) {
+        collector->keys->insert(child);
+    }
+
+    return true;
+}
+
 }  // namespace
 
 namespace kano::backlog_core {
@@ -57,10 +84,11 @@ std::optional<ProjectConfig> ProjectConfig::load_from_toml(const std::filesystem
 
     ProjectConfig config;
 
-    size_t product_count = 0;
-    char** product_names = kano_config_list_children(cfg, "products", &product_count);
-    for (size_t index = 0; index < product_count; ++index) {
-        const std::string key = product_names[index];
+    std::set<std::string> product_keys;
+    ChildKeyCollector collector{"products.", &product_keys};
+    kano_config_foreach(cfg, collect_child_keys, &collector);
+
+    for (const std::string& key : product_keys) {
         const std::string prefix = "products." + key + ".";
 
         ProductDefinition product;
@@ -86,7 +114,6 @@ std::optional<ProjectConfig> ProjectConfig::load_from_toml(const std::filesystem
         config.products[key] = product;
     }
 
-    kano_config_free_string_array(product_names, product_count);
     kano_config_free(cfg);
     return config;
 }
@@ -139,10 +166,10 @@ std::optional<std::filesystem::path> ConfigLoader::resolve_project_root(const st
         return std::nullopt;
     }
 
-    const char* root_value = kano_config_root(cfg);
     std::optional<std::filesystem::path> root;
-    if (root_value && *root_value) {
-        root = std::filesystem::path(root_value);
+    if (char* root_value = kano_config_resolve_path(cfg, ".")) {
+        root = std::filesystem::path(root_value).lexically_normal();
+        std::free(root_value);
     }
     kano_config_free(cfg);
     return root;

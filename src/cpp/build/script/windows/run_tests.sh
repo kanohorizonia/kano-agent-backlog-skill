@@ -23,11 +23,9 @@ echo "=== kano-backlog test runner ==="
 echo "  KOB_CPP_ROOT: $KOB_CPP_ROOT"
 echo "  PRESET: $PRESET"
 
-# Build directory from preset
-BUILD_DIR="$KOB_CPP_ROOT/build/_intermediate/$PRESET"
-
-# Determine binary directory (Debug is default for this repo)
-BIN_DIR="$KOB_CPP_ROOT/out/bin/debug"
+# Build directory and binary directory from preset
+BUILD_DIR="$KOB_CPP_ROOT/out/obj/$PRESET"
+BIN_DIR="$KOB_CPP_ROOT/out/bin/$PRESET/debug"
 
 if [[ ! -d "$BUILD_DIR" ]]; then
   echo "[WARN] Build directory not found: $BUILD_DIR"

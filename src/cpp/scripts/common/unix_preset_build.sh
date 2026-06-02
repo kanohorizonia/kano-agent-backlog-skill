@@ -10,7 +10,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Source infra's generic unix preset runner (provides kano_cpp_run_unix_preset)
 # shellcheck disable=SC1091
-source "$SCRIPT_DIR/../../shared/infra/scripts/common/unix_preset_build.sh"
+source "$SCRIPT_DIR/../../shared/infra/scripts/lib/unix_preset_build.sh"
 
 # Source local build_metadata.sh (already sources infra via shared/infra)
 if [[ -f "$SCRIPT_DIR/build_metadata.sh" ]]; then

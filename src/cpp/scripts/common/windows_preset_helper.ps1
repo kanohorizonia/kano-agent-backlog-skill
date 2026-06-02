@@ -339,8 +339,8 @@ function Prepare-SubstRoot([string]$InRoot, [string]$InPreset, [string]$InPrefer
     Write-Error ("EstimatedLongestLength: " + $risk.EstimatedLongestLength)
     Write-Error ("EstimatedLongestPath: " + $risk.EstimatedLongestPath)
     Write-Error ("Hint: enable Windows long paths (run as Administrator):")
-    Write-Error ("  Set-ItemProperty -Path \"HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem\" -Name \"LongPathsEnabled\" -Value 1")
-    Write-Error ("  Get-ItemProperty -Path \"HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem\" | Select-Object LongPathsEnabled")
+    Write-Error '  Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1'
+    Write-Error '  Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" | Select-Object LongPathsEnabled'
     exit 3
   }
 

@@ -1,9 +1,10 @@
 #include <iostream>
 #include <stdexcept>
 
-#include "backlog_core/frontmatter/parser.hpp"
-#include "backlog_core/state/state_machine.hpp"
-#include "backlog_core/validation/validator.hpp"
+#include "kano/backlog_core/frontmatter/frontmatter.hpp"
+#include "kano/backlog_core/models/models.hpp"
+#include "kano/backlog_core/state/state_machine.hpp"
+#include "kano/backlog_core/validation/validator.hpp"
 
 namespace {
 
@@ -16,12 +17,14 @@ void expect(bool condition, const std::string& message) {
 } // namespace
 
 int main() {
-    using kano::backlog::core::BacklogItem;
-    using kano::backlog::core::FrontmatterParser;
-    using kano::backlog::core::ItemState;
-    using kano::backlog::core::ItemType;
-    using kano::backlog::core::StateMachine;
-    using kano::backlog::core::Validator;
+    using kano::backlog_core::BacklogItem;
+    using kano::backlog_core::Frontmatter;
+    using kano::backlog_core::FrontmatterContext;
+    using kano::backlog_core::ItemState;
+    using kano::backlog_core::ItemType;
+    using kano::backlog_core::StateAction;
+    using kano::backlog_core::StateMachine;
+    using kano::backlog_core::Validator;
 
     try {
         BacklogItem item;
@@ -44,30 +47,41 @@ int main() {
         item.risks = "Low.";
         item.worklog = {"2026-03-12 00:00 [agent=opencode] Created smoke item"};
 
-        auto validation = Validator::validate_item(item);
-        expect(validation.valid, "ready item should validate");
+        auto schema_errors = Validator::validate_schema(item);
+        expect(schema_errors.empty(), "ready item should satisfy schema validation");
+        auto [ready_ok, ready_gaps] = Validator::is_ready(item);
+        expect(ready_ok, "ready item should satisfy ready gate");
+        expect(ready_gaps.empty(), "ready item should satisfy ready gate");
 
-        const std::string serialized = FrontmatterParser::serialize(item);
-        const BacklogItem round_trip = FrontmatterParser::parse(serialized);
+        FrontmatterContext ctx;
+        ctx.metadata["id"] = item.id;
+        ctx.metadata["uid"] = item.uid;
+        ctx.metadata["type"] = "task";
+        ctx.metadata["title"] = item.title;
+        ctx.metadata["state"] = "Ready";
+        ctx.body = "# Context\n" + *item.context + "\n\n# Goal\n" + *item.goal + "\n";
 
-        expect(round_trip.id == item.id, "round-trip id mismatch");
-        expect(round_trip.title == item.title, "round-trip title mismatch");
-        expect(round_trip.context == item.context, "round-trip context mismatch");
-        expect(round_trip.acceptance_criteria == item.acceptance_criteria,
-            "round-trip acceptance criteria mismatch");
-        expect(round_trip.worklog.size() == 1, "round-trip worklog size mismatch");
+        const std::string serialized = Frontmatter::serialize(ctx);
+        const FrontmatterContext round_trip = Frontmatter::parse(serialized);
 
-        expect(StateMachine::can_transition(ItemState::Ready, ItemState::InProgress),
-            "ready should transition to in progress");
-        expect(!StateMachine::can_transition(ItemState::Done, ItemState::InProgress),
-            "done should not transition to in progress");
-        expect(FrontmatterParser::parse_state("InProgress") == ItemState::InProgress,
-            "parse_state should parse InProgress");
+        expect(round_trip.metadata["id"].as<std::string>() == item.id, "round-trip id mismatch");
+        expect(round_trip.metadata["title"].as<std::string>() == item.title, "round-trip title mismatch");
+        expect(round_trip.body.find(*item.context) != std::string::npos, "round-trip context mismatch");
+
+        expect(StateMachine::can_transition(ItemState::Ready, StateAction::Start),
+            "ready should transition via Start");
+        expect(!StateMachine::can_transition(ItemState::Done, StateAction::Start),
+            "done should not transition via Start");
+
+        BacklogItem transitioned = item;
+        StateMachine::transition(transitioned, StateAction::Start, std::string("opencode"), std::string("Start work"));
+        expect(transitioned.state == ItemState::InProgress, "transition should set InProgress");
 
         BacklogItem invalid = item;
         invalid.approach.reset();
-        auto invalid_validation = Validator::validate_item(invalid);
-        expect(!invalid_validation.valid, "missing ready-gate field should fail validation");
+        auto [invalid_ready, invalid_ready_gaps] = Validator::is_ready(invalid);
+        expect(!invalid_ready, "missing ready-gate field should fail validation");
+        expect(!invalid_ready_gaps.empty(), "missing ready-gate field should fail validation");
 
         std::cout << "backlog_core_smoke_test: PASS\n";
         return 0;

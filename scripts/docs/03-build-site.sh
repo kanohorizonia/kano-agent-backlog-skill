@@ -47,7 +47,13 @@ mkdir -p "$BUILD_DIR/staged"
 # Install dependencies
 echo "Installing Quartz dependencies..."
 cd "$QUARTZ_DIR"
-npm ci
+if [[ "${CI:-false}" == "true" ]]; then
+  npm ci
+else
+  # Local Windows runs can keep native npm modules locked between retries.
+  # npm install repairs the generated workspace without deleting node_modules.
+  npm install --no-audit --no-fund
+fi
 
 # Apply custom configuration
 echo "Applying custom Quartz configuration..."
@@ -55,7 +61,11 @@ cp "$CONFIG_FILE" ./quartz.config.ts
 
 # Install tokyo-night theme
 echo "Installing tokyo-night theme..."
-npm install --save-dev shiki-themes
+if npm ls shiki-themes >/dev/null 2>&1; then
+  echo "shiki-themes already installed"
+else
+  npm install --no-save --no-audit --no-fund shiki-themes
+fi
 
 # Build static site
 echo "Building static site..."

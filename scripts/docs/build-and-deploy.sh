@@ -1,22 +1,36 @@
 #!/bin/bash
 set -euo pipefail
 
-# Main deployment script - runs all documentation deployment steps in sequence
-# This script orchestrates the complete documentation build and deployment process
+# Main documentation pipeline script
+# Builds and stages the documentation site by default.
+# Local deploy prep and remote publish are explicit opt in steps.
 #
 # Usage: 
-#   build-and-deploy.sh [--ci] [REPO_ROOT]
-#   --ci: Skip workspace setup (for CI environments)
+#   build-and-deploy.sh [--ci] [--prep-deploy] [--push] [REPO_ROOT]
+#   --ci: CI friendly mode
+#   --prep-deploy: populate _ws/deploy/gh-pages locally
+#   --push: commit and push the prepared gh-pages working tree
 #   If no REPO_ROOT provided, auto-detect for local usage
 
 # Parse arguments
 CI_MODE=false
+PREP_DEPLOY=false
+PUSH_REMOTE=false
 REPO_ROOT=""
 
 while [[ $# -gt 0 ]]; do
   case $1 in
     --ci)
       CI_MODE=true
+      shift
+      ;;
+    --prep-deploy)
+      PREP_DEPLOY=true
+      shift
+      ;;
+    --push)
+      PREP_DEPLOY=true
+      PUSH_REMOTE=true
       shift
       ;;
     *)
@@ -32,97 +46,73 @@ if [ -z "$REPO_ROOT" ]; then
   REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 fi
 
-echo "=== Documentation Deployment Pipeline ==="
+echo "=== Documentation Build Pipeline ==="
 echo "Repository root: $REPO_ROOT"
 echo "CI mode: $CI_MODE"
+echo "Prepare local deploy tree: $PREP_DEPLOY"
+echo "Push remote: $PUSH_REMOTE"
 echo ""
 
-# Step 1: Setup workspace (skip in CI mode)
-if [ "$CI_MODE" = false ]; then
-  echo "Step 1: Setting up workspace..."
-  bash "$REPO_ROOT/scripts/docs/01-setup-workspace.sh"
-  echo ""
-else
-  echo "Step 1: Skipping workspace setup (CI mode)"
-  echo ""
-fi
+# Step 1: Setup workspace
+echo "Step 1: Setting up workspace..."
+bash "$REPO_ROOT/scripts/docs/01-setup-workspace.sh"
+echo ""
 
 # Step 2: Prepare content
 echo "Step 2: Preparing documentation content..."
-if [ "$CI_MODE" = true ]; then
-  # CI mode: use explicit paths with YAML config
-  bash "$REPO_ROOT/_ws/src/demo/scripts/docs/02-prepare-content.sh" \
-    "$REPO_ROOT" \
-    "$REPO_ROOT/_ws/src/demo" \
-    "$REPO_ROOT/_ws/src/skill" \
-    "$REPO_ROOT/_ws/build"
-else
-  # Local mode: use YAML config with auto-detect paths
-  bash "$REPO_ROOT/scripts/docs/02-prepare-content.sh"
-fi
+bash "$REPO_ROOT/scripts/docs/02-prepare-content.sh" \
+  "$REPO_ROOT" \
+  "$REPO_ROOT/_ws/src/demo" \
+  "$REPO_ROOT/_ws/src/skill" \
+  "$REPO_ROOT/_ws/build"
 echo ""
 
 # Step 3: Build site
 echo "Step 3: Building Quartz site..."
-if [ "$CI_MODE" = true ]; then
-  # CI mode: use parameterized script
-  bash "$REPO_ROOT/_ws/src/demo/scripts/docs/03-build-site.sh" \
-    "$REPO_ROOT" \
-    "$REPO_ROOT/_ws/src/quartz" \
-    "$REPO_ROOT/_ws/build" \
-    "$REPO_ROOT/_ws/src/demo/scripts/docs/config/quartz.config.ts"
-else
-  # Local mode: use parameterized script with auto-detect
-  bash "$REPO_ROOT/scripts/docs/03-build-site.sh"
-fi
+bash "$REPO_ROOT/scripts/docs/03-build-site.sh" \
+  "$REPO_ROOT" \
+  "$REPO_ROOT/_ws/src/quartz" \
+  "$REPO_ROOT/_ws/build" \
+  "$REPO_ROOT/scripts/docs/config/quartz.config.ts"
 echo ""
 
 # Step 4: Deploy MkDocs API documentation
 echo "Step 4: Deploying MkDocs API documentation..."
-if [ "$CI_MODE" = true ]; then
-  # CI mode: use parameterized script
-  bash "$REPO_ROOT/_ws/src/demo/scripts/docs/04-deploy-mkdocs.sh" \
-    "$REPO_ROOT/_ws/build" \
-    "$REPO_ROOT/_ws/src/skill" \
-    "$REPO_ROOT/_ws/src/demo/scripts/docs/config/mkdocs.yml"
-else
-  # Local mode: use auto-detect
-  bash "$REPO_ROOT/scripts/docs/04-deploy-mkdocs.sh"
-fi
+bash "$REPO_ROOT/scripts/docs/04-deploy-mkdocs.sh" \
+  "$REPO_ROOT/_ws/build" \
+  "$REPO_ROOT/_ws/src/skill" \
+  "$REPO_ROOT/scripts/docs/config/mkdocs.yml"
 echo ""
 
-# Step 5: Deploy to local gh-pages branch
-echo "Step 5: Deploying to local gh-pages branch..."
-if [ "$CI_MODE" = true ]; then
-  # CI mode: use parameterized script
-  bash "$REPO_ROOT/_ws/src/demo/scripts/docs/05-deploy-quartz.sh" \
+if [ "$PREP_DEPLOY" = true ]; then
+  echo "Step 5: Preparing local gh-pages working tree..."
+  bash "$REPO_ROOT/scripts/docs/05-deploy-quartz.sh" \
     "$REPO_ROOT/_ws/build" \
     "$REPO_ROOT/_ws/deploy/gh-pages" \
-    "Deploy docs site from GitHub Actions (${GITHUB_SHA:-unknown})"
-else
-  # Local mode: use parameterized script with auto-detect
-  bash "$REPO_ROOT/scripts/docs/05-deploy-quartz.sh"
+    "Prepare docs site from ${GITHUB_SHA:-local-build}"
+  echo ""
 fi
-echo ""
 
-# Step 6: Push to remote
-echo "Step 6: Committing and pushing to remote gh-pages branch..."
-if [ "$CI_MODE" = true ]; then
-  # CI mode: use parameterized script with auto-push
-  bash "$REPO_ROOT/_ws/src/demo/scripts/docs/06-push-remote.sh" \
+if [ "$PUSH_REMOTE" = true ]; then
+  echo "Step 6: Committing and pushing to remote gh-pages branch..."
+  bash "$REPO_ROOT/scripts/docs/06-push-remote.sh" \
     "$REPO_ROOT/_ws/deploy/gh-pages" \
-    "Deploy docs site from GitHub Actions (${GITHUB_SHA:-unknown})"
-else
-  # Local mode: use parameterized script with auto-detect
-  bash "$REPO_ROOT/scripts/docs/06-push-remote.sh"
+    "Deploy docs site from ${GITHUB_SHA:-local-build}"
+  echo ""
 fi
-echo ""
 
-echo "=== Deployment Complete ==="
+echo "=== Build Complete ==="
 echo ""
-echo "Documentation site deployed successfully!"
-echo "Site URL: https://dorgonman.github.io/kano-agent-backlog-skill/"
+echo "Documentation site staged successfully!"
+echo "Staged site directory: $REPO_ROOT/_ws/build/staged"
+echo "Site URL: https://agentskill-backlog.kanohorizonia.com/"
 echo ""
+if [ "$PREP_DEPLOY" = false ]; then
+  echo "Local deploy prep was skipped. Use --prep-deploy if you need _ws/deploy/gh-pages."
+fi
+if [ "$PUSH_REMOTE" = false ]; then
+  echo "Remote publish was skipped. Use --push only when you intend to publish."
+fi
 if [ "$CI_MODE" = false ]; then
   echo "To clean up workspace: rm -rf _ws"
 fi

@@ -122,7 +122,7 @@ echo "## Access Full Documentation" >> "$BUILD_DIR/content_quartz/api/mkdocs.md"
 echo "" >> "$BUILD_DIR/content_quartz/api/mkdocs.md"
 echo "The complete API documentation is available at:" >> "$BUILD_DIR/content_quartz/api/mkdocs.md"
 echo "" >> "$BUILD_DIR/content_quartz/api/mkdocs.md"
-echo "**[https://dorgonman.github.io/kano-agent-backlog-skill/api-docs/](https://dorgonman.github.io/kano-agent-backlog-skill/api-docs/)**" >> "$BUILD_DIR/content_quartz/api/mkdocs.md"
+echo "**[https://agentskill-backlog.kanohorizonia.com/api-docs/](https://agentskill-backlog.kanohorizonia.com/api-docs/)**" >> "$BUILD_DIR/content_quartz/api/mkdocs.md"
 
 # Process content with YAML config supporting multiple source directories
 if [ -d "$DEMO_DIR" ]; then

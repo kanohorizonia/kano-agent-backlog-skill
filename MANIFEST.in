@@ -10,33 +10,19 @@ recursive-include templates *.md *.json *.toml *.template
 
 # Include schema files (SQL files for database initialization)
 # Already covered by package_data, but explicit inclusion ensures they're in sdist
-recursive-include src/kano_backlog_core/schema *.sql
+recursive-include src/python/kano_backlog_core/schema *.sql
 
 # Include PEP 561 type marker files
 # These indicate that packages support type checking
-include src/kano_backlog_core/py.typed
-include src/kano_backlog_ops/py.typed
-include src/kano_backlog_cli/py.typed
+include src/python/kano_backlog_core/py.typed
+include src/python/kano_backlog_ops/py.typed
+include src/python/kano_backlog_cli/py.typed
+
+# Include packaged CLI templates used by installed commands
+recursive-include src/python/kano_backlog_cli/templates *.toml
 
 # Include type stub files for sentence_transformers
-include src/sentence_transformers/__init__.pyi
+include src/python/sentence_transformers/__init__.pyi
 
-# Exclude development and generated files
-global-exclude __pycache__
-global-exclude *.py[cod]
-global-exclude *$py.class
-global-exclude *.so
-global-exclude .DS_Store
-global-exclude *.swp
-global-exclude *.swo
+# Exclude repository tests from release artifacts; package-data includes above are explicit.
 recursive-exclude tests *
-recursive-exclude .git *
-recursive-exclude .github *
-recursive-exclude .hypothesis *
-recursive-exclude .pytest_cache *
-recursive-exclude htmlcov *
-recursive-exclude .cache *
-recursive-exclude .kano *
-recursive-exclude dist *
-recursive-exclude build *
-recursive-exclude *.egg-info *

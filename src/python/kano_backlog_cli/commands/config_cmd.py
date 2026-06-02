@@ -4,8 +4,9 @@ import json
 import re
 import shutil
 from datetime import datetime, timezone
+from importlib import resources
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import TYPE_CHECKING, Any, Optional, Union
 
 import typer
 import tomli_w
@@ -16,6 +17,9 @@ app = typer.Typer(help="Configuration inspection and validation")
 
 profiles_app = typer.Typer(help="Named config profiles (file-based overrides)")
 app.add_typer(profiles_app, name="profiles")
+
+if TYPE_CHECKING:
+    from kano_backlog_core.config import BacklogContext
 
 
 def _validate_required_fields(cfg: dict[str, Any]) -> list[str]:
@@ -132,6 +136,27 @@ def _strip_nulls(value: Any) -> Any:
                 cleaned_list.append(cleaned_item)
         return cleaned_list
     return value
+
+
+def _read_config_template() -> str:
+    """Read the packaged product config template with a source-tree fallback."""
+    try:
+        return resources.read_text(
+            "kano_backlog_cli.templates",
+            "config.template.toml",
+            encoding="utf-8",
+        )
+    except (FileNotFoundError, ModuleNotFoundError):
+        pass
+
+    source_template_path = Path(__file__).resolve().parents[4] / "templates" / "config.template.toml"
+    if source_template_path.exists():
+        return source_template_path.read_text(encoding="utf-8")
+
+    raise FileNotFoundError(
+        "Template not found in package data or source tree: "
+        f"kano_backlog_cli.templates/config.template.toml; {source_template_path}"
+    )
 
 
 def _next_backup_path(json_path: Path) -> Path:
@@ -427,16 +452,16 @@ def config_init(
         typer.echo(f"Config already exists: {config_path}. Use --force to overwrite.")
         raise typer.Exit(1)
 
-    template_path = Path(__file__).resolve().parents[3] / "templates" / "config.template.toml"
-    if not template_path.exists():
-        typer.echo(f"Template not found: {template_path}")
-        raise typer.Exit(1)
-
     product_name = ctx.product_name
     derived_prefix = item_utils.derive_prefix(product_name)
     final_prefix = (prefix or derived_prefix).upper()
 
-    template = template_path.read_text(encoding="utf-8")
+    try:
+        template = _read_config_template()
+    except FileNotFoundError as e:
+        typer.echo(str(e))
+        raise typer.Exit(1)
+
     rendered = template.replace("{{PRODUCT_NAME}}", product_name).replace("{{PRODUCT_PREFIX}}", final_prefix)
 
     config_path.parent.mkdir(parents=True, exist_ok=True)

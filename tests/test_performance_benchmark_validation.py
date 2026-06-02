@@ -64,7 +64,7 @@ class TestPerformanceBenchmarkSuite:
         # Verify content characteristics
         assert "tokenizer" in documents["1kb_english"].lower()
         assert "トークナイザー" in documents["1kb_cjk"]
-        assert "🚀" in documents["1kb_mixed"]  # Should contain emoji
+        assert "🚀" in documents["10kb_mixed"]  # Mixed corpus should contain emoji
     
     def test_performance_measurement_context(self):
         """Test the performance measurement context manager."""

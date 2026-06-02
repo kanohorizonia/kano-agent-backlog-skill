@@ -15,6 +15,7 @@ Requirements: 6.1-11.4
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import shutil
 from typing import Optional, List, Any, Literal, cast
@@ -38,14 +39,16 @@ def _resolve_backlog_root_override(path: Optional[Path]) -> Optional[Path]:
 
 def _get_backlog_root_override() -> Optional[Path]:
     ctx = click.get_current_context(silent=True)
-    if ctx is None:
-        return None
-    obj: Any = getattr(ctx, "obj", None)
-    if not isinstance(obj, dict):
-        return None
-    value = obj.get("backlog_root_override")
-    if isinstance(value, Path):
-        return value
+    while ctx is not None:
+        obj: Any = getattr(ctx, "obj", None)
+        if isinstance(obj, dict):
+            value = obj.get("backlog_root_override")
+            if isinstance(value, Path):
+                return value
+        ctx = ctx.parent
+    env_value = os.environ.get("KANO_BACKLOG_ROOT_OVERRIDE")
+    if env_value:
+        return _resolve_backlog_root_override(Path(env_value))
     return None
 
 
@@ -107,7 +110,12 @@ def _topic_callback(
     ),
 ):
     ctx.ensure_object(dict)
-    ctx.obj["backlog_root_override"] = _resolve_backlog_root_override(backlog_root_override)
+    resolved = _resolve_backlog_root_override(backlog_root_override)
+    ctx.obj["backlog_root_override"] = resolved
+    if resolved is not None:
+        os.environ["KANO_BACKLOG_ROOT_OVERRIDE"] = str(resolved)
+    else:
+        os.environ.pop("KANO_BACKLOG_ROOT_OVERRIDE", None)
 
 
 @app.command()

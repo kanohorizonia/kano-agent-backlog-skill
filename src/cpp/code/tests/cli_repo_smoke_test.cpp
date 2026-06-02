@@ -24,10 +24,15 @@ int run_command(const std::filesystem::path& binary, const std::vector<std::stri
 
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
     try {
         const std::filesystem::path repo_root(KANO_REPO_ROOT);
-        const std::filesystem::path binary = repo_root / "src/cpp/out/bin/windows-ninja-msvc/debug/kano-backlog.exe";
+        const std::filesystem::path executable_path =
+            (argc > 0 && argv != nullptr) ? std::filesystem::absolute(argv[0]) : std::filesystem::path();
+        std::filesystem::path binary = executable_path.parent_path() / "kano-backlog.exe";
+        if (!std::filesystem::exists(binary)) {
+            binary = repo_root / "src/cpp/out/bin/windows-ninja-msvc/debug/kano-backlog.exe";
+        }
 
         expect(std::filesystem::exists(binary), "native binary not found for cli_repo_smoke_test");
         std::filesystem::current_path(repo_root);

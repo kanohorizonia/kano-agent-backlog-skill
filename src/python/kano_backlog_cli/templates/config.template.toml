@@ -1,0 +1,48 @@
+# Canonical product config template for kano-agent-backlog-skill
+# Fill in product identity; other sections are optional and documented inline.
+
+[product]
+# Required: product name used for ID prefix derivation and display
+name = "{{PRODUCT_NAME}}"
+# Required: stable ID prefix for items (recommended to keep short and uppercase)
+prefix = "{{PRODUCT_PREFIX}}"
+
+[views]
+# Auto-refresh dashboards after operations
+auto_refresh = true
+
+[log]
+# verbosity: debug|info|warning|error
+verbosity = "warning"
+# debug: enables verbose traces in some commands
+debug = false
+
+[process]
+# Use either profile OR path (not both)
+# profile = "builtin/azure-boards-agile"
+# path = "skills/kano-agent-backlog-skill/references/processes/jira-default.json"
+
+[sandbox]
+# Root for sandboxes relative to repository root
+root = "_kano/backlog_sandbox"
+
+[cache]
+# Optional: Override cache location (e.g., for shared NAS storage)
+# If not specified, defaults to <repo_root>/.kano/cache/backlog/
+# Useful for team collaboration with shared cache on network storage
+# root = "/mnt/nas/shared-cache/backlog"
+
+[analysis.llm]
+# Enable derived LLM analysis; keep secrets in env vars, not here
+enabled = false
+
+# Backends are optional; example structure shown below.
+# [backends.jira]
+# type = "jira"
+# host = "example.atlassian.net"
+# project = "DEMOS"
+# token = "env:JIRA_TOKEN"
+#
+# [backends.filesystem]
+# type = "filesystem"
+# root = "_kano/backlog"

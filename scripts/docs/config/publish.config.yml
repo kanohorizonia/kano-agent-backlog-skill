@@ -36,6 +36,70 @@ navigation:
         target: "skill/changelog.md"
         title: "Changelog"
 
+  Guides:
+    title: "Guides"
+    description: "User and operator guides from the skill repository"
+    items:
+      - source: "skill/docs/quick-start.md"
+        target: "guides/quick-start.md"
+        title: "Quick Start"
+      - source: "skill/docs/agent-quick-start.md"
+        target: "guides/agent-quick-start.md"
+        title: "Agent Quick Start"
+      - source: "skill/docs/installation.md"
+        target: "guides/installation.md"
+        title: "Installation"
+      - source: "skill/docs/configuration.md"
+        target: "guides/configuration.md"
+        title: "Configuration"
+      - source: "skill/docs/usage-examples.md"
+        target: "guides/usage-examples.md"
+        title: "Usage Examples"
+      - source: "skill/docs/workset.md"
+        target: "guides/workset.md"
+        title: "Worksets"
+      - source: "skill/docs/topic.md"
+        target: "guides/topic.md"
+        title: "Topics"
+      - source: "skill/docs/version-policy.md"
+        target: "guides/version-policy.md"
+        title: "Version Policy"
+      - source: "skill/docs/demo-maintenance.md"
+        target: "guides/demo-maintenance.md"
+        title: "Demo Maintenance"
+      - source: "skill/docs/codex-for-oss.md"
+        target: "guides/codex-for-oss.md"
+        title: "Codex for OSS"
+      - source: "skill/docs/tokenizer-quickstart.md"
+        target: "guides/tokenizer-quickstart.md"
+        title: "Tokenizer Quick Start"
+      - source: "skill/docs/tokenizer-adapters.md"
+        target: "guides/tokenizer-adapters.md"
+        title: "Tokenizer Adapters"
+      - source: "skill/docs/tokenizer-configuration.md"
+        target: "guides/tokenizer-configuration.md"
+        title: "Tokenizer Configuration"
+      - source: "skill/docs/tokenizer-cli-reference.md"
+        target: "guides/tokenizer-cli-reference.md"
+        title: "Tokenizer CLI Reference"
+      - source: "skill/docs/tokenizer-troubleshooting.md"
+        target: "guides/tokenizer-troubleshooting.md"
+        title: "Tokenizer Troubleshooting"
+      - source: "skill/docs/tokenizer-performance.md"
+        target: "guides/tokenizer-performance.md"
+        title: "Tokenizer Performance"
+
+  Automation:
+    title: "Maintainer Automation"
+    description: "Docs build and publishing automation for maintainers"
+    items:
+      - source: "skill/docs/maintainer-automation.md"
+        target: "automation/maintainer-automation.md"
+        title: "Maintainer Automation"
+      - source: "skill/scripts/docs/README.md"
+        target: "automation/docs-pipeline.md"
+        title: "Docs Pipeline"
+
   ADR:
     title: "Architecture Decisions"
     description: "Architecture Decision Records and design rationale"
@@ -86,6 +150,20 @@ navigation:
       - target: "api/mkdocs.md"
         title: "Full API Documentation"
 
+  Releases:
+    title: "Releases"
+    description: "Published release notes and change history"
+    items:
+      - source: "skill/docs/releases/0.0.3.md"
+        target: "releases/0.0.3.md"
+        title: "Release 0.0.3"
+      - source: "skill/docs/releases/0.0.1.md"
+        target: "releases/0.0.1.md"
+        title: "Release 0.0.1"
+      - source: "skill/CHANGELOG.md"
+        target: "releases/changelog.md"
+        title: "Changelog"
+
 # Global exclusions
 exclude:
   - "docs/internal/"
@@ -103,6 +181,7 @@ exclude:
 site:
   title: "Kano Agent Backlog Skill"
   description: "AI Agent Skills for Spec-Driven Agentic Programming"
+  home_page_source: "skill/docs/index.md"
   generate_indexes: true
   flatten_deep_paths: true
 
@@ -110,7 +189,7 @@ site:
 api_navigation:
   site_name: "Kano Agent Backlog Skill API"
   site_description: "Python API documentation for Kano Agent Backlog Skill"
-  site_url: "https://dorgonman.github.io/kano-agent-backlog-skill/api-docs/"
+  site_url: "https://agentskill-backlog.kanohorizonia.com/api-docs/"
   
   # Main page content
   home_content: |

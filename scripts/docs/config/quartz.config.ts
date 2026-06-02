@@ -21,7 +21,7 @@ const config: QuartzConfig = {
       provider: "plausible",
     },
     locale: "en-US",
-    baseUrl: "https://dorgonman.github.io/kano-agent-backlog-skill",
+    baseUrl: "agentskill-backlog.kanohorizonia.com",
     ignorePatterns: ["private", "templates", ".obsidian"],
     defaultDateType: "created",
     theme: {

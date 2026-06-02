@@ -4,10 +4,11 @@
     "repository": "https://github.com/jackyzha0/quartz.git"
   },
   "repositories": {
-    "skill": "https://github.com/dorgonman/kano-agent-backlog-skill.git"
+    "demo": "https://github.com/dorgonman/kano-agent-backlog-skill-demo.git",
+    "skill": "https://github.com/kanohorizonia/kano-agent-backlog-skill.git"
   },
   "deployment": {
-    "site_url": "https://dorgonman.github.io/kano-agent-backlog-skill/",
+    "site_url": "https://agentskill-backlog.kanohorizonia.com/",
     "branch": "gh-pages"
   },
   "build": {

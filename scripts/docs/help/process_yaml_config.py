@@ -70,10 +70,10 @@ title: {section['title']}
                 for source_file in source_files:
                     if os.path.isfile(source_file):
                         rel_path = os.path.relpath(source_file, source_base_dir)
+                        filename = os.path.basename(source_file)
                         if item.get('preserve_structure'):
                             target_file = os.path.join(target_dir, target_path, os.path.relpath(source_file, os.path.join(source_base_dir, os.path.dirname(source_pattern.replace('**/*', '')))))
                         else:
-                            filename = os.path.basename(source_file)
                             target_file = os.path.join(target_dir, target_path, filename)
                         
                         os.makedirs(os.path.dirname(target_file), exist_ok=True)
@@ -106,9 +106,20 @@ title: {section['title']}
         
         nav_links.append((section_key.lower(), section['title'], section['description']))
     
-    # Generate main navigation index
     site_config = config.get('site', {})
-    main_index = f"""---
+    home_page_source = site_config.get('home_page_source')
+    index_path = os.path.join(target_dir, 'index.md')
+
+    if home_page_source:
+        source_index = os.path.join(source_base_dir, home_page_source)
+        if os.path.isfile(source_index):
+            shutil.copy2(source_index, index_path)
+            print(f"  Copied home page: {home_page_source} -> index.md")
+        else:
+            print(f"Warning: home page source not found: {home_page_source}")
+
+    if not os.path.exists(index_path):
+        main_index = f"""---
 title: {site_config.get('title', 'Documentation')}
 ---
 
@@ -119,17 +130,12 @@ title: {site_config.get('title', 'Documentation')}
 ## Navigation
 
 """
-    
-    for link, title, desc in nav_links:
-        main_index += f"- [{title}]({link}/) - {desc}\n"
-    
-    # Add link to demo overview as default content
-    main_index += f"\n## Getting Started\n\n[View Demo Overview](demo/overview.md)\n"
-    
-    # Write main index
-    index_path = os.path.join(target_dir, 'index.md')
-    with open(index_path, 'w', encoding='utf-8') as f:
-        f.write(main_index)
+
+        for link, title, desc in nav_links:
+            main_index += f"- [{title}]({link}/) - {desc}\n"
+
+        with open(index_path, 'w', encoding='utf-8') as f:
+            f.write(main_index)
     
     print("YAML config processing completed")
 

@@ -17,7 +17,7 @@
   "sitePublishCommand": "bash src/shell/docs/build-and-deploy.sh --prep-deploy --push",
   "releaseApprovalMessage": "Approve kano-agent-backlog-skill Release/Publish? Confirm tag, artifacts, docs, and publish plan before proceeding.",
   "windowsBuildCommand": "bash src/shell/support/self-build.sh debug",
-  "windowsTestCommand": "python -m pytest --tb=short -q --ignore=./tests/performance_utils.py --junitxml artifacts/reports/windows/junit-pytest.xml --cov=src/python --cov-report xml:artifacts/reports/windows/cobertura-pytest.xml && bash src/shell/test/native-test.sh",
-  "windowsValidateCommand": "bash src/shell/test/lint.sh && python -m build --sdist --wheel --outdir dist-test && bash src/shell/docs/build-and-deploy.sh --ci",
-  "windowsExportCommand": "python -m build --sdist --wheel --outdir dist-test"
+  "windowsTestCommand": "pixi run python -m pip install -e .[dev] build && pixi run python -m pytest --tb=short -q --ignore=./tests/performance_utils.py --junitxml artifacts/reports/windows/junit-pytest.xml --cov=src/python --cov-report xml:artifacts/reports/windows/cobertura-pytest.xml && bash src/shell/test/native-test.sh",
+  "windowsValidateCommand": "bash src/shell/test/lint.sh && pixi run python -m pip install -e .[dev] build && pixi run python -m build --sdist --wheel --outdir dist-test && bash src/shell/docs/build-and-deploy.sh --ci",
+  "windowsExportCommand": "pixi run python -m pip install -e .[dev] build && pixi run python -m build --sdist --wheel --outdir dist-test"
 }

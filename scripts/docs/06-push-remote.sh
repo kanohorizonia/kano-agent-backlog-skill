@@ -54,4 +54,4 @@ git push origin gh-pages
 
 echo "Successfully committed and pushed to gh-pages branch!"
 echo "Documentation site should be available at:"
-echo "https://dorgonman.github.io/kano-agent-backlog-skill/"
+echo "https://agentskill-backlog.kanohorizonia.com/"

@@ -8,6 +8,11 @@ set -euo pipefail
 #   04-deploy-local.sh [BUILD_DIR] [DEPLOY_DIR] [COMMIT_MESSAGE]
 #   If no arguments provided, auto-detect paths for local usage
 
+SCRIPT_DIR_FOR_CONFIG="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CONFIG_FILE="$SCRIPT_DIR_FOR_CONFIG/config/build.json"
+SKILL_REPO=$(grep -A6 '"repositories"' "$CONFIG_FILE" | grep -o '"skill"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d'"' -f4)
+SITE_URL=$(grep -A6 '"deployment"' "$CONFIG_FILE" | grep -o '"site_url"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d'"' -f4)
+
 # Parse arguments or auto-detect paths
 if [ $# -ge 2 ]; then
   # Parameterized mode: use provided paths
@@ -37,12 +42,12 @@ if [ ! -d "$DEPLOY_DIR" ]; then
   mkdir -p "$(dirname "$DEPLOY_DIR")"
   
   # Try to clone existing gh-pages branch, if it doesn't exist, create it
-  if git ls-remote --heads https://github.com/dorgonman/kano-agent-backlog-skill.git gh-pages | grep -q gh-pages; then
-    echo "Cloning existing gh-pages branch..."
-    git clone --branch gh-pages https://github.com/dorgonman/kano-agent-backlog-skill.git "$DEPLOY_DIR"
-  else
-    echo "Creating new gh-pages branch..."
-    git clone https://github.com/dorgonman/kano-agent-backlog-skill.git "$DEPLOY_DIR"
+   if git ls-remote --heads "$SKILL_REPO" gh-pages | grep -q gh-pages; then
+     echo "Cloning existing gh-pages branch..."
+    git clone --branch gh-pages "$SKILL_REPO" "$DEPLOY_DIR"
+   else
+     echo "Creating new gh-pages branch..."
+    git clone "$SKILL_REPO" "$DEPLOY_DIR"
     cd "$DEPLOY_DIR"
     git checkout --orphan gh-pages
     git rm -rf .
@@ -63,5 +68,11 @@ find "$DEPLOY_DIR" -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
 # Copy built site to deployment target
 cp -r "$BUILD_DIR/staged"/* "$DEPLOY_DIR/"
 
-echo "Files copied to gh-pages branch."
+# Restore CNAME for custom-domain GitHub Pages deployments.
+SITE_HOST=$(python -c "from urllib.parse import urlparse; print(urlparse('$SITE_URL').hostname or '')")
+if [[ -n "$SITE_HOST" && "$SITE_HOST" != *.github.io ]]; then
+  printf '%s\n' "$SITE_HOST" > "$DEPLOY_DIR/CNAME"
+fi
+
+echo "Files copied to local gh-pages working tree."
 echo "To commit and push changes, run: ./scripts/docs/06-push-remote.sh"

@@ -1,6 +1,6 @@
 # Documentation Deployment Scripts
 
-This directory contains scripts for building and deploying the official documentation website using Quartz static site generator and GitHub Pages.
+This directory contains scripts for building and staging the official documentation website with Quartz, MkDocs, and GitHub Pages.
 
 ## Architecture
 
@@ -9,22 +9,23 @@ This directory contains scripts for building and deploying the official document
 ```
 _ws/
 ├── src/           # Source repositories
-│   ├── demo/      # Demo repo (current repo clone)
+│   ├── demo/      # Demo repo clone
 │   ├── quartz/    # Quartz v4.4.0 engine
-│   └── skill/     # Skill repo source
+│   └── skill/     # Skill repo working tree snapshot
 ├── build/         # Generated artifacts
-│   ├── content/   # Prepared content for Quartz
-│   └── public/    # Built static site
-└── deploy/        # Deployment targets
-    └── gh-pages/  # Skill repo gh-pages branch
+│   ├── content/   # Prepared content for Quartz and MkDocs helpers
+│   ├── staged/    # Final static site artifact for GitHub Pages
+│   └── public/    # Reserved for local Quartz output if needed
+└── deploy/        # Optional local deploy target
+    └── gh-pages/  # Local gh-pages working tree
 ```
 
 ### Pipeline Flow
 
 ```
-Source Repos → Content Preparation → Quartz Build → Deployment
-     ↓               ↓                    ↓            ↓
-  _ws/src/    →  _ws/build/content  →  _ws/build/public  →  _ws/deploy/gh-pages
+Source Repos → Content Preparation → Quartz Build → MkDocs Integration → Optional Local Deploy Prep
+     ↓               ↓                    ↓                 ↓                        ↓
+  _ws/src/    →  _ws/build/content  →  _ws/build/staged → _ws/build/staged  →  _ws/deploy/gh-pages
 ```
 
 ## File Structure
@@ -32,18 +33,18 @@ Source Repos → Content Preparation → Quartz Build → Deployment
 ### Main Scripts
 | Script | Purpose | Dependencies |
 |--------|---------|-------------|
-| `01-setup-workspace.sh` | Clone repositories and setup workspace | Git |
+| `01-setup-workspace.sh` | Clone the demo repo, clone Quartz, and snapshot the local skill repo | Git, tar |
 | `02-prepare-content.sh` | Process YAML config and prepare content | 01 |
 | `03-build-site.sh` | Build static site with Quartz | 02, Node.js 22 |
-| `04-deploy-mkdocs.sh` | Build + integrate MkDocs API docs into site | 03, Python deps |
-| `05-deploy-quartz.sh` | Copy built site into gh-pages working tree | 03 |
-| `06-push-remote.sh` | Commit + push gh-pages branch to remote | 05 |
-| `build-and-deploy.sh` | **Main script** - runs all steps | All above |
+| `04-deploy-mkdocs.sh` | Build and integrate MkDocs API docs into the staged site | 03, Python deps |
+| `05-deploy-quartz.sh` | Copy the staged site into a local gh-pages working tree | 04 |
+| `06-push-remote.sh` | Commit and push the gh-pages working tree, explicit use only | 05 |
+| `build-and-deploy.sh` | Main entrypoint, builds and stages output by default | 01 to 04 |
 
 ### Configuration Files
 | File | Purpose |
 |------|---------|
-| `config/build.json` | Build parameters (Quartz version, repos, deployment) |
+| `config/build.json` | Build parameters, repository URLs, deployment metadata |
 | `config/quartz.config.ts` | Quartz theme and plugin configuration |
 | `config/mkdocs.yml` | MkDocs API documentation preprocessing |
 | `config/publish.config.yml` | Content mapping and navigation structure |
@@ -52,185 +53,163 @@ Source Repos → Content Preparation → Quartz Build → Deployment
 | File | Purpose |
 |------|---------|
 | `help/process_yaml_config.py` | YAML configuration processor and index generator |
+| `help/mkdocs-content-generator.py` | MkDocs nav and stub page generator |
+| `help/config-paths.sh` | Shared config path resolution |
 
 ## Content Publishing System
 
-### YAML-Based Configuration
+### YAML Based Configuration
 
-Content publishing is controlled by `config/publish.config.yml` which defines:
+Content publishing is controlled by `config/publish.config.yml`.
 
-```yaml
-navigation:
-  Demo:
-    title: "Demo & Examples"
-    items:
-      - source: "README.md"
-        target: "demo/index.md"
-        title: "Demo Overview"
-  
-  ADR:
-    title: "Architecture Decisions"
-    items:
-      - source: "_kano/backlog/products/*/decisions/**/*.md"
-        target: "adr/"
-        title_from_frontmatter: "title"
-```
+It defines:
 
-### GitHub Pages Compatibility
+- which files are copied from the demo and skill repos
+- which sections appear in navigation
+- which file becomes the site landing page
+- how CLI and API sections are stitched into the final site
 
-- **Flattened Structure**: Deep paths automatically flattened to avoid GitHub Pages routing issues
-- **Navigation Indexes**: Auto-generated index pages for each content section
-- **Direct Access**: All content accessible via clean URLs
+### Published Sections
+
+The current config publishes these top level sections:
+
+- Demo
+- Skill
+- Guides
+- Maintainer Automation
+- Architecture Decisions
+- Examples
+- References
+- CLI
+- API
+- Releases
+
+The landing page comes from `skill/docs/index.md`, not from an auto generated placeholder.
 
 ## Usage
 
-### Quick Start (Recommended)
+### Quick Start
 
 ```bash
-# Run complete pipeline
 ./scripts/docs/build-and-deploy.sh
 ```
+
+This builds the site and leaves the GitHub Pages artifact in `_ws/build/staged`.
 
 ### CI Mode
 
 ```bash
-# Skip workspace setup (for GitHub Actions)
 ./scripts/docs/build-and-deploy.sh --ci
 ```
 
-### Step-by-Step Execution
+This uses the same build flow and still stops at the staged artifact.
+
+### Optional Local Deploy Prep
 
 ```bash
-# 1. Setup workspace
-./scripts/docs/01-setup-workspace.sh
-
-# 2. Prepare content with YAML config
-./scripts/docs/02-prepare-content.sh
-
-# 3. Build site
-./scripts/docs/03-build-site.sh
-
-# 4. Deploy locally
-./scripts/docs/05-deploy-quartz.sh
-
-# 5. Push to remote
-./scripts/docs/06-push-remote.sh
+./scripts/docs/build-and-deploy.sh --prep-deploy
 ```
 
-### Cleanup
+This additionally populates `_ws/deploy/gh-pages` without pushing.
+
+### Explicit Remote Publish
 
 ```bash
-# Remove workspace
-rm -rf _ws
+./scripts/docs/build-and-deploy.sh --prep-deploy --push
+```
+
+Only run this if you intentionally want the legacy git based publish step.
+
+### Step by Step Execution
+
+```bash
+./scripts/docs/01-setup-workspace.sh
+./scripts/docs/02-prepare-content.sh
+./scripts/docs/03-build-site.sh
+./scripts/docs/04-deploy-mkdocs.sh
+./scripts/docs/05-deploy-quartz.sh
+./scripts/docs/06-push-remote.sh
 ```
 
 ## Prerequisites
 
-- **Git**: For repository cloning
-- **Node.js 22**: For Quartz build process
-- **Python 3**: For YAML configuration processing
-- **GitHub Access**: For pushing to remote repository
+- **Git** for repository cloning
+- **Node.js 22** for Quartz build
+- **Python 3** for YAML and MkDocs helpers
+- **MkDocs toolchain** if you want API docs generated locally
+- **GitHub push rights** only if you explicitly run the remote publish step
 
 ## Configuration
 
-### Build Configuration (`config/build.json`)
+### Build Configuration
 
-```json
-{
-  "quartz": {
-    "version": "v4.4.0",
-    "repository": "https://github.com/jackyzha0/quartz.git"
-  },
-  "repositories": {
-    "skill": "https://github.com/dorgonman/kano-agent-backlog-skill.git"
-  },
-  "deployment": {
-    "site_url": "https://dorgonman.github.io/kano-agent-backlog-skill/",
-    "branch": "gh-pages"
-  }
-}
-```
+`config/build.json` tracks:
 
-### Content Mapping (`config/publish.config.yml`)
+- Quartz version and source
+- demo repo URL
+- skill repo URL
+- deployed site URL
+- branch metadata for the optional git based publish flow
 
-Note: the canonical location in this repo is `scripts/docs/config/publish.config.yml`.
+Current canonical site URL:
 
-Defines how source files map to website structure:
-- **Navigation sections**: Demo, Skill, ADR, Examples, References
-- **File mappings**: Source patterns to target paths
-- **Index generation**: Automatic navigation page creation
-- **GitHub Pages optimization**: Flattened URLs for compatibility
+- `https://agentskill-backlog.kanohorizonia.com/`
 
-## GitHub Actions Integration
+### Content Mapping
 
-The CI pipeline uses `--ci` mode which:
-1. Assumes workspace is already setup by GitHub Actions checkout steps
-2. Uses explicit paths for all operations
-3. Automatically pushes to remote gh-pages branch
+`config/publish.config.yml` controls:
 
-### Workflow Structure
+- content copied from `demo/` and `skill/`
+- generated section indexes
+- home page source selection
+- API docs site URL metadata
 
-```yaml
-steps:
-  - name: Checkout repos (Demo, Quartz, Skill, gh-pages)
-  - name: Setup Node.js
-  - name: Build and deploy
-    run: ./scripts/docs/build-and-deploy.sh --ci
-```
+## GitHub Pages Integration
+
+The repository workflow uses the official Pages artifact model:
+
+1. Build the site into `_ws/build/staged`
+2. Upload it with `actions/upload-pages-artifact`
+3. Deploy it with `actions/deploy-pages`
+
+Custom domain handling should still be configured in repository Pages settings, but the current branch-based `gh-pages` publish flow also restores a `CNAME` file from `config/build.json` so the deployed branch keeps the expected hostname.
 
 ## Troubleshooting
 
-### Common Issues
+### Workspace not found
 
-**Workspace not found:**
+Run:
+
 ```bash
-Error: _ws directory not found
-```
-→ Run `01-setup-workspace.sh` first
-
-**YAML config not found:**
-```bash
-ERROR: publish.config.yml not found in any expected location
-```
-→ Ensure `scripts/docs/config/publish.config.yml` exists in the demo repo checkout
-
-**Python dependencies:**
-```bash
-ModuleNotFoundError: No module named 'yaml'
-```
-→ Install PyYAML: `pip install PyYAML`
-
-### Debug Mode
-
-Add debug output to any script:
-```bash
-set -x  # Enable debug mode
-./scripts/docs/build-and-deploy.sh
+./scripts/docs/01-setup-workspace.sh
 ```
 
-## Development
+### YAML config not found
 
-### Local Testing
+Make sure `scripts/docs/config/publish.config.yml` exists in the skill repo checkout.
 
-1. Run `build-and-deploy.sh` to build complete site
-2. Serve locally: `cd _ws/build/public && python -m http.server 8000`
-3. View at: `http://localhost:8000`
+### Python dependency errors
 
-### Content Updates
+Install the local docs dependencies you need, for example:
 
-1. Modify `scripts/docs/config/publish.config.yml` to control published content
-2. Update documentation in source repositories
-3. Run pipeline to rebuild and deploy
+```bash
+pip install mkdocs mkdocs-material "mkdocstrings[python]" pyyaml
+```
 
-### Adding New Content Sections
+## Local Testing
 
-1. Add new navigation section to `scripts/docs/config/publish.config.yml`
-2. Define source patterns and target paths
-3. Run content preparation to generate indexes
+1. Run `build-and-deploy.sh`
+2. Serve `_ws/build/staged`
+3. Open the local server in your browser
+
+Example:
+
+```bash
+cd _ws/build/staged && python -m http.server 8000
+```
 
 ## Security Notes
 
-- Scripts clone public repositories only
-- No sensitive credentials in scripts
-- GitHub token required for CI deployment
-- Local pipeline runs the full deploy, including pushing to `gh-pages` (skip step 6 if you want build-only)
+- The official GitHub Pages workflow uses the repository provided Pages token flow
+- Local builds do not push by default
+- The optional git based publish step is still available for maintainers who need it

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(kano_backlog VERSION 0.1.0 DESCRIPTION "Kano Agent Backlog — ticket-first AI agent collaboration" LANGUAGES CXX)
+project(kano_backlog VERSION 0.0.3 DESCRIPTION "Kano Agent Backlog — ticket-first AI agent collaboration" LANGUAGES CXX)
 
 # ---------------------------------------------------------------------------
 # Fix MSVC path length warning (object file paths exceed 250-char MAX_PATH)

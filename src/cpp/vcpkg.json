@@ -1,6 +1,6 @@
 {
   "name": "kano-backlog",
-  "version-string": "0.1.0-beta",
+  "version-string": "0.0.3",
   "description": "Kano Agent Backlog — ticket-first AI agent collaboration",
   "dependencies": [
     "cli11",

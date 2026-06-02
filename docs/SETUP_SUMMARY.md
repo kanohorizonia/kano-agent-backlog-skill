@@ -39,7 +39,7 @@ cd skills/kano-agent-backlog-skill
 pip install -e ".[dev]"
 
 # Verify installation
-bash scripts/internal/show-version.sh
+bash src/shell/support/show-version.sh
 kano-backlog --help
 kano-backlog doctor
 
@@ -128,13 +128,13 @@ See: [CONTRIBUTING.md](../CONTRIBUTING.md)
 
 ```bash
 # Test on Test PyPI first
-./scripts/publish_to_pypi.sh test
+./src/shell/release/publish_to_pypi.sh test
 
 # Verify test installation
 pip install --index-url https://test.pypi.org/simple/ kano-agent-backlog-skill
 
 # If all good, publish to production
-./scripts/publish_to_pypi.sh prod
+./src/shell/release/publish_to_pypi.sh prod
 ```
 
 Docs site publishing is separate. Merge docs changes to `main`, or run the `Publish docs to GitHub Pages` workflow manually with `workflow_dispatch`, and let `.github/workflows/pages.yml` deploy the Pages artifact.

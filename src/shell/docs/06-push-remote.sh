@@ -17,7 +17,7 @@ if [ $# -ge 1 ]; then
 else
   # Local mode: auto-detect repository root
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+  REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
   DEPLOY_DIR="$REPO_ROOT/_ws/deploy/gh-pages"
   COMMIT_MESSAGE="Deploy docs site from local build"
   echo "Auto-detected path: $DEPLOY_DIR"

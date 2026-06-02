@@ -2,6 +2,8 @@
 
 Local first backlog tooling for agent driven software work, with durable work items, worklogs, ADRs, and release evidence stored in the repo.
 
+> This file is the GitHub Pages home page source. If you are browsing the repository directly on GitHub, use [docs/README.md](README.md) for repo-local links.
+
 ## Start here
 
 - [Main repository](https://github.com/kanohorizonia/kano-agent-backlog-skill)
@@ -42,6 +44,6 @@ This site brings together the published skill docs, generated CLI docs, the Quar
 
 ## Maintainers
 
-The docs build keeps the existing Quartz plus MkDocs hybrid. Local runs now stop at build and staging by default. The repository currently supports branch-based `gh-pages` publishing through `scripts/docs/`, and that flow restores the `CNAME` file from docs build config so the custom domain stays attached.
+The docs build keeps the existing Quartz plus MkDocs hybrid. Local runs now stop at build and staging by default. The repository currently supports branch-based `gh-pages` publishing through `src/shell/docs/`, and that flow restores the `CNAME` file from docs build config so the custom domain stays attached.
 
 This project is currently preparing the `0.0.3` public OSS-readiness release. Experimental native and search-related areas remain available, but they are not the first thing a new reviewer should see.

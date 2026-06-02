@@ -1,6 +1,8 @@
 # Enforce LF for shell scripts and source code
 *.sh text eol=lf
 *.bash text eol=lf
+scripts/kob text eol=lf
+scripts/kano-backlog text eol=lf
 *.ps1 text eol=crlf
 *.bat text eol=crlf
 *.md text eol=lf

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SKILL_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+SKILL_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 MODE="${1:-debug}"
 
 case "$MODE" in

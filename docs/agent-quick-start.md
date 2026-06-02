@@ -81,11 +81,11 @@ pip install -e ".[dev]"
 bash scripts/internal/show-version.sh
 # Expected output: kob version from VERSION
 
-# Inspect command surface
-kob
+# Inspect repo-local launcher surface (native first, Python fallback)
+bash scripts/kob --help
 
 # Run environment check
-kob doctor
+bash scripts/kob doctor
 # All checks should pass (✅)
 ```
 
@@ -104,10 +104,10 @@ cd /path/to/user/project
 
 ```bash
 # Initialize with product name and agent identity
-kob admin init --product <product-name> --agent <agent-id>
+bash scripts/kob admin init --product <product-name> --agent <agent-id>
 
 # Example:
-kob admin init --product my-app --agent kiro
+bash scripts/kob admin init --product my-app --agent kiro
 ```
 
 **What this creates:**
@@ -171,7 +171,7 @@ _kano/backlog/_shared/logs
 
 ```bash
 # Create a task
-kob item create \
+bash scripts/kob item create \
   --type task \
   --title "Implement user authentication" \
   --product my-app \
@@ -197,7 +197,7 @@ code _kano/backlog/products/my-app/items/task/0000/MYAPP-TSK-0001_*.md
 **Move to Ready state (enforces required fields):**
 
 ```bash
-kob workitem set-ready MYAPP-TSK-0001 \
+bash scripts/kob workitem set-ready MYAPP-TSK-0001 \
   --product my-app \
   --context "Users need secure authentication tokens" \
   --goal "Implement reliable authentication for the app" \
@@ -210,12 +210,12 @@ kob workitem set-ready MYAPP-TSK-0001 \
 
 ```bash
 # Start work
-kob workitem update-state MYAPP-TSK-0001 \
+bash scripts/kob workitem update-state MYAPP-TSK-0001 \
   --state InProgress \
   --product my-app
 
 # Complete work
-kob workitem update-state MYAPP-TSK-0001 \
+bash scripts/kob workitem update-state MYAPP-TSK-0001 \
   --state Done \
   --product my-app
 ```
@@ -225,7 +225,7 @@ kob workitem update-state MYAPP-TSK-0001 \
 **Create an ADR for significant decisions:**
 
 ```bash
-kob adr create \
+bash scripts/kob adr create \
   --title "Use JWT for authentication" \
   --product my-app \
   --agent kiro
@@ -262,10 +262,10 @@ This is a **required parameter** for auditability and worklog tracking. Commands
 **Example - ALL commands need --agent:**
 ```bash
 # ✅ Correct
-kob item create --type task --title "My task" --product my-app --agent kiro
+bash scripts/kob item create --type task --title "My task" --product my-app --agent kiro
 
 # ❌ Wrong - missing --agent
-kob item create --type task --title "My task" --product my-app
+bash scripts/kob item create --type task --title "My task" --product my-app
 ```
 
 ## Troubleshooting
@@ -274,19 +274,16 @@ kob item create --type task --title "My task" --product my-app
 
 **Problem:** The public Python-installed `kano-backlog.exe` path can behave differently from repo-local development workflows in some Windows environments
 
-**Solution (Developer fallback):** If you are working from a repo clone and need a local workaround, use the repo-local `kob` launcher after building the native development binary:
+**Solution (Repo-local launcher):** If you are working from a repo clone, use the repo-local launcher. It prefers a native binary when present and otherwise falls back to Python from `src/python`:
 
 ```powershell
-# Build the native CLI
-bash src/cpp/build/script/windows/build_windows_ninja_msvc_debug.sh
-
-# Then use the local launcher
-./kob item create --type task --title "My task" --product my-app --agent kiro
+# Use the local launcher from the repo root
+bash scripts/kob item create --type task --title "My task" --product my-app --agent kiro
 ```
 
 **Why this happens:**
 - The packaged Python wrapper and repo-local development launchers are different execution paths
-- The repo-local `kob` launcher goes straight to the current native build output and is useful for contributor troubleshooting
+- The repo-local launcher prefers the current native build output and falls back to Python when the native binary is missing
 
 **Alternative:** Reinstall in a clean venv:
 ```powershell
@@ -316,7 +313,7 @@ pip show kano-agent-backlog-skill
 
 # If installed but not in PATH, use the repo-local launcher:
 bash scripts/internal/show-version.sh
-kob
+bash scripts/kob --help
 
 # Or reinstall:
 pip uninstall kano-agent-backlog-skill
@@ -331,10 +328,10 @@ pip install -e ".[dev]"
 
 ```bash
 # ❌ Wrong - will fail
-kob item create --type task --title "My task" --product my-app
+bash scripts/kob item create --type task --title "My task" --product my-app
 
 # ✅ Correct - includes --agent
-kob item create --type task --title "My task" --product my-app --agent kiro
+bash scripts/kob item create --type task --title "My task" --product my-app --agent kiro
 ```
 
 **Commands that require --agent:**
@@ -371,10 +368,10 @@ pip install -e ".[dev]"
 # Proposed → Planned → Ready → InProgress → Done
 
 # Move through states sequentially:
-kob workitem update-state <ID> --state Planned --product <product>
-kob workitem set-ready <ID> --product <product> --context "..." --goal "..." --approach "..." --acceptance-criteria "..." --risks "..."
-kob workitem update-state <ID> --state InProgress --product <product>
-kob workitem update-state <ID> --state Done --product <product>
+bash scripts/kob workitem update-state <ID> --state Planned --product <product>
+bash scripts/kob workitem set-ready <ID> --product <product> --context "..." --goal "..." --approach "..." --acceptance-criteria "..." --risks "..."
+bash scripts/kob workitem update-state <ID> --state InProgress --product <product>
+bash scripts/kob workitem update-state <ID> --state Done --product <product>
 ```
 
 ### "Ready gate validation failed"
@@ -400,32 +397,32 @@ kob workitem update-state <ID> --state Done --product <product>
 cd skills/kano-agent-backlog-skill
 pip install -e ".[dev]"
 bash scripts/internal/show-version.sh
-kob
-kob doctor
+bash scripts/kob --help
+bash scripts/kob doctor
 ```
 
 ### Initialization
 ```bash
 cd /path/to/project
-kob admin init --product <product> --agent <agent>
+bash scripts/kob admin init --product <product> --agent <agent>
 ```
 
 ### Common Commands
 ```bash
 # Create item
-kob item create --type task --title "<title>" --product <product> --agent <agent>
+bash scripts/kob item create --type task --title "<title>" --product <product> --agent <agent>
 
 # List items
-kob item list --product <product>
+bash scripts/kob item list --product <product>
 
 # Update state
-kob workitem update-state <ID> --state <state> --product <product>
+bash scripts/kob workitem update-state <ID> --state <state> --product <product>
 
 # Create ADR
-kob adr create --title "<title>" --product <product> --agent <agent>
+bash scripts/kob adr create --title "<title>" --product <product> --agent <agent>
 
 # Check environment
-kob doctor
+bash scripts/kob doctor
 ```
 
 ## For Users: Installing from PyPI
@@ -437,9 +434,8 @@ If the user wants to install the released version instead of development mode:
 pip install kano-agent-backlog-skill
 
 # Verify
-bash scripts/internal/show-version.sh
-kob
-kob doctor
+kano-backlog --help
+kano-backlog doctor
 ```
 
 See [Quick Start Guide](quick-start.md) for the standard installation workflow.

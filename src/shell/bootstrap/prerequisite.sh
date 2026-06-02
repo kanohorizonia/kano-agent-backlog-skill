@@ -8,8 +8,8 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-SKILL_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd -P)"
-REPO_ROOT="$(cd "${SKILL_ROOT}/../../../.." && pwd -P)"
+SKILL_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd -P)"
+REPO_ROOT="$SKILL_ROOT"
 
 print_info() {
     echo -e "${BLUE}[INFO]${NC} $1"
@@ -35,7 +35,7 @@ Usage:
 Notes:
   - Can be run from any directory; it will use the demo repo root automatically.
   - Manages optional developer tooling (bun/opencode/oh-my-opencode).
-  - Native repo usage goes through ./kob after the C++ build completes.
+  - Native repo usage goes through bash scripts/kob after the C++ build completes.
   - OpenCode UI may require Bun. If you saw:
       {"name":"BunInstallFailedError",...}
     run:

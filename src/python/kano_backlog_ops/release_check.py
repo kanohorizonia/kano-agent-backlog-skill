@@ -311,7 +311,7 @@ def run_phase2(
     artifacts: List[Path] = []
 
     py = sys.executable
-    kano = [py, "skills/kano-agent-backlog-skill/scripts/kano-backlog"]
+    kano = ["bash", "scripts/kob"]
 
     def write_artifact(name: str, content: str) -> Optional[Path]:
         if artifact_dir is None:

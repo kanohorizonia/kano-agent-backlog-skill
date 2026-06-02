@@ -43,7 +43,7 @@ done
 # Auto-detect repository root if not provided
 if [ -z "$REPO_ROOT" ]; then
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+  REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 fi
 
 echo "=== Documentation Build Pipeline ==="
@@ -55,12 +55,12 @@ echo ""
 
 # Step 1: Setup workspace
 echo "Step 1: Setting up workspace..."
-bash "$REPO_ROOT/scripts/docs/01-setup-workspace.sh"
+bash "$REPO_ROOT/src/shell/docs/01-setup-workspace.sh"
 echo ""
 
 # Step 2: Prepare content
 echo "Step 2: Preparing documentation content..."
-bash "$REPO_ROOT/scripts/docs/02-prepare-content.sh" \
+bash "$REPO_ROOT/src/shell/docs/02-prepare-content.sh" \
   "$REPO_ROOT" \
   "$REPO_ROOT/_ws/src/demo" \
   "$REPO_ROOT/_ws/src/skill" \
@@ -69,24 +69,24 @@ echo ""
 
 # Step 3: Build site
 echo "Step 3: Building Quartz site..."
-bash "$REPO_ROOT/scripts/docs/03-build-site.sh" \
+bash "$REPO_ROOT/src/shell/docs/03-build-site.sh" \
   "$REPO_ROOT" \
   "$REPO_ROOT/_ws/src/quartz" \
   "$REPO_ROOT/_ws/build" \
-  "$REPO_ROOT/scripts/docs/config/quartz.config.ts"
+  "$REPO_ROOT/src/shell/docs/config/quartz.config.ts"
 echo ""
 
 # Step 4: Deploy MkDocs API documentation
 echo "Step 4: Deploying MkDocs API documentation..."
-bash "$REPO_ROOT/scripts/docs/04-deploy-mkdocs.sh" \
+bash "$REPO_ROOT/src/shell/docs/04-deploy-mkdocs.sh" \
   "$REPO_ROOT/_ws/build" \
   "$REPO_ROOT/_ws/src/skill" \
-  "$REPO_ROOT/scripts/docs/config/mkdocs.yml"
+  "$REPO_ROOT/src/shell/docs/config/mkdocs.yml"
 echo ""
 
 if [ "$PREP_DEPLOY" = true ]; then
   echo "Step 5: Preparing local gh-pages working tree..."
-  bash "$REPO_ROOT/scripts/docs/05-deploy-quartz.sh" \
+  bash "$REPO_ROOT/src/shell/docs/05-deploy-quartz.sh" \
     "$REPO_ROOT/_ws/build" \
     "$REPO_ROOT/_ws/deploy/gh-pages" \
     "Prepare docs site from ${GITHUB_SHA:-local-build}"
@@ -95,7 +95,7 @@ fi
 
 if [ "$PUSH_REMOTE" = true ]; then
   echo "Step 6: Committing and pushing to remote gh-pages branch..."
-  bash "$REPO_ROOT/scripts/docs/06-push-remote.sh" \
+  bash "$REPO_ROOT/src/shell/docs/06-push-remote.sh" \
     "$REPO_ROOT/_ws/deploy/gh-pages" \
     "Deploy docs site from ${GITHUB_SHA:-local-build}"
   echo ""

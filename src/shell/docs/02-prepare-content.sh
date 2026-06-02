@@ -13,7 +13,7 @@ if [ $# -eq 4 ]; then
   echo "Using provided paths (CI mode)"
 else
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+  REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
   DEMO_DIR="$REPO_ROOT/_ws/src/demo"
   SKILL_DIR="$REPO_ROOT/_ws/src/skill"
   BUILD_DIR="$REPO_ROOT/_ws/build"
@@ -31,7 +31,7 @@ if ! command -v python >/dev/null 2>&1; then
   PREREQ_MISSING=true
 fi
 
-if [ ! -x "$REPO_ROOT/kob" ] && ! command -v kob >/dev/null 2>&1; then
+if [ ! -x "$REPO_ROOT/scripts/kob" ] && ! command -v kob >/dev/null 2>&1; then
   echo "WARNING: kob command surface not available - CLI docs will be limited"
 fi
 
@@ -56,8 +56,8 @@ echo "Generating CLI documentation..."
 mkdir -p "$BUILD_DIR/content_quartz/cli"
 
 KOB_CMD=""
-if [ -x "$REPO_ROOT/kob" ]; then
-  KOB_CMD="$REPO_ROOT/kob"
+if [ -x "$REPO_ROOT/scripts/kob" ]; then
+  KOB_CMD="$REPO_ROOT/scripts/kob"
 elif command -v kob >/dev/null 2>&1; then
   KOB_CMD="kob"
 fi

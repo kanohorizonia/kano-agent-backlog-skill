@@ -120,7 +120,7 @@ source test-venv/bin/activate  # or test-venv\Scripts\activate on Windows
 pip install dist/kano_agent_backlog_skill-0.0.3-py3-none-any.whl
 
 # Verify CLI works
-bash scripts/internal/show-version.sh
+bash src/shell/support/show-version.sh
 kano-backlog doctor
 
 # Test basic workflow
@@ -136,7 +136,7 @@ rm -rf test-venv
 
 ```bash
 # Using the script (recommended)
-./scripts/publish_to_pypi.sh test
+./src/shell/release/publish_to_pypi.sh test
 
 # Or manually
 twine upload --repository testpypi dist/*
@@ -167,7 +167,7 @@ rm -rf test-pypi-venv
 
 ```bash
 # Using the script (recommended)
-./scripts/publish_to_pypi.sh prod
+./src/shell/release/publish_to_pypi.sh prod
 
 # Or manually
 twine upload dist/*

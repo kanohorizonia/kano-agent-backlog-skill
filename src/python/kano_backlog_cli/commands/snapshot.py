@@ -28,8 +28,8 @@ def _collect_cli_remotely() -> List[snapshot_ops.CliCommand]:
     """
     # Find the kano-backlog script wrapper or module
     # We try to run the same command that invoked us, or default to standard locations
-    cmd = [sys.executable, "skills/kano-agent-backlog-skill/scripts/kano-backlog"]
-    if not Path("skills/kano-agent-backlog-skill/scripts/kano-backlog").exists():
+    cmd = ["bash", "scripts/kob"]
+    if not Path("scripts/kob").exists():
         # Fallback to module execution if script not found
         cmd = [sys.executable, "-m", "kano_backlog_cli"]
 

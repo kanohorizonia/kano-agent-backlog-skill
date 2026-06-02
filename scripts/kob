@@ -2,4 +2,5 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-exec "$SCRIPT_DIR/kano-backlog" "$@"
+# Thin repo-local launcher: delegate to the canonical launcher script.
+exec "$SCRIPT_DIR/../src/shell/core/kano-backlog" "$@"

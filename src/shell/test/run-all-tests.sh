@@ -5,8 +5,8 @@
 # Runs pytest with coverage reporting. Slower than quick-test.sh (~2-5 min).
 #
 # Usage:
-#   bash scripts/test/run-all-tests.sh [--cleanup]
-#   bash scripts/test/run-all-tests.sh --help
+#   bash src/shell/test/run-all-tests.sh [--cleanup]
+#   bash src/shell/test/run-all-tests.sh --help
 #
 # Options:
 #   --cleanup   Remove coverage artifacts after report generation
@@ -31,7 +31,7 @@ else
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"
-SKILL_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+SKILL_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 
 # Add skill's src/python/ to PYTHONPATH so tests can import packages
 export PYTHONPATH="$SKILL_ROOT/src/python:${PYTHONPATH:-}"
@@ -67,9 +67,9 @@ Options:
   --help      Show this help
 
 Examples:
-  bash scripts/test/run-all-tests.sh
-  bash scripts/test/run-all-tests.sh --cleanup
-  bash scripts/test/run-all-tests.sh --verbose
+  bash src/shell/test/run-all-tests.sh
+  bash src/shell/test/run-all-tests.sh --cleanup
+  bash src/shell/test/run-all-tests.sh --verbose
 EOF
 }
 

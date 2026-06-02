@@ -6,7 +6,7 @@
 # Use run-all-tests.sh for full test suite with coverage.
 #
 # Usage:
-#   bash scripts/test/quick-test.sh [--verbose]
+#   bash src/shell/test/quick-test.sh [--verbose]
 #
 # Requirements:
 #   - Python 3.8+ with pytest installed
@@ -23,7 +23,7 @@ else
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"
-SKILL_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+SKILL_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 
 # Add skill's src/python/ to PYTHONPATH so tests can import packages
 # (skill uses src/python-layout; packages are under src/python/kano_backlog_*/)

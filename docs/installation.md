@@ -18,7 +18,9 @@ If you are working from a clone of the skill repository, start with the repo lev
 - [Agent quick start](agent-quick-start.md)
 - [Main repository README](https://github.com/kanohorizonia/kano-agent-backlog-skill#quick-start)
 
-For docs maintenance, the local docs pipeline lives under `scripts/docs/` and builds into `_ws/build/staged` by default.
+For repo-local execution, use `bash scripts/kob`. It prefers a built native binary and falls back to the Python CLI from `src/python` when native output is missing.
+
+For docs maintenance, the local docs pipeline lives under `src/shell/docs/` and builds into `_ws/build/staged` by default.
 
 ## Editable install for contributors
 
@@ -38,4 +40,4 @@ This is the recommended path when working on the skill itself, because it keeps 
 
 - If `kob` is not found, confirm the environment where the package was installed is active.
 - If docs dependencies are missing, install `mkdocs`, `mkdocs-material`, `mkdocstrings[python]`, and `pyyaml` before running the docs pipeline.
-- If tests cannot import the package from source, use the provided `scripts/test/*.sh` wrappers, which set `PYTHONPATH` correctly.
+- If tests cannot import the package from source, use the provided `src/shell/test/*.sh` wrappers, which set `PYTHONPATH` correctly.

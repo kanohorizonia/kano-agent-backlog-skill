@@ -246,7 +246,7 @@ def _run_create_command(
                 if summary:
                     typer.echo(f"  Details: {summary}")
                 typer.echo(
-                    "  Suggested: python skills/kano-agent-backlog-skill/scripts/kano-backlog admin "
+                    "  Suggested: bash scripts/kob admin "
                     f"sync-sequences --product {effective_product}"
                 )
                 if auto_sync:

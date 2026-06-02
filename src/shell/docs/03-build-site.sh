@@ -19,7 +19,7 @@ if [ $# -eq 4 ]; then
 else
   # Local mode: auto-detect repository root
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+  REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
   QUARTZ_DIR="$REPO_ROOT/_ws/src/quartz"
   BUILD_DIR="$REPO_ROOT/_ws/build"
   CONFIG_FILE="$SCRIPT_DIR/config/quartz.config.ts"

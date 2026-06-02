@@ -64,6 +64,9 @@ navigation:
       - source: "skill/docs/version-policy.md"
         target: "guides/version-policy.md"
         title: "Version Policy"
+      - source: "skill/docs/design/native-cli-direction.md"
+        target: "guides/native-cli-direction.md"
+        title: "Native CLI Direction"
       - source: "skill/docs/demo-maintenance.md"
         target: "guides/demo-maintenance.md"
         title: "Demo Maintenance"
@@ -96,7 +99,7 @@ navigation:
       - source: "skill/docs/maintainer-automation.md"
         target: "automation/maintainer-automation.md"
         title: "Maintainer Automation"
-      - source: "skill/scripts/docs/README.md"
+      - source: "skill/src/shell/docs/README.md"
         target: "automation/docs-pipeline.md"
         title: "Docs Pipeline"
 

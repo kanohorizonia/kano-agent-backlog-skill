@@ -262,7 +262,7 @@ def check_backlog_initialized(
             passed=False,
             message="Backlog root not found",
             details=(
-                "Initialize the backlog with 'python skills/kano-agent-backlog-skill/scripts/kano-backlog admin "
+                "Initialize the backlog with 'bash scripts/kob admin "
                 "init --product <name> --agent <id>' or follow SKILL.md for manual scaffolding."
             ),
         )
@@ -302,7 +302,7 @@ def check_backlog_initialized(
             passed=False,
             message="No products found",
             details=(
-                "Create one with 'python skills/kano-agent-backlog-skill/scripts/kano-backlog admin init --product <name> "
+                "Create one with 'bash scripts/kob admin init --product <name> "
                 "--agent <id>' or follow SKILL.md for manual scaffolding."
             ),
         )

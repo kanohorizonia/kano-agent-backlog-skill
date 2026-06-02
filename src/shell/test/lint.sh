@@ -10,8 +10,8 @@
 # those failures block the script.
 #
 # Usage:
-#   bash scripts/test/lint.sh [--fix]
-#   bash scripts/test/lint.sh --help
+#   bash src/shell/test/lint.sh [--fix]
+#   bash src/shell/test/lint.sh --help
 #
 # Options:
 #   --fix   Apply automatic fixes (ruff, black, isort). mypy does not have --fix.
@@ -31,7 +31,7 @@ else
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"
-SKILL_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+SKILL_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 
 # Add skill's src/python/ to PYTHONPATH so tools can import packages
 export PYTHONPATH="$SKILL_ROOT/src/python:${PYTHONPATH:-}"
@@ -74,8 +74,8 @@ Tools checked:
   mypy     - Type checking
 
 Examples:
-  bash scripts/test/lint.sh           # Check only
-  bash scripts/test/lint.sh --fix     # Check + auto-fix
+  bash src/shell/test/lint.sh           # Check only
+  bash src/shell/test/lint.sh --fix     # Check + auto-fix
 EOF
 }
 

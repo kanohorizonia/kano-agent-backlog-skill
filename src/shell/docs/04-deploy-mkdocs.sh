@@ -21,7 +21,7 @@ if [ $# -eq 3 ]; then
   # Derive the workspace root so config resolution works consistently.
   REPO_ROOT="$(cd "$(dirname "$(dirname "$BUILD_DIR")")" && pwd)"
 else
-  REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+  REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
   BUILD_DIR="$REPO_ROOT/_ws/build"
   SKILL_DIR="$REPO_ROOT/_ws/src/skill"
   

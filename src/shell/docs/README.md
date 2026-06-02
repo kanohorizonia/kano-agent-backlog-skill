@@ -91,7 +91,7 @@ The landing page comes from `skill/docs/index.md`, not from an auto generated pl
 ### Quick Start
 
 ```bash
-./scripts/docs/build-and-deploy.sh
+./src/shell/docs/build-and-deploy.sh
 ```
 
 This builds the site and leaves the GitHub Pages artifact in `_ws/build/staged`.
@@ -99,7 +99,7 @@ This builds the site and leaves the GitHub Pages artifact in `_ws/build/staged`.
 ### CI Mode
 
 ```bash
-./scripts/docs/build-and-deploy.sh --ci
+./src/shell/docs/build-and-deploy.sh --ci
 ```
 
 This uses the same build flow and still stops at the staged artifact.
@@ -107,7 +107,7 @@ This uses the same build flow and still stops at the staged artifact.
 ### Optional Local Deploy Prep
 
 ```bash
-./scripts/docs/build-and-deploy.sh --prep-deploy
+./src/shell/docs/build-and-deploy.sh --prep-deploy
 ```
 
 This additionally populates `_ws/deploy/gh-pages` without pushing.
@@ -115,7 +115,7 @@ This additionally populates `_ws/deploy/gh-pages` without pushing.
 ### Explicit Remote Publish
 
 ```bash
-./scripts/docs/build-and-deploy.sh --prep-deploy --push
+./src/shell/docs/build-and-deploy.sh --prep-deploy --push
 ```
 
 Only run this if you intentionally want the legacy git based publish step.
@@ -123,12 +123,12 @@ Only run this if you intentionally want the legacy git based publish step.
 ### Step by Step Execution
 
 ```bash
-./scripts/docs/01-setup-workspace.sh
-./scripts/docs/02-prepare-content.sh
-./scripts/docs/03-build-site.sh
-./scripts/docs/04-deploy-mkdocs.sh
-./scripts/docs/05-deploy-quartz.sh
-./scripts/docs/06-push-remote.sh
+./src/shell/docs/01-setup-workspace.sh
+./src/shell/docs/02-prepare-content.sh
+./src/shell/docs/03-build-site.sh
+./src/shell/docs/04-deploy-mkdocs.sh
+./src/shell/docs/05-deploy-quartz.sh
+./src/shell/docs/06-push-remote.sh
 ```
 
 ## Prerequisites
@@ -181,12 +181,12 @@ Custom domain handling should still be configured in repository Pages settings, 
 Run:
 
 ```bash
-./scripts/docs/01-setup-workspace.sh
+./src/shell/docs/01-setup-workspace.sh
 ```
 
 ### YAML config not found
 
-Make sure `scripts/docs/config/publish.config.yml` exists in the skill repo checkout.
+Make sure `src/shell/docs/config/publish.config.yml` exists in the skill repo checkout.
 
 ### Python dependency errors
 

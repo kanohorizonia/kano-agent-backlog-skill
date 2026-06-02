@@ -5,7 +5,7 @@ set -euo pipefail
 # Run after build-quartz-site.sh to deploy the documentation
 #
 # Usage: 
-#   04-deploy-local.sh [BUILD_DIR] [DEPLOY_DIR] [COMMIT_MESSAGE]
+#   05-deploy-quartz.sh [BUILD_DIR] [DEPLOY_DIR] [COMMIT_MESSAGE]
 #   If no arguments provided, auto-detect paths for local usage
 
 SCRIPT_DIR_FOR_CONFIG="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -23,7 +23,7 @@ if [ $# -ge 2 ]; then
 else
   # Local mode: auto-detect repository root
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+  REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
   BUILD_DIR="$REPO_ROOT/_ws/build"
   DEPLOY_DIR="$REPO_ROOT/_ws/deploy/gh-pages"
   COMMIT_MESSAGE="Deploy docs site from local build"
@@ -75,4 +75,4 @@ if [[ -n "$SITE_HOST" && "$SITE_HOST" != *.github.io ]]; then
 fi
 
 echo "Files copied to local gh-pages working tree."
-echo "To commit and push changes, run: ./scripts/docs/06-push-remote.sh"
+echo "To commit and push changes, run: ./src/shell/docs/06-push-remote.sh"

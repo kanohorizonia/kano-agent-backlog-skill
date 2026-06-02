@@ -272,9 +272,9 @@ kob item create --type task --title "My task" --product my-app
 
 ### Windows: "ModuleNotFoundError: No module named 'kano_backlog_cli'"
 
-**Problem:** The legacy `kano-backlog.exe` packaging path may differ from the preferred repo-local kob surface in some Windows environments
+**Problem:** The public Python-installed `kano-backlog.exe` path can behave differently from repo-local development workflows in some Windows environments
 
-**Solution (Recommended):** Prefer the repo-local kob launcher and native build flow:
+**Solution (Developer fallback):** If you are working from a repo clone and need a local workaround, use the repo-local `kob` launcher after building the native development binary:
 
 ```powershell
 # Build the native CLI
@@ -285,8 +285,8 @@ bash src/cpp/build/script/windows/build_windows_ninja_msvc_debug.sh
 ```
 
 **Why this happens:**
-- The packaged Python wrapper can differ from the preferred repo-local native surface
-- The repo-local `kob` launcher goes straight to the current native build output
+- The packaged Python wrapper and repo-local development launchers are different execution paths
+- The repo-local `kob` launcher goes straight to the current native build output and is useful for contributor troubleshooting
 
 **Alternative:** Reinstall in a clean venv:
 ```powershell

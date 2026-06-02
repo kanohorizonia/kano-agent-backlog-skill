@@ -5,17 +5,17 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "kano-agent-backlog-skill"
 dynamic = ["version"]
-description = "Local-first backlog system with audit trail for AI agent collaboration, including core domain library and CLI facade"
+description = "Local-first backlog workflow for AI coding agents, with durable markdown work items, ADRs, worklogs, and handoffs"
 readme = "README.md"
 requires-python = ">=3.8"
-license = {text = "MIT"}
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     {name = "Kano Team"}
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.8",
@@ -23,7 +23,9 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Documentation",
     "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Software Development :: Project Management",
     "Topic :: Software Development :: Version Control",
 ]
 dependencies = [
@@ -38,11 +40,11 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/kano-ai/kano-agent-backlog-skill"
-Repository = "https://github.com/kano-ai/kano-agent-backlog-skill"
-Documentation = "https://github.com/kano-ai/kano-agent-backlog-skill/tree/main/docs"
-"Bug Tracker" = "https://github.com/kano-ai/kano-agent-backlog-skill/issues"
-Changelog = "https://github.com/kano-ai/kano-agent-backlog-skill/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/kanohorizonia/kano-agent-backlog-skill"
+Repository = "https://github.com/kanohorizonia/kano-agent-backlog-skill"
+Documentation = "https://agentskill-backlog.kanohorizonia.com/"
+"Bug Tracker" = "https://github.com/kanohorizonia/kano-agent-backlog-skill/issues"
+Changelog = "https://github.com/kanohorizonia/kano-agent-backlog-skill/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 dev = [
@@ -64,8 +66,8 @@ vector = [
 kano-backlog = "kano_backlog_cli.cli:main"
 
 [tool.setuptools.packages.find]
-where = ["src"]
-# Automatically discover all packages under src/
+where = ["src/python"]
+# Automatically discover all packages under src/python/
 # This will find: kano_backlog_core, kano_backlog_ops, kano_backlog_cli, sentence_transformers
 
 [tool.setuptools.package-data]
@@ -73,7 +75,7 @@ where = ["src"]
 kano_backlog_core = ["schema/*.sql", "py.typed"]
 # Include PEP 561 type marker files
 kano_backlog_ops = ["py.typed"]
-kano_backlog_cli = ["py.typed"]
+kano_backlog_cli = ["py.typed", "templates/*.toml"]
 # Include type stub files for sentence_transformers
 sentence_transformers = ["*.pyi"]
 

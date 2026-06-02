@@ -1,329 +1,130 @@
 # kano-agent-backlog-skill
 
 [![PyPI version](https://img.shields.io/pypi/v/kano-agent-backlog-skill.svg)](https://pypi.org/project/kano-agent-backlog-skill/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/downloads/)
-[![AI Agent Skills](https://img.shields.io/badge/AI-Agent%20Skills-brightgreen.svg)](https://github.com/topics/ai-agent)
-[![Spec-Driven](https://img.shields.io/badge/Spec--Driven-Agentic%20Programming-orange.svg)](https://github.com/topics/agentic-programming)
+[![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-2ea44f.svg)](https://agentskill-backlog.kanohorizonia.com/)
 
-> **Local-first backlog management for AI agent collaboration** | Turn ephemeral chat context into durable engineering assets
+Local-first backlog workflow for AI coding agents, with durable markdown work items, ADRs, worklogs, release evidence, and multi-agent handoff.
 
-**Transform agent conversations into auditable work items, decisions, and acceptance criteria.**  
-Stop losing context when your AI coding assistant forgets what you discussed. Keep a durable trail of *what to build*, *why*, and *how to verify* — all stored as human-readable markdown files in your repository.
+## Public thesis
 
-> Code can be rewritten. Lost decisions can't.
+AI coding sessions move fast, but the reasoning behind them disappears even faster. This project keeps the planning, decisions, verification targets, and handoff trail inside the repo as plain markdown so humans and agents can keep working from the same durable source.
 
-## Why kano-agent-backlog-skill?
+## Why this exists
 
-Working with AI coding agents is powerful, but context evaporates:
-- **Lost decisions**: "Why didn't we use approach X?" — buried in chat history
-- **Missing rationale**: Code works today, but maintenance feels like archaeology
-- **Requirement drift**: Changes force you to dig through conversations to understand impact
-- **Agent amnesia**: Each new session starts from scratch, losing accumulated context
+Most agent workflows still depend on fragile chat memory. That breaks down when you need to answer basic questions later, like why a task was split, what was accepted, which risk was known, or what the next agent should do.
 
-**kano-agent-backlog-skill** solves this by making your agent work *tickets-first*:
-- Create work items (Epic/Feature/Task/Bug) **before** writing code
-- Capture decisions in append-only worklogs and Architecture Decision Records (ADRs)
-- Enforce a "Ready gate" so every task has Context, Goal, Approach, Acceptance Criteria, and Risks
-- Store everything as markdown files — searchable, linkable, version-controlled
+`kano-agent-backlog-skill` exists to make agent work local first, reviewable, and recoverable. Instead of treating planning as disposable chat, it turns backlog items, ADRs, worklogs, and release evidence into repo assets.
 
-**Result**: Your agent becomes a teammate with institutional memory, not just a code generator.
+## Native implementation direction
 
-## Key Features
+The current public release still includes the Python implementation and Python packaging path. A native C++ CLI remains a future direction, not the current stable public contract.
 
-- **📝 Structured Work Items**: Hierarchical backlog (Epic → Feature → User Story → Task/Bug) with frontmatter metadata
-- **🔒 Ready Gate Validation**: Enforce required fields (Context, Goal, Approach, Acceptance Criteria, Risks) before work begins
-- **📜 Append-Only Worklog**: Auditable decision trail with timestamps and agent identity — never lose context
-- **🏗️ Architecture Decision Records (ADRs)**: Capture significant technical decisions with trade-offs and consequences
-- **🎯 Worksets**: Per-item execution cache with plan checklists to prevent agent drift during complex tasks
-- **🔄 Topics**: Context switching and grouping for rapid focus area changes with code snippet collection
-- **👥 Multi-Agent Coordination**: Multiple agents can collaborate on the same backlog with clear handoffs
-- **📊 Multiple Views**: Generate Obsidian Dataview dashboards and plain markdown reports
-- **🔍 Optional Search**: SQLite indexing and vector embeddings for semantic search (experimental)
-- **🌐 Local-First**: All data stored as markdown files — no server required, works offline
+The motivation is practical rather than ideological. In agentic workflows, an agent may call the same skill CLI hundreds or thousands of times while exploring, validating, and repairing a task. A Python command pays interpreter startup and import cost on every call; a native CLI can start as a single binary and return much faster. That can improve runtime dependencies, distribution ergonomics, CI throughput, and repeated agent-tool invocation costs.
 
-## Quick Install
+That direction is still future-facing until the native implementation is validated by tests and docs at the same level as the current Python path. C++ is not a substitute for design or review, and it will not be presented here as the stable public CLI until that validation is complete.
+
+## What it provides
+
+- Markdown backed work items with frontmatter and stable IDs
+- Ready gate fields for context, goal, approach, acceptance criteria, and risks
+- Append only worklogs for execution history and handoff notes
+- ADR support for durable technical decisions
+- Worksets and topics for focused execution and multi-agent coordination
+- Release evidence, views, and validation surfaces that stay in the repository
+- Optional search and embedding flows, clearly marked as experimental
+
+## Current release status
+
+- `0.0.2` released
+- `0.0.3` is the current OSS-readiness release target
+- the current public release still includes Python
+- native C++ CLI migration remains future-facing until validated
+- Pre-1.0, so schema, CLI details, and public docs can still change
+
+## Quick start
+
+The current public package path is Python-based. These commands document the existing released behavior targeted for the `0.0.3` OSS-readiness release.
 
 ```bash
 pip install kano-agent-backlog-skill
+kano-backlog admin init --product my-app --agent codex
+kano-backlog item create --type task --title "Add login" --product my-app --agent codex
+kano-backlog doctor
 ```
 
-**Verify installation:**
-```bash
-bash scripts/internal/show-version.sh
-kob
-kob doctor
-```
-
-## Minimal Usage Example
-
-```bash
-# Initialize a backlog for your product
-kob admin init --product my-app --agent kiro
-
-# IMPORTANT: Add cache and logs to .gitignore
-echo ".kano/cache" >> .gitignore
-echo "_kano/backlog/_shared/logs" >> .gitignore
-
-# Create a task with required fields
-kob item create --type task \
-  --title "Add user authentication" \
-  --agent kiro --product my-app
-
-# Set task to Ready state (enforces required fields)
-kob workitem set-ready MYAPP-TSK-0001 --product my-app \
-  --context "Users need secure login" \
-  --goal "Implement JWT-based authentication" \
-  --approach "Use bcrypt for passwords, JWT for sessions" \
-  --acceptance-criteria "Users can login, logout, and stay authenticated" \
-  --risks "Token expiration handling needs testing"
-
-# Start work with a workset to prevent drift
-kob workset init --item MYAPP-TSK-0001 --agent kiro
-kob workset next --item MYAPP-TSK-0001
-
-# Update state when done
-kob workitem update-state MYAPP-TSK-0001 --state Done \
-  --agent kiro --product my-app
-```
-
-**Note:** Always add `.kano/cache` and `_kano/backlog/_shared/logs` to your `.gitignore` after initialization to avoid committing derived data (embeddings, SQLite indexes, audit logs).
+If you are working from a clone, start with [docs/agent-quick-start.md](docs/agent-quick-start.md).
 
 ## Documentation
 
-- **[Agent Quick Start](docs/agent-quick-start.md)** - For AI agents: Install from cloned repo and initialize backlog
-- **[Quick Start Guide](docs/quick-start.md)** - Get started in 5-10 minutes
-- **[Installation Guide](docs/installation.md)** - System requirements and setup
-- **[Configuration Guide](docs/configuration.md)** - Profiles, environment variables, and settings
-- **[SKILL.md](SKILL.md)** - Complete workflow and rules for agents
-- **[Workset Documentation](docs/workset.md)** - Prevent agent drift during tasks
-- **[Topic Documentation](docs/topic.md)** - Context switching and grouping
-- **[Schema Reference](references/schema.md)** - Item types, states, and frontmatter
-- **[Workflow Guide](references/workflow.md)** - When to create items and record decisions
-- **[CHANGELOG.md](CHANGELOG.md)** - Version history and release notes
+- [GitHub Pages documentation site](https://agentskill-backlog.kanohorizonia.com/)
+- [Quick start](docs/quick-start.md)
+- [Installation](docs/installation.md)
+- [Configuration](docs/configuration.md)
+- [Version policy](docs/version-policy.md)
+- [Maintainer automation](docs/maintainer-automation.md)
+- [Codex for OSS](docs/codex-for-oss.md)
+- [Agent quick start](docs/agent-quick-start.md)
+- [Usage examples](docs/usage-examples.md)
+- [Worksets](docs/workset.md)
+- [Topics](docs/topic.md)
+- [Experimental features](docs/experimental-features.md)
+- [Workflow reference](references/workflow.md)
+- [Schema reference](references/schema.md)
+- [REFERENCE.md](REFERENCE.md)
+- [SKILL.md](SKILL.md)
+- [CHANGELOG.md](CHANGELOG.md)
 
-## System Requirements
+## Demo
 
-- **Python**: 3.8 or higher
-- **Operating System**: Linux, macOS, or Windows
-- **SQLite**: 3.8+ (usually included with Python)
-- **Optional**: Obsidian (for Dataview dashboards)
+A companion demo repo exists at [dorgonman/kano-agent-backlog-skill-demo](https://github.com/dorgonman/kano-agent-backlog-skill-demo).
 
-See the [Installation Guide](docs/installation.md) for detailed setup instructions and troubleshooting.
+It demonstrates the multi-agent adapter layout and a sample backlog workspace. This repo does not bundle that demo, so treat it as a separate example workspace. See [docs/demo-maintenance.md](docs/demo-maintenance.md) for the follow-up checklist used when the demo checkout is unavailable locally.
 
-## How It Works
+## GitHub Pages
 
-`kano-agent-backlog-skill` guides AI agents into a **tickets-first workflow**:
+Published docs live at [agentskill-backlog.kanohorizonia.com](https://agentskill-backlog.kanohorizonia.com/).
 
-1. **Plan Before Code**: Create work items (Epic/Feature/Task/Bug) before implementation
-2. **Capture Decisions**: Record rationale in append-only worklogs and ADRs
-3. **Enforce Quality**: Ready gate ensures every task has minimum required context
-4. **Prevent Drift**: Worksets keep agents focused with explicit plan checklists
-5. **Enable Handoffs**: Any agent (or human) can pick up where another left off
+## Codex for OSS relevance
 
-Everything is stored as **markdown files** in your repository — human-readable, version-controlled, and searchable.
+This project is aimed at open source maintainers and agent heavy teams who need more than generated code. It helps Codex style and other coding agents work against durable repo state instead of fading conversation state.
 
-## Core Concepts
+That matters for OSS review because maintainers need artifacts they can inspect in pull requests, not just claims from a previous chat. The backlog, ADR, worklog, and release evidence model is built around that review loop.
 
-### Work Items
-Hierarchical structure for organizing work:
-- **Epic**: Large initiative spanning multiple features
-- **Feature**: Cohesive capability or user-facing functionality  
-- **User Story**: Specific user need or scenario
-- **Task**: Technical implementation work
-- **Bug**: Defect to be fixed
+- issue triage and task refinement survive beyond chat history
+- acceptance criteria and Ready Gate fields stay reviewable in markdown
+- ADRs and worklogs preserve technical decisions for maintainers and future agents
+- release notes, changelog inputs, and evidence snapshots stay attached to the repo
+- multi-agent handoff is grounded in shared backlog artifacts instead of prompt reconstruction
 
-### Ready Gate
-Before a Task or Bug can move to "Ready" state, it must have:
-- **Context**: Why this work is needed
-- **Goal**: What success looks like
-- **Approach**: How it will be implemented
-- **Acceptance Criteria**: How to verify it works
-- **Risks/Dependencies**: What could go wrong or block progress
+## Validation
 
-### Worksets
-Per-item execution cache that prevents agent drift:
-- **plan.md**: Checklist derived from acceptance criteria
-- **notes.md**: Working notes with decision markers
-- **deliverables/**: Staging area for work artifacts
-- Keeps agents focused on one task at a time
+Validation here means keeping execution tied to explicit acceptance and visible evidence.
 
-### Topics
-Context grouping for rapid focus area changes:
-- Group related items and documents
-- Collect code snippets and references
-- Generate distilled briefs from materials
-- Enable quick context switching between work areas
+- Ready gate fields make tasks reviewable before coding starts
+- `kano-backlog doctor` checks environment and backlog health
+- Worklogs and release artifacts keep a visible trail of what changed and why
+- References and generated views keep human review and agent handoff aligned
 
-### Architecture Decision Records (ADRs)
-Capture significant technical decisions:
-- Document the context, decision, and consequences
-- Link to related work items
-- Preserve rationale for future reference
-- Prevent re-litigating settled questions
-
-## CLI Commands
-
-The `kob` CLI provides comprehensive commands for backlog management:
-
-- **`admin`** - Backlog bootstrap and maintenance (init, adr, index, schema, release)
-- **`item` / `workitem`** - Create and manage work items (Epic/Feature/UserStory/Task/Bug)
-- **`worklog`** - Append worklog entries
-- **`workset`** - Per-item execution cache (init/refresh/next/promote/cleanup/detect-adr)
-- **`topic`** - Context grouping (templates, snapshots, merge/split, cross-references, switch/export)
-- **`view`** - Generate dashboards and reports
-- **`snapshot`** - Evidence snapshots (read-only capture)
-- **`config`** - Inspect and validate layered configuration
-- **`embedding`** - Embedding pipeline operations (build/query/status)
-- **`search`** - Vector similarity search
-- **`tokenizer`** - Tokenizer adapter configuration and testing
-- **`benchmark`** - Deterministic benchmark harness
-- **`changelog`** - Generate changelog from backlog
-- **`doctor`** - Environment and backlog health checks
-
-Run `kob` or the thin repo wrappers under `scripts/core/` for current local usage guidance.
-
-## Workset Usage
-
-Worksets prevent agent drift during task execution by providing a structured working context:
+Recommended commands:
 
 ```bash
-# Initialize workset for a task
-kob workset init --item TASK-0042 --agent kiro
-
-# Get next action from plan
-kob workset next --item TASK-0042
-
-# Detect decisions that should become ADRs
-kob workset detect-adr --item TASK-0042
-
-# Promote deliverables to canonical artifacts
-kob workset promote --item TASK-0042 --agent kiro
-
-# Clean up expired worksets
-kob workset cleanup --ttl-hours 72
+bash scripts/test/quick-test.sh
+bash scripts/test/lint.sh
+bash scripts/internal/show-version.sh
 ```
 
-See [docs/workset.md](docs/workset.md) for complete documentation.
+## Experimental areas
 
-## Topic Usage
+Experimental work is present, but not sold as stable.
 
-Topics enable rapid context switching when focus areas change:
+- Search and embedding flows
+- Some advanced querying and tokenizer diagnostics
+- Other surfaces called out in [docs/experimental-features.md](docs/experimental-features.md)
 
-```bash
-# Create a topic for related work
-kob topic create auth-refactor --agent kiro
+## License and contributing
 
-# Add items to the topic
-kob topic add auth-refactor --item TASK-0042
-kob topic add auth-refactor --item BUG-0012
+Licensed under [MIT](LICENSE).
 
-# Pin relevant documents
-kob topic pin auth-refactor --doc _kano/backlog/decisions/ADR-0015.md
-
-# Collect a code snippet reference
-kob topic add-snippet auth-refactor --file src/auth.py --start 10 --end 25 --agent kiro
-
-# Distill deterministic brief from materials
-kob topic distill auth-refactor
-
-# Switch active topic
-kob topic switch auth-refactor --agent kiro
-
-# Export context bundle
-kob topic export-context auth-refactor --format json
-
-# Close and cleanup
-kob topic close auth-refactor --agent kiro
-kob topic cleanup --ttl-days 14 --apply
-```
-
-See [docs/topic.md](docs/topic.md) for complete documentation.
-
-## Cache Configuration
-
-The backlog skill stores cache files (chunks databases and vector embeddings) in `.kano/cache/backlog/` by default. You can override this location for team collaboration scenarios.
-
-### Configuration Priority
-
-1. **CLI parameter**: `--cache-root /path/to/cache` (highest priority)
-2. **Config file**: `config.cache.root = "/path/to/cache"`
-3. **Default**: `<repo_root>/.kano/cache/backlog/`
-
-### Using Config File
-
-Add to your product config (`_kano/backlog/products/<product>/_config/config.toml`):
-
-```toml
-[cache]
-root = "/mnt/nas/shared-cache/backlog"
-```
-
-### Using CLI Override
-
-```bash
-kob embedding build --product my-product --cache-root /mnt/nas/cache
-kob search query "authentication" --product my-product --cache-root /mnt/nas/cache
-```
-
-## The Dual-Readability Principle
-
-Topics and Snapshots solve two problems simultaneously:
-
-1. **Human Overload**: Humans need high-level summaries (`brief.md`, Reports) to make decisions without reading all code
-2. **Agent Coordination**: Agents need explicit structure (file paths, line numbers, stub inventories) to act without hallucinating
-
-By enforcing **Dual-Readability** (Markdown for humans, JSON/Structured data for Agents), we create a shared workspace where:
-- Humans provide direction (via Briefs)
-- Agents provide evidence (via Snapshots)
-- Both can understand the other's output without translation
-
-## Development Setup
-
-For development or contributing:
-
-```bash
-# Clone the repository
-git clone https://github.com/yourusername/kano-agent-backlog-skill.git
-cd kano-agent-backlog-skill
-
-# Install in editable mode with dev dependencies
-python -m pip install -e ".[dev]"
-
-# Run tests
-pytest tests/
-
-# Run type checking
-mypy src/
-
-# Format code
-black src/ tests/
-isort src/ tests/
-```
-
-## Contributing
-
-PRs welcome, with one rule: **don't turn this into another Jira.**  
-The point is to preserve decisions and acceptance, not to worship process.
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development guidelines and release process.
-
-## External References
-
-- [Agent Skills Overview (Anthropic/Claude)](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview)
-- [Versioning Policy](VERSIONING.md)
-- [Release Notes](CHANGELOG.md)
-
-## License
-
-MIT License - see [LICENSE](LICENSE) file for details.
-
-## Support
-
-- **Issues**: [GitHub Issues](https://github.com/yourusername/kano-agent-backlog-skill/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/yourusername/kano-agent-backlog-skill/discussions)
-- **Documentation**: [docs/](docs/)
-
----
-
-**Remember**: Code can be rewritten. Lost decisions can't.
+If you want to contribute, start with [CONTRIBUTING.md](CONTRIBUTING.md). For issues and feature requests, use the [GitHub issue tracker](https://github.com/kanohorizonia/kano-agent-backlog-skill/issues).

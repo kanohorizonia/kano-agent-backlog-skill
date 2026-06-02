@@ -16,19 +16,22 @@ Performance Targets (from design):
 - Consistent performance across text types
 """
 
-import pytest
 import os
 import time
 import gc
 import json
 import statistics
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Type, Iterator
 from pathlib import Path
 from dataclasses import dataclass, asdict
 from contextlib import contextmanager
 
+import pytest
+
 try:
-    import psutil
+    psutil: Any
+    import importlib
+    psutil = importlib.import_module("psutil")
     PSUTIL_AVAILABLE = True
 except ImportError:
     PSUTIL_AVAILABLE = False
@@ -93,10 +96,16 @@ class BenchmarkReport:
     summary: Dict[str, Any]
 
 
+RegressionRecord = Dict[str, object]
+RegressionSummary = Dict[str, object]
+RegressionAnalysis = Dict[str, object]
+AdapterConfig = Tuple[str, Type[Any], Dict[str, float]]
+
+
 class PerformanceBenchmarkSuite:
     """Comprehensive performance benchmark suite for tokenizer adapters."""
     
-    def __init__(self):
+    def __init__(self) -> None:
         self.registry = TokenizerRegistry()
         self.performance_targets = {
             "tokenization_10kb_ms": 100.0,  # < 100ms for 10KB documents
@@ -197,9 +206,10 @@ class PerformanceBenchmarkSuite:
         return documents
     
     @contextmanager
-    def _measure_performance(self):
+    def _measure_performance(self) -> Iterator[None]:
         """Context manager for measuring performance metrics."""
-        if PSUTIL_AVAILABLE:
+        process = None
+        if PSUTIL_AVAILABLE and psutil is not None:
             import os
             process = psutil.Process(os.getpid())
             memory_before = process.memory_info().rss / 1024 / 1024  # MB
@@ -214,7 +224,7 @@ class PerformanceBenchmarkSuite:
         finally:
             end_time = time.perf_counter()
             
-            if PSUTIL_AVAILABLE:
+            if process is not None:
                 memory_after = process.memory_info().rss / 1024 / 1024  # MB
                 memory_used = memory_after - memory_before
             else:
@@ -230,7 +240,7 @@ class PerformanceBenchmarkSuite:
         results = []
         
         # Test different adapter configurations
-        adapter_configs = [
+        adapter_configs: List[AdapterConfig] = [
             ("heuristic_3.0", HeuristicTokenizer, {"chars_per_token": 3.0}),
             ("heuristic_4.0", HeuristicTokenizer, {"chars_per_token": 4.0}),
             ("heuristic_5.0", HeuristicTokenizer, {"chars_per_token": 5.0}),
@@ -271,6 +281,7 @@ class PerformanceBenchmarkSuite:
                     
                     # Check if target is met (10KB documents should be < 100ms)
                     target_threshold = self.performance_targets["tokenization_10kb_ms"]
+                    scaled_target = target_threshold
                     if text_size_kb >= 10:
                         target_met = perf["processing_time_ms"] <= target_threshold
                     else:
@@ -345,6 +356,7 @@ class PerformanceBenchmarkSuite:
                             tokenizer_adapter=adapter_type
                         )
                         
+                        tokenizer: Any
                         if adapter_type == "heuristic":
                             tokenizer = HeuristicTokenizer("benchmark-model", chars_per_token=4.0)
                         else:
@@ -369,6 +381,7 @@ class PerformanceBenchmarkSuite:
                         
                         # Check if target is met (100KB documents should be < 500ms)
                         target_threshold = self.performance_targets["chunking_100kb_ms"]
+                        scaled_target = target_threshold
                         if text_size_kb >= 100:
                             target_met = perf["processing_time_ms"] <= target_threshold
                         else:
@@ -491,10 +504,10 @@ class PerformanceBenchmarkSuite:
     
     def analyze_adapter_comparison(self, tokenization_results: List[PerformanceMetrics]) -> Dict[str, Dict[str, float]]:
         """Analyze performance comparison between different adapters."""
-        comparison = {}
+        comparison: Dict[str, Dict[str, float]] = {}
         
         # Group results by adapter type
-        by_adapter = {}
+        by_adapter: Dict[str, List[PerformanceMetrics]] = {}
         for result in tokenization_results:
             if result.error is None:
                 if result.adapter_type not in by_adapter:
@@ -526,11 +539,15 @@ class PerformanceBenchmarkSuite:
     def detect_performance_regressions(self, current_results: List[PerformanceMetrics], 
                                      baseline_file: Optional[Path] = None) -> Dict[str, Any]:
         """Detect performance regressions by comparing with baseline."""
-        regression_analysis = {
+        regressions_detected: List[RegressionRecord] = []
+        improvements_detected: List[RegressionRecord] = []
+        new_failures: List[RegressionRecord] = []
+
+        regression_analysis: RegressionAnalysis = {
             "baseline_available": False,
-            "regressions_detected": [],
-            "improvements_detected": [],
-            "new_failures": [],
+            "regressions_detected": regressions_detected,
+            "improvements_detected": improvements_detected,
+            "new_failures": new_failures,
             "summary": {}
         }
         
@@ -554,7 +571,7 @@ class PerformanceBenchmarkSuite:
                         if baseline and baseline.error is None:
                             # Check for regression (>20% slower)
                             if current.processing_time_ms > baseline.processing_time_ms * 1.2:
-                                regression_analysis["regressions_detected"].append({
+                                regressions_detected.append({
                                     "operation": current.operation,
                                     "adapter": current.adapter_type,
                                     "text_size_kb": current.text_size_kb,
@@ -565,7 +582,7 @@ class PerformanceBenchmarkSuite:
                             
                             # Check for improvement (>20% faster)
                             elif current.processing_time_ms < baseline.processing_time_ms * 0.8:
-                                regression_analysis["improvements_detected"].append({
+                                improvements_detected.append({
                                     "operation": current.operation,
                                     "adapter": current.adapter_type,
                                     "text_size_kb": current.text_size_kb,
@@ -576,7 +593,7 @@ class PerformanceBenchmarkSuite:
                         
                         # Check for new failures
                         elif baseline and baseline.error is not None and current.error is None:
-                            regression_analysis["improvements_detected"].append({
+                            improvements_detected.append({
                                 "operation": current.operation,
                                 "adapter": current.adapter_type,
                                 "text_size_kb": current.text_size_kb,
@@ -593,7 +610,7 @@ class PerformanceBenchmarkSuite:
                                        and b.operation == current.operation), None)
                         
                         if baseline and baseline.error is None:
-                            regression_analysis["new_failures"].append({
+                            new_failures.append({
                                 "operation": current.operation,
                                 "adapter": current.adapter_type,
                                 "text_size_kb": current.text_size_kb,
@@ -604,12 +621,13 @@ class PerformanceBenchmarkSuite:
                 regression_analysis["baseline_error"] = str(e)
         
         # Generate summary
-        regression_analysis["summary"] = {
-            "total_regressions": len(regression_analysis["regressions_detected"]),
-            "total_improvements": len(regression_analysis["improvements_detected"]),
-            "total_new_failures": len(regression_analysis["new_failures"]),
-            "overall_status": "PASS" if len(regression_analysis["regressions_detected"]) == 0 and len(regression_analysis["new_failures"]) == 0 else "FAIL"
+        summary: RegressionSummary = {
+            "total_regressions": len(regressions_detected),
+            "total_improvements": len(improvements_detected),
+            "total_new_failures": len(new_failures),
+            "overall_status": "PASS" if len(regressions_detected) == 0 and len(new_failures) == 0 else "FAIL"
         }
+        regression_analysis["summary"] = summary
         
         return regression_analysis
     
@@ -643,7 +661,7 @@ class PerformanceBenchmarkSuite:
             "platform": platform.platform(),
             "python_version": sys.version,
             "processor": platform.processor(),
-            "memory_available": psutil.virtual_memory().total / 1024 / 1024 / 1024 if PSUTIL_AVAILABLE else "unknown",
+            "memory_available": psutil.virtual_memory().total / 1024 / 1024 / 1024 if PSUTIL_AVAILABLE and psutil is not None else "unknown",
             "psutil_available": PSUTIL_AVAILABLE
         }
         
@@ -688,10 +706,10 @@ class PerformanceBenchmarkSuite:
 class TestTokenizationPerformance:
     """Test tokenization performance against targets."""
     
-    def setup_method(self):
+    def setup_method(self) -> None:
         self.benchmark_suite = PerformanceBenchmarkSuite()
     
-    def test_tokenization_performance_targets(self):
+    def test_tokenization_performance_targets(self) -> None:
         """Test that tokenization meets performance targets."""
         results = self.benchmark_suite.benchmark_tokenization_performance()
         
@@ -713,12 +731,12 @@ class TestTokenizationPerformance:
         print(f"   Pass rate: {pass_rate:.1%}")
         print(f"   Adapters tested: {len(set(r.adapter_type for r in target_results))}")
     
-    def test_tokenization_scaling(self):
+    def test_tokenization_scaling(self) -> None:
         """Test that tokenization performance scales reasonably with document size."""
         results = self.benchmark_suite.benchmark_tokenization_performance()
         
         # Group by adapter type and analyze scaling
-        by_adapter = {}
+        by_adapter: Dict[str, List[PerformanceMetrics]] = {}
         for result in results:
             if result.error is None:
                 if result.adapter_type not in by_adapter:
@@ -746,10 +764,10 @@ class TestTokenizationPerformance:
 class TestChunkingPerformance:
     """Test chunking pipeline performance against targets."""
     
-    def setup_method(self):
+    def setup_method(self) -> None:
         self.benchmark_suite = PerformanceBenchmarkSuite()
     
-    def test_chunking_performance_targets(self):
+    def test_chunking_performance_targets(self) -> None:
         """Test that chunking meets performance targets."""
         results = self.benchmark_suite.benchmark_chunking_performance()
         
@@ -772,7 +790,7 @@ class TestChunkingPerformance:
         print(f"   Pass rate: {pass_rate:.1%}")
         print(f"   Configurations tested: {len(set(r.operation for r in target_results))}")
     
-    def test_chunking_produces_valid_results(self):
+    def test_chunking_produces_valid_results(self) -> None:
         """Test that chunking produces valid results while meeting performance targets."""
         results = self.benchmark_suite.benchmark_chunking_performance()
         
@@ -793,10 +811,10 @@ class TestChunkingPerformance:
 class TestMemoryUsage:
     """Test memory usage patterns and scaling."""
     
-    def setup_method(self):
+    def setup_method(self) -> None:
         self.benchmark_suite = PerformanceBenchmarkSuite()
     
-    def test_memory_scaling_linearity(self):
+    def test_memory_scaling_linearity(self) -> None:
         """Test that memory usage scales linearly with document size."""
         if not PSUTIL_AVAILABLE:
             pytest.skip("psutil not available for memory testing")
@@ -830,7 +848,7 @@ class TestMemoryUsage:
             print(f"   Memory ratio: {memory_ratio:.1f}x")
             print(f"   Scaling factor: {scaling_factor:.1f} (target: <{target_scaling})")
     
-    def test_memory_usage_reasonable(self):
+    def test_memory_usage_reasonable(self) -> None:
         """Test that memory usage is reasonable for document sizes."""
         if not PSUTIL_AVAILABLE:
             pytest.skip("psutil not available for memory testing")
@@ -848,10 +866,10 @@ class TestMemoryUsage:
 class TestPerformanceRegression:
     """Test for performance regressions."""
     
-    def setup_method(self):
+    def setup_method(self) -> None:
         self.benchmark_suite = PerformanceBenchmarkSuite()
     
-    def test_no_performance_regressions(self):
+    def test_no_performance_regressions(self) -> None:
         """Test that there are no significant performance regressions."""
         # Run tokenization benchmarks
         results = self.benchmark_suite.benchmark_tokenization_performance()
@@ -895,7 +913,7 @@ class TestPerformanceRegression:
 
 
 # Utility functions for generating reports
-def generate_performance_report(output_file: str = "performance_report.json"):
+def generate_performance_report(output_file: str = "performance_report.json") -> BenchmarkReport:
     """Generate a comprehensive performance report."""
     suite = PerformanceBenchmarkSuite()
     report = suite.generate_performance_report(Path(output_file))

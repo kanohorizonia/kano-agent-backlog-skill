@@ -5,30 +5,64 @@ Validates Requirements: 2.3, 2.5, 1.4
 """
 
 import subprocess
+import shutil
 import tarfile
+import time
 import zipfile
 from pathlib import Path
-from typing import List, Set
+from typing import Iterator
 
 import pytest
 
 
-def test_sdist_includes_required_files():
-    """Verify source distribution includes all required files."""
-    # Build the package
-    result = subprocess.run(
-        ["python", "-m", "build", "--sdist", "--outdir", "dist-test"],
-        capture_output=True,
-        text=True,
-        cwd=Path(__file__).parent.parent,
-    )
+PROJECT_ROOT = Path(__file__).parent.parent
+DIST_TEST_DIR = PROJECT_ROOT / "dist-test"
+
+
+@pytest.fixture(scope="module")
+def built_distributions() -> Iterator[tuple[Path, Path]]:
+    """Build package artifacts once to avoid repeated Windows build staging races."""
+    result = build_package("--sdist", "--wheel")
     assert result.returncode == 0, f"Build failed: {result.stderr}"
 
-    # Find the sdist file
-    dist_dir = Path(__file__).parent.parent / "dist-test"
-    sdist_files = list(dist_dir.glob("kano_agent_backlog_skill-*.tar.gz"))
+    sdist_files = list(DIST_TEST_DIR.glob("kano_agent_backlog_skill-*.tar.gz"))
+    wheel_files = list(DIST_TEST_DIR.glob("kano_agent_backlog_skill-*.whl"))
     assert len(sdist_files) > 0, "No sdist file found"
-    sdist_path = sdist_files[0]
+    assert len(wheel_files) > 0, "No wheel file found"
+    yield sdist_files[0], wheel_files[0]
+
+
+def remove_build_staging() -> None:
+    """Remove setuptools build staging between repeated subprocess builds on Windows."""
+    build_dirs = [PROJECT_ROOT / "build", DIST_TEST_DIR]
+    for attempt in range(5):
+        existing_dirs = [build_dir for build_dir in build_dirs if build_dir.exists()]
+        if not existing_dirs:
+            return
+        try:
+            for build_dir in existing_dirs:
+                shutil.rmtree(build_dir)
+            return
+        except OSError:
+            if attempt == 4:
+                raise
+            time.sleep(0.2)
+
+
+def build_package(*build_args: str) -> subprocess.CompletedProcess[str]:
+    """Run python -m build from a clean staging directory."""
+    remove_build_staging()
+    return subprocess.run(
+        ["python", "-m", "build", *build_args, "--outdir", str(DIST_TEST_DIR)],
+        capture_output=True,
+        text=True,
+        cwd=PROJECT_ROOT,
+    )
+
+
+def test_sdist_includes_required_files(built_distributions: tuple[Path, Path]):
+    """Verify source distribution includes all required files."""
+    sdist_path, _wheel_path = built_distributions
 
     # Extract file list from sdist
     with tarfile.open(sdist_path, "r:gz") as tar:
@@ -65,22 +99,9 @@ def test_sdist_includes_required_files():
     )
 
 
-def test_wheel_includes_package_data():
+def test_wheel_includes_package_data(built_distributions: tuple[Path, Path]):
     """Verify wheel includes package data (SQL schemas, py.typed)."""
-    # Build the package
-    result = subprocess.run(
-        ["python", "-m", "build", "--wheel", "--outdir", "dist-test"],
-        capture_output=True,
-        text=True,
-        cwd=Path(__file__).parent.parent,
-    )
-    assert result.returncode == 0, f"Build failed: {result.stderr}"
-
-    # Find the wheel file
-    dist_dir = Path(__file__).parent.parent / "dist-test"
-    wheel_files = list(dist_dir.glob("kano_agent_backlog_skill-*.whl"))
-    assert len(wheel_files) > 0, "No wheel file found"
-    wheel_path = wheel_files[0]
+    _sdist_path, wheel_path = built_distributions
 
     # Extract file list from wheel
     with zipfile.ZipFile(wheel_path, "r") as whl:
@@ -111,23 +132,14 @@ def test_wheel_includes_package_data():
         "kano_backlog_cli/py.typed not in wheel"
     )
 
-
-def test_wheel_excludes_development_files():
-    """Verify wheel excludes development and test files."""
-    # Build the package
-    result = subprocess.run(
-        ["python", "-m", "build", "--wheel", "--outdir", "dist-test"],
-        capture_output=True,
-        text=True,
-        cwd=Path(__file__).parent.parent,
+    assert any("kano_backlog_cli/templates/config.template.toml" in f for f in file_list), (
+        "config.template.toml not in wheel package data"
     )
-    assert result.returncode == 0, f"Build failed: {result.stderr}"
 
-    # Find the wheel file
-    dist_dir = Path(__file__).parent.parent / "dist-test"
-    wheel_files = list(dist_dir.glob("kano_agent_backlog_skill-*.whl"))
-    assert len(wheel_files) > 0, "No wheel file found"
-    wheel_path = wheel_files[0]
+
+def test_wheel_excludes_development_files(built_distributions: tuple[Path, Path]):
+    """Verify wheel excludes development and test files."""
+    _sdist_path, wheel_path = built_distributions
 
     # Extract file list from wheel
     with zipfile.ZipFile(wheel_path, "r") as whl:
@@ -155,22 +167,9 @@ def test_wheel_excludes_development_files():
         )
 
 
-def test_package_discovery_finds_all_packages():
-    """Verify setuptools discovers all packages under src/."""
-    # Build the package
-    result = subprocess.run(
-        ["python", "-m", "build", "--wheel", "--outdir", "dist-test"],
-        capture_output=True,
-        text=True,
-        cwd=Path(__file__).parent.parent,
-    )
-    assert result.returncode == 0, f"Build failed: {result.stderr}"
-
-    # Find the wheel file
-    dist_dir = Path(__file__).parent.parent / "dist-test"
-    wheel_files = list(dist_dir.glob("kano_agent_backlog_skill-*.whl"))
-    assert len(wheel_files) > 0, "No wheel file found"
-    wheel_path = wheel_files[0]
+def test_package_discovery_finds_all_packages(built_distributions: tuple[Path, Path]):
+    """Verify setuptools discovers all packages under src/python/."""
+    _sdist_path, wheel_path = built_distributions
 
     # Extract file list from wheel
     with zipfile.ZipFile(wheel_path, "r") as whl:

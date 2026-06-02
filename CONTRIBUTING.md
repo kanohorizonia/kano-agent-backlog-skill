@@ -24,7 +24,7 @@ Thank you for your interest in contributing to kano-agent-backlog-skill! This do
 
 1. **Clone the repository**:
    ```bash
-   git clone https://github.com/yourusername/kano-agent-backlog-skill.git
+   git clone https://github.com/kanohorizonia/kano-agent-backlog-skill.git
    cd kano-agent-backlog-skill
    ```
 
@@ -48,8 +48,8 @@ Thank you for your interest in contributing to kano-agent-backlog-skill! This do
 4. **Verify installation**:
    ```bash
    bash scripts/internal/show-version.sh
-   kob
-   kob doctor
+   kano-backlog
+   kano-backlog doctor
    ```
 
 ## Code Style Guidelines
@@ -167,7 +167,7 @@ from hypothesis import given, strategies as st
 
 @given(st.lists(st.text(min_size=1, max_size=50), min_size=1, max_size=100))
 def test_id_assignment_uniqueness(item_titles):
-    """Feature: release-0-1-0-beta, Property 5: ID Assignment Uniqueness"""
+    """Feature: release-0-0-3-readiness, Property 5: ID Assignment Uniqueness"""
     # Test implementation
     assert len(assigned_ids) == len(set(assigned_ids))
 ```
@@ -213,7 +213,7 @@ This project uses kano-agent-backlog-skill for planning and tracking work.
 
 1. **Create or update backlog items** before writing code:
    ```bash
-   kob item create \
+   kano-backlog item create \
      --type task \
      --title "Implement X feature" \
      --product kano-agent-backlog-skill \
@@ -226,11 +226,11 @@ This project uses kano-agent-backlog-skill for planning and tracking work.
 
 3. **Update item state** when starting work:
    ```bash
-    kob workitem update-state \
-      KABSD-TSK-0146 \
-      --state InProgress \
-      --product kano-agent-backlog-skill
-   ```
+     kano-backlog workitem update-state \
+       KABSD-TSK-0146 \
+       --state InProgress \
+       --product kano-agent-backlog-skill
+    ```
 
 ### Worklog Discipline
 
@@ -277,14 +277,14 @@ source test-venv/bin/activate  # or test-venv\Scripts\activate on Windows
 pip install dist/kano_agent_backlog_skill-*.whl
 
 # Verify CLI is available
-which kob
+which kano-backlog
 bash scripts/internal/show-version.sh
-kob doctor
+kano-backlog doctor
 
 # Test basic workflow
-kob admin init --product test-product --agent test-agent
-kob item create --type task --title "Test task" --product test-product --agent test-agent
-kob item list --product test-product
+kano-backlog admin init --product test-product --agent test-agent
+kano-backlog item create --type task --title "Test task" --product test-product --agent test-agent
+kano-backlog item list --product test-product
 
 # Clean up
 deactivate
@@ -314,9 +314,9 @@ For maintainers preparing a release, see the detailed [Release Checklist](docs/r
 
 ### Version Bumping
 
-1. Update version in `src/kano_backlog_core/__version__.py`:
+1. Update `VERSION` and `src/python/kano_backlog_core/__version__.py`:
    ```python
-   __version__ = "0.2.0"
+   __version__ = "<next-version>"
    ```
 
 2. Follow [Semantic Versioning](https://semver.org/):
@@ -330,7 +330,7 @@ For maintainers preparing a release, see the detailed [Release Checklist](docs/r
 Update `CHANGELOG.md` following [Keep a Changelog](https://keepachangelog.com/) format:
 
 ```markdown
-## [0.2.0] - 2024-XX-XX
+## [<next-version>] - YYYY-MM-DD
 
 ### Added
 - New feature X
@@ -348,8 +348,8 @@ Update `CHANGELOG.md` following [Keep a Changelog](https://keepachangelog.com/) 
 Create annotated tags with format `v{version}`:
 
 ```bash
-git tag -a v0.2.0 -m "Release 0.2.0: Add feature X"
-git push origin v0.2.0
+git tag -a v<next-version> -m "Release <next-version>: Add feature X"
+git push origin v<next-version>
 ```
 
 ## Getting Help

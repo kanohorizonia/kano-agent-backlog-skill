@@ -59,9 +59,9 @@ export TWINE_PASSWORD=pypi-YOUR-TOKEN-HERE
 
 ### Step 1: Prepare for Release
 
-1. **Update version** in `src/kano_backlog_core/__version__.py`:
+1. **Update version** in `VERSION` and `src/python/kano_backlog_core/__version__.py`:
    ```python
-   __version__ = "0.1.0"
+   __version__ = "0.0.3"
    ```
 
 2. **Update CHANGELOG.md** with release notes
@@ -82,7 +82,7 @@ export TWINE_PASSWORD=pypi-YOUR-TOKEN-HERE
 4. **Commit changes**:
    ```bash
    git add .
-   git commit -m "Release 0.1.0"
+   git commit -m "Release 0.0.3"
    ```
 
 ### Step 2: Build Distribution Packages
@@ -96,8 +96,8 @@ python -m build
 ```
 
 This creates:
-- `dist/kano_agent_backlog_skill-0.1.0.tar.gz` (source distribution)
-- `dist/kano_agent_backlog_skill-0.1.0-py3-none-any.whl` (wheel)
+- `dist/kano_agent_backlog_skill-0.0.3.tar.gz` (source distribution)
+- `dist/kano_agent_backlog_skill-0.0.3-py3-none-any.whl` (wheel)
 
 ### Step 3: Verify Distribution
 
@@ -117,15 +117,15 @@ python -m venv test-venv
 source test-venv/bin/activate  # or test-venv\Scripts\activate on Windows
 
 # Install from wheel
-pip install dist/kano_agent_backlog_skill-0.1.0-py3-none-any.whl
+pip install dist/kano_agent_backlog_skill-0.0.3-py3-none-any.whl
 
 # Verify CLI works
 bash scripts/internal/show-version.sh
-kob doctor
+kano-backlog doctor
 
 # Test basic workflow
-kob admin init --product test --agent test-agent
-kob item create --type task --title "Test" --product test --agent test-agent
+kano-backlog admin init --product test --agent test-agent
+kano-backlog item create --type task --title "Test" --product test --agent test-agent
 
 # Clean up
 deactivate
@@ -153,8 +153,8 @@ source test-pypi-venv/bin/activate
 pip install --index-url https://test.pypi.org/simple/ kano-agent-backlog-skill
 
 # Verify it works
-bash scripts/internal/show-version.sh
-kob doctor
+kano-backlog --help
+kano-backlog doctor
 
 # Clean up
 deactivate
@@ -173,26 +173,34 @@ rm -rf test-pypi-venv
 twine upload dist/*
 ```
 
-### Step 8: Create Git Tag and GitHub Release
+### Step 8: Publish the GitHub Pages docs site
+
+If the release changes docs, publish the docs site through the repository Pages workflow, not by pushing a `gh-pages` branch manually:
+
+1. Merge the release docs changes to `main`, which triggers `.github/workflows/pages.yml`.
+2. If you need to republish without a new merge, run the same workflow with `workflow_dispatch`.
+3. Let the workflow build `_ws/build/staged`, upload the Pages artifact, and deploy it with `actions/deploy-pages`.
+
+### Step 9: Create Git Tag and GitHub Release
 
 ```bash
 # Create annotated tag
-git tag -a v0.1.0 -m "Release 0.1.0 alpha"
+git tag -a v0.0.3 -m "Release 0.0.3"
 
 # Push tag to GitHub
-git push origin v0.1.0
+git push origin v0.0.3
 ```
 
 Then create a GitHub Release:
-1. Go to https://github.com/yourusername/kano-agent-backlog-skill/releases/new
-2. Select the tag `v0.1.0`
-3. Add release title: "Release 0.1.0 Alpha"
+1. Go to https://github.com/kanohorizonia/kano-agent-backlog-skill/releases/new
+2. Select the tag `v0.0.3`
+3. Add release title: "Release 0.0.3"
 4. Copy release notes from CHANGELOG.md
 5. Attach distribution files from `dist/`
 6. Mark as "pre-release" if it's alpha/beta
 7. Publish release
 
-### Step 9: Verify Public Installation
+### Step 10: Verify Public Installation
 
 ```bash
 # Create fresh virtual environment
@@ -203,8 +211,8 @@ source verify-venv/bin/activate
 pip install kano-agent-backlog-skill
 
 # Verify
-bash scripts/internal/show-version.sh
-kob doctor
+kano-backlog --help
+kano-backlog doctor
 
 # Clean up
 deactivate

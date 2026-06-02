@@ -7,13 +7,18 @@ This project uses Git tags as releases: `vX.Y.Z`.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.0] - 2026-02-05
+Current OSS release target: `0.0.3`.
+Latest released OSS version: `0.0.2`.
+
+`0.1.0` references below are future planning only unless called out elsewhere as internal or experimental.
+
+## [0.1.0] - Future / internal planning
 
 ### Overview
 
-**Initial alpha release** - Transition from pre-alpha development tool to distributable package. This release focuses on packaging infrastructure, documentation, and core functionality validation while maintaining the local-first architecture.
+**Future alpha milestone** - Planned transition from pre-alpha development tool to a broader distributable package milestone. These notes are retained as forward-looking planning, not as a released or currently tagged OSS version.
 
-**Status**: Alpha - Core functionality is working but still under active development. API may change significantly based on testing and feedback.
+**Status**: Future / internal planning. API and packaging details may change before a `0.1.0` release is actually prepared.
 
 ### Added
 
@@ -91,12 +96,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Feedback Welcome
 This is an alpha release. Please report issues, suggest improvements, or share your use cases:
-- **GitHub Issues**: [Report bugs or request features](https://github.com/yourusername/kano-agent-backlog-skill/issues)
-- **Discussions**: [Share feedback and ask questions](https://github.com/yourusername/kano-agent-backlog-skill/discussions)
+- **GitHub Issues**: [Report bugs or request features](https://github.com/kanohorizonia/kano-agent-backlog-skill/issues)
+- **Discussions**: Use the repository issue tracker until a public discussions flow is published.
 
 ---
 
-## [0.0.3] - 2026-02-04
+## [0.0.3] - Unreleased
 
 ### Added
 - Effective config artifacts (stable vs runtime) written to deterministic paths under `.kano/cache/`.
@@ -116,6 +121,7 @@ This is an alpha release. Please report issues, suggest improvements, or share y
 
 ### Documentation
 - Release notes: `docs/releases/0.0.3.md`.
+- Public OSS-readiness cleanup across README, package metadata, docs links, and GitHub Pages configuration.
 
 ## [0.0.2] - 2026-01-19
 
@@ -130,7 +136,7 @@ This is an alpha release. Please report issues, suggest improvements, or share y
 - Artifact attachment resolves items in product layout (`_kano/backlog/products/<product>/items/...`) when `--backlog-root-override` is used with `--product`.
 
 ### Documentation
-- Release notes for GitHub Releases: `skills/kano-agent-backlog-skill/docs/releases/0.0.2.md`.
+- Release notes for GitHub Releases: `docs/releases/0.0.2.md`.
 
 ## [0.0.1] - 2026-01-15
 
@@ -142,7 +148,7 @@ This is an alpha release. Please report issues, suggest improvements, or share y
 - `views.auto_refresh` config flag (default: true) to keep dashboards up to date automatically.
 
 ### Documentation
-- Release notes for GitHub Releases: `skills/kano-agent-backlog-skill/docs/releases/0.0.1.md`.
+- Release notes for GitHub Releases: `docs/releases/0.0.1.md`.
 
 ### Changed
 - Unified generated dashboards to prefer SQLite when enabled/available and fall back to file scan.

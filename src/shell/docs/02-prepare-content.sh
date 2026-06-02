@@ -1,6 +1,14 @@
 #!/bin/bash
 set -euo pipefail
 
+docs_python() {
+  if [ "${KANO_DOCS_USE_PIXI:-0}" = "1" ]; then
+    pixi run python "$@"
+    return
+  fi
+  python "$@"
+}
+
 # Enhanced content preparation with YAML-based configuration
 # Supports content mapping, navigation structure, and automatic index generation
 
@@ -26,7 +34,12 @@ mkdir -p "$BUILD_DIR/content_quartz"
 echo "Checking prerequisites..."
 PREREQ_MISSING=false
 
-if ! command -v python >/dev/null 2>&1; then
+if [ "${KANO_DOCS_USE_PIXI:-0}" = "1" ]; then
+  if ! command -v pixi >/dev/null 2>&1; then
+    echo "ERROR: pixi not found for docs Python launcher"
+    PREREQ_MISSING=true
+  fi
+elif ! command -v python >/dev/null 2>&1; then
   echo "ERROR: Python not found"
   PREREQ_MISSING=true
 fi
@@ -136,7 +149,7 @@ if [ -d "$DEMO_DIR" ]; then
   PUBLISH_CONFIG=$(find_config_file "publish.config.yml" "$SCRIPT_DIR" "$REPO_ROOT")
   if validate_config_file "$PUBLISH_CONFIG" "publish.config.yml"; then
     echo "Using publish config: $PUBLISH_CONFIG"
-    python "$SCRIPT_DIR/help/process_yaml_config.py" "$REPO_ROOT/_ws/src" "$BUILD_DIR/content_quartz" "$PUBLISH_CONFIG"
+    docs_python "$SCRIPT_DIR/help/process_yaml_config.py" "$REPO_ROOT/_ws/src" "$BUILD_DIR/content_quartz" "$PUBLISH_CONFIG"
   else
     echo "WARNING: publish.config.yml not found - skipping YAML processing"
   fi

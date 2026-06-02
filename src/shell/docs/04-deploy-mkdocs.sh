@@ -1,6 +1,14 @@
 #!/bin/bash
 set -euo pipefail
 
+docs_python() {
+  if [ "${KANO_DOCS_USE_PIXI:-0}" = "1" ]; then
+    pixi run python "$@"
+    return
+  fi
+  python "$@"
+}
+
 # Deploy MkDocs API documentation as part of main site
 # Integrates API documentation into the Quartz-built site
 #
@@ -74,7 +82,7 @@ cp "$CONFIG_FILE" "$TEMP_MKDOCS/"
 echo "Copied MkDocs config to: $TEMP_MKDOCS/mkdocs.yml"
 
 # Generate dynamic content and navigation using Python
-python "$SCRIPT_DIR/help/mkdocs-content-generator.py" "$API_CONFIG" "$TEMP_MKDOCS/mkdocs.yml" "$TEMP_MKDOCS/docs"
+docs_python "$SCRIPT_DIR/help/mkdocs-content-generator.py" "$API_CONFIG" "$TEMP_MKDOCS/mkdocs.yml" "$TEMP_MKDOCS/docs"
 
 # Show generated MkDocs config if it exists
 if [ -f "$TEMP_MKDOCS/mkdocs.yml" ]; then

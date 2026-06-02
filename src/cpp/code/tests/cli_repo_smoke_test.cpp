@@ -35,7 +35,11 @@ int main(int argc, char** argv) {
         }
 
         expect(std::filesystem::exists(binary), "native binary not found for cli_repo_smoke_test");
-        std::filesystem::current_path(repo_root);
+        if (std::filesystem::exists(repo_root)) {
+            std::filesystem::current_path(repo_root);
+        } else {
+            std::filesystem::current_path(binary.parent_path());
+        }
 
         expect(run_command(binary, {"--help"}) == 0, "help command failed");
         expect(run_command(binary, {"--version"}) == 0, "version command failed");

@@ -35,6 +35,21 @@ prepare_windows_ctest_drive() {
   trap 'cleanup_subst_drive "Z:"' EXIT
 }
 
+run_windows_native_smoke_tests() {
+  local config_dir
+  config_dir="$(printf '%s' "$CONFIG" | tr '[:upper:]' '[:lower:]')"
+  local bin_root="$SKILL_ROOT/src/cpp/out/bin/$PRESET/$config_dir"
+  local exe
+
+  for exe in backlog_core_smoke_test.exe workitem_ops_smoke_test.exe cli_repo_smoke_test.exe; do
+    if [[ ! -f "$bin_root/$exe" ]]; then
+      echo "Missing native smoke test executable: $bin_root/$exe" >&2
+      return 1
+    fi
+    "$bin_root/$exe"
+  done
+}
+
 DEFAULT_PRESET=""
 DEFAULT_CONFIG="Debug"
 
@@ -54,5 +69,10 @@ shift $(( $# > 0 ? 1 : 0 )) || true
 shift $(( $# > 0 ? 1 : 0 )) || true
 
 prepare_windows_ctest_drive
+
+if [[ "$PRESET" == windows-* ]]; then
+  run_windows_native_smoke_tests
+  exit $?
+fi
 
 ctest --test-dir "$SKILL_ROOT/src/cpp/out/obj/$PRESET" -C "$CONFIG" --output-on-failure "$@"

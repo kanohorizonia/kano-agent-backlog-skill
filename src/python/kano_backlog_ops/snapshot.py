@@ -22,7 +22,7 @@ class SnapshotMeta:
     """Metadata for the snapshot evidence pack."""
     scope: str              # "repo" or "product:<name>"
     vcs: VcsMeta            # VCS metadata (agnostic)
-    generator_version: str = "0.1.0"
+    generator_version: str = "0.0.3"
 
 
 @dataclass
@@ -99,7 +99,7 @@ class EvidencePack:
                 hash=vcs_hash,
                 dirty=vcs_data.get('dirty', 'unknown'),
             ),
-            generator_version=meta_data.get('generator_version', '0.1.0'),
+            generator_version=meta_data.get('generator_version', '0.0.3'),
         )
         data['cli_tree'] = [cls._reconstruct_cli(c) for c in data.get('cli_tree', [])]
         data['stub_inventory'] = [StubEntry(**s) for s in data.get('stub_inventory', [])]

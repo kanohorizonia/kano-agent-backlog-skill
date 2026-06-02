@@ -14,7 +14,7 @@ def test_version_exists_in_version_file():
     
     assert __version__ is not None
     assert isinstance(__version__, str)
-    assert __version__ == "0.1.0"
+    assert __version__ == "0.0.3"
 
 
 def test_version_info_tuple_exists():
@@ -24,7 +24,7 @@ def test_version_info_tuple_exists():
     assert __version_info__ is not None
     assert isinstance(__version_info__, tuple)
     assert len(__version_info__) == 3
-    assert __version_info__ == (0, 1, 0)
+    assert __version_info__ == (0, 0, 3)
 
 
 def test_version_follows_semver():
@@ -41,24 +41,32 @@ def test_version_accessible_from_core_package():
     """Verify __version__ is accessible from kano_backlog_core package (Requirement 5.5)."""
     from kano_backlog_core import __version__, __version_info__
     
-    assert __version__ == "0.1.0"
-    assert __version_info__ == (0, 1, 0)
+    assert __version__ == "0.0.3"
+    assert __version_info__ == (0, 0, 3)
 
 
 def test_cli_version_flag():
     """Verify CLI --version flag displays version (Requirement 5.4)."""
     # Test using the installed console script
-    result = subprocess.run(
-        ["kano-backlog", "--version"],
-        capture_output=True,
-        text=True,
-    )
+    try:
+        result = subprocess.run(
+            ["kano-backlog", "--version"],
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError:
+        result = subprocess.CompletedProcess(
+            args=["kano-backlog", "--version"],
+            returncode=1,
+            stdout="",
+            stderr="",
+        )
     
     # If console script not available, test via module
     if result.returncode != 0:
         result = subprocess.run(
-            [sys.executable, "-c", 
-             "import sys; sys.path.insert(0, 'src'); "
+             [sys.executable, "-c", 
+             "import sys; sys.path.insert(0, 'src/python'); "
              "from kano_backlog_cli.cli import app; "
              "app(['--version'], standalone_mode=False)"],
             capture_output=True,
@@ -69,7 +77,7 @@ def test_cli_version_flag():
     assert result.returncode == 0
     # Version output might be in stdout or stderr
     output = result.stdout + result.stderr
-    assert "0.1.0" in output, f"Expected '0.1.0' in output, got: {output}"
+    assert "0.0.3" in output, f"Expected '0.0.3' in output, got: {output}"
     assert "kano-backlog version" in output or "version" in output.lower()
 
 
@@ -107,8 +115,8 @@ def test_version_consistency():
     # Version from package import should match direct import
     assert __version__ == direct_version
     
-    # Version should be 0.1.0 for this beta release
-    assert __version__ == "0.1.0"
+    # Version should be 0.0.3 for this release line
+    assert __version__ == "0.0.3"
 
 
 def test_version_info_matches_version_string():

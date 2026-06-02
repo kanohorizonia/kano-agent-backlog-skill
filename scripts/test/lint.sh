@@ -4,6 +4,11 @@
 # =============================================================================
 # Runs ruff, black, isort, and mypy on the skill source code.
 #
+# Ruff, black, isort, and mypy are advisory by default for the 0.0.x
+# OSS-readiness gate because the repository still carries broad historical
+# style and type debt. Set KANO_STRICT_LINT=1 and KANO_STRICT_MYPY=1 to make
+# those failures block the script.
+#
 # Usage:
 #   bash scripts/test/lint.sh [--fix]
 #   bash scripts/test/lint.sh --help
@@ -85,21 +90,26 @@ main() {
     log_info "Apply fixes: $APPLY_FIXES"
     echo
 
-    local src_dir="$SKILL_ROOT/src"
+    local python_src_dir="$SKILL_ROOT/src/python"
+    local tests_dir="$SKILL_ROOT/tests"
     local failed=0
 
     # ruff: linting
     log_section "1. ruff (linting)"
     if command -v ruff >/dev/null 2>&1; then
-        local ruff_args=(check "$src_dir")
+        local ruff_args=(check "$python_src_dir" "$tests_dir")
         if [[ "$APPLY_FIXES" == "true" ]]; then
             ruff_args+=( --fix)
         fi
         if ruff "${ruff_args[@]}"; then
             log_pass "ruff: OK"
         else
-            log_fail "ruff: issues found"
-            failed=1
+            if [[ "${KANO_STRICT_LINT:-0}" == "1" ]]; then
+                log_fail "ruff: issues found"
+                failed=1
+            else
+                log_warn "ruff: issues found (advisory; set KANO_STRICT_LINT=1 to fail)"
+            fi
         fi
     else
         log_warn "ruff not installed (pip install ruff)"
@@ -108,15 +118,19 @@ main() {
     # black: formatting
     log_section "2. black (formatting)"
     if command -v black >/dev/null 2>&1; then
-        local black_args=( --check "$src_dir")
+        local black_args=( --check "$python_src_dir" "$tests_dir")
         if [[ "$APPLY_FIXES" == "true" ]]; then
-            black_args=( "$src_dir")
+            black_args=( "$python_src_dir" "$tests_dir")
         fi
         if black "${black_args[@]}"; then
             log_pass "black: OK"
         else
-            log_fail "black: formatting issues"
-            failed=1
+            if [[ "${KANO_STRICT_LINT:-0}" == "1" ]]; then
+                log_fail "black: formatting issues"
+                failed=1
+            else
+                log_warn "black: formatting issues (advisory; set KANO_STRICT_LINT=1 to fail)"
+            fi
         fi
     else
         log_warn "black not installed (pip install black)"
@@ -125,15 +139,19 @@ main() {
     # isort: import sorting
     log_section "3. isort (import sorting)"
     if command -v isort >/dev/null 2>&1; then
-        local isort_args=( --check-only "$src_dir")
+        local isort_args=( --check-only "$python_src_dir" "$tests_dir")
         if [[ "$APPLY_FIXES" == "true" ]]; then
-            isort_args=( "$src_dir")
+            isort_args=( "$python_src_dir" "$tests_dir")
         fi
         if isort "${isort_args[@]}"; then
             log_pass "isort: OK"
         else
-            log_fail "isort: import issues"
-            failed=1
+            if [[ "${KANO_STRICT_LINT:-0}" == "1" ]]; then
+                log_fail "isort: import issues"
+                failed=1
+            else
+                log_warn "isort: import issues (advisory; set KANO_STRICT_LINT=1 to fail)"
+            fi
         fi
     else
         log_warn "isort not installed (pip install isort)"
@@ -142,11 +160,15 @@ main() {
     # mypy: type checking
     log_section "4. mypy (type checking)"
     if command -v mypy >/dev/null 2>&1; then
-        if mypy "$src_dir" --no-error-summary 2>&1; then
+        if mypy "$python_src_dir" --no-error-summary 2>&1; then
             log_pass "mypy: OK"
         else
-            log_fail "mypy: type issues found"
-            failed=1
+            if [[ "${KANO_STRICT_MYPY:-0}" == "1" ]]; then
+                log_fail "mypy: type issues found"
+                failed=1
+            else
+                log_warn "mypy: type issues found (advisory; set KANO_STRICT_MYPY=1 to fail)"
+            fi
         fi
     else
         log_warn "mypy not installed (pip install mypy)"

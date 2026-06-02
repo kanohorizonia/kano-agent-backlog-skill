@@ -13,7 +13,7 @@ pipeline {
                 script {
                     agentSkillPipelineFromProjectConfig(
                         configPath: '.jenkins/config/agent-skill-pipeline.json',
-                        bootstrapAgentLabel: 'lightweight',
+                        bootstrapAgentLabel: 'windows && lightweight',
                         config: [
                             bDryRun                    : params.DRY_RUN,
                             bRunBuildPhase             : !params.DRY_RUN,

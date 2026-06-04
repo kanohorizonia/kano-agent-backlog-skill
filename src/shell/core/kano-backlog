@@ -95,6 +95,10 @@ native_bin_matches_version() {
 
 NATIVE_BIN="$(find_native_bin || true)"
 
+if [[ "${1-}" == "repo-hygiene" ]]; then
+  NATIVE_BIN=""
+fi
+
 if [[ -n "$NATIVE_BIN" ]] && native_bin_matches_version "$NATIVE_BIN"; then
   cd "$WORKSPACE_ROOT"
   exec "$NATIVE_BIN" "$@"
@@ -106,10 +110,6 @@ if [[ -z "$PYTHON_BIN" ]]; then
   echo "Build native with: bash scripts/internal/self-build.sh debug" >&2
   echo "Or run via Python after installing deps: python -m pip install -e \".[dev]\"" >&2
   exit 1
-fi
-
-if [[ "${1-}" == "repo-hygiene" ]]; then
-  NATIVE_BIN=""
 fi
 
 cd "$WORKSPACE_ROOT"

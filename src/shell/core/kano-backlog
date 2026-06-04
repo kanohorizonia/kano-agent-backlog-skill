@@ -108,6 +108,10 @@ if [[ -z "$PYTHON_BIN" ]]; then
   exit 1
 fi
 
+if [[ "${1-}" == "repo-hygiene" ]]; then
+  NATIVE_BIN=""
+fi
+
 cd "$WORKSPACE_ROOT"
 MODULE_ROOT="$SKILL_ROOT/src/python"
 case "$(uname -s 2>/dev/null || printf 'unknown')" in

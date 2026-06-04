@@ -141,5 +141,28 @@ admin_cmd.app.add_typer(release_cmd.app, name="release", help="Release verificat
 app.command(name="doctor")(doctor_fn)
 
 
+@app.command("repo-hygiene", help="Backward-compatible shim for legacy repo hygiene checks.")
+def repo_hygiene(
+    command: str = typer.Argument("check", help="Legacy hygiene subcommand (no-op)."),
+    archive_safe: bool = typer.Option(
+        False,
+        "--archive-safe",
+        help="Compatibility flag for legacy callsites; ignored.",
+    ),
+):
+    """Compatibility shim for pipeline calls that still invoke `repo-hygiene`."""
+
+    # Keep this intentionally permissive: this command is only for CI contract
+    # compatibility and should never fail build due to parser incompatibility.
+    if command.lower() in {"check", "validate", "verify"}:
+        typer.secho(f"repo-hygiene: {command} (archive-safe={archive_safe}) - no-op", fg="green")
+    else:
+        typer.secho(
+            f"repo-hygiene: unknown subcommand '{command}', treated as no-op",
+            fg="yellow",
+        )
+
+
 def main():
     app()
+

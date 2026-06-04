@@ -8,12 +8,14 @@ EXPECTED_VERSION="$(tr -d '\r\n' < "$SKILL_ROOT/VERSION")"
 find_python_bin() {
   local candidate
   for candidate in \
-    python \
-    python3 \
-    py \
+    "$SKILL_ROOT/.pixi/envs/default/python.exe" \
+    "$SKILL_ROOT/.pixi/envs/default/bin/python" \
     "$SKILL_ROOT/.venv/Scripts/python.exe" \
     "$SKILL_ROOT/.venv/bin/python" \
-    "$HOME/.pixi/bin/python"
+    "$HOME/.pixi/bin/python" \
+    python \
+    python3 \
+    py
   do
     if command -v "$candidate" >/dev/null 2>&1; then
       printf '%s\n' "$candidate"

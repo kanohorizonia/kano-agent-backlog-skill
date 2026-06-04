@@ -10,6 +10,9 @@ ninja = "*"
 python = ">=3.12,<3.13"
 pip = "*"
 
+[pypi-dependencies]
+kano-agent-backlog-skill = { path = ".", editable = true }
+
 [target.linux-64.dependencies]
 bash = "*"
 

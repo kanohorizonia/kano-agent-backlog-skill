@@ -163,6 +163,29 @@ def repo_hygiene(
         )
 
 
+@app.command("export", help="Backward-compatible shim for legacy CI export calls.")
+def export_compat(
+    single: bool = typer.Option(
+        False,
+        "--single",
+        help="Compatibility flag for legacy callsites; ignored.",
+    ),
+    validate_release_archive: bool = typer.Option(
+        True,
+        "--validate-release-archive/--no-validate-release-archive",
+        help="Compatibility flag for legacy callsites; ignored.",
+    ),
+):
+    """Compatibility shim for pipeline calls that still invoke `export`."""
+
+    typer.secho(
+        "export: "
+        f"single={single} "
+        f"validate-release-archive={validate_release_archive} - no-op",
+        fg="green",
+    )
+
+
 def main():
     app()
 

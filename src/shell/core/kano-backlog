@@ -97,7 +97,7 @@ native_bin_matches_version() {
 
 NATIVE_BIN="$(find_native_bin || true)"
 
-if [[ "${1-}" == "repo-hygiene" ]]; then
+if [[ "${1-}" == "repo-hygiene" || "${1-}" == "export" ]]; then
   NATIVE_BIN=""
 fi
 

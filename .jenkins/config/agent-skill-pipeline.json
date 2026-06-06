@@ -6,6 +6,7 @@
   "linuxAgentLabel": "linux && lightweight",
   "macAgentLabel": "mac && lightweight",
   "bRunReleasePhase": false,
+  "bNormalizePlatformPackages": false,
   "bRunTests": true,
   "buildTasks": ["build"],
   "testTasks": ["quick-test"],

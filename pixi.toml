@@ -50,7 +50,7 @@ report-coverage = "bash src/cpp/build/script/windows/ninja-msvc-coverage-report.
 coverage-all = "KOB_CPP_ROOT=src/cpp KABSD_BUILD_PREFIX=KOB KABSD_CMAKE_VAR_PREFIX=KB bash src/cpp/shared/infra/scripts/platform/win64/ninja-msvc-coverage-build.sh && bash src/cpp/build/script/windows/ninja-msvc-coverage-run.sh && bash src/cpp/build/script/windows/ninja-msvc-coverage-report.sh"
 
 # Tests
-quick-test = "bash src/cpp/build/script/windows/run_tests.sh windows-ninja-msvc"
+quick-test = "bash src/cpp/code/tests/run_tests.sh windows-ninja-msvc"
 
 # =============================================================================
 # Linux-specific (linux-64)

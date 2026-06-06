@@ -20,6 +20,7 @@
   "releaseJobName": "Release_Publish",
   "upstreamBuildJob": "KanoAgentSkills/kano-agent-backlog-skill/Build_CI",
   "gitUrl": "https://github.com/kanohorizonia/kano-agent-backlog-skill.git",
+  "gitCredentialsId": "github-kanohorizonia-jenkins",
   "gitBranch": "__BUILD_BRANCH__",
   "bRunWindowsBuild": true,
   "bRunLinuxBuild": false,

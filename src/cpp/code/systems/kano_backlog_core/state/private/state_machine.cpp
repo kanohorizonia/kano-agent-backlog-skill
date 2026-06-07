@@ -104,8 +104,10 @@ void StateMachine::transition(
     std::stringstream worklog_line;
     worklog_line << time_ss.str() << " ";
     if (agent) {
-        std::string model_val = (model && !model->empty()) ? *model : "unknown";
-        worklog_line << "[agent=" << *agent << "] [model=" << model_val << "] ";
+        worklog_line << "[agent=" << *agent << "] ";
+        if (model && !model->empty()) {
+            worklog_line << "[model=" << *model << "] ";
+        }
     }
     worklog_line << worklog_text;
     
@@ -131,8 +133,11 @@ void StateMachine::record_worklog(
     
     std::stringstream worklog_line;
     worklog_line << time_ss.str() << " ";
-    std::string model_val = (model && !model->empty()) ? *model : "unknown";
-    worklog_line << "[agent=" << agent << "] [model=" << model_val << "] " << message;
+    worklog_line << "[agent=" << agent << "] ";
+    if (model && !model->empty()) {
+        worklog_line << "[model=" << *model << "] ";
+    }
+    worklog_line << message;
     
     item.worklog.push_back(worklog_line.str());
 }

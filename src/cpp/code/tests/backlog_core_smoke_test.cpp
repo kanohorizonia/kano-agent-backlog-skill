@@ -76,6 +76,17 @@ int main() {
         BacklogItem transitioned = item;
         StateMachine::transition(transitioned, StateAction::Start, std::string("opencode"), std::string("Start work"));
         expect(transitioned.state == ItemState::InProgress, "transition should set InProgress");
+        expect(transitioned.worklog.back().find("[agent=opencode]") != std::string::npos, "transition should include agent marker");
+        expect(transitioned.worklog.back().find("[model=unknown]") == std::string::npos, "transition should omit unknown model marker");
+
+        BacklogItem modeled = item;
+        StateMachine::record_worklog(modeled, "opencode", "Record modeled work", std::string("gpt-test"));
+        expect(modeled.worklog.back().find("[model=gpt-test]") != std::string::npos, "explicit model marker should be preserved");
+
+        BacklogItem unmodeled = item;
+        StateMachine::record_worklog(unmodeled, "opencode", "Record unmodeled work");
+        expect(unmodeled.worklog.back().find("[agent=opencode]") != std::string::npos, "record_worklog should include agent marker");
+        expect(unmodeled.worklog.back().find("[model=unknown]") == std::string::npos, "record_worklog should omit unknown model marker");
 
         BacklogItem invalid = item;
         invalid.approach.reset();

@@ -395,11 +395,49 @@ int main(int InArgc, char* InArgv[]) {
 
             auto* initCmd = adminCmd->add_subcommand("init", "Initialize a new backlog");
             std::string init_agent;
+            std::string init_product;
+            std::string init_backlog_root;
+            std::string init_product_name;
+            std::string init_prefix;
+            bool init_force = false;
+            bool init_skip_refresh_views = false;
             initCmd->add_option("--agent", init_agent, "Agent ID")->required();
+            initCmd->add_option("--product", init_product, "Product name");
+            initCmd->add_option("--backlog-root", init_backlog_root, "Backlog root path");
+            initCmd->add_option("--product-name", init_product_name, "Display product name");
+            initCmd->add_option("--prefix", init_prefix, "Display ID prefix");
+            initCmd->add_flag("--force", init_force, "Update an existing product scaffold/config block");
+            initCmd->add_flag("--skip-refresh-views", init_skip_refresh_views, "Skip initial dashboard refresh");
             initCmd->callback([&]() {
-                std::filesystem::path backlog_root(path_str);
-                OrchestrationOps::initialize_backlog(backlog_root, init_agent);
-                std::cout << "Initialized backlog at: " << std::filesystem::absolute(backlog_root).string() << "\n";
+                const std::string effective_product = !init_product.empty() ? init_product : product_name_opt;
+                if (effective_product.empty()) {
+                    throw std::runtime_error("Product name is required. Pass --product or global -P/--product.");
+                }
+
+                OrchestrationOps::InitOptions options;
+                options.start_path = path_str;
+                options.product = effective_product;
+                options.agent = init_agent;
+                options.force = init_force;
+                options.refresh_views = !init_skip_refresh_views;
+                if (!init_backlog_root.empty()) {
+                    options.backlog_root = std::filesystem::path(init_backlog_root);
+                }
+                if (!init_product_name.empty()) {
+                    options.product_name = init_product_name;
+                }
+                if (!init_prefix.empty()) {
+                    options.prefix = init_prefix;
+                }
+
+                auto result = OrchestrationOps::initialize_backlog(options);
+                std::cout << "Initialized backlog product: " << effective_product << "\n";
+                std::cout << "Project root: " << result.project_root.string() << "\n";
+                std::cout << "Backlog root: " << result.backlog_root.string() << "\n";
+                std::cout << "Product root: " << result.product_root.string() << "\n";
+                std::cout << "Config: " << result.config_path.string() << "\n";
+                std::cout << "Created paths: " << result.created_paths.size() << "\n";
+                std::cout << "Refreshed dashboards: " << result.views_refreshed.size() << "\n";
             });
 
             // admin sync-sequences

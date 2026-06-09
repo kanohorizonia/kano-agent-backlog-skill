@@ -29,8 +29,12 @@ sync_local_skill_repo() {
   mkdir -p "$target_dir"
 
   echo "Syncing local skill repo working tree..."
-  tar \
-    --warning=no-file-changed \
+  local tar_args=()
+  if tar --warning=no-file-changed --version >/dev/null 2>&1; then
+    tar_args+=(--warning=no-file-changed)
+  fi
+
+  tar "${tar_args[@]}" \
     --exclude='./.git' \
     --exclude='./.pixi' \
     --exclude='./_ws' \

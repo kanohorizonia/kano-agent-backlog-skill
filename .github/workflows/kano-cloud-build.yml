@@ -83,24 +83,13 @@ jobs:
         with:
           ref: ${{ inputs.source_ref }}
           fetch-depth: 0
-          submodules: recursive
+          submodules: false
 
       - name: Checkout requested commit
         if: ${{ inputs.source_commit != '' && inputs.source_commit != 'HEAD' }}
         run: git checkout --force "${{ inputs.source_commit }}"
 
-      - name: Install native build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y clang ninja-build build-essential cmake
-
-      - name: Build native release CLI
-        run: bash src/shell/support/self-build.sh release
-
-      - name: Run native quick tests
-        run: bash src/shell/test/quick-test.sh linux-ninja-clang Release
-
-      - name: Prepare cloud artifact
+      - name: Resolve cloud artifact metadata
         id: artifact
         shell: bash
         run: |
@@ -116,7 +105,148 @@ jobs:
             safe_package="artifact"
           fi
 
-          artifact_name="${safe_package}-${PLATFORM}-${REQUEST_ID}"
+          retention_days="${INPUT_RETENTION_DAYS:-1}"
+          case "$retention_days" in
+            ''|*[!0-9]*) retention_days=1 ;;
+          esac
+          if [ "$retention_days" -lt 1 ]; then
+            retention_days=1
+          elif [ "$retention_days" -gt 3 ]; then
+            retention_days=3
+          fi
+
+          {
+            echo "artifact_name=${safe_package}-${PLATFORM}-${REQUEST_ID}"
+            echo "retention_days=$retention_days"
+          } >> "$GITHUB_OUTPUT"
+        env:
+          INPUT_RETENTION_DAYS: ${{ inputs.retention_days }}
+
+      - name: Initialize native infra dependency
+        id: dependency
+        shell: bash
+        env:
+          ARTIFACT_NAME: ${{ steps.artifact.outputs.artifact_name }}
+          KANO_GITHUB_READ_TOKEN: ${{ secrets.KANO_GITHUB_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [ -n "${KANO_GITHUB_READ_TOKEN:-}" ]; then
+            auth_header="$(printf 'x-access-token:%s' "$KANO_GITHUB_READ_TOKEN" | base64 -w0)"
+            git config --global http.https://github.com/.extraheader "AUTHORIZATION: basic $auth_header"
+          fi
+
+          if git submodule update --init --force --recursive; then
+            echo "dependency_available=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "dependency_available=false" >> "$GITHUB_OUTPUT"
+          mkdir -p ".kano/cloud-artifact/platform/$PLATFORM"
+          python3 - "$PLATFORM" "$PACKAGE_ID" "$PACKAGE_VERSION" "$REQUEST_ID" "$ARTIFACT_NAME" "$RELEASE_MODE" "$REQUIRED" "$EXPERIMENTAL" <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          platform = sys.argv[1]
+          package_id = sys.argv[2]
+          package_version = sys.argv[3]
+          request_id = sys.argv[4]
+          artifact_name = sys.argv[5]
+          release_mode = sys.argv[6]
+          required = sys.argv[7].lower() == "true"
+          experimental = sys.argv[8].lower() == "true"
+          root = pathlib.Path(".kano/cloud-artifact")
+          message = (
+              "Private dependency submodule src/cpp/shared/infra could not be fetched. "
+              "Configure the KANO_GITHUB_READ_TOKEN repository secret with read access "
+              "to kanohorizonia/kano-cpp-infra, or make that dependency public."
+          )
+          platform_manifest = {
+              "schemaVersion": 1,
+              "kind": "kano-platform-build-artifact",
+              "platform": platform,
+              "required": required,
+              "experimental": experimental,
+              "buildBackend": "none",
+              "backendStatus": "REQUIRED_PLATFORM_BACKEND_UNAVAILABLE" if required else "SKIPPED_BACKEND_UNAVAILABLE",
+              "built": False,
+              "tested": False,
+              "supported": False,
+              "skipped": True,
+              "skipReason": "BACKEND_UNAVAILABLE",
+              "message": message,
+              "requestId": request_id,
+              "packageId": package_id,
+              "packageVersion": package_version,
+              "releaseMode": release_mode,
+              "githubActions": {
+                  "artifactName": artifact_name,
+                  "dependencyAvailable": False,
+                  "repository": "${{ github.repository }}",
+                  "workflow": "${{ github.workflow }}",
+                  "runId": "${{ github.run_id }}",
+              },
+              "files": [],
+          }
+          (root / "platform" / platform / "release-artifact-manifest.json").write_text(
+              json.dumps(platform_manifest, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          release_manifest = {
+              "schemaVersion": 1,
+              "kind": "kano-release-artifacts",
+              "packageId": package_id,
+              "packageVersion": package_version,
+              "platform": platform,
+              "files": [],
+              "skipped": True,
+              "skipReason": "BACKEND_UNAVAILABLE",
+              "message": message,
+          }
+          (root / "release-artifacts.manifest.json").write_text(
+              json.dumps(release_manifest, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+          if [ "${REQUIRED,,}" = "true" ]; then
+            exit 1
+          fi
+
+      - name: Install native build dependencies
+        if: ${{ steps.dependency.outputs.dependency_available == 'true' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang ninja-build build-essential cmake
+
+      - name: Build native release CLI
+        if: ${{ steps.dependency.outputs.dependency_available == 'true' }}
+        run: bash src/shell/support/self-build.sh release
+
+      - name: Run native quick tests
+        if: ${{ steps.dependency.outputs.dependency_available == 'true' }}
+        run: bash src/shell/test/quick-test.sh linux-ninja-clang Release
+
+      - name: Prepare cloud artifact
+        if: ${{ steps.dependency.outputs.dependency_available == 'true' }}
+        shell: bash
+        env:
+          ARTIFACT_NAME: ${{ steps.artifact.outputs.artifact_name }}
+        run: |
+          set -euo pipefail
+
+          safe_component() {
+            printf '%s' "$1" |
+              sed -E 's/[^A-Za-z0-9._-]+/-/g; s/-+/-/g; s/^-|-$//g'
+          }
+
+          safe_package="$(safe_component "$PACKAGE_ID")"
+          if [ -z "$safe_package" ]; then
+            safe_package="artifact"
+          fi
+
+          artifact_name="$ARTIFACT_NAME"
           archive_base="${safe_package}_${PACKAGE_VERSION}_${PLATFORM}"
           artifact_root=".kano/cloud-artifact"
           payload_root=".kano/cloud-payload/${safe_package}"
@@ -246,24 +376,8 @@ jobs:
           manifest_path.write_text(json.dumps(platform_manifest, indent=2) + "\n", encoding="utf-8")
           PY
 
-          retention_days="${INPUT_RETENTION_DAYS:-1}"
-          case "$retention_days" in
-            ''|*[!0-9]*) retention_days=1 ;;
-          esac
-          if [ "$retention_days" -lt 1 ]; then
-            retention_days=1
-          elif [ "$retention_days" -gt 3 ]; then
-            retention_days=3
-          fi
-
-          {
-            echo "artifact_name=$artifact_name"
-            echo "retention_days=$retention_days"
-          } >> "$GITHUB_OUTPUT"
-        env:
-          INPUT_RETENTION_DAYS: ${{ inputs.retention_days }}
-
       - name: Upload cloud artifact
+        if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.artifact.outputs.artifact_name }}

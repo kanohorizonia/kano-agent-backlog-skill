@@ -32,7 +32,9 @@
   "bBuildSite": true,
   "bPublishSite": true,
   "bCreateGitHubRelease": true,
-  "bRequireExplicitReleaseTag": true,
+  "bRequireExplicitReleaseTag": false,
+  "bUseVersionAsReleaseTag": true,
+  "bForceUpdateReleaseTag": true,
   "releaseApprovalMessage": "Approve kano-agent-backlog-skill Release/Publish? Confirm tag, artifacts, docs, and release plan before proceeding.",
   "branchPolicy": {
     "parameterName": "BUILD_BRANCH",

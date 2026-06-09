@@ -78,12 +78,27 @@ jobs:
       KANO_TEST_NONINTERACTIVE: "1"
       GIT_TERMINAL_PROMPT: "0"
     steps:
+      - name: Create kanohorizonia Jenkins app token
+        id: jenkins-app-token
+        if: ${{ vars.KANO_JENKINS_APP_CLIENT_ID != '' }}
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.KANO_JENKINS_APP_CLIENT_ID }}
+          private-key: ${{ secrets.KANO_JENKINS_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: |
+            kano-agent-backlog-skill
+            kano-cpp-infra
+          permission-contents: read
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.source_ref }}
           fetch-depth: 0
           submodules: false
+          token: ${{ steps.jenkins-app-token.outputs.token || github.token }}
+          persist-credentials: false
 
       - name: Checkout requested commit
         if: ${{ inputs.source_commit != '' && inputs.source_commit != 'HEAD' }}
@@ -127,19 +142,23 @@ jobs:
         shell: bash
         env:
           ARTIFACT_NAME: ${{ steps.artifact.outputs.artifact_name }}
-          KANO_GITHUB_READ_TOKEN: ${{ secrets.KANO_GITHUB_READ_TOKEN }}
+          KANO_GITHUB_READ_TOKEN: ${{ steps.jenkins-app-token.outputs.token || secrets.KANO_GITHUB_READ_TOKEN }}
         run: |
           set -euo pipefail
 
           if [ -n "${KANO_GITHUB_READ_TOKEN:-}" ]; then
+            echo "::add-mask::$KANO_GITHUB_READ_TOKEN"
             auth_header="$(printf 'x-access-token:%s' "$KANO_GITHUB_READ_TOKEN" | base64 -w0)"
+            echo "::add-mask::$auth_header"
             git config --global http.https://github.com/.extraheader "AUTHORIZATION: basic $auth_header"
           fi
 
           if git submodule update --init --force --recursive; then
+            git config --global --unset-all http.https://github.com/.extraheader || true
             echo "dependency_available=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          git config --global --unset-all http.https://github.com/.extraheader || true
 
           echo "dependency_available=false" >> "$GITHUB_OUTPUT"
           mkdir -p ".kano/cloud-artifact/platform/$PLATFORM"
@@ -159,7 +178,9 @@ jobs:
           root = pathlib.Path(".kano/cloud-artifact")
           message = (
               "Private dependency submodule src/cpp/shared/infra could not be fetched. "
-              "Configure the KANO_GITHUB_READ_TOKEN repository secret with read access "
+              "Configure the kanohorizonia-jenkins GitHub App credentials as "
+              "KANO_JENKINS_APP_CLIENT_ID and KANO_JENKINS_APP_PRIVATE_KEY, configure "
+              "the fallback KANO_GITHUB_READ_TOKEN repository secret with read access "
               "to kanohorizonia/kano-cpp-infra, or make that dependency public."
           )
           platform_manifest = {

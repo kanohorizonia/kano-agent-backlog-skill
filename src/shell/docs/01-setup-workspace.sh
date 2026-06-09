@@ -29,12 +29,13 @@ sync_local_skill_repo() {
   mkdir -p "$target_dir"
 
   echo "Syncing local skill repo working tree..."
-  local tar_args=()
+  local tar_warning_arg=""
   if tar --warning=no-file-changed --version >/dev/null 2>&1; then
-    tar_args+=(--warning=no-file-changed)
+    tar_warning_arg="--warning=no-file-changed"
   fi
 
-  tar "${tar_args[@]}" \
+  # shellcheck disable=SC2086
+  tar ${tar_warning_arg:+$tar_warning_arg} \
     --exclude='./.git' \
     --exclude='./.pixi' \
     --exclude='./_ws' \

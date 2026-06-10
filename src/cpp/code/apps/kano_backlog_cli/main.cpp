@@ -9898,6 +9898,287 @@ int main(int InArgc, char* InArgv[]) {
             return 0;
         };
 
+        auto try_run_topic_opencode_fast_path = [&]() -> std::optional<int> {
+            int topic_index = -1;
+            for (int i = 1; i + 1 < parse_argc; ++i) {
+                if (std::string(parse_argv[i]) == "topic") {
+                    topic_index = i;
+                    break;
+                }
+            }
+            if (topic_index < 0 || topic_index + 1 >= parse_argc) {
+                return std::nullopt;
+            }
+
+            const std::string action = parse_argv[topic_index + 1];
+            if (action != "sync-opencode-plan" && action != "resolve-opencode-plan") {
+                return std::nullopt;
+            }
+
+            std::string local_path = ".";
+            std::string local_product;
+            std::string local_sandbox;
+            std::vector<std::string> positionals;
+            std::string agent = "atlas";
+            std::string plan_file = "plan.md";
+            std::string target_name;
+            std::string import_sisyphus_plan;
+            std::string provider = action == "resolve-opencode-plan" ? "backlog" : "";
+            std::string format = action == "resolve-opencode-plan" ? "json" : "plain";
+            bool set_active = false;
+            bool sync_compat = false;
+            bool set_active_compat = false;
+            bool oh_my_opencode = false;
+
+            const auto option_value = [&](int& index, const std::string& option) -> std::optional<std::string> {
+                const std::string arg = parse_argv[index];
+                const std::string prefix_text = option + "=";
+                if (arg.rfind(prefix_text, 0) == 0) {
+                    return arg.substr(prefix_text.size());
+                }
+                if (arg == option && index + 1 < parse_argc) {
+                    ++index;
+                    return std::string(parse_argv[index]);
+                }
+                return std::nullopt;
+            };
+
+            const auto parse_context_option = [&](int& index) -> bool {
+                if (auto value = option_value(index, "-p")) {
+                    local_path = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "--path")) {
+                    local_path = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "-P")) {
+                    local_product = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "--product")) {
+                    local_product = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "-s")) {
+                    local_sandbox = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "--sandbox")) {
+                    local_sandbox = *value;
+                    return true;
+                }
+                return false;
+            };
+
+            for (int i = 1; i < topic_index; ++i) {
+                if (!parse_context_option(i)) {
+                    return std::nullopt;
+                }
+            }
+
+            for (int i = topic_index + 2; i < parse_argc; ++i) {
+                const std::string arg = parse_argv[i];
+                if (arg == "-h" || arg == "--help") {
+                    return std::nullopt;
+                }
+                if (auto value = option_value(i, "--agent")) {
+                    agent = *value;
+                    continue;
+                }
+                if (auto value = option_value(i, "--plan-file")) {
+                    plan_file = *value;
+                    continue;
+                }
+                if (auto value = option_value(i, "--target-name")) {
+                    target_name = *value;
+                    continue;
+                }
+                if (auto value = option_value(i, "--import-sisyphus-plan")) {
+                    import_sisyphus_plan = *value;
+                    continue;
+                }
+                if (auto value = option_value(i, "--provider")) {
+                    provider = *value;
+                    continue;
+                }
+                if (auto value = option_value(i, "--format")) {
+                    format = *value;
+                    continue;
+                }
+                if (arg == "--set-active") {
+                    set_active = true;
+                    continue;
+                }
+                if (arg == "--sync-compat") {
+                    sync_compat = true;
+                    continue;
+                }
+                if (arg == "--set-active-compat") {
+                    set_active_compat = true;
+                    continue;
+                }
+                if (arg == "--oh-my-opencode") {
+                    oh_my_opencode = true;
+                    continue;
+                }
+                if (parse_context_option(i)) {
+                    continue;
+                }
+                if (arg.rfind("-", 0) != 0) {
+                    positionals.push_back(arg);
+                    continue;
+                }
+                return std::nullopt;
+            }
+
+            if (!oh_my_opencode) {
+                return std::nullopt;
+            }
+
+            const auto default_format = action == "resolve-opencode-plan" ? std::string("json") : std::string("plain");
+            const auto format_norm = lower_copy(format.empty() ? default_format : format);
+            if (format_norm != "plain" && format_norm != "json") {
+                throw std::runtime_error("format must be one of: plain, json");
+            }
+
+            auto ctx = BacklogContext::resolve(
+                local_path,
+                local_product.empty() ? std::nullopt : std::optional<std::string>(local_product),
+                local_sandbox.empty() ? std::nullopt : std::optional<std::string>(local_sandbox)
+            );
+            const auto workspace_root = normalized_absolute_path(std::filesystem::current_path());
+            const auto sis_plan_dir = workspace_root / ".sisyphus" / "plans";
+            const auto sis_boulder = workspace_root / ".sisyphus" / "boulder.json";
+            const auto effective_plan_file = trim_copy(plan_file).empty() ? std::string("plan.md") : plan_file;
+
+            if (action == "sync-opencode-plan") {
+                if (positionals.size() != 1) {
+                    return std::nullopt;
+                }
+                const auto topic_name = topic_normalize_name(positionals[0]);
+                const auto topic_path = topic_path_for(ctx.backlog_root, topic_name);
+                if (!std::filesystem::exists(topic_path)) {
+                    throw std::runtime_error("Topic not found: " + topic_path.string());
+                }
+
+                auto source_plan = topic_path / effective_plan_file;
+                bool imported = false;
+                std::filesystem::path import_source;
+                if (!trim_copy(import_sisyphus_plan).empty()) {
+                    import_source = sis_plan_dir / import_sisyphus_plan;
+                    if (!std::filesystem::exists(import_source)) {
+                        throw std::runtime_error("Sisyphus plan not found: " + import_source.string());
+                    }
+                    std::filesystem::create_directories(source_plan.parent_path());
+                    std::error_code import_ec;
+                    std::filesystem::copy_file(import_source, source_plan, std::filesystem::copy_options::overwrite_existing, import_ec);
+                    if (import_ec) {
+                        throw std::runtime_error("Failed to import Sisyphus plan: " + import_ec.message());
+                    }
+                    imported = true;
+                } else if (!std::filesystem::exists(source_plan)) {
+                    throw std::runtime_error("Topic plan not found: " + source_plan.string());
+                }
+
+                std::filesystem::create_directories(sis_plan_dir);
+                const auto resolved_target_name = trim_copy(target_name).empty() ? (topic_name + ".md") : target_name;
+                const auto target_plan = sis_plan_dir / resolved_target_name;
+                std::filesystem::create_directories(target_plan.parent_path());
+                std::error_code copy_ec;
+                std::filesystem::copy_file(source_plan, target_plan, std::filesystem::copy_options::overwrite_existing, copy_ec);
+                if (copy_ec) {
+                    throw std::runtime_error("Failed to sync topic plan: " + copy_ec.message());
+                }
+
+                if (set_active) {
+                    write_opencode_boulder(sis_boulder, target_plan);
+                }
+
+                if (format_norm == "json") {
+                    Json::Value payload(Json::objectValue);
+                    payload["topic"] = topic_name;
+                    payload["topic_path"] = topic_path.string();
+                    payload["source_plan"] = source_plan.string();
+                    payload["target_plan"] = target_plan.string();
+                    payload["imported"] = imported;
+                    payload["import_source"] = imported ? Json::Value(import_source.string()) : Json::Value(Json::nullValue);
+                    payload["set_active"] = set_active;
+                    payload["boulder"] = set_active ? Json::Value(sis_boulder.string()) : Json::Value(Json::nullValue);
+                    payload["integration"] = "oh-my-opencode";
+                    std::cout << json_to_string(payload, true) << "\n";
+                } else {
+                    std::cout << "Synced topic plan '" << topic_name << "' to " << target_plan.string() << "\n";
+                    if (imported) {
+                        std::cout << "  Imported from: " << import_source.string() << "\n";
+                    }
+                    if (set_active) {
+                        std::cout << "  Updated active plan: " << sis_boulder.string() << "\n";
+                    }
+                }
+                return 0;
+            }
+
+            if (positionals.size() > 1) {
+                return std::nullopt;
+            }
+            const auto provider_norm = lower_copy(trim_copy(provider.empty() ? std::string("backlog") : provider));
+            if (provider_norm != "backlog" && provider_norm != "sisyphus" && provider_norm != "auto") {
+                throw std::runtime_error("Invalid --provider. Use backlog|sisyphus|auto.");
+            }
+
+            auto selected_topic = positionals.empty() ? std::string() : trim_copy(positionals[0]);
+            if (selected_topic.empty()) {
+                auto active_topic = resolve_active_topic_name(ctx.backlog_root, agent);
+                if (!active_topic) {
+                    throw std::runtime_error("No active topic found for agent '" + agent + "'. Pass topic_name explicitly.");
+                }
+                selected_topic = *active_topic;
+            }
+            selected_topic = topic_normalize_name(selected_topic);
+
+            auto resolution = resolve_opencode_topic_plan(ctx.backlog_root, workspace_root, selected_topic, effective_plan_file, provider_norm);
+            bool synced_compat = false;
+            std::filesystem::path boulder_path;
+            if (sync_compat && resolution.selected_provider == "backlog") {
+                std::filesystem::create_directories(resolution.sis_plan_path.parent_path());
+                std::error_code copy_ec;
+                std::filesystem::copy_file(resolution.selected_plan, resolution.sis_plan_path, std::filesystem::copy_options::overwrite_existing, copy_ec);
+                if (copy_ec) {
+                    throw std::runtime_error("Failed to sync compatibility plan: " + copy_ec.message());
+                }
+                synced_compat = true;
+                if (set_active_compat) {
+                    boulder_path = workspace_root / ".sisyphus" / "boulder.json";
+                    write_opencode_boulder(boulder_path, resolution.sis_plan_path);
+                }
+            }
+
+            if (format_norm == "json") {
+                Json::Value payload(Json::objectValue);
+                payload["topic"] = selected_topic;
+                payload["topic_path"] = resolution.topic_path.string();
+                payload["provider"] = resolution.selected_provider;
+                payload["plan_path"] = normalized_absolute_path(resolution.selected_plan).string();
+                payload["sync_compat"] = synced_compat;
+                payload["compat_plan_path"] = resolution.sis_plan_path.string();
+                payload["set_active_compat"] = !boulder_path.empty();
+                payload["boulder"] = boulder_path.empty() ? Json::Value(Json::nullValue) : Json::Value(boulder_path.string());
+                payload["integration"] = "oh-my-opencode";
+                std::cout << json_to_string(payload, true) << "\n";
+            } else {
+                std::cout << "Resolved plan for topic '" << selected_topic << "' from "
+                          << resolution.selected_provider << ": " << resolution.selected_plan.string() << "\n";
+                if (synced_compat) {
+                    std::cout << "  Synced compatibility plan: " << resolution.sis_plan_path.string() << "\n";
+                }
+                if (!boulder_path.empty()) {
+                    std::cout << "  Updated active plan: " << boulder_path.string() << "\n";
+                }
+            }
+            return 0;
+        };
+
         if (auto topic_create_rc = try_run_topic_create_fast_path()) {
             return *topic_create_rc;
         }
@@ -9912,6 +10193,9 @@ int main(int InArgc, char* InArgv[]) {
         }
         if (auto topic_state_rc = try_run_topic_state_fast_path()) {
             return *topic_state_rc;
+        }
+        if (auto topic_opencode_rc = try_run_topic_opencode_fast_path()) {
+            return *topic_opencode_rc;
         }
 
         auto topic_safe_snapshot_name = [](const std::string& value) {

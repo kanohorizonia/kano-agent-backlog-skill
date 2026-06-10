@@ -12175,6 +12175,193 @@ int main(int InArgc, char* InArgv[]) {
             return *tokenizer_rc;
         }
 
+        auto try_run_changelog_fast_path = [&]() -> std::optional<int> {
+            int changelog_index = -1;
+            for (int i = 1; i + 1 < parse_argc; ++i) {
+                if (std::string(parse_argv[i]) == "changelog") {
+                    changelog_index = i;
+                    break;
+                }
+            }
+            if (changelog_index < 0 || changelog_index + 1 >= parse_argc) {
+                return std::nullopt;
+            }
+            const std::string action = parse_argv[changelog_index + 1];
+            if (action != "merge-unreleased") {
+                return std::nullopt;
+            }
+
+            const auto option_value = [&](int& index, const std::string& option) -> std::optional<std::string> {
+                const std::string arg = parse_argv[index];
+                const std::string prefix_text = option + "=";
+                if (arg.rfind(prefix_text, 0) == 0) {
+                    return arg.substr(prefix_text.size());
+                }
+                if (arg == option && index + 1 < parse_argc) {
+                    ++index;
+                    return std::string(parse_argv[index]);
+                }
+                return std::nullopt;
+            };
+
+            std::string version;
+            std::string changelog_path_text = "CHANGELOG.md";
+            std::string release_date;
+            bool dry_run = false;
+            for (int i = changelog_index + 2; i < parse_argc; ++i) {
+                const std::string arg = parse_argv[i];
+                if (arg == "-h" || arg == "--help") {
+                    return std::nullopt;
+                }
+                if (auto value = option_value(i, "--version")) {
+                    version = *value;
+                    continue;
+                }
+                if (auto value = option_value(i, "--changelog")) {
+                    changelog_path_text = *value;
+                    continue;
+                }
+                if (auto value = option_value(i, "--date")) {
+                    release_date = *value;
+                    continue;
+                }
+                if (arg == "--dry-run") {
+                    dry_run = true;
+                    continue;
+                }
+                return std::nullopt;
+            }
+
+            version = trim_copy(version);
+            if (version.empty()) {
+                throw std::runtime_error("--version is required");
+            }
+            if (release_date.empty()) {
+                auto now = std::chrono::system_clock::now();
+                auto time_t_now = std::chrono::system_clock::to_time_t(now);
+                std::tm tm_buf{};
+#ifdef _WIN32
+                localtime_s(&tm_buf, &time_t_now);
+#else
+                localtime_r(&time_t_now, &tm_buf);
+#endif
+                std::ostringstream oss;
+                oss << std::put_time(&tm_buf, "%Y-%m-%d");
+                release_date = oss.str();
+            }
+
+            const auto changelog_path = std::filesystem::path(changelog_path_text);
+            if (!std::filesystem::exists(changelog_path)) {
+                throw std::runtime_error("CHANGELOG.md not found: " + changelog_path.string());
+            }
+
+            std::vector<std::string> lines;
+            {
+                std::istringstream input(read_text_file_path(changelog_path));
+                std::string line;
+                while (std::getline(input, line)) {
+                    if (!line.empty() && line.back() == '\r') {
+                        line.pop_back();
+                    }
+                    lines.push_back(line);
+                }
+            }
+
+            int unreleased_start = -1;
+            int unreleased_end = -1;
+            for (int i = 0; i < static_cast<int>(lines.size()); ++i) {
+                const auto line_trimmed = trim_copy(lines[i]);
+                if (line_trimmed == "## [Unreleased]") {
+                    unreleased_start = i;
+                    continue;
+                }
+                if (unreleased_start >= 0 && unreleased_end < 0) {
+                    if (line_trimmed.rfind("## [", 0) == 0 && line_trimmed != "## [Unreleased]") {
+                        unreleased_end = i;
+                        break;
+                    }
+                    if (line_trimmed.rfind("## Option", 0) == 0 || line_trimmed.rfind("## Recommendation", 0) == 0) {
+                        unreleased_end = i;
+                        break;
+                    }
+                }
+            }
+            if (unreleased_start < 0) {
+                throw std::runtime_error("No [Unreleased] section found in CHANGELOG.md");
+            }
+            if (unreleased_end < 0) {
+                unreleased_end = static_cast<int>(lines.size());
+            }
+
+            const std::vector<std::string> unreleased_body(
+                lines.begin() + unreleased_start + 1,
+                lines.begin() + unreleased_end
+            );
+
+            std::size_t body_first = 0;
+            while (body_first < unreleased_body.size() && trim_copy(unreleased_body[body_first]).empty()) {
+                ++body_first;
+            }
+            std::size_t body_last = unreleased_body.size();
+            while (body_last > body_first && trim_copy(unreleased_body[body_last - 1]).empty()) {
+                --body_last;
+            }
+
+            std::vector<std::string> release_block;
+            release_block.push_back("## [" + version + "] - " + release_date);
+            release_block.push_back("");
+            for (std::size_t i = body_first; i < body_last; ++i) {
+                release_block.push_back(unreleased_body[i]);
+            }
+            release_block.push_back("");
+
+            std::vector<std::string> updated_lines = lines;
+            updated_lines.erase(updated_lines.begin() + unreleased_start + 1, updated_lines.begin() + unreleased_end);
+            updated_lines.insert(updated_lines.begin() + unreleased_start + 1, "");
+
+            int version_start = -1;
+            for (int i = 0; i < static_cast<int>(updated_lines.size()); ++i) {
+                const auto line_trimmed = trim_copy(updated_lines[i]);
+                if (line_trimmed.rfind("## [" + version + "]", 0) == 0) {
+                    version_start = i;
+                    break;
+                }
+            }
+
+            if (version_start >= 0) {
+                updated_lines[version_start] = release_block.front();
+                updated_lines.insert(
+                    updated_lines.begin() + version_start + 1,
+                    release_block.begin() + 1,
+                    release_block.end()
+                );
+            } else {
+                updated_lines.insert(
+                    updated_lines.begin() + unreleased_start + 2,
+                    release_block.begin(),
+                    release_block.end()
+                );
+            }
+
+            std::ostringstream output;
+            for (const auto& line : updated_lines) {
+                output << line << "\n";
+            }
+            const auto new_content = output.str();
+
+            if (dry_run) {
+                std::cout << "DRY-RUN - would write:\n" << new_content << "\n";
+            } else {
+                write_text_file(changelog_path, new_content);
+                std::cout << "Merged [Unreleased] into v" << version << " in " << changelog_path << "\n";
+            }
+            return 0;
+        };
+
+        if (auto changelog_rc = try_run_changelog_fast_path()) {
+            return *changelog_rc;
+        }
+
         auto topic_safe_snapshot_name = [](const std::string& value) {
             std::string safe;
             for (const unsigned char ch : value) {

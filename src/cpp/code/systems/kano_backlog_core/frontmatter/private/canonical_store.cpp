@@ -335,16 +335,25 @@ int CanonicalStore::get_next_id_number(ItemType type) const {
 }
 
 std::string CanonicalStore::slugify(const std::string& text) {
-    std::string slug = text;
-    std::transform(slug.begin(), slug.end(), slug.begin(), [](unsigned char c){ return std::tolower(c); });
-    slug = std::regex_replace(slug, std::regex(R"([^\w\s-])"), "");
-    slug = std::regex_replace(slug, std::regex(R"([-\s]+)"), "-");
-    // Trim hyphens
-    size_t first = slug.find_first_not_of("-");
-    if (first == std::string::npos) return "";
-    size_t last = slug.find_last_not_of("-");
-    slug = slug.substr(first, (last - first + 1));
-    if (slug.length() > 50) slug = slug.substr(0, 50);
+    std::string slug;
+    bool pending_separator = false;
+    for (unsigned char c : text) {
+        if (std::isalnum(c) || c == '_') {
+            if (pending_separator && !slug.empty()) {
+                slug.push_back('-');
+            }
+            slug.push_back(static_cast<char>(std::tolower(c)));
+            pending_separator = false;
+        } else if (std::isspace(c) || c == '-') {
+            pending_separator = !slug.empty();
+        }
+    }
+    if (slug.length() > 50) {
+        slug = slug.substr(0, 50);
+        while (!slug.empty() && slug.back() == '-') {
+            slug.pop_back();
+        }
+    }
     return slug;
 }
 

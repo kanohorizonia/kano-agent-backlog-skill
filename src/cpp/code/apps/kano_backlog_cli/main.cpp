@@ -10179,6 +10179,176 @@ int main(int InArgc, char* InArgv[]) {
             return 0;
         };
 
+        auto try_run_topic_reference_fast_path = [&]() -> std::optional<int> {
+            int topic_index = -1;
+            for (int i = 1; i + 1 < parse_argc; ++i) {
+                if (std::string(parse_argv[i]) == "topic") {
+                    topic_index = i;
+                    break;
+                }
+            }
+            if (topic_index < 0 || topic_index + 1 >= parse_argc) {
+                return std::nullopt;
+            }
+
+            const std::string action = parse_argv[topic_index + 1];
+            if (action != "add-reference" && action != "remove-reference") {
+                return std::nullopt;
+            }
+
+            std::string local_path = ".";
+            std::string local_product;
+            std::string local_sandbox;
+            std::vector<std::string> positionals;
+            std::string format = "plain";
+
+            const auto option_value = [&](int& index, const std::string& option) -> std::optional<std::string> {
+                const std::string arg = parse_argv[index];
+                const std::string prefix_text = option + "=";
+                if (arg.rfind(prefix_text, 0) == 0) {
+                    return arg.substr(prefix_text.size());
+                }
+                if (arg == option && index + 1 < parse_argc) {
+                    ++index;
+                    return std::string(parse_argv[index]);
+                }
+                return std::nullopt;
+            };
+
+            const auto parse_context_option = [&](int& index) -> bool {
+                if (auto value = option_value(index, "-p")) {
+                    local_path = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "--path")) {
+                    local_path = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "-P")) {
+                    local_product = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "--product")) {
+                    local_product = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "-s")) {
+                    local_sandbox = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "--sandbox")) {
+                    local_sandbox = *value;
+                    return true;
+                }
+                return false;
+            };
+
+            for (int i = 1; i < topic_index; ++i) {
+                if (!parse_context_option(i)) {
+                    return std::nullopt;
+                }
+            }
+
+            for (int i = topic_index + 2; i < parse_argc; ++i) {
+                const std::string arg = parse_argv[i];
+                if (arg == "-h" || arg == "--help") {
+                    return std::nullopt;
+                }
+                if (auto value = option_value(i, "--format")) {
+                    format = *value;
+                    continue;
+                }
+                if (parse_context_option(i)) {
+                    continue;
+                }
+                if (arg.rfind("-", 0) != 0) {
+                    positionals.push_back(arg);
+                    continue;
+                }
+                return std::nullopt;
+            }
+
+            if (positionals.size() != 2) {
+                return std::nullopt;
+            }
+
+            const auto format_norm = lower_copy(format.empty() ? std::string("plain") : format);
+            if (format_norm != "plain" && format_norm != "json") {
+                throw std::runtime_error("format must be one of: plain, json");
+            }
+
+            auto ctx = BacklogContext::resolve(
+                local_path,
+                local_product.empty() ? std::nullopt : std::optional<std::string>(local_product),
+                local_sandbox.empty() ? std::nullopt : std::optional<std::string>(local_sandbox)
+            );
+            const auto topic_name = topic_normalize_name(positionals[0]);
+            const auto referenced_topic = topic_normalize_name(positionals[1]);
+
+            if (action == "add-reference") {
+                if (topic_name == referenced_topic) {
+                    throw std::runtime_error("Cannot reference self: " + topic_name);
+                }
+                auto source = load_topic_manifest_json(ctx.backlog_root, topic_name);
+                auto target = load_topic_manifest_json(ctx.backlog_root, referenced_topic);
+                auto& source_refs = ensure_topic_json_array(source, "related_topics");
+                auto& target_refs = ensure_topic_json_array(target, "related_topics");
+                if (!topic_json_array_contains_string(source_refs, referenced_topic) && source_refs.size() >= 10) {
+                    throw std::runtime_error("Reference limit exceeded: 10/10");
+                }
+                bool added = false;
+                if (!topic_json_array_contains_string(source_refs, referenced_topic)) {
+                    source_refs.append(referenced_topic);
+                    added = true;
+                }
+                if (!topic_json_array_contains_string(target_refs, topic_name) && target_refs.size() < 10) {
+                    target_refs.append(topic_name);
+                }
+                if (added) {
+                    save_topic_manifest_json(ctx.backlog_root, topic_name, source);
+                    save_topic_manifest_json(ctx.backlog_root, referenced_topic, target);
+                }
+                if (format_norm == "json") {
+                    Json::Value payload(Json::objectValue);
+                    payload["topic"] = topic_name;
+                    payload["referenced_topic"] = referenced_topic;
+                    payload["added"] = added;
+                    std::cout << json_to_string(payload, true) << "\n";
+                } else {
+                    std::cout << (added ? "Added reference: " : "Reference already exists: ")
+                              << topic_name << " -> " << referenced_topic << "\n";
+                }
+                return 0;
+            }
+
+            auto source = load_topic_manifest_json(ctx.backlog_root, topic_name);
+            auto& source_refs = ensure_topic_json_array(source, "related_topics");
+            const bool removed = topic_remove_string_from_array(source_refs, referenced_topic);
+            if (removed) {
+                save_topic_manifest_json(ctx.backlog_root, topic_name, source);
+            }
+            try {
+                auto target = load_topic_manifest_json(ctx.backlog_root, referenced_topic);
+                auto& target_refs = ensure_topic_json_array(target, "related_topics");
+                if (topic_remove_string_from_array(target_refs, topic_name)) {
+                    save_topic_manifest_json(ctx.backlog_root, referenced_topic, target);
+                }
+            } catch (...) {
+                // Source cleanup is the primary operation; missing target is tolerated.
+            }
+            if (format_norm == "json") {
+                Json::Value payload(Json::objectValue);
+                payload["topic"] = topic_name;
+                payload["referenced_topic"] = referenced_topic;
+                payload["removed"] = removed;
+                std::cout << json_to_string(payload, true) << "\n";
+            } else {
+                std::cout << (removed ? "Removed reference: " : "Reference not present: ")
+                          << topic_name << " -> " << referenced_topic << "\n";
+            }
+            return 0;
+        };
+
         if (auto topic_create_rc = try_run_topic_create_fast_path()) {
             return *topic_create_rc;
         }
@@ -10196,6 +10366,9 @@ int main(int InArgc, char* InArgv[]) {
         }
         if (auto topic_opencode_rc = try_run_topic_opencode_fast_path()) {
             return *topic_opencode_rc;
+        }
+        if (auto topic_reference_rc = try_run_topic_reference_fast_path()) {
+            return *topic_reference_rc;
         }
 
         auto topic_safe_snapshot_name = [](const std::string& value) {

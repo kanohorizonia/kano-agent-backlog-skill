@@ -11364,6 +11364,311 @@ int main(int InArgc, char* InArgv[]) {
             return *chunks_rc;
         }
 
+        auto try_run_embedding_fast_path = [&]() -> std::optional<int> {
+            int embedding_index = -1;
+            for (int i = 1; i + 1 < parse_argc; ++i) {
+                if (std::string(parse_argv[i]) == "embedding") {
+                    embedding_index = i;
+                    break;
+                }
+            }
+            if (embedding_index < 0 || embedding_index + 1 >= parse_argc) {
+                return std::nullopt;
+            }
+
+            const std::string action = parse_argv[embedding_index + 1];
+            if (action != "build" && action != "query" && action != "status") {
+                return std::nullopt;
+            }
+
+            std::string local_path = ".";
+            std::string local_product;
+            std::string local_sandbox;
+            std::string command_product;
+            std::string backlog_root;
+            std::string cache_root;
+            std::string format = "markdown";
+            std::string file_path;
+            std::string text;
+            std::string source_id;
+            std::string query_text;
+            std::string tokenizer_model;
+            int k = action == "query" ? 5 : 10;
+            bool force = false;
+
+            const auto option_value = [&](int& index, const std::string& option) -> std::optional<std::string> {
+                const std::string arg = parse_argv[index];
+                const std::string prefix_text = option + "=";
+                if (arg.rfind(prefix_text, 0) == 0) {
+                    return arg.substr(prefix_text.size());
+                }
+                if (arg == option && index + 1 < parse_argc) {
+                    ++index;
+                    return std::string(parse_argv[index]);
+                }
+                return std::nullopt;
+            };
+
+            const auto parse_context_option = [&](int& index) -> bool {
+                if (auto value = option_value(index, "-p")) {
+                    local_path = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "--path")) {
+                    local_path = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "-P")) {
+                    local_product = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "-s")) {
+                    local_sandbox = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "--sandbox")) {
+                    local_sandbox = *value;
+                    return true;
+                }
+                return false;
+            };
+
+            for (int i = 1; i < embedding_index; ++i) {
+                if (!parse_context_option(i)) {
+                    return std::nullopt;
+                }
+            }
+
+            for (int i = embedding_index + 2; i < parse_argc; ++i) {
+                const std::string arg = parse_argv[i];
+                if (arg == "-h" || arg == "--help") {
+                    return std::nullopt;
+                }
+                if (action == "build" && file_path.empty() && arg.rfind("-", 0) != 0) {
+                    file_path = arg;
+                    continue;
+                }
+                if (action == "query" && query_text.empty() && arg.rfind("-", 0) != 0) {
+                    query_text = arg;
+                    continue;
+                }
+                if (auto value = option_value(i, "--product")) {
+                    command_product = *value;
+                    continue;
+                }
+                if (auto value = option_value(i, "--backlog-root")) {
+                    backlog_root = *value;
+                    continue;
+                }
+                if (auto value = option_value(i, "--cache-root")) {
+                    cache_root = *value;
+                    continue;
+                }
+                if (auto value = option_value(i, "--format")) {
+                    format = *value;
+                    continue;
+                }
+                if (auto value = option_value(i, "--text")) {
+                    text = *value;
+                    continue;
+                }
+                if (auto value = option_value(i, "--source-id")) {
+                    source_id = *value;
+                    continue;
+                }
+                if (auto value = option_value(i, "--k")) {
+                    k = std::stoi(*value);
+                    continue;
+                }
+                if (auto value = option_value(i, "--tokenizer-model")) {
+                    tokenizer_model = *value;
+                    continue;
+                }
+                if (auto value = option_value(i, "--tokenizer-adapter")) {
+                    (void)value;
+                    continue;
+                }
+                if (auto value = option_value(i, "--tokenizer-max-tokens")) {
+                    (void)value;
+                    continue;
+                }
+                if (auto value = option_value(i, "--tokenizer-config")) {
+                    (void)value;
+                    continue;
+                }
+                if (auto value = option_value(i, "--profile")) {
+                    (void)value;
+                    continue;
+                }
+                if (action == "build" && arg == "--force") {
+                    force = true;
+                    continue;
+                }
+                if (parse_context_option(i)) {
+                    continue;
+                }
+                return std::nullopt;
+            }
+
+            if (action == "query" && query_text.empty()) {
+                return std::nullopt;
+            }
+
+            const auto format_norm = lower_copy(format.empty() ? std::string("markdown") : format);
+            if (format_norm != "markdown" && format_norm != "json") {
+                throw std::runtime_error("format must be one of: markdown, json");
+            }
+
+            const auto resolve_embedding_ctx = [&]() {
+                const auto effective_product = !command_product.empty() ? command_product : local_product;
+                if (!backlog_root.empty()) {
+                    BacklogContext ctx;
+                    ctx.backlog_root = normalized_absolute_path(std::filesystem::path(backlog_root));
+                    ctx.project_root = normalized_absolute_path(ctx.backlog_root.parent_path().parent_path());
+                    ctx.product_name = !effective_product.empty() ? effective_product : std::string("kano-agent-backlog-skill");
+                    ctx.product_root = ctx.backlog_root / "products" / ctx.product_name;
+                    ctx.product_def.name = ctx.product_name;
+                    ctx.product_def.prefix = "KABS";
+                    ctx.product_def.backlog_root = relative_or_string(ctx.product_root, ctx.project_root);
+                    return ctx;
+                }
+                return BacklogContext::resolve(
+                    local_path,
+                    effective_product.empty() ? std::nullopt : std::optional<std::string>(effective_product),
+                    local_sandbox.empty() ? std::nullopt : std::optional<std::string>(local_sandbox)
+                );
+            };
+
+            auto ctx = resolve_embedding_ctx();
+            if (action == "status") {
+                const auto db_path = native_backlog_chunks_db_path(ctx, cache_root);
+                if (format_norm == "json") {
+                    Json::Value payload(Json::objectValue);
+                    payload["product"] = ctx.product_name;
+                    payload["backend_type"] = "noop";
+                    payload["index_path"] = db_path.string();
+                    payload["index_exists"] = std::filesystem::exists(db_path);
+                    payload["collection"] = "backlog";
+                    payload["embedding_provider"] = ctx.product_def.embedding_provider.value_or("noop");
+                    payload["embedding_model"] = ctx.product_def.embedding_model.value_or("noop-embedding");
+                    payload["embedding_dimension"] = ctx.product_def.embedding_dimension.value_or(1536);
+                    payload["vector_metric"] = ctx.product_def.vector_metric.value_or("cosine");
+                    payload["tokenizer_adapter"] = "heuristic";
+                    std::cout << json_to_string(payload, true) << "\n";
+                } else {
+                    std::cout << "# Embedding Index Status: " << ctx.product_name << "\n";
+                    std::cout << "- backend_type: noop\n";
+                    std::cout << "- index_path: " << db_path.string() << "\n";
+                    std::cout << "- index_exists: " << (std::filesystem::exists(db_path) ? "yes" : "no") << "\n";
+                    std::cout << "- embedding_provider: " << ctx.product_def.embedding_provider.value_or("noop") << "\n";
+                    std::cout << "- tokenizer_adapter: heuristic\n";
+                }
+                return 0;
+            }
+
+            if (action == "build") {
+                if (!text.empty() || !file_path.empty()) {
+                    std::string effective_source_id = source_id;
+                    std::string content = text;
+                    if (!file_path.empty()) {
+                        if (!text.empty()) {
+                            throw std::runtime_error("Use either file path or --text, not both");
+                        }
+                        const auto path = std::filesystem::path(file_path);
+                        content = read_text_file_path(path);
+                        effective_source_id = path.string();
+                    }
+                    if (!text.empty() && effective_source_id.empty()) {
+                        throw std::runtime_error("--source-id is required when using --text");
+                    }
+                    const auto chunks = native_chunk_text(effective_source_id, content);
+                    int tokens_total = 0;
+                    for (const auto& chunk : chunks) {
+                        tokens_total += native_heuristic_token_count(chunk.text);
+                    }
+                    if (format_norm == "json") {
+                        Json::Value payload(Json::objectValue);
+                        payload["source_id"] = effective_source_id;
+                        payload["chunks_count"] = static_cast<int>(chunks.size());
+                        payload["tokens_total"] = tokens_total;
+                        payload["duration_ms"] = 0.0;
+                        payload["backend_type"] = "noop";
+                        payload["embedding_provider"] = ctx.product_def.embedding_provider.value_or("noop");
+                        payload["chunks_trimmed"] = 0;
+                        payload["tokenizer_adapter"] = "heuristic";
+                        payload["tokenizer_model"] = tokenizer_model.empty() ? "default-model" : tokenizer_model;
+                        std::cout << json_to_string(payload, true) << "\n";
+                    } else {
+                        std::cout << "# Index Document: " << effective_source_id << "\n";
+                        std::cout << "- chunks_count: " << chunks.size() << "\n";
+                        std::cout << "- tokens_total: " << tokens_total << "\n";
+                        std::cout << "- backend_type: noop\n";
+                        std::cout << "- embedding_provider: " << ctx.product_def.embedding_provider.value_or("noop") << "\n";
+                        std::cout << "- tokenizer_adapter: heuristic\n";
+                    }
+                    return 0;
+                }
+
+                auto result = build_native_backlog_chunks_db(ctx, force, cache_root);
+                if (format_norm == "json") {
+                    Json::Value payload(Json::objectValue);
+                    payload["product"] = ctx.product_name;
+                    payload["items_processed"] = result.items_indexed;
+                    payload["chunks_generated"] = result.chunks_indexed;
+                    payload["chunks_indexed"] = 0;
+                    payload["duration_ms"] = result.build_time_ms;
+                    payload["backend_type"] = "noop";
+                    std::cout << json_to_string(payload, true) << "\n";
+                } else {
+                    std::cout << "# Build Vector Index: " << ctx.product_name << "\n";
+                    std::cout << "- items_processed: " << result.items_indexed << "\n";
+                    std::cout << "- chunks_generated: " << result.chunks_indexed << "\n";
+                    std::cout << "- chunks_indexed: 0\n";
+                    std::cout << "- duration_ms: " << std::fixed << std::setprecision(2) << result.build_time_ms << "\n";
+                    std::cout << "- backend_type: noop\n";
+                }
+                return 0;
+            }
+
+            auto results = query_native_backlog_chunks(ctx, query_text, k, cache_root);
+            if (format_norm == "json") {
+                Json::Value payload(Json::objectValue);
+                payload["query"] = query_text;
+                payload["k"] = k;
+                payload["duration_ms"] = 0.0;
+                payload["tokenizer_adapter"] = "heuristic";
+                Json::Value rows(Json::arrayValue);
+                for (const auto& r : results) {
+                    Json::Value row(Json::objectValue);
+                    row["chunk_id"] = r.chunk_id;
+                    row["text"] = r.content;
+                    row["score"] = r.score;
+                    row["metadata"]["source_id"] = r.item_id;
+                    row["metadata"]["section"] = r.section;
+                    rows.append(row);
+                }
+                payload["results"] = rows;
+                std::cout << json_to_string(payload, true) << "\n";
+            } else {
+                std::cout << "# Query Results: '" << query_text << "'\n";
+                std::cout << "- k: " << k << "\n";
+                std::cout << "- results_count: " << results.size() << "\n";
+                std::cout << "- tokenizer_adapter: heuristic\n\n";
+                int row_index = 1;
+                for (const auto& r : results) {
+                    std::cout << "## Result " << row_index++ << " (score: " << std::fixed << std::setprecision(4) << r.score << ")\n";
+                    std::cout << "- chunk_id: " << r.chunk_id << "\n";
+                    std::cout << "- source_id: " << r.item_id << "\n";
+                    std::cout << "- text: " << preview_text(r.content) << "\n\n";
+                }
+            }
+            return 0;
+        };
+
+        if (auto embedding_rc = try_run_embedding_fast_path()) {
+            return *embedding_rc;
+        }
+
         auto topic_safe_snapshot_name = [](const std::string& value) {
             std::string safe;
             for (const unsigned char ch : value) {

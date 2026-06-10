@@ -11854,6 +11854,327 @@ int main(int InArgc, char* InArgv[]) {
             return *inspect_health_rc;
         }
 
+        auto try_run_tokenizer_fast_path = [&]() -> std::optional<int> {
+            int tokenizer_index = -1;
+            for (int i = 1; i + 1 < parse_argc; ++i) {
+                if (std::string(parse_argv[i]) == "tokenizer") {
+                    tokenizer_index = i;
+                    break;
+                }
+            }
+            if (tokenizer_index < 0 || tokenizer_index + 1 >= parse_argc) {
+                return std::nullopt;
+            }
+
+            const std::string action = parse_argv[tokenizer_index + 1];
+            if (action != "compare" && action != "migrate" && action != "telemetry") {
+                return std::nullopt;
+            }
+
+            const auto option_value = [&](int& index, const std::string& option) -> std::optional<std::string> {
+                const std::string arg = parse_argv[index];
+                const std::string prefix_text = option + "=";
+                if (arg.rfind(prefix_text, 0) == 0) {
+                    return arg.substr(prefix_text.size());
+                }
+                if (arg == option && index + 1 < parse_argc) {
+                    ++index;
+                    return std::string(parse_argv[index]);
+                }
+                return std::nullopt;
+            };
+
+            auto split_adapters = [](const std::string& raw) {
+                std::vector<std::string> adapters;
+                std::stringstream input(raw);
+                std::string part;
+                while (std::getline(input, part, ',')) {
+                    part = lower_copy(trim_copy(part));
+                    if (!part.empty()) {
+                        adapters.push_back(part);
+                    }
+                }
+                if (adapters.empty()) {
+                    adapters.push_back("heuristic");
+                }
+                return adapters;
+            };
+
+            if (action == "compare") {
+                std::string compare_text = "Sample text";
+                std::string compare_adapters = "heuristic";
+                std::string compare_model = "text-embedding-3-small";
+                std::string compare_format = "markdown";
+                bool compare_show_tokens = false;
+                bool saw_text = false;
+
+                for (int i = tokenizer_index + 2; i < parse_argc; ++i) {
+                    const std::string arg = parse_argv[i];
+                    if (arg == "-h" || arg == "--help") {
+                        return std::nullopt;
+                    }
+                    if (!saw_text && arg.rfind("-", 0) != 0) {
+                        compare_text = arg;
+                        saw_text = true;
+                        continue;
+                    }
+                    if (auto value = option_value(i, "--adapters")) {
+                        compare_adapters = *value;
+                        continue;
+                    }
+                    if (auto value = option_value(i, "--model")) {
+                        compare_model = *value;
+                        continue;
+                    }
+                    if (auto value = option_value(i, "--format")) {
+                        compare_format = *value;
+                        continue;
+                    }
+                    if (arg == "--show-tokens") {
+                        compare_show_tokens = true;
+                        continue;
+                    }
+                    return std::nullopt;
+                }
+
+                const auto format_norm = lower_copy(trim_copy(compare_format));
+                if (format_norm != "markdown" && format_norm != "json") {
+                    throw std::runtime_error("format must be one of: markdown, json");
+                }
+                const auto effective_text = compare_text.empty() ? std::string("Sample text") : compare_text;
+                const auto effective_model = trim_copy(compare_model).empty()
+                    ? std::string("text-embedding-3-small")
+                    : compare_model;
+                const auto effective_adapters = trim_copy(compare_adapters).empty()
+                    ? std::string("heuristic")
+                    : compare_adapters;
+
+                Json::Value payload(Json::objectValue);
+                payload["runtime"] = "native-cpp";
+                payload["text_length"] = static_cast<Json::UInt64>(effective_text.size());
+                payload["model"] = effective_model;
+                payload["model_max_tokens"] = std::stoi(model_max_tokens_native(effective_model));
+                for (const auto& adapter_name : split_adapters(effective_adapters)) {
+                    Json::Value row(Json::objectValue);
+                    row["adapter"] = adapter_name;
+                    if (adapter_name == "heuristic") {
+                        row["success"] = true;
+                        row["count"] = native_heuristic_token_count(effective_text);
+                        row["method"] = "native-heuristic";
+                        row["is_exact"] = false;
+                    } else {
+                        row["success"] = false;
+                        row["count"] = Json::Value(Json::nullValue);
+                        row["method"] = Json::Value(Json::nullValue);
+                        row["is_exact"] = Json::Value(Json::nullValue);
+                        row["error"] = "Adapter excluded from native executable contract";
+                    }
+                    payload["results"].append(row);
+                }
+                payload["show_tokens"] = compare_show_tokens;
+
+                if (format_norm == "json") {
+                    std::cout << json_to_string(payload, true) << "\n";
+                } else {
+                    std::cout << "# Tokenizer Comparison\n";
+                    std::cout << "- runtime: native-cpp\n";
+                    std::cout << "- model: " << effective_model << "\n";
+                    std::cout << "- text_length: " << effective_text.size() << "\n\n";
+                    std::cout << "| Adapter | Token Count | Exact | Method | Status |\n";
+                    std::cout << "| --- | ---: | --- | --- | --- |\n";
+                    for (const auto& row : payload["results"]) {
+                        std::cout << "| " << row["adapter"].asString() << " | ";
+                        if (row["success"].asBool()) {
+                            std::cout << row["count"].asInt() << " | false | " << row["method"].asString() << " | available |\n";
+                        } else {
+                            std::cout << "N/A | N/A | N/A | excluded |\n";
+                        }
+                    }
+                    if (compare_show_tokens) {
+                        std::cout << "\nToken span metadata is available only as aggregate native heuristic counts.\n";
+                    }
+                }
+                return 0;
+            }
+
+            if (action == "migrate") {
+                std::string migrate_input_path;
+                std::string migrate_output_path;
+                std::string migrate_format = "markdown";
+                bool migrate_force = false;
+                bool saw_input = false;
+
+                for (int i = tokenizer_index + 2; i < parse_argc; ++i) {
+                    const std::string arg = parse_argv[i];
+                    if (arg == "-h" || arg == "--help") {
+                        return std::nullopt;
+                    }
+                    if (!saw_input && arg.rfind("-", 0) != 0) {
+                        migrate_input_path = arg;
+                        saw_input = true;
+                        continue;
+                    }
+                    if (auto value = option_value(i, "--output")) {
+                        migrate_output_path = *value;
+                        continue;
+                    }
+                    if (auto value = option_value(i, "--format")) {
+                        migrate_format = *value;
+                        continue;
+                    }
+                    if (arg == "--force") {
+                        migrate_force = true;
+                        continue;
+                    }
+                    return std::nullopt;
+                }
+
+                const auto format_norm = lower_copy(trim_copy(migrate_format));
+                if (format_norm != "markdown" && format_norm != "json") {
+                    throw std::runtime_error("format must be one of: markdown, json");
+                }
+
+                Json::Value config(Json::objectValue);
+                config["tokenizer"]["adapter"] = "heuristic";
+                config["tokenizer"]["model"] = "text-embedding-3-small";
+                config["tokenizer"]["max_tokens"] = 8191;
+                config["tokenizer"]["fallback_chain"].append("heuristic");
+                std::filesystem::path input_path;
+                std::filesystem::path output_path;
+                bool wrote_file = false;
+
+                if (!migrate_input_path.empty()) {
+                    input_path = normalized_absolute_path(expand_user_path(migrate_input_path));
+                    if (!std::filesystem::exists(input_path)) {
+                        throw std::runtime_error("Input file not found: " + input_path.string());
+                    }
+                    const auto ext = lower_copy(input_path.extension().string());
+                    if (ext == ".json") {
+                        const auto input = read_json_file(input_path);
+                        const Json::Value* source = &input;
+                        if (input.isMember("tokenizer") && input["tokenizer"].isObject()) {
+                            source = &input["tokenizer"];
+                        }
+                        if ((*source).isMember("adapter")) {
+                            config["tokenizer"]["adapter"] = (*source)["adapter"].asString();
+                        }
+                        if ((*source).isMember("model")) {
+                            config["tokenizer"]["model"] = (*source)["model"].asString();
+                        }
+                        if ((*source).isMember("max_tokens")) {
+                            config["tokenizer"]["max_tokens"] = (*source)["max_tokens"].asInt();
+                        }
+                    } else {
+                        const auto text = read_text_file_path(input_path);
+                        std::stringstream lines(text);
+                        std::string line;
+                        while (std::getline(lines, line)) {
+                            const auto hash = line.find('#');
+                            if (hash != std::string::npos) {
+                                line = line.substr(0, hash);
+                            }
+                            const auto eq = line.find('=');
+                            if (eq == std::string::npos) {
+                                continue;
+                            }
+                            const auto key = lower_copy(trim_copy(line.substr(0, eq)));
+                            auto value = trim_copy(line.substr(eq + 1));
+                            while (value.size() >= 2 &&
+                                   ((value.front() == '"' && value.back() == '"') ||
+                                    (value.front() == '\'' && value.back() == '\''))) {
+                                value = trim_copy(value.substr(1, value.size() - 2));
+                            }
+                            if (key == "adapter") {
+                                config["tokenizer"]["adapter"] = value;
+                            } else if (key == "model") {
+                                config["tokenizer"]["model"] = value;
+                            } else if (key == "max_tokens" && !value.empty()) {
+                                config["tokenizer"]["max_tokens"] = std::stoi(value);
+                            }
+                        }
+                    }
+                    if (lower_copy(config["tokenizer"]["adapter"].asString()) != "heuristic") {
+                        config["tokenizer"]["previous_adapter"] = config["tokenizer"]["adapter"];
+                        config["tokenizer"]["adapter"] = "heuristic";
+                    }
+                    config["tokenizer"]["fallback_chain"].clear();
+                    config["tokenizer"]["fallback_chain"].append("heuristic");
+                    output_path = migrate_output_path.empty()
+                        ? input_path.parent_path() / (input_path.stem().string() + ".native.toml")
+                        : normalized_absolute_path(expand_user_path(migrate_output_path));
+                    if (std::filesystem::exists(output_path) && !migrate_force) {
+                        throw std::runtime_error("Output file already exists: " + output_path.string() + ". Use --force to overwrite.");
+                    }
+                    write_text_file(output_path, json_object_to_toml(config));
+                    wrote_file = true;
+                }
+
+                Json::Value payload(Json::objectValue);
+                payload["runtime"] = "native-cpp";
+                payload["status"] = wrote_file ? "migrated" : "native-defaults-ready";
+                payload["input"] = input_path.empty() ? Json::Value(Json::nullValue) : Json::Value(input_path.string());
+                payload["output"] = output_path.empty() ? Json::Value(Json::nullValue) : Json::Value(output_path.string());
+                payload["config"] = config;
+                if (format_norm == "json") {
+                    std::cout << json_to_string(payload, true) << "\n";
+                } else {
+                    std::cout << "# Tokenizer Config Migration\n";
+                    std::cout << "- runtime: native-cpp\n";
+                    std::cout << "- status: " << payload["status"].asString() << "\n";
+                    std::cout << "- adapter: heuristic\n";
+                    std::cout << "- model: " << config["tokenizer"]["model"].asString() << "\n";
+                    if (wrote_file) {
+                        std::cout << "- output: " << output_path.string() << "\n";
+                    }
+                }
+                return 0;
+            }
+
+            std::string telemetry_format = "markdown";
+            for (int i = tokenizer_index + 2; i < parse_argc; ++i) {
+                const std::string arg = parse_argv[i];
+                if (arg == "-h" || arg == "--help") {
+                    return std::nullopt;
+                }
+                if (auto value = option_value(i, "--format")) {
+                    telemetry_format = *value;
+                    continue;
+                }
+                if (auto value = option_value(i, "--window")) {
+                    (void)value;
+                    continue;
+                }
+                return std::nullopt;
+            }
+
+            const auto format_norm = lower_copy(trim_copy(telemetry_format));
+            if (format_norm != "markdown" && format_norm != "json") {
+                throw std::runtime_error("format must be one of: markdown, json");
+            }
+            Json::Value payload(Json::objectValue);
+            payload["command"] = "telemetry";
+            payload["runtime"] = "native-cpp";
+            payload["status"] = "disabled";
+            payload["telemetry_enabled"] = false;
+            payload["sample_count"] = 0;
+            payload["alerts"].resize(0);
+            payload["reason"] = "Native tokenizer telemetry persistence is not enabled";
+            if (format_norm == "json") {
+                std::cout << json_to_string(payload, true) << "\n";
+            } else {
+                std::cout << "# Tokenizer telemetry\n";
+                std::cout << "- runtime: native-cpp\n";
+                std::cout << "- status: disabled\n";
+                std::cout << "- telemetry_enabled: false\n";
+                std::cout << "- sample_count: 0\n";
+            }
+            return 0;
+        };
+
+        if (auto tokenizer_rc = try_run_tokenizer_fast_path()) {
+            return *tokenizer_rc;
+        }
+
         auto topic_safe_snapshot_name = [](const std::string& value) {
             std::string safe;
             for (const unsigned char ch : value) {

@@ -4313,6 +4313,141 @@ std::optional<int> try_run_admin_sync_sequences_fast_path(int argc, char** argv)
     return 0;
 }
 
+std::optional<int> try_run_workitem_create_fast_path(int argc, char** argv) {
+    if (argc < 3 || argv == nullptr) {
+        return std::nullopt;
+    }
+
+    int workitem_index = -1;
+    for (int i = 1; i + 1 < argc; ++i) {
+        const std::string arg = argv[i];
+        if ((arg == "workitem" || arg == "item") && std::string(argv[i + 1]) == "create") {
+            workitem_index = i;
+            break;
+        }
+    }
+    if (workitem_index < 0) {
+        return std::nullopt;
+    }
+
+    std::string path_str = ".";
+    std::string product;
+    std::string sandbox;
+    std::string type_str;
+    std::string title;
+    std::string agent;
+    std::string parent;
+
+    const auto option_value = [&](int& index, const std::string& option) -> std::optional<std::string> {
+        const std::string arg = argv[index];
+        const std::string prefix = option + "=";
+        if (arg.rfind(prefix, 0) == 0) {
+            return arg.substr(prefix.size());
+        }
+        if (arg == option && index + 1 < argc) {
+            ++index;
+            return std::string(argv[index]);
+        }
+        return std::nullopt;
+    };
+
+    const auto parse_context_option = [&](int& index) -> bool {
+        if (auto value = option_value(index, "-p")) {
+            path_str = *value;
+            return true;
+        }
+        if (auto value = option_value(index, "--path")) {
+            path_str = *value;
+            return true;
+        }
+        if (auto value = option_value(index, "-P")) {
+            product = *value;
+            return true;
+        }
+        if (auto value = option_value(index, "--product")) {
+            product = *value;
+            return true;
+        }
+        if (auto value = option_value(index, "-s")) {
+            sandbox = *value;
+            return true;
+        }
+        if (auto value = option_value(index, "--sandbox")) {
+            sandbox = *value;
+            return true;
+        }
+        return false;
+    };
+
+    for (int i = 1; i < workitem_index; ++i) {
+        if (!parse_context_option(i)) {
+            return std::nullopt;
+        }
+    }
+
+    for (int i = workitem_index + 2; i < argc; ++i) {
+        const std::string arg = argv[i];
+        if (arg == "-h" || arg == "--help") {
+            return std::nullopt;
+        }
+        if (parse_context_option(i)) {
+            continue;
+        }
+        if (auto value = option_value(i, "-t")) {
+            type_str = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--type")) {
+            type_str = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--title")) {
+            title = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--agent")) {
+            agent = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--parent")) {
+            parent = *value;
+            continue;
+        }
+        return std::nullopt;
+    }
+
+    if (type_str.empty() || title.empty() || agent.empty()) {
+        return std::nullopt;
+    }
+
+    auto ctx = BacklogContext::resolve(
+        path_str,
+        product.empty() ? std::nullopt : std::optional<std::string>(product),
+        sandbox.empty() ? std::nullopt : std::optional<std::string>(sandbox)
+    );
+    BacklogIndex index(ctx.backlog_root / ".cache" / "index" / "backlog.db");
+    index.initialize();
+
+    auto type_opt = parse_item_type(type_str);
+    if (!type_opt) {
+        throw std::runtime_error("Invalid item type: " + type_str);
+    }
+
+    auto result = WorkitemOps::create_item(
+        index,
+        ctx.product_root,
+        ctx.product_def.prefix,
+        *type_opt,
+        title,
+        agent,
+        parent.empty() ? std::nullopt : std::optional<std::string>(parent)
+    );
+
+    std::cout << "Created item: " << result.id << " (" << result.uid << ")\n";
+    std::cout << "Path: " << result.path.string() << "\n";
+    return 0;
+}
+
 std::optional<int> try_run_config_show_fast_path(int argc, char** argv) {
     if (argc < 3 || argv == nullptr) {
         return std::nullopt;
@@ -4907,6 +5042,9 @@ int main(int InArgc, char* InArgv[]) {
             return *rc;
         }
         if (auto rc = try_run_admin_sync_sequences_fast_path(parse_argc, parse_argv)) {
+            return *rc;
+        }
+        if (auto rc = try_run_workitem_create_fast_path(parse_argc, parse_argv)) {
             return *rc;
         }
         if (auto rc = try_run_config_show_fast_path(parse_argc, parse_argv)) {

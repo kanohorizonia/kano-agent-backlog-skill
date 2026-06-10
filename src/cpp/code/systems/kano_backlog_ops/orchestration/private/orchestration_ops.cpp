@@ -346,39 +346,17 @@ namespace kano::backlog_ops {
 
 using namespace kano::backlog_core;
 
-namespace {
-
-bool debug_init_trace_enabled() {
-    const char* value = std::getenv("KANO_BACKLOG_DEBUG_INIT");
-    return value != nullptr && std::string(value) == "1";
-}
-
-void debug_init_trace(const char* message) {
-    if (debug_init_trace_enabled()) {
-        std::cerr << "[init-trace] " << message << "\n";
-    }
-}
-
-} // namespace
-
 OrchestrationOps::InitResult OrchestrationOps::initialize_backlog(const InitOptions& options) {
-    debug_init_trace("enter initialize_backlog");
     const std::string agent = normalize_agent_id(options.agent);
-    debug_init_trace("normalized agent");
     const std::string product = normalize_product_name(options.product);
-    debug_init_trace("normalized product");
     const std::filesystem::path backlog_root = resolve_backlog_root(options);
-    debug_init_trace("resolved backlog root");
     const std::filesystem::path project_root = resolve_project_root(backlog_root);
-    debug_init_trace("resolved project root");
     const std::filesystem::path products_root = backlog_root / "products";
     const std::filesystem::path product_root = products_root / product;
-    debug_init_trace("computed root paths");
 
     if (std::filesystem::exists(product_root) && !options.force) {
         throw std::runtime_error("Product backlog already exists: " + product_root.string() + " (use --force to update config/scaffold)");
     }
-    debug_init_trace("checked existing product root");
 
     InitResult result;
     result.project_root = project_root;
@@ -406,7 +384,6 @@ OrchestrationOps::InitResult OrchestrationOps::initialize_backlog(const InitOpti
         if (ensure_dir(type_dir)) result.created_paths.push_back(type_dir);
         if (ensure_dir(bucket_dir)) result.created_paths.push_back(bucket_dir);
     }
-    debug_init_trace("created scaffold directories");
 
     std::string actual_product_name = options.product_name ? trim(*options.product_name) : product;
     if (actual_product_name.empty()) {
@@ -419,10 +396,8 @@ OrchestrationOps::InitResult OrchestrationOps::initialize_backlog(const InitOpti
     std::transform(actual_prefix.begin(), actual_prefix.end(), actual_prefix.begin(), [](unsigned char ch) {
         return static_cast<char>(std::toupper(ch));
     });
-    debug_init_trace("resolved product display metadata");
 
     bool config_created = false;
-    debug_init_trace("upserting project config");
     result.config_path = upsert_project_config(
         project_root,
         product,
@@ -436,21 +411,15 @@ OrchestrationOps::InitResult OrchestrationOps::initialize_backlog(const InitOpti
     if (config_created) {
         result.created_paths.push_back(result.config_path);
     }
-    debug_init_trace("upserted project config");
 
-    debug_init_trace("upserting project gitignore");
     if (const auto gitignore_path = upsert_project_gitignore(project_root)) {
         result.created_paths.push_back(*gitignore_path);
     }
-    debug_init_trace("upserted project gitignore");
 
     if (options.refresh_views) {
-        debug_init_trace("refreshing dashboards");
         result.views_refreshed = ViewOps::refresh_dashboards(product_root, agent).views_refreshed;
-        debug_init_trace("refreshed dashboards");
     }
 
-    debug_init_trace("leave initialize_backlog");
     return result;
 }
 

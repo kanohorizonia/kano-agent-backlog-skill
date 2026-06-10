@@ -154,24 +154,8 @@ void apply_product_value(ProductDefinition& product, const std::string& key, con
 
 namespace kano::backlog_core {
 
-namespace {
-
-bool debug_config_trace_enabled() {
-    const char* value = std::getenv("KANO_BACKLOG_DEBUG_CONFIG");
-    return value != nullptr && std::string(value) == "1";
-}
-
-void debug_config_trace(const char* message) {
-    if (debug_config_trace_enabled()) {
-        std::cerr << "[config-trace] " << message << "\n";
-    }
-}
-
-} // namespace
-
 // ProjectConfig Implementation
 std::optional<ProjectConfig> ProjectConfig::load_from_toml(const std::filesystem::path& file_path) {
-    debug_config_trace("enter load_from_toml");
     if (!std::filesystem::exists(file_path)) {
         return std::nullopt;
     }
@@ -211,7 +195,6 @@ std::optional<ProjectConfig> ProjectConfig::load_from_toml(const std::filesystem
         apply_product_value(config.products[*current_product], key, value);
     }
 
-    debug_config_trace("leave load_from_toml");
     return config;
 }
 
@@ -285,18 +268,14 @@ BacklogContext BacklogContext::resolve(
     const std::optional<std::string>& product_name_opt, 
     const std::optional<std::string>& sandbox_name
 ) {
-    debug_config_trace("enter BacklogContext::resolve");
     std::filesystem::path abs_resource = std::filesystem::absolute(resource_path);
-    debug_config_trace("resolved absolute resource");
     
     auto config_path = ConfigLoader::find_project_config(abs_resource);
-    debug_config_trace("searched project config");
     if (!config_path) {
         throw ConfigError("Project config required but not found. Create .kano/backlog_config.toml in project root.");
     }
 
     auto project_config = ProjectConfig::load_from_toml(*config_path);
-    debug_config_trace("loaded project config");
     if (!project_config) {
         throw ConfigError("Failed to parse project config at " + config_path->string());
     }
@@ -317,16 +296,13 @@ BacklogContext BacklogContext::resolve(
     } else {
         product_name = *product_name_opt;
     }
-    debug_config_trace("resolved product name");
 
     auto product_root = project_config->resolve_backlog_root(product_name, *config_path);
-    debug_config_trace("resolved product root");
     if (!product_root) {
         throw ConfigError("Product '" + product_name + "' not found in project config");
     }
 
     std::filesystem::path project_root = ConfigLoader::resolve_project_root(*config_path).value_or(infer_project_root(*config_path));
-    debug_config_trace("resolved project root");
 
     std::filesystem::path backlog_root = *product_root;
     if (product_root->parent_path().filename() == "products" && product_root->parent_path().parent_path().filename() == "backlog") {
@@ -350,7 +326,6 @@ BacklogContext BacklogContext::resolve(
         ctx.is_sandbox = true;
     }
 
-    debug_config_trace("leave BacklogContext::resolve");
     return ctx;
 }
 

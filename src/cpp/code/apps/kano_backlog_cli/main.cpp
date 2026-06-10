@@ -11669,6 +11669,191 @@ int main(int InArgc, char* InArgv[]) {
             return *embedding_rc;
         }
 
+        auto try_run_inspect_health_fast_path = [&]() -> std::optional<int> {
+            int inspect_index = -1;
+            for (int i = 1; i + 1 < parse_argc; ++i) {
+                if (std::string(parse_argv[i]) == "inspect" && std::string(parse_argv[i + 1]) == "health") {
+                    inspect_index = i;
+                    break;
+                }
+            }
+            if (inspect_index < 0) {
+                return std::nullopt;
+            }
+
+            std::string local_path = ".";
+            std::string local_product;
+            std::string local_sandbox;
+            std::string inspect_item;
+            std::string inspect_backlog_root;
+            std::string inspect_output;
+            std::string inspect_format = "markdown";
+
+            const auto option_value = [&](int& index, const std::string& option) -> std::optional<std::string> {
+                const std::string arg = parse_argv[index];
+                const std::string prefix_text = option + "=";
+                if (arg.rfind(prefix_text, 0) == 0) {
+                    return arg.substr(prefix_text.size());
+                }
+                if (arg == option && index + 1 < parse_argc) {
+                    ++index;
+                    return std::string(parse_argv[index]);
+                }
+                return std::nullopt;
+            };
+
+            const auto parse_context_option = [&](int& index) -> bool {
+                if (auto value = option_value(index, "-p")) {
+                    local_path = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "--path")) {
+                    local_path = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "-P")) {
+                    local_product = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "--product")) {
+                    local_product = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "-s")) {
+                    local_sandbox = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "--sandbox")) {
+                    local_sandbox = *value;
+                    return true;
+                }
+                return false;
+            };
+
+            for (int i = 1; i < inspect_index; ++i) {
+                if (!parse_context_option(i)) {
+                    return std::nullopt;
+                }
+            }
+
+            for (int i = inspect_index + 2; i < parse_argc; ++i) {
+                const std::string arg = parse_argv[i];
+                if (arg == "-h" || arg == "--help") {
+                    return std::nullopt;
+                }
+                if (auto value = option_value(i, "--item")) {
+                    inspect_item = *value;
+                    continue;
+                }
+                if (auto value = option_value(i, "--backlog-root")) {
+                    inspect_backlog_root = *value;
+                    continue;
+                }
+                if (auto value = option_value(i, "-o")) {
+                    inspect_output = *value;
+                    continue;
+                }
+                if (auto value = option_value(i, "--output")) {
+                    inspect_output = *value;
+                    continue;
+                }
+                if (auto value = option_value(i, "--format")) {
+                    inspect_format = *value;
+                    continue;
+                }
+                if (parse_context_option(i)) {
+                    continue;
+                }
+                return std::nullopt;
+            }
+
+            const auto format_norm = lower_copy(inspect_format.empty() ? std::string("markdown") : inspect_format);
+            if (format_norm != "markdown" && format_norm != "json") {
+                throw std::runtime_error("format must be one of: markdown, json");
+            }
+
+            std::filesystem::path backlog_root;
+            if (!inspect_backlog_root.empty()) {
+                backlog_root = normalized_absolute_path(std::filesystem::path(inspect_backlog_root));
+            } else {
+                backlog_root = detect_backlog_root(local_path);
+                if (!local_product.empty() || !local_sandbox.empty()) {
+                    (void)BacklogContext::resolve(
+                        local_path,
+                        local_product.empty() ? std::nullopt : std::optional<std::string>(local_product),
+                        local_sandbox.empty() ? std::nullopt : std::optional<std::string>(local_sandbox)
+                    );
+                }
+            }
+
+            std::vector<ResolvedBacklogItem> items;
+            std::vector<ResolvedBacklogItem> all_items;
+            for (const auto& product_root : list_product_roots(backlog_root)) {
+                CanonicalStore store(product_root);
+                for (const auto& path : list_item_markdown_paths(product_root)) {
+                    try {
+                        all_items.push_back(ResolvedBacklogItem{product_root, store.read(path)});
+                    } catch (...) {
+                        continue;
+                    }
+                }
+            }
+
+            if (inspect_item.empty()) {
+                items = all_items;
+            } else {
+                bool matched = false;
+                for (const auto& resolved : all_items) {
+                    const auto path_text = resolved.item.file_path ? resolved.item.file_path->string() : std::string();
+                    if (inspect_item == resolved.item.id || inspect_item == resolved.item.uid || inspect_item == path_text) {
+                        items.push_back(resolved);
+                        matched = true;
+                    }
+                }
+                if (!matched) {
+                    throw std::runtime_error("Item not found for inspect health: " + inspect_item);
+                }
+            }
+
+            std::vector<HealthFindingNative> findings;
+            std::set<std::string> items_with_issues;
+            for (const auto& resolved : items) {
+                auto item_findings = inspect_item_health(resolved.item, backlog_root);
+                if (!item_findings.empty()) {
+                    items_with_issues.insert(resolved.item.id);
+                }
+                findings.insert(findings.end(), item_findings.begin(), item_findings.end());
+            }
+
+            auto report = health_report_json(findings, static_cast<int>(items.size()), static_cast<int>(items_with_issues.size()));
+            const auto rendered = format_norm == "json" ? json_to_string(report, true) : render_health_markdown(report);
+            if (!inspect_output.empty()) {
+                std::filesystem::path out_path(inspect_output);
+                if (!out_path.parent_path().empty()) {
+                    std::filesystem::create_directories(out_path.parent_path());
+                }
+                std::ofstream out(out_path, std::ios::binary);
+                if (!out.is_open()) {
+                    throw std::runtime_error("Failed to write inspect health report: " + out_path.string());
+                }
+                out << rendered;
+                if (rendered.empty() || rendered.back() != '\n') {
+                    out << "\n";
+                }
+                std::cout << "OK: Health report written to " << out_path.string() << "\n";
+            } else {
+                std::cout << rendered;
+                if (rendered.empty() || rendered.back() != '\n') {
+                    std::cout << "\n";
+                }
+            }
+            return 0;
+        };
+
+        if (auto inspect_health_rc = try_run_inspect_health_fast_path()) {
+            return *inspect_health_rc;
+        }
+
         auto topic_safe_snapshot_name = [](const std::string& value) {
             std::string safe;
             for (const unsigned char ch : value) {

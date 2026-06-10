@@ -5453,7 +5453,7 @@ int main(int InArgc, char* InArgv[]) {
 #if defined(_WIN32)
             gmtime_s(&tm_buf, &time_t_cutoff);
 #else
-            gmtime_r(&tm_buf, &time_t_cutoff);
+            gmtime_r(&time_t_cutoff, &tm_buf);
 #endif
             char buf[32];
             std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &tm_buf);

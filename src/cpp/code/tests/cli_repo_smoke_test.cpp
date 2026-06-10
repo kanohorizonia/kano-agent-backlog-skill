@@ -207,9 +207,9 @@ int main(int argc, char** argv) {
         const auto original_cwd = std::filesystem::current_path();
         std::filesystem::current_path(temp_root);
 
-        expect(run_command(binary, {"-P", "kano-ai-3d-asset-skill", "admin", "init", "--agent", "tester", "--skip-refresh-views"}) == 0, "admin init command failed");
-        expect(run_command(binary, {"-P", "kano-ai-3d-asset-skill", "admin", "init", "--agent", "tester", "--skip-refresh-views"}) != 0, "duplicate admin init should fail without --force");
-        expect(run_command(binary, {"-P", "kano-ai-3d-asset-skill", "admin", "init", "--agent", "tester", "--product-name", "Kano AI 3D Asset Skill", "--force", "--skip-refresh-views"}) == 0, "forced admin init with spaced product name failed");
+        expect(run_command(binary, {"admin", "init", "--product", "kano-ai-3d-asset-skill", "--agent", "tester", "--skip-refresh-views"}) == 0, "admin init command failed");
+        expect(run_command(binary, {"admin", "init", "--product", "kano-ai-3d-asset-skill", "--agent", "tester", "--skip-refresh-views"}) != 0, "duplicate admin init should fail without --force");
+        expect(run_command(binary, {"admin", "init", "--product", "kano-ai-3d-asset-skill", "--agent", "tester", "--product-name", "Kano AI 3D Asset Skill", "--force", "--skip-refresh-views"}) == 0, "forced admin init with spaced product name failed");
 
         const auto config_path = temp_root / ".kano" / "backlog_config.toml";
         const auto backlog_root = temp_root / "_kano" / "backlog";

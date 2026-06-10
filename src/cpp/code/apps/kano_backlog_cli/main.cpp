@@ -4654,6 +4654,146 @@ std::optional<int> try_run_workitem_set_ready_fast_path(int argc, char** argv) {
     return 0;
 }
 
+std::optional<int> try_run_worklog_append_fast_path(int argc, char** argv) {
+    if (argc < 4 || argv == nullptr) {
+        return std::nullopt;
+    }
+
+    int worklog_index = -1;
+    for (int i = 1; i + 1 < argc; ++i) {
+        if (std::string(argv[i]) == "worklog" && std::string(argv[i + 1]) == "append") {
+            worklog_index = i;
+            break;
+        }
+    }
+    if (worklog_index < 0) {
+        return std::nullopt;
+    }
+
+    std::string path_str = ".";
+    std::string product;
+    std::string sandbox;
+    std::string item_ref;
+    std::string message;
+    std::string message_file;
+    std::string agent;
+    std::string model;
+    bool consume_input_files = false;
+
+    const auto option_value = [&](int& index, const std::string& option) -> std::optional<std::string> {
+        const std::string arg = argv[index];
+        const std::string prefix = option + "=";
+        if (arg.rfind(prefix, 0) == 0) {
+            return arg.substr(prefix.size());
+        }
+        if (arg == option && index + 1 < argc) {
+            ++index;
+            return std::string(argv[index]);
+        }
+        return std::nullopt;
+    };
+
+    const auto parse_context_option = [&](int& index) -> bool {
+        if (auto value = option_value(index, "-p")) {
+            path_str = *value;
+            return true;
+        }
+        if (auto value = option_value(index, "--path")) {
+            path_str = *value;
+            return true;
+        }
+        if (auto value = option_value(index, "-P")) {
+            product = *value;
+            return true;
+        }
+        if (auto value = option_value(index, "--product")) {
+            product = *value;
+            return true;
+        }
+        if (auto value = option_value(index, "-s")) {
+            sandbox = *value;
+            return true;
+        }
+        if (auto value = option_value(index, "--sandbox")) {
+            sandbox = *value;
+            return true;
+        }
+        return false;
+    };
+
+    for (int i = 1; i < worklog_index; ++i) {
+        if (!parse_context_option(i)) {
+            return std::nullopt;
+        }
+    }
+
+    for (int i = worklog_index + 2; i < argc; ++i) {
+        const std::string arg = argv[i];
+        if (arg == "-h" || arg == "--help") {
+            return std::nullopt;
+        }
+        if (parse_context_option(i)) {
+            continue;
+        }
+        if (auto value = option_value(i, "--message-file")) {
+            message_file = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--agent")) {
+            agent = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--model")) {
+            model = *value;
+            continue;
+        }
+        if (arg == "--consume-input-files") {
+            consume_input_files = true;
+            continue;
+        }
+        if (arg.rfind("-", 0) != 0) {
+            if (item_ref.empty()) {
+                item_ref = arg;
+                continue;
+            }
+            if (message.empty()) {
+                message = arg;
+                continue;
+            }
+        }
+        return std::nullopt;
+    }
+
+    if (item_ref.empty()) {
+        return std::nullopt;
+    }
+
+    auto ctx = BacklogContext::resolve(
+        path_str,
+        product.empty() ? std::nullopt : std::optional<std::string>(product),
+        sandbox.empty() ? std::nullopt : std::optional<std::string>(sandbox)
+    );
+    CanonicalStore store(ctx.product_root);
+    RefResolver resolver(store);
+    auto item = resolver.resolve(item_ref);
+
+    apply_text_file_option(message, message_file, "message", "--message-file");
+    if (message.empty()) {
+        throw std::runtime_error("Missing worklog message. Use positional <message> or --message-file <path>");
+    }
+
+    const auto model_opt = model.empty() ? std::nullopt : std::optional<std::string>(model);
+    StateMachine::record_worklog(item, agent.empty() ? "cli" : agent, message, model_opt);
+    store.write(item);
+
+    std::cout << "OK: Appended worklog to " << item.id << "\n";
+    if (consume_input_files) {
+        consume_backlog_text_file(message_file, "--message-file");
+    }
+
+    return 0;
+}
+
 std::optional<int> try_run_admin_items_fast_path(int argc, char** argv) {
     if (argc < 5 || argv == nullptr) {
         return std::nullopt;
@@ -5688,6 +5828,9 @@ int main(int InArgc, char* InArgv[]) {
             return *rc;
         }
         if (auto rc = try_run_workitem_set_ready_fast_path(parse_argc, parse_argv)) {
+            return *rc;
+        }
+        if (auto rc = try_run_worklog_append_fast_path(parse_argc, parse_argv)) {
             return *rc;
         }
         if (auto rc = try_run_admin_items_fast_path(parse_argc, parse_argv)) {

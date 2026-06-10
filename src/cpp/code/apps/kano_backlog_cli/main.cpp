@@ -4448,6 +4448,282 @@ std::optional<int> try_run_workitem_create_fast_path(int argc, char** argv) {
     return 0;
 }
 
+std::optional<int> try_run_admin_items_fast_path(int argc, char** argv) {
+    if (argc < 5 || argv == nullptr) {
+        return std::nullopt;
+    }
+
+    int admin_index = -1;
+    std::string command;
+    for (int i = 1; i + 2 < argc; ++i) {
+        if (std::string(argv[i]) == "admin" && std::string(argv[i + 1]) == "items") {
+            const std::string child = argv[i + 2];
+            if (child == "set-parent" || child == "trash") {
+                admin_index = i;
+                command = child;
+                break;
+            }
+        }
+    }
+    if (admin_index < 0) {
+        return std::nullopt;
+    }
+
+    std::string path_str = ".";
+    std::string global_product;
+    std::string sandbox;
+    std::string item_ref;
+    std::string product;
+    std::string backlog_root;
+    std::string agent;
+    std::string model;
+    std::string format = "markdown";
+    std::string parent;
+    std::string reason;
+    bool clear = false;
+    bool apply = false;
+
+    const auto option_value = [&](int& index, const std::string& option) -> std::optional<std::string> {
+        const std::string arg = argv[index];
+        const std::string prefix = option + "=";
+        if (arg.rfind(prefix, 0) == 0) {
+            return arg.substr(prefix.size());
+        }
+        if (arg == option && index + 1 < argc) {
+            ++index;
+            return std::string(argv[index]);
+        }
+        return std::nullopt;
+    };
+
+    const auto parse_global_option = [&](int& index) -> bool {
+        if (auto value = option_value(index, "-p")) {
+            path_str = *value;
+            return true;
+        }
+        if (auto value = option_value(index, "--path")) {
+            path_str = *value;
+            return true;
+        }
+        if (auto value = option_value(index, "-P")) {
+            global_product = *value;
+            return true;
+        }
+        if (auto value = option_value(index, "--product")) {
+            global_product = *value;
+            return true;
+        }
+        if (auto value = option_value(index, "-s")) {
+            sandbox = *value;
+            return true;
+        }
+        if (auto value = option_value(index, "--sandbox")) {
+            sandbox = *value;
+            return true;
+        }
+        return false;
+    };
+
+    for (int i = 1; i < admin_index; ++i) {
+        if (!parse_global_option(i)) {
+            return std::nullopt;
+        }
+    }
+
+    for (int i = admin_index + 3; i < argc; ++i) {
+        const std::string arg = argv[i];
+        if (arg == "-h" || arg == "--help") {
+            return std::nullopt;
+        }
+        if (item_ref.empty() && arg.rfind("-", 0) != 0) {
+            item_ref = arg;
+            continue;
+        }
+        if (auto value = option_value(i, "--product")) {
+            product = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--backlog-root")) {
+            backlog_root = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--agent")) {
+            agent = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--model")) {
+            model = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--format")) {
+            format = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--parent")) {
+            parent = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--reason")) {
+            reason = *value;
+            continue;
+        }
+        if (arg == "--clear") {
+            clear = true;
+            continue;
+        }
+        if (arg == "--apply") {
+            apply = true;
+            continue;
+        }
+        return std::nullopt;
+    }
+
+    if (item_ref.empty() || agent.empty()) {
+        return std::nullopt;
+    }
+
+    const auto format_norm = lower_copy(trim_copy(format));
+    if (format_norm != "markdown" && format_norm != "json") {
+        throw std::runtime_error("format must be one of: markdown, json");
+    }
+
+    const auto resolve_context = [&]() {
+        const std::string effective_product = !product.empty() ? product : global_product;
+        if (backlog_root.empty()) {
+            return BacklogContext::resolve(
+                path_str,
+                effective_product.empty() ? std::nullopt : std::optional<std::string>(effective_product),
+                sandbox.empty() ? std::nullopt : std::optional<std::string>(sandbox)
+            );
+        }
+
+        BacklogContext ctx;
+        ctx.backlog_root = normalized_absolute_path(expand_user_path(backlog_root));
+        ctx.project_root = normalized_absolute_path(ctx.backlog_root.parent_path().parent_path());
+        ctx.product_name = effective_product.empty() ? std::string("kano-agent-backlog-skill") : effective_product;
+        ctx.product_root = ctx.backlog_root / "products" / ctx.product_name;
+        ctx.product_def.name = ctx.product_name;
+        ctx.product_def.prefix = "KABS";
+        ctx.product_def.backlog_root = relative_or_string(ctx.product_root, ctx.project_root);
+        return ctx;
+    };
+
+    auto ctx = resolve_context();
+    BacklogIndex index(ctx.backlog_root / ".cache" / "index" / "backlog.db");
+    index.initialize();
+
+    if (command == "trash") {
+        TrashItemResult result;
+        if (apply) {
+            result = WorkitemOps::trash_item(
+                index,
+                ctx.product_root,
+                item_ref,
+                agent,
+                reason.empty() ? std::nullopt : std::optional<std::string>(reason));
+        } else {
+            CanonicalStore store(ctx.product_root);
+            RefResolver resolver(store);
+            auto item = resolver.resolve(item_ref);
+            if (!item.file_path) {
+                throw std::runtime_error("Resolved item has no file path: " + item_ref);
+            }
+
+            const auto now = std::chrono::system_clock::now();
+            const auto time_now = std::chrono::system_clock::to_time_t(now);
+            std::tm tm_buf{};
+#ifdef _WIN32
+            localtime_s(&tm_buf, &time_now);
+#else
+            localtime_r(&time_now, &tm_buf);
+#endif
+            std::ostringstream stamp;
+            stamp << std::put_time(&tm_buf, "%Y%m%d");
+
+            const auto source_path = *item.file_path;
+            const auto rel_path = std::filesystem::relative(source_path, ctx.product_root);
+            result = TrashItemResult{
+                item_ref,
+                source_path,
+                ctx.product_root / "_trash" / stamp.str() / rel_path,
+                "dry-run",
+                reason.empty() ? std::nullopt : std::optional<std::string>(reason)
+            };
+        }
+
+        if (format_norm == "json") {
+            Json::Value payload(Json::objectValue);
+            payload["item_ref"] = result.item_ref;
+            payload["status"] = result.status;
+            payload["source_path"] = result.source_path.string();
+            payload["trashed_path"] = result.trashed_path.string();
+            if (result.reason) payload["reason"] = *result.reason;
+            else payload["reason"] = Json::Value(Json::nullValue);
+            std::cout << json_to_string(payload, true) << "\n";
+            return 0;
+        }
+
+        std::cout << "# Trash item: " << result.item_ref << "\n";
+        std::cout << "- status: " << result.status << "\n";
+        std::cout << "- source_path: " << result.source_path.string() << "\n";
+        std::cout << "- trashed_path: " << result.trashed_path.string() << "\n";
+        if (result.reason) {
+            std::cout << "- reason: " << *result.reason << "\n";
+        }
+        return 0;
+    }
+
+    if (clear && !parent.empty()) {
+        throw std::runtime_error("Use --clear or --parent, not both.");
+    }
+    if (!clear && parent.empty()) {
+        throw std::runtime_error("Provide --parent or --clear.");
+    }
+
+    CanonicalStore store(ctx.product_root);
+    RefResolver resolver(store);
+    auto item = resolver.resolve(item_ref);
+    const auto old_parent = item.parent;
+    std::optional<std::string> new_parent;
+    if (!clear) {
+        auto parent_item = resolver.resolve(parent);
+        new_parent = parent_item.id;
+    }
+
+    if (apply) {
+        WorkitemOps::remap_parent(
+            index,
+            ctx.product_root,
+            item_ref,
+            clear ? std::string("none") : parent,
+            agent);
+        item = resolver.resolve(item_ref);
+    }
+
+    const std::string status = apply ? "updated" : "dry-run";
+    const auto effective_new_parent = apply ? item.parent : new_parent;
+    const auto path = item.file_path.value_or(std::filesystem::path{item_ref});
+    if (format_norm == "json") {
+        Json::Value payload(Json::objectValue);
+        payload["item_ref"] = item.id.empty() ? item_ref : item.id;
+        payload["status"] = status;
+        payload["path"] = path.string();
+        if (old_parent) payload["old_parent"] = *old_parent;
+        else payload["old_parent"] = Json::Value(Json::nullValue);
+        if (effective_new_parent) payload["new_parent"] = *effective_new_parent;
+        else payload["new_parent"] = Json::Value(Json::nullValue);
+        std::cout << json_to_string(payload, true) << "\n";
+        return 0;
+    }
+
+    std::cout << "# Set parent: " << (item.id.empty() ? item_ref : item.id) << "\n";
+    std::cout << "- status: " << status << "\n";
+    std::cout << "- path: " << path.string() << "\n";
+    std::cout << "- old_parent: " << (old_parent ? *old_parent : "null") << "\n";
+    std::cout << "- new_parent: " << (effective_new_parent ? *effective_new_parent : "null") << "\n";
+    return 0;
+}
+
 std::optional<int> try_run_config_show_fast_path(int argc, char** argv) {
     if (argc < 3 || argv == nullptr) {
         return std::nullopt;
@@ -5045,6 +5321,9 @@ int main(int InArgc, char* InArgv[]) {
             return *rc;
         }
         if (auto rc = try_run_workitem_create_fast_path(parse_argc, parse_argv)) {
+            return *rc;
+        }
+        if (auto rc = try_run_admin_items_fast_path(parse_argc, parse_argv)) {
             return *rc;
         }
         if (auto rc = try_run_config_show_fast_path(parse_argc, parse_argv)) {

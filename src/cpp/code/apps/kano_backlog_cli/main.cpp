@@ -9065,6 +9065,225 @@ int main(int InArgc, char* InArgv[]) {
             return result;
         };
 
+        auto try_run_topic_create_fast_path = [&]() -> std::optional<int> {
+            int topic_index = -1;
+            for (int i = 1; i + 1 < parse_argc; ++i) {
+                if (std::string(parse_argv[i]) == "topic" && std::string(parse_argv[i + 1]) == "create") {
+                    topic_index = i;
+                    break;
+                }
+            }
+            if (topic_index < 0) {
+                return std::nullopt;
+            }
+
+            std::string local_path = ".";
+            std::string local_product;
+            std::string local_sandbox;
+            std::string name;
+            std::string agent;
+            std::string create_template;
+            std::string create_format = "plain";
+            std::vector<std::string> create_vars;
+            bool create_list_templates = false;
+            bool create_no_notes = false;
+            bool create_with_spec = false;
+
+            const auto option_value = [&](int& index, const std::string& option) -> std::optional<std::string> {
+                const std::string arg = parse_argv[index];
+                const std::string prefix_text = option + "=";
+                if (arg.rfind(prefix_text, 0) == 0) {
+                    return arg.substr(prefix_text.size());
+                }
+                if (arg == option && index + 1 < parse_argc) {
+                    ++index;
+                    return std::string(parse_argv[index]);
+                }
+                return std::nullopt;
+            };
+
+            const auto parse_context_option = [&](int& index) -> bool {
+                if (auto value = option_value(index, "-p")) {
+                    local_path = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "--path")) {
+                    local_path = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "-P")) {
+                    local_product = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "--product")) {
+                    local_product = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "-s")) {
+                    local_sandbox = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "--sandbox")) {
+                    local_sandbox = *value;
+                    return true;
+                }
+                return false;
+            };
+
+            for (int i = 1; i < topic_index; ++i) {
+                if (!parse_context_option(i)) {
+                    return std::nullopt;
+                }
+            }
+
+            for (int i = topic_index + 2; i < parse_argc; ++i) {
+                const std::string arg = parse_argv[i];
+                if (arg == "-h" || arg == "--help") {
+                    return std::nullopt;
+                }
+                if (name.empty() && arg.rfind("-", 0) != 0) {
+                    name = arg;
+                    continue;
+                }
+                if (auto value = option_value(i, "--agent")) {
+                    agent = *value;
+                    continue;
+                }
+                if (auto value = option_value(i, "--template")) {
+                    create_template = *value;
+                    continue;
+                }
+                if (auto value = option_value(i, "--var")) {
+                    create_vars.push_back(*value);
+                    continue;
+                }
+                if (auto value = option_value(i, "--format")) {
+                    create_format = *value;
+                    continue;
+                }
+                if (arg == "--list-templates") {
+                    create_list_templates = true;
+                    continue;
+                }
+                if (arg == "--no-notes") {
+                    create_no_notes = true;
+                    continue;
+                }
+                if (arg == "--with-spec") {
+                    create_with_spec = true;
+                    continue;
+                }
+                if (parse_context_option(i)) {
+                    continue;
+                }
+                return std::nullopt;
+            }
+
+            if (name.empty() || agent.empty()) {
+                return std::nullopt;
+            }
+
+            auto ctx = BacklogContext::resolve(
+                local_path,
+                local_product.empty() ? std::nullopt : std::optional<std::string>(local_product),
+                local_sandbox.empty() ? std::nullopt : std::optional<std::string>(local_sandbox)
+            );
+            const auto format_norm = lower_copy(create_format.empty() ? std::string("plain") : create_format);
+            if (format_norm != "plain" && format_norm != "json") {
+                throw std::runtime_error("format must be one of: plain, json");
+            }
+
+            if (create_list_templates) {
+                const auto templates = topic_list_templates(ctx.backlog_root);
+                int builtin_count = 0;
+                int custom_count = 0;
+                Json::Value template_items(Json::arrayValue);
+                for (const auto& entry : templates) {
+                    template_items.append(topic_template_to_list_item(entry, false));
+                    if (entry.is_builtin) {
+                        ++builtin_count;
+                    } else {
+                        ++custom_count;
+                    }
+                }
+                if (format_norm == "json") {
+                    Json::Value payload(Json::objectValue);
+                    payload["templates"] = template_items;
+                    payload["builtin_count"] = builtin_count;
+                    payload["custom_count"] = custom_count;
+                    std::cout << json_to_string(payload, true) << "\n";
+                } else if (templates.empty()) {
+                    std::cout << "No templates available\n";
+                } else {
+                    std::cout << "Available templates (" << templates.size() << " total):\n\n";
+                    for (const auto& entry : templates) {
+                        std::cout << "  " << entry.data.get("name", "").asString() << "\n";
+                        std::cout << "    " << entry.data.get("description", "").asString() << "\n";
+                        const auto tags = topic_json_array_to_strings(entry.data["tags"]);
+                        if (!tags.empty()) {
+                            std::cout << "    Tags: " << join_strings(tags) << "\n";
+                        }
+                        std::cout << "\n";
+                    }
+                }
+                return 0;
+            }
+
+            TopicOps::CreateResult result;
+            const auto create_template_vars = topic_parse_template_vars(create_vars);
+            if (!trim_copy(create_template).empty()) {
+                result = topic_apply_template_to_new_topic(ctx.backlog_root, name, create_template, agent, create_vars);
+            } else {
+                result = TopicOps::create_topic(name, agent, ctx.backlog_root);
+                if (create_no_notes) {
+                    std::filesystem::remove(result.topic_path / "notes.md");
+                }
+                if (create_with_spec) {
+                    const auto spec_root = result.topic_path / "spec";
+                    write_text_file(spec_root / "requirements.md", "# Requirements\n\n");
+                    write_text_file(spec_root / "design.md", "# Design\n\n");
+                    write_text_file(spec_root / "tasks.md", "# Tasks\n\n");
+                    auto manifest = load_topic_manifest_json(ctx.backlog_root, result.topic);
+                    manifest["has_spec"] = true;
+                    save_topic_manifest_json(ctx.backlog_root, result.topic, manifest);
+                }
+            }
+
+            if (format_norm == "json") {
+                Json::Value payload(Json::objectValue);
+                payload["topic"] = result.topic;
+                payload["topic_path"] = result.topic_path.string();
+                payload["created_at"] = result.created_at;
+                payload["agent"] = result.agent;
+                payload["template"] = create_template.empty() ? Json::Value(Json::nullValue) : Json::Value(create_template);
+                payload["template_used"] = create_template.empty() ? Json::Value(Json::nullValue) : Json::Value(create_template);
+                if (create_template.empty()) {
+                    payload["variables_used"] = Json::Value(Json::nullValue);
+                } else {
+                    Json::Value variables_used(Json::objectValue);
+                    for (const auto& [key, value] : create_template_vars) {
+                        variables_used[key] = value;
+                    }
+                    payload["variables_used"] = variables_used;
+                }
+                std::cout << json_to_string(payload, true) << "\n";
+            } else {
+                std::cout << "Topic created: " << result.topic << "\n";
+                if (!create_template.empty()) {
+                    std::cout << "  Template: " << create_template << "\n";
+                    if (!create_template_vars.empty()) {
+                        std::cout << "  Variables: " << create_template_vars.size() << " provided\n";
+                    }
+                }
+                std::cout << "  Path: " << result.topic_path.string() << "\n";
+            }
+            return 0;
+        };
+
+        if (auto topic_create_rc = try_run_topic_create_fast_path()) {
+            return *topic_create_rc;
+        }
+
         auto topic_safe_snapshot_name = [](const std::string& value) {
             std::string safe;
             for (const unsigned char ch : value) {

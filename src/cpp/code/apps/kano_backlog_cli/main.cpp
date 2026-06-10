@@ -4210,6 +4210,100 @@ std::optional<int> try_run_admin_init_fast_path(int argc, char** argv) {
     return 0;
 }
 
+std::optional<int> try_run_config_show_fast_path(int argc, char** argv) {
+    if (argc < 3 || argv == nullptr) {
+        return std::nullopt;
+    }
+
+    int config_index = -1;
+    for (int i = 1; i + 1 < argc; ++i) {
+        if (std::string(argv[i]) == "config") {
+            const std::string child = argv[i + 1];
+            if (child == "show" || child == "dump") {
+                config_index = i;
+                break;
+            }
+        }
+    }
+    if (config_index < 0) {
+        return std::nullopt;
+    }
+
+    std::string path_str = ".";
+    std::string product;
+    std::string sandbox;
+
+    const auto option_value = [&](int& index, const std::string& option) -> std::optional<std::string> {
+        const std::string arg = argv[index];
+        const std::string prefix = option + "=";
+        if (arg.rfind(prefix, 0) == 0) {
+            return arg.substr(prefix.size());
+        }
+        if (arg == option && index + 1 < argc) {
+            ++index;
+            return std::string(argv[index]);
+        }
+        return std::nullopt;
+    };
+
+    const auto parse_context_option = [&](int& index) -> bool {
+        if (auto value = option_value(index, "-p")) {
+            path_str = *value;
+            return true;
+        }
+        if (auto value = option_value(index, "--path")) {
+            path_str = *value;
+            return true;
+        }
+        if (auto value = option_value(index, "-P")) {
+            product = *value;
+            return true;
+        }
+        if (auto value = option_value(index, "--product")) {
+            product = *value;
+            return true;
+        }
+        if (auto value = option_value(index, "-s")) {
+            sandbox = *value;
+            return true;
+        }
+        if (auto value = option_value(index, "--sandbox")) {
+            sandbox = *value;
+            return true;
+        }
+        return false;
+    };
+
+    for (int i = 1; i < config_index; ++i) {
+        if (!parse_context_option(i)) {
+            return std::nullopt;
+        }
+    }
+
+    for (int i = config_index + 2; i < argc; ++i) {
+        const std::string arg = argv[i];
+        if (arg == "-h" || arg == "--help") {
+            return std::nullopt;
+        }
+        if (parse_context_option(i)) {
+            continue;
+        }
+        if (option_value(i, "--agent") || option_value(i, "--topic") ||
+            option_value(i, "--profile") || option_value(i, "--workset")) {
+            continue;
+        }
+        return std::nullopt;
+    }
+
+    auto ctx = BacklogContext::resolve(
+        path_str,
+        product.empty() ? std::nullopt : std::optional<std::string>(product),
+        sandbox.empty() ? std::nullopt : std::optional<std::string>(sandbox)
+    );
+    std::cout << json_to_string(effective_config_json_for_context(ctx), true) << "\n";
+    return 0;
+}
+
 } // namespace
 
 int main(int InArgc, char* InArgv[]) {
@@ -4280,6 +4374,9 @@ int main(int InArgc, char* InArgv[]) {
 
     try {
         if (auto rc = try_run_admin_init_fast_path(parse_argc, parse_argv)) {
+            return *rc;
+        }
+        if (auto rc = try_run_config_show_fast_path(parse_argc, parse_argv)) {
             return *rc;
         }
     } catch (const std::exception& e) {

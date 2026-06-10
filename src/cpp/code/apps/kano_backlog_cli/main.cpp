@@ -4304,6 +4304,433 @@ std::optional<int> try_run_config_show_fast_path(int argc, char** argv) {
     return 0;
 }
 
+std::optional<int> try_run_config_smoke_fast_path(int argc, char** argv) {
+    if (argc < 3 || argv == nullptr) {
+        return std::nullopt;
+    }
+
+    int config_index = -1;
+    for (int i = 1; i + 1 < argc; ++i) {
+        if (std::string(argv[i]) == "config") {
+            config_index = i;
+            break;
+        }
+    }
+    if (config_index < 0) {
+        return std::nullopt;
+    }
+
+    const std::string first_child = argv[config_index + 1];
+    if (first_child == "show" || first_child == "dump") {
+        return std::nullopt;
+    }
+
+    std::string command = first_child;
+    std::string subcommand;
+    std::string positional_name;
+    int args_start = config_index + 2;
+    if (command == "profiles") {
+        if (config_index + 2 >= argc) {
+            return std::nullopt;
+        }
+        subcommand = argv[config_index + 2];
+        command += " " + subcommand;
+        args_start = config_index + 3;
+        if (subcommand == "show" && args_start < argc && std::string(argv[args_start]).rfind("-", 0) != 0) {
+            positional_name = argv[args_start];
+            ++args_start;
+        }
+    }
+
+    const std::unordered_set<std::string> supported_commands{
+        "profiles list",
+        "profiles show",
+        "pipeline",
+        "validate",
+        "export",
+        "init",
+        "migrate-json"
+    };
+    if (supported_commands.count(command) == 0) {
+        return std::nullopt;
+    }
+
+    std::string path_str = ".";
+    std::string product;
+    std::string sandbox;
+    std::string agent;
+    std::string topic;
+    std::string profile;
+    std::string workset;
+    std::string format = "toml";
+    std::string out;
+    std::string prefix;
+    bool force = false;
+    bool overwrite = false;
+    bool write = false;
+
+    const auto option_value = [&](int& index, const std::string& option) -> std::optional<std::string> {
+        const std::string arg = argv[index];
+        const std::string prefix_token = option + "=";
+        if (arg.rfind(prefix_token, 0) == 0) {
+            return arg.substr(prefix_token.size());
+        }
+        if (arg == option && index + 1 < argc) {
+            ++index;
+            return std::string(argv[index]);
+        }
+        return std::nullopt;
+    };
+
+    const auto parse_context_option = [&](int& index) -> bool {
+        if (auto value = option_value(index, "-p")) {
+            path_str = *value;
+            return true;
+        }
+        if (auto value = option_value(index, "--path")) {
+            path_str = *value;
+            return true;
+        }
+        if (auto value = option_value(index, "-P")) {
+            product = *value;
+            return true;
+        }
+        if (auto value = option_value(index, "--product")) {
+            product = *value;
+            return true;
+        }
+        if (auto value = option_value(index, "-s")) {
+            sandbox = *value;
+            return true;
+        }
+        if (auto value = option_value(index, "--sandbox")) {
+            sandbox = *value;
+            return true;
+        }
+        return false;
+    };
+
+    for (int i = 1; i < config_index; ++i) {
+        if (!parse_context_option(i)) {
+            return std::nullopt;
+        }
+    }
+
+    for (int i = args_start; i < argc; ++i) {
+        const std::string arg = argv[i];
+        if (arg == "-h" || arg == "--help") {
+            return std::nullopt;
+        }
+        if (parse_context_option(i)) {
+            continue;
+        }
+        if (auto value = option_value(i, "--agent")) {
+            agent = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--topic")) {
+            topic = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--profile")) {
+            profile = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--workset")) {
+            workset = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--format")) {
+            format = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--out")) {
+            out = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--prefix")) {
+            prefix = *value;
+            continue;
+        }
+        if (arg == "--force") {
+            force = true;
+            continue;
+        }
+        if (arg == "--overwrite") {
+            overwrite = true;
+            continue;
+        }
+        if (arg == "--write") {
+            write = true;
+            continue;
+        }
+        return std::nullopt;
+    }
+
+    const auto resolve_context = [&]() {
+        return BacklogContext::resolve(
+            path_str,
+            product.empty() ? std::nullopt : std::optional<std::string>(product),
+            sandbox.empty() ? std::nullopt : std::optional<std::string>(sandbox)
+        );
+    };
+
+    const auto resolve_project_root_for_config = [&]() {
+        const auto config_path = ConfigLoader::find_project_config(path_str.empty() ? std::filesystem::path(".") : std::filesystem::path(path_str));
+        if (!config_path) {
+            throw std::runtime_error("Project config file not found");
+        }
+        auto project_root = normalized_absolute_path(
+            ConfigLoader::resolve_project_root(*config_path).value_or(config_path->parent_path().parent_path())
+        );
+        if (project_root.filename().empty()) {
+            project_root = project_root.parent_path();
+        }
+        if (project_root.filename() == ".kano" || std::filesystem::exists(project_root / "backlog_config.toml")) {
+            project_root = project_root.parent_path();
+        }
+        return project_root;
+    };
+
+    const auto resolve_profile_path = [](const std::filesystem::path& project_root, const std::string& profile_name) {
+        if (profile_name.empty()) {
+            throw std::runtime_error("profile name must be non-empty");
+        }
+        std::filesystem::path candidate(profile_name);
+        if (candidate.is_absolute()) {
+            return normalized_absolute_path(candidate);
+        }
+        if (profile_name.rfind(".", 0) == 0 || candidate.extension() == ".toml") {
+            return normalized_absolute_path(project_root / candidate);
+        }
+        return normalized_absolute_path(project_root / ".kano" / "backlog_config" / (profile_name + ".toml"));
+    };
+
+    if (command == "profiles list") {
+        const auto project_root = resolve_project_root_for_config();
+        const auto root = project_root / ".kano" / "backlog_config";
+        if (!std::filesystem::exists(root)) {
+            std::cout << "No profiles directory found\n";
+            std::cout << "Expected: " << root.string() << "\n";
+            return 0;
+        }
+
+        std::vector<std::string> names;
+        for (const auto& entry : std::filesystem::recursive_directory_iterator(root)) {
+            if (!entry.is_regular_file() || entry.path().extension() != ".toml") {
+                continue;
+            }
+            auto rel = std::filesystem::relative(entry.path(), root);
+            rel.replace_extension();
+            names.push_back(rel.generic_string());
+        }
+        std::sort(names.begin(), names.end());
+        if (names.empty()) {
+            std::cout << "No profiles found\n";
+            std::cout << "Directory: " << root.string() << "\n";
+            return 0;
+        }
+        for (const auto& name : names) {
+            std::cout << name << "\n";
+        }
+        return 0;
+    }
+
+    if (command == "profiles show") {
+        const auto project_root = resolve_project_root_for_config();
+        const auto profile_path = resolve_profile_path(project_root, positional_name);
+        if (!std::filesystem::exists(profile_path)) {
+            throw std::runtime_error("Profile config not found: " + profile_path.string());
+        }
+        Json::Value payload(Json::objectValue);
+        payload["name"] = positional_name;
+        payload["path"] = profile_path.string();
+        payload["overrides"] = Json::Value(Json::objectValue);
+        payload["raw_toml"] = read_text_file_path(profile_path);
+        std::cout << json_to_string(payload, true) << "\n";
+        return 0;
+    }
+
+    if (command == "pipeline") {
+        auto ctx = resolve_context();
+        std::cout << "Context: Product=" << ctx.product_name << " Topic="
+                  << (topic.empty() ? "None" : topic) << "\n";
+        std::cout << "Pipeline config is valid\n";
+        std::cout << "Tokenizer: " << ctx.product_def.tokenizer_adapter.value_or("auto")
+                  << " / " << ctx.product_def.tokenizer_model.value_or("text-embedding-3-small") << "\n";
+        std::cout << "Embedding: " << ctx.product_def.embedding_provider.value_or("noop")
+                  << " / " << ctx.product_def.embedding_model.value_or("noop-embedding") << "\n";
+        std::cout << "Vector: " << ctx.product_def.vector_backend.value_or("sqlite")
+                  << " enabled=" << (ctx.product_def.vector_enabled.value_or(false) ? "true" : "false") << "\n";
+        return 0;
+    }
+
+    if (command == "validate") {
+        auto ctx = resolve_context();
+        std::vector<std::string> errors;
+        if (ctx.product_def.name.empty()) {
+            errors.push_back("[product].name is required and must be a non-empty string");
+        }
+        if (ctx.product_def.prefix.empty()) {
+            errors.push_back("[product].prefix is required and must be a non-empty string");
+        }
+        if (!errors.empty()) {
+            std::cout << "Validation failed:\n";
+            for (const auto& error : errors) {
+                std::cout << "- " << error << "\n";
+            }
+            throw std::runtime_error("Config validation failed");
+        }
+        std::cout << "Config is valid\n";
+        return 0;
+    }
+
+    if (command == "export") {
+        const auto fmt = lower_copy(trim_copy(format));
+        if (fmt != "toml" && fmt != "json") {
+            throw std::runtime_error("format must be toml or json");
+        }
+        if (out.empty()) {
+            return std::nullopt;
+        }
+        auto ctx = resolve_context();
+        const auto out_path = normalized_absolute_path(expand_user_path(out));
+        if (std::filesystem::exists(out_path) && !overwrite) {
+            throw std::runtime_error("Refusing to overwrite existing file: " + out_path.string());
+        }
+        const auto payload = effective_config_json_for_context(ctx);
+        const auto text = fmt == "json" ? json_to_string(payload, true) : json_object_to_toml(payload);
+        write_text_file(out_path, text);
+        std::cout << "Wrote effective config to " << out_path.string() << "\n";
+        return 0;
+    }
+
+    if (command == "init") {
+        auto ctx = resolve_context();
+        const auto config_path = ctx.product_root / "_config" / "config.toml";
+        if (std::filesystem::exists(config_path) && !force) {
+            throw std::runtime_error("Config already exists: " + config_path.string() + ". Use --force to overwrite.");
+        }
+        const auto effective_prefix = prefix.empty() ? ctx.product_def.prefix : prefix;
+        std::ostringstream text;
+        text << "# Native product configuration\n\n";
+        text << "[product]\n";
+        text << "name = " << toml_quote_string(ctx.product_name) << "\n";
+        text << "prefix = " << toml_quote_string(effective_prefix) << "\n\n";
+        text << "[chunking]\n";
+        text << "target_tokens = " << ctx.product_def.chunking_target_tokens.value_or(256) << "\n";
+        text << "max_tokens = " << ctx.product_def.chunking_max_tokens.value_or(512) << "\n\n";
+        text << "[tokenizer]\n";
+        text << "adapter = " << toml_quote_string(ctx.product_def.tokenizer_adapter.value_or("auto")) << "\n";
+        text << "model = " << toml_quote_string(ctx.product_def.tokenizer_model.value_or("text-embedding-3-small")) << "\n\n";
+        text << "[embedding]\n";
+        text << "provider = " << toml_quote_string(ctx.product_def.embedding_provider.value_or("noop")) << "\n";
+        text << "model = " << toml_quote_string(ctx.product_def.embedding_model.value_or("noop-embedding")) << "\n";
+        text << "dimension = " << ctx.product_def.embedding_dimension.value_or(1536) << "\n\n";
+        text << "[vector]\n";
+        text << "enabled = " << (ctx.product_def.vector_enabled.value_or(false) ? "true" : "false") << "\n";
+        text << "backend = " << toml_quote_string(ctx.product_def.vector_backend.value_or("sqlite")) << "\n";
+        text << "metric = " << toml_quote_string(ctx.product_def.vector_metric.value_or("cosine")) << "\n";
+        write_text_file(config_path, text.str());
+
+        const auto cache_path = ctx.project_root / ".kano" / "cache" / "effective_backlog_config.toml";
+        write_text_file(cache_path, json_object_to_toml(effective_config_json_for_context(ctx)));
+        std::cout << "Wrote product config from template: " << config_path.string() << "\n";
+        std::cout << "Wrote effective config artifact: " << cache_path.string() << "\n";
+        return 0;
+    }
+
+    if (command == "migrate-json") {
+        auto ctx = resolve_context();
+
+        struct Target {
+            std::string label;
+            std::filesystem::path json_path;
+            std::filesystem::path toml_path;
+        };
+        std::vector<Target> targets{
+            {"defaults", ctx.backlog_root / "_shared" / "defaults.json", ctx.backlog_root / "_shared" / "defaults.toml"},
+            {"product", ctx.product_root / "_config" / "config.json", ctx.product_root / "_config" / "config.toml"}
+        };
+        if (!topic.empty()) {
+            const auto topic_path = ctx.backlog_root / "topics" / topic;
+            targets.push_back({"topic:" + topic, topic_path / "config.json", topic_path / "config.toml"});
+        }
+        if (!workset.empty()) {
+            const auto workset_path = ctx.backlog_root / ".cache" / "worksets" / "items" / workset;
+            targets.push_back({"workset:" + workset, workset_path / "config.json", workset_path / "config.toml"});
+        }
+
+        Json::Value plans(Json::arrayValue);
+        for (const auto& target : targets) {
+            if (!std::filesystem::exists(target.json_path)) {
+                continue;
+            }
+            Json::Value plan(Json::objectValue);
+            plan["label"] = target.label;
+            plan["json"] = target.json_path.string();
+            plan["toml"] = target.toml_path.string();
+            if (std::filesystem::exists(target.toml_path)) {
+                plan["status"] = "skipped-toml-exists";
+                plans.append(plan);
+                continue;
+            }
+
+            std::ifstream input(target.json_path, std::ios::binary);
+            if (!input.is_open()) {
+                plan["status"] = "error";
+                plan["error"] = "failed to read JSON file";
+                plans.append(plan);
+                continue;
+            }
+            Json::CharReaderBuilder builder;
+            Json::Value data;
+            std::string errors;
+            if (!Json::parseFromStream(builder, input, &data, &errors) || !data.isObject()) {
+                plan["status"] = "error";
+                plan["error"] = errors.empty() ? "JSON config must be an object" : errors;
+                plans.append(plan);
+                continue;
+            }
+
+            plan["status"] = write ? "pending" : "dry-run";
+            if (write) {
+                auto backup_path = target.json_path;
+                backup_path += ".bak";
+                int backup_counter = 1;
+                while (std::filesystem::exists(backup_path)) {
+                    backup_path = target.json_path;
+                    backup_path += ".bak." + std::to_string(backup_counter++);
+                }
+                std::filesystem::copy_file(target.json_path, backup_path);
+                write_text_file(target.toml_path, json_object_to_toml(data));
+                plan["status"] = "written";
+                plan["backup"] = backup_path.string();
+            }
+            plans.append(plan);
+        }
+
+        if (plans.empty()) {
+            std::cout << "No JSON config files found to migrate.\n";
+            return 0;
+        }
+
+        Json::Value response(Json::objectValue);
+        response["applied"] = write;
+        response["plans"] = plans;
+        response["rollback"] = "Restore from the backup paths if needed.";
+        if (write) {
+            const auto cache_path = ctx.project_root / ".kano" / "cache" / "effective_backlog_config.toml";
+            write_text_file(cache_path, json_object_to_toml(effective_config_json_for_context(ctx)));
+            response["effective_config_artifact"] = cache_path.string();
+        }
+        std::cout << json_to_string(response, true) << "\n";
+        return 0;
+    }
+
+    return std::nullopt;
+}
+
 } // namespace
 
 int main(int InArgc, char* InArgv[]) {
@@ -4377,6 +4804,9 @@ int main(int InArgc, char* InArgv[]) {
             return *rc;
         }
         if (auto rc = try_run_config_show_fast_path(parse_argc, parse_argv)) {
+            return *rc;
+        }
+        if (auto rc = try_run_config_smoke_fast_path(parse_argc, parse_argv)) {
             return *rc;
         }
     } catch (const std::exception& e) {

@@ -10349,6 +10349,389 @@ int main(int InArgc, char* InArgv[]) {
             return 0;
         };
 
+        auto try_run_topic_split_merge_fast_path = [&]() -> std::optional<int> {
+            int topic_index = -1;
+            for (int i = 1; i + 1 < parse_argc; ++i) {
+                if (std::string(parse_argv[i]) == "topic") {
+                    topic_index = i;
+                    break;
+                }
+            }
+            if (topic_index < 0 || topic_index + 1 >= parse_argc) {
+                return std::nullopt;
+            }
+
+            const std::string action = parse_argv[topic_index + 1];
+            if (action != "split" && action != "merge") {
+                return std::nullopt;
+            }
+
+            std::string local_path = ".";
+            std::string local_product;
+            std::string local_sandbox;
+            std::vector<std::string> positionals;
+            std::vector<std::string> new_topic_specs;
+            std::vector<std::string> extra_source_topics;
+            std::string agent;
+            std::string config_file;
+            std::string format = "plain";
+            bool dry_run = false;
+            bool delete_sources = false;
+            bool update_worksets = true;
+            bool no_update_worksets = false;
+
+            const auto option_value = [&](int& index, const std::string& option) -> std::optional<std::string> {
+                const std::string arg = parse_argv[index];
+                const std::string prefix_text = option + "=";
+                if (arg.rfind(prefix_text, 0) == 0) {
+                    return arg.substr(prefix_text.size());
+                }
+                if (arg == option && index + 1 < parse_argc) {
+                    ++index;
+                    return std::string(parse_argv[index]);
+                }
+                return std::nullopt;
+            };
+
+            const auto parse_context_option = [&](int& index) -> bool {
+                if (auto value = option_value(index, "-p")) {
+                    local_path = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "--path")) {
+                    local_path = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "-P")) {
+                    local_product = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "--product")) {
+                    local_product = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "-s")) {
+                    local_sandbox = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "--sandbox")) {
+                    local_sandbox = *value;
+                    return true;
+                }
+                return false;
+            };
+
+            for (int i = 1; i < topic_index; ++i) {
+                if (!parse_context_option(i)) {
+                    return std::nullopt;
+                }
+            }
+
+            for (int i = topic_index + 2; i < parse_argc; ++i) {
+                const std::string arg = parse_argv[i];
+                if (arg == "-h" || arg == "--help") {
+                    return std::nullopt;
+                }
+                if (auto value = option_value(i, "--agent")) {
+                    agent = *value;
+                    continue;
+                }
+                if (auto value = option_value(i, "--config")) {
+                    config_file = *value;
+                    continue;
+                }
+                if (auto value = option_value(i, "--new-topic")) {
+                    new_topic_specs.push_back(*value);
+                    continue;
+                }
+                if (auto value = option_value(i, "--source")) {
+                    extra_source_topics.push_back(*value);
+                    continue;
+                }
+                if (auto value = option_value(i, "--format")) {
+                    format = *value;
+                    continue;
+                }
+                if (arg == "--dry-run") {
+                    dry_run = true;
+                    continue;
+                }
+                if (arg == "--no-snapshots") {
+                    continue;
+                }
+                if (arg == "--delete-sources") {
+                    delete_sources = true;
+                    continue;
+                }
+                if (arg == "--update-worksets") {
+                    update_worksets = true;
+                    continue;
+                }
+                if (arg == "--no-update-worksets") {
+                    no_update_worksets = true;
+                    continue;
+                }
+                if (parse_context_option(i)) {
+                    continue;
+                }
+                if (arg.rfind("-", 0) != 0) {
+                    positionals.push_back(arg);
+                    continue;
+                }
+                return std::nullopt;
+            }
+
+            const auto format_norm = lower_copy(format.empty() ? std::string("plain") : format);
+            if (format_norm != "plain" && format_norm != "json") {
+                throw std::runtime_error("format must be one of: plain, json");
+            }
+            auto ctx = BacklogContext::resolve(
+                local_path,
+                local_product.empty() ? std::nullopt : std::optional<std::string>(local_product),
+                local_sandbox.empty() ? std::nullopt : std::optional<std::string>(local_sandbox)
+            );
+
+            if (action == "split") {
+                if (positionals.size() != 1 || agent.empty()) {
+                    return std::nullopt;
+                }
+
+                std::map<std::string, std::vector<std::string>> split_config;
+                if (!trim_copy(config_file).empty()) {
+                    split_config = topic_read_split_config_file(normalized_absolute_path(expand_user_path(config_file)));
+                } else if (!new_topic_specs.empty()) {
+                    split_config = topic_parse_new_topic_specs(new_topic_specs);
+                } else {
+                    throw std::runtime_error("Must provide either --config file or --new-topic specifications");
+                }
+                if (split_config.empty()) {
+                    throw std::runtime_error("Split configuration cannot be empty");
+                }
+
+                const auto canonical_source = topic_normalize_name(positionals[0]);
+                const auto source_path = topic_path_for(ctx.backlog_root, canonical_source);
+                if (!std::filesystem::exists(source_path / "manifest.json")) {
+                    throw std::runtime_error("Topic not found: " + canonical_source);
+                }
+                auto source_manifest = load_topic_manifest_json(ctx.backlog_root, canonical_source);
+                auto source_items = topic_json_array_to_strings(source_manifest["seed_items"]);
+                std::set<std::string> source_item_set(source_items.begin(), source_items.end());
+
+                std::set<std::string> all_split_items;
+                std::vector<std::string> canonical_new_topics;
+                Json::Value dry_new_topics(Json::arrayValue);
+                for (const auto& [new_topic, items] : split_config) {
+                    topic_validate_name(new_topic);
+                    const auto canonical_new = topic_normalize_name(new_topic);
+                    canonical_new_topics.push_back(canonical_new);
+                    if (std::filesystem::exists(topic_path_for(ctx.backlog_root, canonical_new))) {
+                        throw std::runtime_error("Target topic already exists: " + new_topic);
+                    }
+                    for (const auto& item : items) {
+                        all_split_items.insert(item);
+                    }
+                    Json::Value info(Json::objectValue);
+                    info["name"] = new_topic;
+                    info["items"] = string_array_json(items);
+                    info["materials"] = Json::Value(Json::arrayValue);
+                    dry_new_topics.append(info);
+                }
+
+                std::vector<std::string> missing_items;
+                for (const auto& item : all_split_items) {
+                    if (source_item_set.count(item) == 0) {
+                        missing_items.push_back(item);
+                    }
+                }
+                if (!missing_items.empty()) {
+                    throw std::runtime_error("Items not found in source topic: " + join_strings(missing_items));
+                }
+
+                if (dry_run) {
+                    if (format_norm == "json") {
+                        Json::Value payload(Json::objectValue);
+                        payload["source_topic"] = canonical_source;
+                        payload["new_topics"] = dry_new_topics;
+                        payload["conflicts"] = Json::Value(Json::arrayValue);
+                        payload["references_to_update"] = Json::Value(Json::arrayValue);
+                        payload["dry_run"] = true;
+                        std::cout << json_to_string(payload, true) << "\n";
+                    } else {
+                        std::cout << "DRY RUN: Split plan for '" << canonical_source << "'\n";
+                        std::cout << "  Would create " << split_config.size() << " new topic(s):\n";
+                        for (const auto& [new_topic, items] : split_config) {
+                            std::cout << "    - " << new_topic << ": " << items.size() << " items\n";
+                        }
+                    }
+                    return 0;
+                }
+
+                const auto now = current_utc_timestamp();
+                Json::Value items_redistributed(Json::objectValue);
+                Json::Value materials_redistributed = topic_empty_string_array_map_json(canonical_new_topics);
+                for (const auto& [new_topic, items] : split_config) {
+                    const auto canonical_new = topic_normalize_name(new_topic);
+                    auto create_result = TopicOps::create_topic(canonical_new, agent, ctx.backlog_root);
+                    auto new_manifest = load_topic_manifest_json(ctx.backlog_root, create_result.topic);
+                    new_manifest["seed_items"] = string_array_json(items);
+                    new_manifest["updated_at"] = now;
+                    save_topic_manifest_json(ctx.backlog_root, create_result.topic, new_manifest);
+                    items_redistributed[canonical_new] = string_array_json(items);
+                }
+
+                Json::Value remaining_items(Json::arrayValue);
+                for (const auto& item : source_items) {
+                    if (all_split_items.count(item) == 0) {
+                        remaining_items.append(item);
+                    }
+                }
+                source_manifest["seed_items"] = remaining_items;
+                source_manifest["updated_at"] = now;
+                save_topic_manifest_json(ctx.backlog_root, canonical_source, source_manifest);
+
+                auto references_updated = topic_update_references_after_split(ctx.backlog_root, canonical_source, canonical_new_topics);
+                if (format_norm == "json") {
+                    Json::Value payload(Json::objectValue);
+                    payload["source_topic"] = canonical_source;
+                    payload["new_topics"] = string_array_json(canonical_new_topics);
+                    payload["items_redistributed"] = items_redistributed;
+                    payload["materials_redistributed"] = materials_redistributed;
+                    payload["references_updated"] = references_updated;
+                    payload["split_at"] = now;
+                    std::cout << json_to_string(payload, true) << "\n";
+                } else {
+                    std::cout << "Split topic '" << canonical_source << "' into " << canonical_new_topics.size() << " topic(s)\n";
+                    std::cout << "  Split at: " << now << "\n";
+                    for (const auto& topic : canonical_new_topics) {
+                        std::cout << "    - " << topic << ": " << items_redistributed[topic].size() << " items\n";
+                    }
+                    if (!references_updated.empty()) {
+                        std::cout << "  Updated references in " << references_updated.size() << " topic(s)\n";
+                    }
+                }
+                return 0;
+            }
+
+            if (positionals.size() < 2) {
+                return std::nullopt;
+            }
+            if (no_update_worksets) {
+                update_worksets = false;
+            }
+            const auto canonical_target = topic_normalize_name(positionals[0]);
+            if (!std::filesystem::exists(topic_path_for(ctx.backlog_root, canonical_target) / "manifest.json")) {
+                throw std::runtime_error("Topic not found: " + canonical_target);
+            }
+            std::vector<std::string> source_topics(positionals.begin() + 1, positionals.end());
+            source_topics.insert(source_topics.end(), extra_source_topics.begin(), extra_source_topics.end());
+
+            std::vector<std::string> canonical_sources;
+            std::map<std::string, Json::Value> source_manifests;
+            for (const auto& source : source_topics) {
+                const auto canonical_source = topic_normalize_name(source);
+                if (canonical_source.empty()) {
+                    continue;
+                }
+                if (canonical_source == canonical_target) {
+                    throw std::runtime_error("Source topic cannot be the target topic: " + canonical_source);
+                }
+                if (!std::filesystem::exists(topic_path_for(ctx.backlog_root, canonical_source) / "manifest.json")) {
+                    throw std::runtime_error("Topic not found: " + canonical_source);
+                }
+                canonical_sources.push_back(canonical_source);
+                source_manifests[canonical_source] = load_topic_manifest_json(ctx.backlog_root, canonical_source);
+            }
+            if (canonical_sources.empty()) {
+                throw std::runtime_error("Source topics list cannot be empty");
+            }
+
+            auto target_manifest = load_topic_manifest_json(ctx.backlog_root, canonical_target);
+            const auto target_items = topic_json_array_to_strings(target_manifest["seed_items"]);
+            std::set<std::string> target_item_set(target_items.begin(), target_items.end());
+
+            if (dry_run) {
+                Json::Value item_conflicts(Json::arrayValue);
+                for (const auto& source : canonical_sources) {
+                    for (const auto& item : topic_json_array_to_strings(source_manifests[source]["seed_items"])) {
+                        if (target_item_set.count(item) > 0 && !topic_json_array_contains_string(item_conflicts, item)) {
+                            item_conflicts.append(item);
+                        }
+                    }
+                }
+                if (format_norm == "json") {
+                    Json::Value payload(Json::objectValue);
+                    payload["target_topic"] = canonical_target;
+                    payload["source_topics"] = string_array_json(canonical_sources);
+                    payload["item_conflicts"] = item_conflicts;
+                    payload["material_conflicts"] = Json::Value(Json::arrayValue);
+                    payload["references_to_update"] = Json::Value(Json::arrayValue);
+                    payload["dry_run"] = true;
+                    std::cout << json_to_string(payload, true) << "\n";
+                } else {
+                    std::cout << "DRY RUN: Merge plan for '" << canonical_target << "'\n";
+                    std::cout << "  Would merge " << canonical_sources.size() << " topic(s):\n";
+                    for (const auto& source : canonical_sources) {
+                        std::cout << "    - " << source << "\n";
+                    }
+                    if (!item_conflicts.empty()) {
+                        std::cout << "  Item conflicts: " << item_conflicts.size() << "\n";
+                    }
+                }
+                return 0;
+            }
+
+            const auto now = current_utc_timestamp();
+            auto& merged_seed_items = ensure_topic_json_array(target_manifest, "seed_items");
+            Json::Value items_merged(Json::objectValue);
+            Json::Value materials_merged = topic_empty_string_array_map_json(canonical_sources);
+            for (const auto& source : canonical_sources) {
+                const auto source_items = topic_json_array_to_strings(source_manifests[source]["seed_items"]);
+                items_merged[source] = string_array_json(source_items);
+                for (const auto& item : source_items) {
+                    topic_append_unique_string(merged_seed_items, item);
+                }
+            }
+            target_manifest["updated_at"] = now;
+            save_topic_manifest_json(ctx.backlog_root, canonical_target, target_manifest);
+
+            auto references_updated = topic_update_references_after_merge(ctx.backlog_root, canonical_target, canonical_sources);
+            if (delete_sources) {
+                for (const auto& source : canonical_sources) {
+                    std::error_code ec;
+                    std::filesystem::remove_all(topic_path_for(ctx.backlog_root, source), ec);
+                }
+            }
+            if (update_worksets) {
+                topic_update_worksets_after_merge(ctx.backlog_root, canonical_target, canonical_sources);
+            }
+
+            if (format_norm == "json") {
+                Json::Value payload(Json::objectValue);
+                payload["target_topic"] = canonical_target;
+                payload["merged_topics"] = string_array_json(canonical_sources);
+                payload["items_merged"] = items_merged;
+                payload["materials_merged"] = materials_merged;
+                payload["references_updated"] = references_updated;
+                payload["merged_at"] = now;
+                payload["worksets_updated"] = update_worksets;
+                payload["deleted_sources"] = delete_sources;
+                std::cout << json_to_string(payload, true) << "\n";
+            } else {
+                std::cout << "Merged " << canonical_sources.size() << " topic(s) into '" << canonical_target << "'\n";
+                std::cout << "  Merged at: " << now << "\n";
+                for (const auto& source : canonical_sources) {
+                    std::cout << "    - " << source << ": " << items_merged[source].size() << " items\n";
+                }
+                if (!references_updated.empty()) {
+                    std::cout << "  Updated references in " << references_updated.size() << " topic(s)\n";
+                }
+                if (delete_sources) {
+                    std::cout << "  Deleted " << canonical_sources.size() << " source topic(s)\n";
+                }
+            }
+            return 0;
+        };
+
         if (auto topic_create_rc = try_run_topic_create_fast_path()) {
             return *topic_create_rc;
         }
@@ -10369,6 +10752,9 @@ int main(int InArgc, char* InArgv[]) {
         }
         if (auto topic_reference_rc = try_run_topic_reference_fast_path()) {
             return *topic_reference_rc;
+        }
+        if (auto topic_split_merge_rc = try_run_topic_split_merge_fast_path()) {
+            return *topic_split_merge_rc;
         }
 
         auto topic_safe_snapshot_name = [](const std::string& value) {

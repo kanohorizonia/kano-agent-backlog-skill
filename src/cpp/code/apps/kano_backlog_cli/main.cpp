@@ -5654,6 +5654,138 @@ std::optional<int> try_run_links_restore_from_vcs_fast_path(int argc, char** arg
     return 0;
 }
 
+std::optional<int> try_run_links_remap_ref_fast_path(int argc, char** argv) {
+    if (argc < 4 || argv == nullptr) {
+        return std::nullopt;
+    }
+
+    int links_index = -1;
+    for (int i = 1; i + 1 < argc; ++i) {
+        if (std::string(argv[i]) == "links" && std::string(argv[i + 1]) == "remap-ref") {
+            links_index = i;
+            break;
+        }
+    }
+    if (links_index < 0) {
+        return std::nullopt;
+    }
+
+    std::string ref_path;
+    std::string prefix = "ADR";
+    std::string product;
+    std::string backlog_root_str;
+    std::string format = "markdown";
+    bool update_refs = true;
+    bool no_update_refs = false;
+    bool apply = false;
+
+    const auto option_value = [&](int& index, const std::string& option) -> std::optional<std::string> {
+        const std::string arg = argv[index];
+        const std::string prefix_text = option + "=";
+        if (arg.rfind(prefix_text, 0) == 0) {
+            return arg.substr(prefix_text.size());
+        }
+        if (arg == option && index + 1 < argc) {
+            ++index;
+            return std::string(argv[index]);
+        }
+        return std::nullopt;
+    };
+
+    for (int i = 1; i < links_index; ++i) {
+        const std::string arg = argv[i];
+        if (arg == "-p" || arg == "--path" || arg == "-P" || arg == "--product" || arg == "-s" || arg == "--sandbox") {
+            if (i + 1 < links_index) {
+                ++i;
+                continue;
+            }
+        }
+        return std::nullopt;
+    }
+
+    for (int i = links_index + 2; i < argc; ++i) {
+        const std::string arg = argv[i];
+        if (arg == "-h" || arg == "--help") {
+            return std::nullopt;
+        }
+        if (ref_path.empty() && arg.rfind("-", 0) != 0) {
+            ref_path = arg;
+            continue;
+        }
+        if (auto value = option_value(i, "--prefix")) {
+            prefix = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--product")) {
+            product = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--backlog-root")) {
+            backlog_root_str = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--format")) {
+            format = *value;
+            continue;
+        }
+        if (arg == "--update-refs") {
+            update_refs = true;
+            continue;
+        }
+        if (arg == "--no-update-refs") {
+            no_update_refs = true;
+            continue;
+        }
+        if (arg == "--apply") {
+            apply = true;
+            continue;
+        }
+        return std::nullopt;
+    }
+
+    if (ref_path.empty()) {
+        return std::nullopt;
+    }
+    if (no_update_refs) {
+        update_refs = false;
+    }
+
+    const auto format_norm = lower_copy(format);
+    if (format_norm != "markdown" && format_norm != "json") {
+        throw std::runtime_error("format must be one of: markdown, json");
+    }
+
+    std::optional<std::filesystem::path> backlog_root;
+    if (!backlog_root_str.empty()) {
+        backlog_root = normalized_absolute_path(expand_user_path(backlog_root_str));
+    }
+    const auto result = remap_reference_id_native(
+        expand_user_path(ref_path),
+        backlog_root,
+        product,
+        trim_copy(prefix).empty() ? std::string("ADR") : prefix,
+        update_refs,
+        apply
+    );
+
+    if (format_norm == "json") {
+        Json::Value payload(Json::objectValue);
+        payload["old_id"] = result.old_id;
+        payload["new_id"] = result.new_id;
+        payload["old_path"] = result.old_path.string();
+        payload["new_path"] = result.new_path.string();
+        payload["updated_files"] = result.updated_files;
+        std::cout << json_to_string(payload, true) << "\n";
+        return 0;
+    }
+
+    std::cout << "# Remap Ref: " << result.old_id << " -> " << result.new_id << "\n";
+    std::cout << "- old_path: " << result.old_path.string() << "\n";
+    std::cout << "- new_path: " << result.new_path.string() << "\n";
+    std::cout << "- updated_files: " << result.updated_files << "\n";
+    return 0;
+}
+
 std::optional<int> try_run_admin_items_fast_path(int argc, char** argv) {
     if (argc < 5 || argv == nullptr) {
         return std::nullopt;
@@ -6706,6 +6838,9 @@ int main(int InArgc, char* InArgv[]) {
             return *rc;
         }
         if (auto rc = try_run_links_restore_from_vcs_fast_path(parse_argc, parse_argv)) {
+            return *rc;
+        }
+        if (auto rc = try_run_links_remap_ref_fast_path(parse_argc, parse_argv)) {
             return *rc;
         }
         if (auto rc = try_run_admin_items_fast_path(parse_argc, parse_argv)) {

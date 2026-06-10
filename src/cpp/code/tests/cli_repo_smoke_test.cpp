@@ -184,7 +184,15 @@ int main(int argc, char** argv) {
         std::filesystem::create_directories(export_dir);
         const auto export_output = std::filesystem::temp_directory_path() / "kano-backlog-export-smoke.txt";
         expect_command_capture_success(
-            run_command_capture(binary, {"export", "--single", "--no-validate-release-archive", "--output", export_dir.string()}, export_output),
+            run_command_capture(binary, {
+                "export",
+                "--single",
+                "--no-validate-release-archive",
+                "--repo",
+                repo_root.string(),
+                "--output",
+                export_dir.string()
+            }, export_output),
             export_output,
             "export command failed"
         );

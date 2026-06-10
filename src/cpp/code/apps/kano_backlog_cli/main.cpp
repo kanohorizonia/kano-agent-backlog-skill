@@ -4448,6 +4448,212 @@ std::optional<int> try_run_workitem_create_fast_path(int argc, char** argv) {
     return 0;
 }
 
+std::optional<int> try_run_workitem_set_ready_fast_path(int argc, char** argv) {
+    if (argc < 4 || argv == nullptr) {
+        return std::nullopt;
+    }
+
+    int workitem_index = -1;
+    for (int i = 1; i + 1 < argc; ++i) {
+        const std::string arg = argv[i];
+        if ((arg == "workitem" || arg == "item") && std::string(argv[i + 1]) == "set-ready") {
+            workitem_index = i;
+            break;
+        }
+    }
+    if (workitem_index < 0) {
+        return std::nullopt;
+    }
+
+    std::string path_str = ".";
+    std::string product;
+    std::string sandbox;
+    std::string ref;
+    std::string context;
+    std::string goal;
+    std::string approach;
+    std::string acceptance_criteria;
+    std::string risks;
+    std::string context_file;
+    std::string goal_file;
+    std::string approach_file;
+    std::string acceptance_criteria_file;
+    std::string risks_file;
+    std::string agent;
+    bool consume_input_files = false;
+
+    const auto option_value = [&](int& index, const std::string& option) -> std::optional<std::string> {
+        const std::string arg = argv[index];
+        const std::string prefix = option + "=";
+        if (arg.rfind(prefix, 0) == 0) {
+            return arg.substr(prefix.size());
+        }
+        if (arg == option && index + 1 < argc) {
+            ++index;
+            return std::string(argv[index]);
+        }
+        return std::nullopt;
+    };
+
+    const auto parse_context_option = [&](int& index) -> bool {
+        if (auto value = option_value(index, "-p")) {
+            path_str = *value;
+            return true;
+        }
+        if (auto value = option_value(index, "--path")) {
+            path_str = *value;
+            return true;
+        }
+        if (auto value = option_value(index, "-P")) {
+            product = *value;
+            return true;
+        }
+        if (auto value = option_value(index, "--product")) {
+            product = *value;
+            return true;
+        }
+        if (auto value = option_value(index, "-s")) {
+            sandbox = *value;
+            return true;
+        }
+        if (auto value = option_value(index, "--sandbox")) {
+            sandbox = *value;
+            return true;
+        }
+        return false;
+    };
+
+    for (int i = 1; i < workitem_index; ++i) {
+        if (!parse_context_option(i)) {
+            return std::nullopt;
+        }
+    }
+
+    for (int i = workitem_index + 2; i < argc; ++i) {
+        const std::string arg = argv[i];
+        if (arg == "-h" || arg == "--help") {
+            return std::nullopt;
+        }
+        if (ref.empty() && arg.rfind("-", 0) != 0) {
+            ref = arg;
+            continue;
+        }
+        if (parse_context_option(i)) {
+            continue;
+        }
+        if (auto value = option_value(i, "--context")) {
+            context = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--goal")) {
+            goal = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--approach")) {
+            approach = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--acceptance-criteria")) {
+            acceptance_criteria = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--risks")) {
+            risks = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--context-file")) {
+            context_file = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--goal-file")) {
+            goal_file = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--approach-file")) {
+            approach_file = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--acceptance-criteria-file")) {
+            acceptance_criteria_file = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--risks-file")) {
+            risks_file = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--agent")) {
+            agent = *value;
+            continue;
+        }
+        if (arg == "--consume-input-files") {
+            consume_input_files = true;
+            continue;
+        }
+        return std::nullopt;
+    }
+
+    if (ref.empty() || agent.empty()) {
+        return std::nullopt;
+    }
+
+    auto ctx = BacklogContext::resolve(
+        path_str,
+        product.empty() ? std::nullopt : std::optional<std::string>(product),
+        sandbox.empty() ? std::nullopt : std::optional<std::string>(sandbox)
+    );
+    CanonicalStore store(ctx.product_root);
+    RefResolver resolver(store);
+    auto item = resolver.resolve(ref);
+
+    apply_text_file_option(context, context_file, "--context", "--context-file");
+    apply_text_file_option(goal, goal_file, "--goal", "--goal-file");
+    apply_text_file_option(approach, approach_file, "--approach", "--approach-file");
+    apply_text_file_option(acceptance_criteria, acceptance_criteria_file, "--acceptance-criteria", "--acceptance-criteria-file");
+    apply_text_file_option(risks, risks_file, "--risks", "--risks-file");
+
+    std::vector<std::string> updated_fields;
+    if (!context.empty()) {
+        item.context = context;
+        updated_fields.push_back("Context");
+    }
+    if (!goal.empty()) {
+        item.goal = goal;
+        updated_fields.push_back("Goal");
+    }
+    if (!approach.empty()) {
+        item.approach = approach;
+        updated_fields.push_back("Approach");
+    }
+    if (!acceptance_criteria.empty()) {
+        item.acceptance_criteria = acceptance_criteria;
+        updated_fields.push_back("Acceptance Criteria");
+    }
+    if (!risks.empty()) {
+        item.risks = risks;
+        updated_fields.push_back("Risks / Dependencies");
+    }
+
+    if (updated_fields.empty()) {
+        throw std::runtime_error("No Ready fields supplied. Pass at least one of --context, --goal, --approach, --acceptance-criteria, --risks");
+    }
+
+    StateMachine::record_worklog(item, agent, "Updated Ready fields: " + join_strings(updated_fields));
+    store.write(item);
+
+    std::cout << "OK: Updated Ready fields for " << item.id << "\n";
+    std::cout << "  Worklog: Updated " << join_strings(updated_fields) << "\n";
+
+    if (consume_input_files) {
+        consume_backlog_text_file(context_file, "--context-file");
+        consume_backlog_text_file(goal_file, "--goal-file");
+        consume_backlog_text_file(approach_file, "--approach-file");
+        consume_backlog_text_file(acceptance_criteria_file, "--acceptance-criteria-file");
+        consume_backlog_text_file(risks_file, "--risks-file");
+    }
+
+    return 0;
+}
+
 std::optional<int> try_run_admin_items_fast_path(int argc, char** argv) {
     if (argc < 5 || argv == nullptr) {
         return std::nullopt;
@@ -5479,6 +5685,9 @@ int main(int InArgc, char* InArgv[]) {
             return *rc;
         }
         if (auto rc = try_run_workitem_create_fast_path(parse_argc, parse_argv)) {
+            return *rc;
+        }
+        if (auto rc = try_run_workitem_set_ready_fast_path(parse_argc, parse_argv)) {
             return *rc;
         }
         if (auto rc = try_run_admin_items_fast_path(parse_argc, parse_argv)) {

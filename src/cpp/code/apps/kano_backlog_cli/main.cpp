@@ -4210,6 +4210,109 @@ std::optional<int> try_run_admin_init_fast_path(int argc, char** argv) {
     return 0;
 }
 
+std::optional<int> try_run_admin_sync_sequences_fast_path(int argc, char** argv) {
+    if (argc < 3 || argv == nullptr) {
+        return std::nullopt;
+    }
+
+    int admin_index = -1;
+    for (int i = 1; i + 1 < argc; ++i) {
+        if (std::string(argv[i]) == "admin" && std::string(argv[i + 1]) == "sync-sequences") {
+            admin_index = i;
+            break;
+        }
+    }
+    if (admin_index < 0) {
+        return std::nullopt;
+    }
+
+    std::string path_str = ".";
+    std::string global_product;
+    std::string command_product;
+    std::string sandbox;
+
+    const auto option_value = [&](int& index, const std::string& option) -> std::optional<std::string> {
+        const std::string arg = argv[index];
+        const std::string prefix = option + "=";
+        if (arg.rfind(prefix, 0) == 0) {
+            return arg.substr(prefix.size());
+        }
+        if (arg == option && index + 1 < argc) {
+            ++index;
+            return std::string(argv[index]);
+        }
+        return std::nullopt;
+    };
+
+    const auto parse_global_option = [&](int& index) -> bool {
+        if (auto value = option_value(index, "-p")) {
+            path_str = *value;
+            return true;
+        }
+        if (auto value = option_value(index, "--path")) {
+            path_str = *value;
+            return true;
+        }
+        if (auto value = option_value(index, "-P")) {
+            global_product = *value;
+            return true;
+        }
+        if (auto value = option_value(index, "--product")) {
+            global_product = *value;
+            return true;
+        }
+        if (auto value = option_value(index, "-s")) {
+            sandbox = *value;
+            return true;
+        }
+        if (auto value = option_value(index, "--sandbox")) {
+            sandbox = *value;
+            return true;
+        }
+        return false;
+    };
+
+    for (int i = 1; i < admin_index; ++i) {
+        if (!parse_global_option(i)) {
+            return std::nullopt;
+        }
+    }
+
+    for (int i = admin_index + 2; i < argc; ++i) {
+        const std::string arg = argv[i];
+        if (arg == "-h" || arg == "--help") {
+            return std::nullopt;
+        }
+        if (auto value = option_value(i, "--product")) {
+            command_product = *value;
+            continue;
+        }
+        return std::nullopt;
+    }
+
+    auto ctx = BacklogContext::resolve(
+        path_str,
+        !command_product.empty()
+            ? std::optional<std::string>(command_product)
+            : (global_product.empty() ? std::nullopt : std::optional<std::string>(global_product)),
+        sandbox.empty() ? std::nullopt : std::optional<std::string>(sandbox)
+    );
+    BacklogIndex index(ctx.backlog_root / ".cache" / "index" / "backlog.db");
+    index.initialize();
+
+    auto result = index.sync_sequences(ctx.product_root);
+    if (result.synced_pairs.empty()) {
+        std::cout << "No sequences synced (no items found).\n";
+    } else {
+        std::cout << "Synced " << result.synced_pairs.size() << " sequence pair(s):\n";
+        for (const auto& pair : result.synced_pairs) {
+            std::cout << "  " << pair << "\n";
+        }
+    }
+    std::cout << "Max sequence found: " << result.max_number_found << "\n";
+    return 0;
+}
+
 std::optional<int> try_run_config_show_fast_path(int argc, char** argv) {
     if (argc < 3 || argv == nullptr) {
         return std::nullopt;
@@ -4801,6 +4904,9 @@ int main(int InArgc, char* InArgv[]) {
 
     try {
         if (auto rc = try_run_admin_init_fast_path(parse_argc, parse_argv)) {
+            return *rc;
+        }
+        if (auto rc = try_run_admin_sync_sequences_fast_path(parse_argc, parse_argv)) {
             return *rc;
         }
         if (auto rc = try_run_config_show_fast_path(parse_argc, parse_argv)) {

@@ -4724,6 +4724,164 @@ std::optional<int> try_run_admin_items_fast_path(int argc, char** argv) {
     return 0;
 }
 
+std::optional<int> try_run_meta_ticketing_fast_path(int argc, char** argv) {
+    if (argc < 3 || argv == nullptr) {
+        return std::nullopt;
+    }
+
+    int meta_index = -1;
+    for (int i = 1; i + 1 < argc; ++i) {
+        if (std::string(argv[i]) == "meta" && std::string(argv[i + 1]) == "add-ticketing-guidance") {
+            meta_index = i;
+            break;
+        }
+    }
+    if (meta_index < 0) {
+        return std::nullopt;
+    }
+
+    std::string path_str = ".";
+    std::string product;
+    std::string backlog_root;
+    std::string agent;
+    std::string model;
+    std::string format = "markdown";
+    bool apply = false;
+
+    const auto option_value = [&](int& index, const std::string& option) -> std::optional<std::string> {
+        const std::string arg = argv[index];
+        const std::string prefix = option + "=";
+        if (arg.rfind(prefix, 0) == 0) {
+            return arg.substr(prefix.size());
+        }
+        if (arg == option && index + 1 < argc) {
+            ++index;
+            return std::string(argv[index]);
+        }
+        return std::nullopt;
+    };
+
+    for (int i = 1; i < meta_index; ++i) {
+        if (auto value = option_value(i, "-p")) {
+            path_str = *value;
+        } else if (auto value = option_value(i, "--path")) {
+            path_str = *value;
+        } else {
+            return std::nullopt;
+        }
+    }
+
+    for (int i = meta_index + 2; i < argc; ++i) {
+        const std::string arg = argv[i];
+        if (arg == "-h" || arg == "--help") {
+            return std::nullopt;
+        }
+        if (auto value = option_value(i, "--product")) {
+            product = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--backlog-root")) {
+            backlog_root = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--agent")) {
+            agent = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--model")) {
+            model = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--format")) {
+            format = *value;
+            continue;
+        }
+        if (arg == "--apply") {
+            apply = true;
+            continue;
+        }
+        return std::nullopt;
+    }
+
+    if (product.empty() || agent.empty()) {
+        return std::nullopt;
+    }
+
+    const auto format_norm = lower_copy(trim_copy(format));
+    if (format_norm != "markdown" && format_norm != "json") {
+        throw std::runtime_error("format must be one of: markdown, json");
+    }
+
+    BacklogContext ctx;
+    if (backlog_root.empty()) {
+        ctx = BacklogContext::resolve(path_str, product, std::nullopt);
+    } else {
+        ctx.backlog_root = normalized_absolute_path(expand_user_path(backlog_root));
+        ctx.project_root = normalized_absolute_path(ctx.backlog_root.parent_path().parent_path());
+        ctx.product_name = product;
+        ctx.product_root = ctx.backlog_root / "products" / ctx.product_name;
+        ctx.product_def.name = ctx.product_name;
+        ctx.product_def.prefix = "KABS";
+        ctx.product_def.backlog_root = relative_or_string(ctx.product_root, ctx.project_root);
+    }
+
+    auto conventions_path = ctx.product_root / "_meta" / "conventions.md";
+    if (!std::filesystem::exists(conventions_path)) {
+        throw std::runtime_error("Conventions file not found: " + conventions_path.string());
+    }
+
+    std::ifstream ifs(conventions_path);
+    if (!ifs) {
+        throw std::runtime_error("Cannot read: " + conventions_path.string());
+    }
+    std::ostringstream ss;
+    ss << ifs.rdbuf();
+    std::string content = ss.str();
+
+    std::string status;
+    if (content.find("## Ticket type selection") != std::string::npos) {
+        status = "unchanged";
+    } else {
+        const char* guidance =
+            "## Ticket type selection\n\n"
+            "- Epic: multi-release or multi-team milestone spanning multiple Features.\n"
+            "- Feature: a new capability that delivers multiple UserStories.\n"
+            "- UserStory: a single user-facing outcome that requires multiple Tasks.\n"
+            "- Task: a single focused implementation or doc change (typically one session).\n"
+            "- Example: \"End-to-end embedding pipeline\" = Epic; \"Pluggable vector backend\" = Feature; \"MVP chunking pipeline\" = UserStory; \"Implement tokenizer adapter\" = Task.\n";
+
+        std::string updated = content;
+        while (!updated.empty() && std::isspace(static_cast<unsigned char>(updated.back()))) {
+            updated.pop_back();
+        }
+        updated += "\n\n";
+        updated += guidance;
+
+        status = "would-update";
+        if (apply) {
+            std::ofstream ofs(conventions_path);
+            if (!ofs) {
+                throw std::runtime_error("Cannot write: " + conventions_path.string());
+            }
+            ofs << updated;
+            status = "updated";
+        }
+    }
+
+    if (format_norm == "json") {
+        Json::Value payload(Json::objectValue);
+        payload["product"] = product;
+        payload["status"] = status;
+        payload["path"] = conventions_path.string();
+        std::cout << json_to_string(payload, true) << "\n";
+        return 0;
+    }
+
+    std::cout << "OK: ticketing guidance " << status << "\n";
+    std::cout << "  Path: " << conventions_path.string() << "\n";
+    return 0;
+}
+
 std::optional<int> try_run_config_show_fast_path(int argc, char** argv) {
     if (argc < 3 || argv == nullptr) {
         return std::nullopt;
@@ -5324,6 +5482,9 @@ int main(int InArgc, char* InArgv[]) {
             return *rc;
         }
         if (auto rc = try_run_admin_items_fast_path(parse_argc, parse_argv)) {
+            return *rc;
+        }
+        if (auto rc = try_run_meta_ticketing_fast_path(parse_argc, parse_argv)) {
             return *rc;
         }
         if (auto rc = try_run_config_show_fast_path(parse_argc, parse_argv)) {

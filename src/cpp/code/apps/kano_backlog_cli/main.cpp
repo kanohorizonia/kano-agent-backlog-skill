@@ -10732,6 +10732,224 @@ int main(int InArgc, char* InArgv[]) {
             return 0;
         };
 
+        auto try_run_topic_legacy_fast_path = [&]() -> std::optional<int> {
+            int topic_index = -1;
+            for (int i = 1; i + 1 < parse_argc; ++i) {
+                if (std::string(parse_argv[i]) == "topic") {
+                    topic_index = i;
+                    break;
+                }
+            }
+            if (topic_index < 0 || topic_index + 1 >= parse_argc) {
+                return std::nullopt;
+            }
+
+            const std::string action = parse_argv[topic_index + 1];
+            if (action != "migrate" && action != "cleanup-legacy" && action != "migrate-filenames") {
+                return std::nullopt;
+            }
+
+            std::string local_path = ".";
+            std::string local_product;
+            std::string local_sandbox;
+            std::string format = "plain";
+            bool no_dry_run = false;
+
+            const auto option_value = [&](int& index, const std::string& option) -> std::optional<std::string> {
+                const std::string arg = parse_argv[index];
+                const std::string prefix_text = option + "=";
+                if (arg.rfind(prefix_text, 0) == 0) {
+                    return arg.substr(prefix_text.size());
+                }
+                if (arg == option && index + 1 < parse_argc) {
+                    ++index;
+                    return std::string(parse_argv[index]);
+                }
+                return std::nullopt;
+            };
+
+            const auto parse_context_option = [&](int& index) -> bool {
+                if (auto value = option_value(index, "-p")) {
+                    local_path = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "--path")) {
+                    local_path = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "-P")) {
+                    local_product = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "--product")) {
+                    local_product = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "-s")) {
+                    local_sandbox = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "--sandbox")) {
+                    local_sandbox = *value;
+                    return true;
+                }
+                return false;
+            };
+
+            for (int i = 1; i < topic_index; ++i) {
+                if (!parse_context_option(i)) {
+                    return std::nullopt;
+                }
+            }
+
+            for (int i = topic_index + 2; i < parse_argc; ++i) {
+                const std::string arg = parse_argv[i];
+                if (arg == "-h" || arg == "--help") {
+                    return std::nullopt;
+                }
+                if (auto value = option_value(i, "--format")) {
+                    format = *value;
+                    continue;
+                }
+                if (arg == "--no-dry-run") {
+                    no_dry_run = true;
+                    continue;
+                }
+                if (parse_context_option(i)) {
+                    continue;
+                }
+                return std::nullopt;
+            }
+
+            const auto format_norm = lower_copy(format.empty() ? std::string("plain") : format);
+            if (format_norm != "plain" && format_norm != "json") {
+                throw std::runtime_error("format must be one of: plain, json");
+            }
+            auto ctx = BacklogContext::resolve(
+                local_path,
+                local_product.empty() ? std::nullopt : std::optional<std::string>(local_product),
+                local_sandbox.empty() ? std::nullopt : std::optional<std::string>(local_sandbox)
+            );
+
+            if (action == "migrate") {
+                Json::Value migrated(Json::objectValue);
+                const auto worksets_dir = ctx.backlog_root / ".cache" / "worksets";
+                if (std::filesystem::exists(worksets_dir)) {
+                    for (const auto& entry : std::filesystem::directory_iterator(worksets_dir)) {
+                        if (!entry.is_regular_file()) {
+                            continue;
+                        }
+                        const auto filename = entry.path().filename().string();
+                        const std::string prefix = "active_topic.";
+                        const std::string suffix = ".txt";
+                        if (!starts_with(filename, prefix) || !ends_with(filename, suffix)) {
+                            continue;
+                        }
+                        const auto agent_id = filename.substr(prefix.size(), filename.size() - prefix.size() - suffix.size());
+                        const auto topic_name = trim_copy(lower_copy(read_text_file_path(entry.path())));
+                        if (topic_name.empty() || !std::filesystem::exists(topic_path_for(ctx.backlog_root, topic_name) / "manifest.json")) {
+                            continue;
+                        }
+                        auto doc = topic_ensure_state_doc(ctx.backlog_root, topic_name, agent_id);
+                        topic_update_agent_state(ctx.backlog_root, agent_id, doc);
+                        migrated[agent_id] = topic_name;
+                    }
+                }
+                if (format_norm == "json") {
+                    std::cout << json_to_string(migrated, true) << "\n";
+                } else if (migrated.empty()) {
+                    std::cout << "No legacy files to migrate\n";
+                } else {
+                    std::cout << "Migrated " << migrated.size() << " agent(s):\n";
+                    for (const auto& agent_id : migrated.getMemberNames()) {
+                        std::cout << "  " << agent_id << " -> " << migrated[agent_id].asString() << "\n";
+                    }
+                }
+                return 0;
+            }
+
+            if (action == "cleanup-legacy") {
+                Json::Value deleted(Json::arrayValue);
+                const auto worksets_dir = ctx.backlog_root / ".cache" / "worksets";
+                if (std::filesystem::exists(worksets_dir)) {
+                    for (const auto& entry : std::filesystem::directory_iterator(worksets_dir)) {
+                        if (!entry.is_regular_file()) {
+                            continue;
+                        }
+                        const auto filename = entry.path().filename().string();
+                        if (!starts_with(filename, "active_topic.") || !ends_with(filename, ".txt")) {
+                            continue;
+                        }
+                        deleted.append(entry.path().string());
+                        if (no_dry_run) {
+                            std::error_code ec;
+                            std::filesystem::remove(entry.path(), ec);
+                            if (ec) {
+                                throw std::runtime_error("Failed to delete " + entry.path().string() + ": " + ec.message());
+                            }
+                        }
+                    }
+                }
+                if (format_norm == "json") {
+                    Json::Value payload(Json::objectValue);
+                    payload["deleted"] = deleted;
+                    payload["count"] = static_cast<int>(deleted.size());
+                    payload["dry_run"] = !no_dry_run;
+                    std::cout << json_to_string(payload, true) << "\n";
+                } else if (deleted.empty()) {
+                    std::cout << "No legacy files to clean up\n";
+                } else {
+                    std::cout << (no_dry_run ? "Deleted " : "Would delete ") << deleted.size() << " file(s):\n";
+                    for (const auto& path : deleted) {
+                        std::cout << "  - " << path.asString() << "\n";
+                    }
+                }
+                return 0;
+            }
+
+            Json::Value renamed(Json::objectValue);
+            const auto topics_dir = topic_state_topics_dir(ctx.backlog_root);
+            if (std::filesystem::exists(topics_dir)) {
+                for (const auto& entry : std::filesystem::directory_iterator(topics_dir)) {
+                    if (!entry.is_regular_file() || entry.path().extension() != ".json" ||
+                        entry.path().stem().string().find('_') != std::string::npos) {
+                        continue;
+                    }
+                    auto doc = topic_load_json_file(entry.path());
+                    if (!doc.isObject() || doc.get("topic_id", "").asString().empty()) {
+                        continue;
+                    }
+                    const auto new_path = topic_state_doc_path(ctx.backlog_root, doc);
+                    if (std::filesystem::exists(new_path)) {
+                        continue;
+                    }
+                    renamed[entry.path().filename().string()] = new_path.filename().string();
+                    if (no_dry_run) {
+                        std::error_code ec;
+                        std::filesystem::rename(entry.path(), new_path, ec);
+                        if (ec) {
+                            throw std::runtime_error("Failed to rename " + entry.path().string() + ": " + ec.message());
+                        }
+                    }
+                }
+            }
+            if (format_norm == "json") {
+                Json::Value payload(Json::objectValue);
+                payload["renamed"] = renamed;
+                payload["count"] = static_cast<int>(renamed.size());
+                payload["dry_run"] = !no_dry_run;
+                std::cout << json_to_string(payload, true) << "\n";
+            } else if (renamed.empty()) {
+                std::cout << "No files to migrate\n";
+            } else {
+                std::cout << (no_dry_run ? "Renamed " : "Would rename ") << renamed.size() << " file(s):\n";
+                for (const auto& old_name : renamed.getMemberNames()) {
+                    std::cout << "  " << old_name << " -> " << renamed[old_name].asString() << "\n";
+                }
+            }
+            return 0;
+        };
+
         if (auto topic_create_rc = try_run_topic_create_fast_path()) {
             return *topic_create_rc;
         }
@@ -10755,6 +10973,9 @@ int main(int InArgc, char* InArgv[]) {
         }
         if (auto topic_split_merge_rc = try_run_topic_split_merge_fast_path()) {
             return *topic_split_merge_rc;
+        }
+        if (auto topic_legacy_rc = try_run_topic_legacy_fast_path()) {
+            return *topic_legacy_rc;
         }
 
         auto topic_safe_snapshot_name = [](const std::string& value) {

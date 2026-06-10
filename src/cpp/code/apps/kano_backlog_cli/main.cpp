@@ -9612,6 +9612,99 @@ int main(int InArgc, char* InArgv[]) {
             return 0;
         };
 
+        auto try_run_topic_distill_fast_path = [&]() -> std::optional<int> {
+            int topic_index = -1;
+            for (int i = 1; i + 1 < parse_argc; ++i) {
+                if (std::string(parse_argv[i]) == "topic" && std::string(parse_argv[i + 1]) == "distill") {
+                    topic_index = i;
+                    break;
+                }
+            }
+            if (topic_index < 0) {
+                return std::nullopt;
+            }
+
+            std::string local_path = ".";
+            std::string local_product;
+            std::string local_sandbox;
+            std::string topic_name;
+
+            const auto option_value = [&](int& index, const std::string& option) -> std::optional<std::string> {
+                const std::string arg = parse_argv[index];
+                const std::string prefix_text = option + "=";
+                if (arg.rfind(prefix_text, 0) == 0) {
+                    return arg.substr(prefix_text.size());
+                }
+                if (arg == option && index + 1 < parse_argc) {
+                    ++index;
+                    return std::string(parse_argv[index]);
+                }
+                return std::nullopt;
+            };
+
+            const auto parse_context_option = [&](int& index) -> bool {
+                if (auto value = option_value(index, "-p")) {
+                    local_path = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "--path")) {
+                    local_path = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "-P")) {
+                    local_product = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "--product")) {
+                    local_product = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "-s")) {
+                    local_sandbox = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "--sandbox")) {
+                    local_sandbox = *value;
+                    return true;
+                }
+                return false;
+            };
+
+            for (int i = 1; i < topic_index; ++i) {
+                if (!parse_context_option(i)) {
+                    return std::nullopt;
+                }
+            }
+
+            for (int i = topic_index + 2; i < parse_argc; ++i) {
+                const std::string arg = parse_argv[i];
+                if (arg == "-h" || arg == "--help") {
+                    return std::nullopt;
+                }
+                if (topic_name.empty() && arg.rfind("-", 0) != 0) {
+                    topic_name = arg;
+                    continue;
+                }
+                if (parse_context_option(i)) {
+                    continue;
+                }
+                return std::nullopt;
+            }
+
+            if (topic_name.empty()) {
+                return std::nullopt;
+            }
+
+            auto ctx = BacklogContext::resolve(
+                local_path,
+                local_product.empty() ? std::nullopt : std::optional<std::string>(local_product),
+                local_sandbox.empty() ? std::nullopt : std::optional<std::string>(local_sandbox)
+            );
+            auto brief_path = TopicOps::distill(topic_name, ctx.backlog_root);
+            std::cout << "Generated: " << brief_path.string() << "\n";
+            return 0;
+        };
+
         if (auto topic_create_rc = try_run_topic_create_fast_path()) {
             return *topic_create_rc;
         }
@@ -9620,6 +9713,9 @@ int main(int InArgc, char* InArgv[]) {
         }
         if (auto topic_add_rc = try_run_topic_add_fast_path()) {
             return *topic_add_rc;
+        }
+        if (auto topic_distill_rc = try_run_topic_distill_fast_path()) {
+            return *topic_distill_rc;
         }
 
         auto topic_safe_snapshot_name = [](const std::string& value) {

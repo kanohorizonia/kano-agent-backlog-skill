@@ -236,7 +236,15 @@ int main(int argc, char** argv) {
         expect(gitignore_text.find("_kano/backlog/_shared/logs/") != std::string::npos, "admin init did not add shared logs to .gitignore");
 
         const auto config_show_output = temp_root / "config-show.txt";
-        expect(run_command_capture(binary, {"-P", "kano-ai-3d-asset-skill", "config", "show"}, config_show_output) == 0, "config show failed after spaced product-name init");
+        expect_command_capture_success(
+            run_command_capture(binary, {
+                "config", "show",
+                "--path", temp_root.string(),
+                "--product", "kano-ai-3d-asset-skill"
+            }, config_show_output),
+            config_show_output,
+            "config show failed after spaced product-name init"
+        );
         expect(read_text(config_show_output).find("Kano AI 3D Asset Skill") != std::string::npos, "config show did not reload spaced product name");
 
         const auto profile_path = temp_root / ".kano" / "backlog_config" / "embedding" / "local-noop.toml";

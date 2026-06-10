@@ -9705,6 +9705,199 @@ int main(int InArgc, char* InArgv[]) {
             return 0;
         };
 
+        auto try_run_topic_state_fast_path = [&]() -> std::optional<int> {
+            int topic_index = -1;
+            for (int i = 1; i + 1 < parse_argc; ++i) {
+                if (std::string(parse_argv[i]) == "topic") {
+                    topic_index = i;
+                    break;
+                }
+            }
+            if (topic_index < 0 || topic_index + 1 >= parse_argc) {
+                return std::nullopt;
+            }
+
+            const std::string action = parse_argv[topic_index + 1];
+            if (action != "switch" && action != "list-active" && action != "show-state") {
+                return std::nullopt;
+            }
+
+            std::string local_path = ".";
+            std::string local_product;
+            std::string local_sandbox;
+            std::vector<std::string> positionals;
+            std::string agent;
+            std::string format = "plain";
+
+            const auto option_value = [&](int& index, const std::string& option) -> std::optional<std::string> {
+                const std::string arg = parse_argv[index];
+                const std::string prefix_text = option + "=";
+                if (arg.rfind(prefix_text, 0) == 0) {
+                    return arg.substr(prefix_text.size());
+                }
+                if (arg == option && index + 1 < parse_argc) {
+                    ++index;
+                    return std::string(parse_argv[index]);
+                }
+                return std::nullopt;
+            };
+
+            const auto parse_context_option = [&](int& index) -> bool {
+                if (auto value = option_value(index, "-p")) {
+                    local_path = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "--path")) {
+                    local_path = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "-P")) {
+                    local_product = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "--product")) {
+                    local_product = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "-s")) {
+                    local_sandbox = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "--sandbox")) {
+                    local_sandbox = *value;
+                    return true;
+                }
+                return false;
+            };
+
+            for (int i = 1; i < topic_index; ++i) {
+                if (!parse_context_option(i)) {
+                    return std::nullopt;
+                }
+            }
+
+            for (int i = topic_index + 2; i < parse_argc; ++i) {
+                const std::string arg = parse_argv[i];
+                if (arg == "-h" || arg == "--help") {
+                    return std::nullopt;
+                }
+                if (auto value = option_value(i, "--agent")) {
+                    agent = *value;
+                    continue;
+                }
+                if (auto value = option_value(i, "--format")) {
+                    format = *value;
+                    continue;
+                }
+                if (parse_context_option(i)) {
+                    continue;
+                }
+                if (arg.rfind("-", 0) != 0) {
+                    positionals.push_back(arg);
+                    continue;
+                }
+                return std::nullopt;
+            }
+
+            const auto format_norm = lower_copy(format.empty() ? std::string("plain") : format);
+            if (format_norm != "plain" && format_norm != "json") {
+                throw std::runtime_error("format must be one of: plain, json");
+            }
+
+            auto ctx = BacklogContext::resolve(
+                local_path,
+                local_product.empty() ? std::nullopt : std::optional<std::string>(local_product),
+                local_sandbox.empty() ? std::nullopt : std::optional<std::string>(local_sandbox)
+            );
+
+            if (action == "switch") {
+                if (positionals.size() != 1 || agent.empty()) {
+                    return std::nullopt;
+                }
+                const auto canonical_topic = topic_normalize_name(positionals[0]);
+                const auto manifest = load_topic_manifest_json(ctx.backlog_root, canonical_topic);
+                const auto topic_path = topic_path_for(ctx.backlog_root, canonical_topic);
+                if (!std::filesystem::exists(topic_path)) {
+                    throw std::runtime_error("Topic not found: " + canonical_topic);
+                }
+                write_text_file(topic_path / ".active", canonical_topic);
+                auto state_doc = topic_ensure_state_doc(ctx.backlog_root, canonical_topic, agent);
+                topic_update_agent_state(ctx.backlog_root, agent, state_doc);
+                const auto seed_items = manifest["seed_items"];
+                const auto pinned_docs = manifest["pinned_docs"];
+                std::cout << "Switched to topic: " << canonical_topic << "\n";
+                std::cout << "  Items: " << (seed_items.isArray() ? seed_items.size() : 0)
+                          << ", Pinned docs: " << (pinned_docs.isArray() ? pinned_docs.size() : 0) << "\n";
+                return 0;
+            }
+
+            if (action == "list-active") {
+                if (!positionals.empty()) {
+                    return std::nullopt;
+                }
+                auto state = topic_load_state_index(ctx.backlog_root);
+                Json::Value result(Json::objectValue);
+                const auto& agents = state["agents"];
+                if (agents.isObject()) {
+                    for (const auto& agent_id : agents.getMemberNames()) {
+                        const auto topic_id = agents[agent_id].get("active_topic_id", "").asString();
+                        if (topic_id.empty()) {
+                            continue;
+                        }
+                        auto doc = topic_find_state_doc_by_id(ctx.backlog_root, topic_id);
+                        if (!doc) {
+                            continue;
+                        }
+                        Json::Value entry(Json::objectValue);
+                        entry["topic_name"] = doc->get("name", "");
+                        entry["topic_id"] = topic_id;
+                        entry["updated_at"] = agents[agent_id].get("updated_at", "");
+                        entry["participants"] = (*doc)["participants"];
+                        result[agent_id] = entry;
+                    }
+                }
+                if (format_norm == "json") {
+                    std::cout << json_to_string(result, true) << "\n";
+                    return 0;
+                }
+                if (result.empty()) {
+                    std::cout << "No active topics\n";
+                    return 0;
+                }
+                std::cout << "Active topics:\n";
+                for (const auto& agent_id : result.getMemberNames()) {
+                    std::cout << "  " << agent_id << ": " << result[agent_id].get("topic_name", "").asString() << "\n";
+                    std::cout << "    ID: " << result[agent_id].get("topic_id", "").asString() << "\n";
+                    std::cout << "    Updated: " << result[agent_id].get("updated_at", "").asString() << "\n";
+                }
+                return 0;
+            }
+
+            if (!positionals.empty()) {
+                return std::nullopt;
+            }
+            auto state = topic_load_state_index(ctx.backlog_root);
+            if (format_norm == "json") {
+                std::cout << json_to_string(state, true) << "\n";
+                return 0;
+            }
+            std::cout << "Repo ID: " << state.get("repo_id", "").asString() << "\n";
+            std::cout << "State version: " << state.get("version", 1).asInt() << "\n";
+            std::cout << "Agents:\n";
+            const auto& agents = state["agents"];
+            if (agents.isObject()) {
+                for (const auto& agent_id : agents.getMemberNames()) {
+                    if (!agent.empty() && agent != agent_id) {
+                        continue;
+                    }
+                    const auto topic_id = agents[agent_id].get("active_topic_id", "").asString();
+                    std::cout << "  " << agent_id << ": " << (topic_id.empty() ? "(none)" : topic_id) << "\n";
+                    std::cout << "    Updated: " << agents[agent_id].get("updated_at", "").asString() << "\n";
+                }
+            }
+            return 0;
+        };
+
         if (auto topic_create_rc = try_run_topic_create_fast_path()) {
             return *topic_create_rc;
         }
@@ -9716,6 +9909,9 @@ int main(int InArgc, char* InArgv[]) {
         }
         if (auto topic_distill_rc = try_run_topic_distill_fast_path()) {
             return *topic_distill_rc;
+        }
+        if (auto topic_state_rc = try_run_topic_state_fast_path()) {
+            return *topic_state_rc;
         }
 
         auto topic_safe_snapshot_name = [](const std::string& value) {

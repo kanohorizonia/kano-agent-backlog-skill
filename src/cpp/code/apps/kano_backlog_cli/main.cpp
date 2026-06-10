@@ -4794,6 +4794,214 @@ std::optional<int> try_run_worklog_append_fast_path(int argc, char** argv) {
     return 0;
 }
 
+std::optional<int> try_run_workitem_attach_artifact_fast_path(int argc, char** argv) {
+    if (argc < 5 || argv == nullptr) {
+        return std::nullopt;
+    }
+
+    int workitem_index = -1;
+    for (int i = 1; i + 1 < argc; ++i) {
+        const std::string arg = argv[i];
+        if ((arg == "workitem" || arg == "item") && std::string(argv[i + 1]) == "attach-artifact") {
+            workitem_index = i;
+            break;
+        }
+    }
+    if (workitem_index < 0) {
+        return std::nullopt;
+    }
+
+    std::string path_str = ".";
+    std::string global_product;
+    std::string sandbox;
+    std::string item_ref;
+    std::string artifact_path;
+    std::string agent;
+    std::string product;
+    std::string backlog_root_override;
+    std::string note;
+    std::string format = "plain";
+    bool shared = true;
+
+    const auto option_value = [&](int& index, const std::string& option) -> std::optional<std::string> {
+        const std::string arg = argv[index];
+        const std::string prefix = option + "=";
+        if (arg.rfind(prefix, 0) == 0) {
+            return arg.substr(prefix.size());
+        }
+        if (arg == option && index + 1 < argc) {
+            ++index;
+            return std::string(argv[index]);
+        }
+        return std::nullopt;
+    };
+
+    const auto parse_context_option = [&](int& index) -> bool {
+        if (auto value = option_value(index, "-p")) {
+            path_str = *value;
+            return true;
+        }
+        if (auto value = option_value(index, "--path")) {
+            path_str = *value;
+            return true;
+        }
+        if (auto value = option_value(index, "-P")) {
+            global_product = *value;
+            return true;
+        }
+        if (auto value = option_value(index, "--product")) {
+            global_product = *value;
+            return true;
+        }
+        if (auto value = option_value(index, "-s")) {
+            sandbox = *value;
+            return true;
+        }
+        if (auto value = option_value(index, "--sandbox")) {
+            sandbox = *value;
+            return true;
+        }
+        return false;
+    };
+
+    for (int i = 1; i < workitem_index; ++i) {
+        if (!parse_context_option(i)) {
+            return std::nullopt;
+        }
+    }
+
+    for (int i = workitem_index + 2; i < argc; ++i) {
+        const std::string arg = argv[i];
+        if (arg == "-h" || arg == "--help") {
+            return std::nullopt;
+        }
+        if (item_ref.empty() && arg.rfind("-", 0) != 0) {
+            item_ref = arg;
+            continue;
+        }
+        if (auto value = option_value(i, "--path")) {
+            artifact_path = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--agent")) {
+            agent = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--product")) {
+            product = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--backlog-root-override")) {
+            backlog_root_override = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--note")) {
+            note = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--format")) {
+            format = *value;
+            continue;
+        }
+        if (arg == "--shared") {
+            shared = true;
+            continue;
+        }
+        if (arg == "--no-shared") {
+            shared = false;
+            continue;
+        }
+        if (parse_context_option(i)) {
+            continue;
+        }
+        return std::nullopt;
+    }
+
+    if (item_ref.empty() || artifact_path.empty() || agent.empty()) {
+        return std::nullopt;
+    }
+
+    const auto format_norm = lower_copy(trim_copy(format));
+    if (format_norm != "plain" && format_norm != "json") {
+        throw std::runtime_error("format must be plain or json");
+    }
+
+    BacklogContext ctx;
+    const std::string effective_product = !product.empty() ? product : global_product;
+    if (backlog_root_override.empty()) {
+        ctx = BacklogContext::resolve(
+            path_str,
+            effective_product.empty() ? std::nullopt : std::optional<std::string>(effective_product),
+            sandbox.empty() ? std::nullopt : std::optional<std::string>(sandbox)
+        );
+    } else {
+        ctx.backlog_root = normalized_absolute_path(expand_user_path(backlog_root_override));
+        ctx.project_root = normalized_absolute_path(ctx.backlog_root.parent_path().parent_path());
+        ctx.product_name = effective_product.empty() ? std::string("kano-agent-backlog-skill") : effective_product;
+        ctx.product_root = ctx.backlog_root / "products" / ctx.product_name;
+        ctx.product_def.name = ctx.product_name;
+        ctx.product_def.prefix = "KABS";
+        ctx.product_def.backlog_root = relative_or_string(ctx.product_root, ctx.project_root);
+    }
+
+    const auto source = normalized_absolute_path(expand_user_path(artifact_path));
+    if (!std::filesystem::exists(source) || !std::filesystem::is_regular_file(source)) {
+        throw std::runtime_error("Artifact not found or not a file: " + source.string());
+    }
+
+    CanonicalStore store(ctx.product_root);
+    RefResolver resolver(store);
+    auto item = resolver.resolve(item_ref);
+    if (!item.file_path) {
+        throw std::runtime_error("Resolved item has no file path: " + item_ref);
+    }
+
+    const auto base_root = shared
+        ? (ctx.backlog_root / "_shared" / "artifacts")
+        : (ctx.product_root / "artifacts");
+    const auto dest_dir = base_root / item.id;
+    std::filesystem::create_directories(dest_dir);
+
+    auto destination = dest_dir / source.filename();
+    if (std::filesystem::exists(destination)) {
+        const auto stem = destination.stem().string();
+        const auto extension = destination.extension().string();
+        int suffix = 1;
+        do {
+            destination = dest_dir / (stem + "-" + std::to_string(suffix++) + extension);
+        } while (std::filesystem::exists(destination));
+    }
+    std::filesystem::copy_file(source, destination);
+
+    const auto rel_link = relative_or_string(destination, item.file_path->parent_path());
+    std::string message = "Artifact attached: [" + destination.filename().string() + "](" + rel_link + ")";
+    if (!note.empty()) {
+        message += " - " + note;
+    }
+    StateMachine::record_worklog(item, agent, message);
+    store.write(item);
+
+    if (format_norm == "json") {
+        Json::Value payload(Json::objectValue);
+        payload["id"] = item.id;
+        payload["source"] = source.string();
+        payload["destination"] = destination.string();
+        payload["worklog_appended"] = true;
+        payload["shared"] = shared;
+        std::cout << json_to_string(payload, false) << "\n";
+        return 0;
+    }
+
+    std::cout << "OK: Attached artifact to " << item.id << "\n";
+    std::cout << "  Source: " << source.filename().string() << "\n";
+    std::cout << "  Dest: " << destination.string() << "\n";
+    if (!note.empty()) {
+        std::cout << "  Note: " << note << "\n";
+    }
+
+    return 0;
+}
+
 std::optional<int> try_run_admin_items_fast_path(int argc, char** argv) {
     if (argc < 5 || argv == nullptr) {
         return std::nullopt;
@@ -5831,6 +6039,9 @@ int main(int InArgc, char* InArgv[]) {
             return *rc;
         }
         if (auto rc = try_run_worklog_append_fast_path(parse_argc, parse_argv)) {
+            return *rc;
+        }
+        if (auto rc = try_run_workitem_attach_artifact_fast_path(parse_argc, parse_argv)) {
             return *rc;
         }
         if (auto rc = try_run_admin_items_fast_path(parse_argc, parse_argv)) {

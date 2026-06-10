@@ -10014,6 +10014,285 @@ int main(int InArgc, char* InArgv[]) {
             return result;
         };
 
+        auto try_run_topic_snapshot_fast_path = [&]() -> std::optional<int> {
+            int topic_index = -1;
+            for (int i = 1; i + 2 < parse_argc; ++i) {
+                if (std::string(parse_argv[i]) == "topic" && std::string(parse_argv[i + 1]) == "snapshot") {
+                    topic_index = i;
+                    break;
+                }
+            }
+            if (topic_index < 0) {
+                return std::nullopt;
+            }
+
+            const std::string action = parse_argv[topic_index + 2];
+            if (action != "create" && action != "list" && action != "restore" && action != "cleanup") {
+                return std::nullopt;
+            }
+
+            std::string local_path = ".";
+            std::string local_product;
+            std::string local_sandbox;
+            std::vector<std::string> positionals;
+            std::string format = "plain";
+            std::string agent;
+            std::string description;
+            bool no_materials = false;
+            bool no_backup = false;
+            bool manifest_only = false;
+            bool brief_only = false;
+            bool notes_only = false;
+            int ttl_days = 30;
+            int keep_latest = 5;
+            bool apply_cleanup = false;
+
+            const auto option_value = [&](int& index, const std::string& option) -> std::optional<std::string> {
+                const std::string arg = parse_argv[index];
+                const std::string prefix_text = option + "=";
+                if (arg.rfind(prefix_text, 0) == 0) {
+                    return arg.substr(prefix_text.size());
+                }
+                if (arg == option && index + 1 < parse_argc) {
+                    ++index;
+                    return std::string(parse_argv[index]);
+                }
+                return std::nullopt;
+            };
+
+            const auto parse_context_option = [&](int& index) -> bool {
+                if (auto value = option_value(index, "-p")) {
+                    local_path = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "--path")) {
+                    local_path = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "-P")) {
+                    local_product = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "--product")) {
+                    local_product = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "-s")) {
+                    local_sandbox = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "--sandbox")) {
+                    local_sandbox = *value;
+                    return true;
+                }
+                return false;
+            };
+
+            for (int i = 1; i < topic_index; ++i) {
+                if (!parse_context_option(i)) {
+                    return std::nullopt;
+                }
+            }
+
+            for (int i = topic_index + 3; i < parse_argc; ++i) {
+                const std::string arg = parse_argv[i];
+                if (arg == "-h" || arg == "--help") {
+                    return std::nullopt;
+                }
+                if (auto value = option_value(i, "--format")) {
+                    format = *value;
+                    continue;
+                }
+                if (auto value = option_value(i, "--agent")) {
+                    agent = *value;
+                    continue;
+                }
+                if (auto value = option_value(i, "--description")) {
+                    description = *value;
+                    continue;
+                }
+                if (auto value = option_value(i, "--ttl-days")) {
+                    ttl_days = std::stoi(*value);
+                    continue;
+                }
+                if (auto value = option_value(i, "--keep-latest")) {
+                    keep_latest = std::stoi(*value);
+                    continue;
+                }
+                if (arg == "--no-materials") {
+                    no_materials = true;
+                    continue;
+                }
+                if (arg == "--no-backup") {
+                    no_backup = true;
+                    continue;
+                }
+                if (arg == "--manifest-only") {
+                    manifest_only = true;
+                    continue;
+                }
+                if (arg == "--brief-only") {
+                    brief_only = true;
+                    continue;
+                }
+                if (arg == "--notes-only") {
+                    notes_only = true;
+                    continue;
+                }
+                if (arg == "--apply") {
+                    apply_cleanup = true;
+                    continue;
+                }
+                if (parse_context_option(i)) {
+                    continue;
+                }
+                if (arg.rfind("-", 0) != 0) {
+                    positionals.push_back(arg);
+                    continue;
+                }
+                return std::nullopt;
+            }
+
+            const auto format_norm = lower_copy(format.empty() ? std::string("plain") : format);
+            if (format_norm != "plain" && format_norm != "json") {
+                throw std::runtime_error("format must be one of: plain, json");
+            }
+
+            auto ctx = BacklogContext::resolve(
+                local_path,
+                local_product.empty() ? std::nullopt : std::optional<std::string>(local_product),
+                local_sandbox.empty() ? std::nullopt : std::optional<std::string>(local_sandbox)
+            );
+
+            if (action == "create") {
+                if (positionals.size() != 2 || agent.empty()) {
+                    return std::nullopt;
+                }
+                const auto result = topic_create_snapshot(
+                    ctx.backlog_root,
+                    positionals[0],
+                    positionals[1],
+                    description,
+                    agent,
+                    !no_materials
+                );
+                if (format_norm == "json") {
+                    Json::Value payload(Json::objectValue);
+                    payload["topic"] = result.topic;
+                    payload["snapshot_name"] = result.snapshot_name;
+                    payload["snapshot_path"] = result.snapshot_path.string();
+                    payload["created_at"] = result.created_at;
+                    std::cout << json_to_string(payload, false) << "\n";
+                } else {
+                    std::cout << "Created snapshot '" << result.snapshot_name << "' for topic '" << result.topic << "'\n";
+                    std::cout << "  Created at: " << result.created_at << "\n";
+                    std::cout << "  Path: " << result.snapshot_path.string() << "\n";
+                }
+                return 0;
+            }
+
+            if (action == "list") {
+                if (positionals.size() != 1) {
+                    return std::nullopt;
+                }
+                const auto canonical_topic = topic_normalize_name(positionals[0]);
+                const auto snapshots = topic_list_snapshots(ctx.backlog_root, canonical_topic);
+                if (format_norm == "json") {
+                    Json::Value payload(Json::objectValue);
+                    payload["topic"] = canonical_topic;
+                    payload["snapshots"] = snapshots;
+                    std::cout << json_to_string(payload, true) << "\n";
+                    return 0;
+                }
+                if (snapshots.empty()) {
+                    std::cout << "No snapshots found for topic '" << canonical_topic << "'\n";
+                    return 0;
+                }
+                std::cout << "Snapshots for topic '" << canonical_topic << "' (" << snapshots.size() << " total):\n\n";
+                for (const auto& snapshot : snapshots) {
+                    std::cout << "  " << snapshot.get("name", "").asString() << "\n";
+                    std::cout << "     Created: " << snapshot.get("created_at", "").asString() << "\n";
+                    std::cout << "     By: " << snapshot.get("created_by", "").asString() << "\n";
+                    if (!snapshot.get("description", "").asString().empty()) {
+                        std::cout << "     Description: " << snapshot.get("description", "").asString() << "\n";
+                    }
+                    std::cout << "\n";
+                }
+                return 0;
+            }
+
+            if (action == "restore") {
+                if (positionals.size() != 2 || agent.empty()) {
+                    return std::nullopt;
+                }
+                bool restore_manifest = true;
+                bool restore_brief = true;
+                bool restore_notes = true;
+                if (manifest_only || brief_only || notes_only) {
+                    restore_manifest = manifest_only;
+                    restore_brief = brief_only;
+                    restore_notes = notes_only;
+                }
+                const auto result = topic_restore_snapshot(
+                    ctx.backlog_root,
+                    positionals[0],
+                    positionals[1],
+                    agent,
+                    restore_manifest,
+                    restore_brief,
+                    restore_notes,
+                    !no_backup
+                );
+                if (format_norm == "json") {
+                    Json::Value payload(Json::objectValue);
+                    payload["topic"] = result.topic;
+                    payload["snapshot_name"] = result.snapshot_name;
+                    payload["restored_at"] = result.restored_at;
+                    payload["restored_components"] = string_array_json(result.restored_components);
+                    std::cout << json_to_string(payload, false) << "\n";
+                } else {
+                    std::cout << "Restored topic '" << result.topic << "' from snapshot '" << result.snapshot_name << "'\n";
+                    std::cout << "  Restored at: " << result.restored_at << "\n";
+                    std::cout << "  Components restored: " << join_strings(result.restored_components) << "\n";
+                    if (!no_backup) {
+                        std::cout << "  Automatic backup created before restore\n";
+                    }
+                }
+                return 0;
+            }
+
+            if (positionals.size() != 1) {
+                return std::nullopt;
+            }
+            const auto result = topic_cleanup_snapshots(
+                ctx.backlog_root,
+                positionals[0],
+                ttl_days,
+                keep_latest,
+                !apply_cleanup
+            );
+            if (format_norm == "json") {
+                std::cout << json_to_string(result, true) << "\n";
+                return 0;
+            }
+            std::cout << (result.get("dry_run", true).asBool() ? "DRY RUN" : "APPLY")
+                      << ": Topic '" << result.get("topic", "").asString() << "'\n";
+            std::cout << "  Snapshots scanned: " << result.get("snapshots_scanned", 0).asInt() << "\n";
+            std::cout << "  Snapshots deleted: " << result.get("snapshots_deleted", 0).asInt() << "\n";
+            const auto deleted_files = result["deleted_files"];
+            if (deleted_files.isArray() && !deleted_files.empty()) {
+                std::cout << "  Deleted files:\n";
+                for (const auto& file_path : deleted_files) {
+                    std::cout << "    - " << file_path.asString() << "\n";
+                }
+            }
+            return 0;
+        };
+
+        if (auto topic_snapshot_rc = try_run_topic_snapshot_fast_path()) {
+            return *topic_snapshot_rc;
+        }
+
         // ============================================================
         // topic group
         // ============================================================

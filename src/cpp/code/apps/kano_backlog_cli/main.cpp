@@ -11159,6 +11159,211 @@ int main(int InArgc, char* InArgv[]) {
             return *topic_cleanup_rc;
         }
 
+        auto try_run_chunks_fast_path = [&]() -> std::optional<int> {
+            int chunks_index = -1;
+            for (int i = 1; i + 1 < parse_argc; ++i) {
+                if (std::string(parse_argv[i]) == "chunks") {
+                    chunks_index = i;
+                    break;
+                }
+            }
+            if (chunks_index < 0 || chunks_index + 1 >= parse_argc) {
+                return std::nullopt;
+            }
+
+            const std::string action = parse_argv[chunks_index + 1];
+            if (action != "build" && action != "query") {
+                return std::nullopt;
+            }
+
+            std::string local_path = ".";
+            std::string local_product;
+            std::string local_sandbox;
+            std::string command_product;
+            std::string backlog_root;
+            std::string cache_root;
+            std::string format = "markdown";
+            std::string query;
+            int k = 10;
+            bool force = false;
+
+            const auto option_value = [&](int& index, const std::string& option) -> std::optional<std::string> {
+                const std::string arg = parse_argv[index];
+                const std::string prefix_text = option + "=";
+                if (arg.rfind(prefix_text, 0) == 0) {
+                    return arg.substr(prefix_text.size());
+                }
+                if (arg == option && index + 1 < parse_argc) {
+                    ++index;
+                    return std::string(parse_argv[index]);
+                }
+                return std::nullopt;
+            };
+
+            const auto parse_context_option = [&](int& index) -> bool {
+                if (auto value = option_value(index, "-p")) {
+                    local_path = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "--path")) {
+                    local_path = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "-P")) {
+                    local_product = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "--sandbox")) {
+                    local_sandbox = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "-s")) {
+                    local_sandbox = *value;
+                    return true;
+                }
+                return false;
+            };
+
+            for (int i = 1; i < chunks_index; ++i) {
+                if (!parse_context_option(i)) {
+                    return std::nullopt;
+                }
+            }
+
+            for (int i = chunks_index + 2; i < parse_argc; ++i) {
+                const std::string arg = parse_argv[i];
+                if (arg == "-h" || arg == "--help") {
+                    return std::nullopt;
+                }
+                if (action == "query" && query.empty() && arg.rfind("-", 0) != 0) {
+                    query = arg;
+                    continue;
+                }
+                if (auto value = option_value(i, "--product")) {
+                    command_product = *value;
+                    continue;
+                }
+                if (auto value = option_value(i, "--backlog-root")) {
+                    backlog_root = *value;
+                    continue;
+                }
+                if (auto value = option_value(i, "--cache-root")) {
+                    cache_root = *value;
+                    continue;
+                }
+                if (auto value = option_value(i, "--format")) {
+                    format = *value;
+                    continue;
+                }
+                if (action == "query") {
+                    if (auto value = option_value(i, "--k")) {
+                        k = std::stoi(*value);
+                        continue;
+                    }
+                }
+                if (action == "build" && arg == "--force") {
+                    force = true;
+                    continue;
+                }
+                if (parse_context_option(i)) {
+                    continue;
+                }
+                return std::nullopt;
+            }
+
+            if (action == "query" && query.empty()) {
+                return std::nullopt;
+            }
+
+            const auto format_norm = lower_copy(format.empty() ? std::string("markdown") : format);
+            if (format_norm != "markdown" && format_norm != "json") {
+                throw std::runtime_error("format must be one of: markdown, json");
+            }
+
+            const auto resolve_chunks_ctx = [&]() {
+                const auto effective_product = !command_product.empty() ? command_product : local_product;
+                if (!backlog_root.empty()) {
+                    BacklogContext ctx;
+                    ctx.backlog_root = normalized_absolute_path(std::filesystem::path(backlog_root));
+                    ctx.project_root = normalized_absolute_path(ctx.backlog_root.parent_path().parent_path());
+                    ctx.product_name = !effective_product.empty() ? effective_product : std::string("kano-agent-backlog-skill");
+                    ctx.product_root = ctx.backlog_root / "products" / ctx.product_name;
+                    ctx.product_def.name = ctx.product_name;
+                    ctx.product_def.prefix = "KABS";
+                    ctx.product_def.backlog_root = relative_or_string(ctx.product_root, ctx.project_root);
+                    return ctx;
+                }
+                return BacklogContext::resolve(
+                    local_path,
+                    effective_product.empty() ? std::nullopt : std::optional<std::string>(effective_product),
+                    local_sandbox.empty() ? std::nullopt : std::optional<std::string>(local_sandbox)
+                );
+            };
+
+            auto ctx = resolve_chunks_ctx();
+            if (action == "build") {
+                auto result = build_native_backlog_chunks_db(ctx, force, cache_root);
+                if (format_norm == "json") {
+                    Json::Value payload(Json::objectValue);
+                    payload["product"] = ctx.product_name;
+                    payload["db_path"] = result.db_path.string();
+                    payload["items_indexed"] = result.items_indexed;
+                    payload["chunks_indexed"] = result.chunks_indexed;
+                    payload["build_time_ms"] = result.build_time_ms;
+                    std::cout << json_to_string(payload, true) << "\n";
+                } else {
+                    std::cout << "# Build Chunks DB: " << ctx.product_name << "\n";
+                    std::cout << "- db_path: " << result.db_path.string() << "\n";
+                    std::cout << "- items_indexed: " << result.items_indexed << "\n";
+                    std::cout << "- chunks_indexed: " << result.chunks_indexed << "\n";
+                    std::cout << "- build_time_ms: " << std::fixed << std::setprecision(2) << result.build_time_ms << "\n";
+                }
+                return 0;
+            }
+
+            auto results = query_native_backlog_chunks(ctx, query, k, cache_root);
+            if (format_norm == "json") {
+                Json::Value payload(Json::objectValue);
+                payload["product"] = ctx.product_name;
+                payload["query"] = query;
+                payload["k"] = k;
+                Json::Value rows(Json::arrayValue);
+                for (const auto& r : results) {
+                    Json::Value row(Json::objectValue);
+                    row["item_id"] = r.item_id;
+                    row["item_title"] = r.item_title;
+                    row["item_path"] = r.item_path;
+                    row["chunk_id"] = r.chunk_id;
+                    row["parent_uid"] = r.parent_uid;
+                    row["section"] = r.section;
+                    row["content"] = r.content;
+                    row["score"] = r.score;
+                    rows.append(row);
+                }
+                payload["results"] = rows;
+                std::cout << json_to_string(payload, true) << "\n";
+            } else {
+                std::cout << "# Chunks Search: " << ctx.product_name << "\n";
+                std::cout << "- query: " << query << "\n";
+                std::cout << "- k: " << k << "\n";
+                std::cout << "- results_count: " << results.size() << "\n\n";
+                int row_index = 1;
+                for (const auto& r : results) {
+                    std::cout << "## Result " << row_index++ << " (score: " << std::fixed << std::setprecision(4) << r.score << ")\n";
+                    std::cout << "- item: " << r.item_id << " (" << r.item_title << ")\n";
+                    std::cout << "- path: " << r.item_path << "\n";
+                    std::cout << "- section: " << (r.section.empty() ? "unknown" : r.section) << "\n";
+                    std::cout << "- chunk_id: " << r.chunk_id << "\n";
+                    std::cout << "- text: " << preview_text(r.content) << "\n\n";
+                }
+            }
+            return 0;
+        };
+
+        if (auto chunks_rc = try_run_chunks_fast_path()) {
+            return *chunks_rc;
+        }
+
         auto topic_safe_snapshot_name = [](const std::string& value) {
             std::string safe;
             for (const unsigned char ch : value) {

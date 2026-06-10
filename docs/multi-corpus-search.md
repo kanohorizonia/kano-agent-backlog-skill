@@ -130,15 +130,15 @@ version = "v1"
 target_tokens = 400
 max_tokens = 512
 overlap_tokens = 50
-tokenizer_adapter = "tiktoken"
+tokenizer_adapter = "heuristic"
 
 [tokenizer]
-adapter = "tiktoken"
+adapter = "heuristic"
 model = "cl100k_base"
 max_tokens = 8191
 
 [embedding]
-provider = "sentence-transformers"
+provider = "native-placeholder"
 model = "all-MiniLM-L6-v2"
 dimension = 384
 

@@ -1,8 +1,6 @@
 # kano-agent-backlog-skill
 
-[![PyPI version](https://img.shields.io/pypi/v/kano-agent-backlog-skill.svg)](https://pypi.org/project/kano-agent-backlog-skill/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
-[![Python 3.8+](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/downloads/)
 [![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-2ea44f.svg)](https://agentskill-backlog.kanohorizonia.com/)
 
 Local-first backlog workflow for AI coding agents, with durable markdown work items, ADRs, worklogs, release evidence, and multi-agent handoff.
@@ -19,11 +17,7 @@ Most agent workflows still depend on fragile chat memory. That breaks down when 
 
 ## Native implementation direction
 
-The current public release still includes the Python implementation and Python packaging path. A native C++ CLI remains a future direction, not the current stable public contract.
-
-The motivation is practical rather than ideological. In agentic workflows, an agent may call the same skill CLI hundreds or thousands of times while exploring, validating, and repairing a task. A Python command pays interpreter startup and import cost on every call; a native CLI can start as a single binary and return much faster. That can improve runtime dependencies, distribution ergonomics, CI throughput, and repeated agent-tool invocation costs.
-
-That direction is still future-facing until the native implementation is validated by tests and docs at the same level as the current Python path. C++ is not a substitute for design or review, and it will not be presented here as the stable public CLI until that validation is complete.
+The repo-local executable contract is the native C++ CLI. The `scripts/kob` and `scripts/kano-backlog` launchers require a locally built native binary and no longer fall back to Python. The old Python runtime and pytest oracle have been removed from this repo; native C++ smoke tests and release gates are the supported verification surface.
 
 ## What it provides
 
@@ -38,23 +32,23 @@ That direction is still future-facing until the native implementation is validat
 ## Current release status
 
 - `0.0.2` released
-- `0.0.3` is the current OSS-readiness release target
-- the current public release still includes Python
-- native C++ CLI migration remains future-facing until validated
+- this native milestone is not part of the old `0.0.3` Python-public release contract
+- repo-local CLI usage is native C++ only
+- Python package publishing is retired for this milestone
 - Pre-1.0, so schema, CLI details, and public docs can still change
 
 ## Quick start
 
-The current public package path is Python-based. These commands document the existing released behavior targeted for the `0.0.3` OSS-readiness release.
+Build the native CLI from a cloned repository, then use the repo-local launcher:
 
 ```bash
-pip install kano-agent-backlog-skill
-kano-backlog admin init --product my-app --agent codex
-kano-backlog item create --type task --title "Add login" --product my-app --agent codex
-kano-backlog doctor
+pixi run build-dev
+bash scripts/kob admin init --product my-app --agent codex
+bash scripts/kob item create --type task --title "Add login" --product my-app --agent codex
+bash scripts/kob doctor
 ```
 
-If you are working from a clone, start with [docs/agent-quick-start.md](docs/agent-quick-start.md). The repo-local launcher is `bash scripts/kob`: it prefers a locally built native binary and falls back to the Python CLI from `src/python`.
+If you are working from a clone, start with [docs/agent-quick-start.md](docs/agent-quick-start.md). The repo-local launcher is `bash scripts/kob`; it routes to the native binary only.
 
 ## Documentation
 

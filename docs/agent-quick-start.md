@@ -5,74 +5,34 @@ This guide is for AI agents helping users set up and use kano-agent-backlog-skil
 ## For Agents: When to Use This Guide
 
 Use this guide when:
-- User has cloned the skill repository (not installed from PyPI)
-- User wants to use the skill in development mode
+- User has cloned the skill repository
+- User wants to use the native repo-local CLI
 - User asks you to "initialize the backlog skill" or "set up kano-backlog"
 - You need to help set up a local-first backlog system
 
-## Installation: Development Mode
+## Native Repo-Local Setup
 
-When working with a cloned repository, install in **editable mode** so changes to the code take effect immediately.
+When working with a cloned repository, build the native CLI first. The repo-local launcher requires a native binary and does not fall back to Python.
 
-### Step 0: Create Virtual Environment (Strongly Recommended)
+### Step 0: Verify Prerequisites
 
-**IMPORTANT:** Always use a virtual environment to avoid conflicts with system Python packages.
-
-**Windows (PowerShell):**
-```powershell
-# Create venv
-python -m venv .venv
-
-# Activate venv
-.\.venv\Scripts\Activate.ps1
-
-# Verify you're in venv (should show .venv path)
-where.exe python
-```
-
-**Linux/macOS (Bash):**
-```bash
-# Create venv
-python -m venv .venv
-
-# Activate venv
-source .venv/bin/activate
-
-# Verify you're in venv (should show .venv path)
-which python
-```
-
-### Step 1: Verify Prerequisites
+Use the repository Pixi environment for repeatable native builds:
 
 ```bash
-# Check Python version (must be 3.8+)
-python --version
-
-# Verify you're in a virtual environment (CRITICAL)
-# Windows: where.exe python
-# Linux/macOS: which python
-# Should show .venv path, NOT system Python
+pixi run env-summary
 ```
 
-### Step 2: Install in Editable Mode
+### Step 1: Build the Native CLI
 
 ```bash
-# Navigate to the skill directory
-cd skills/kano-agent-backlog-skill
-
-# Install with dev dependencies
-pip install -e ".[dev]"
-
-# This installs:
-# - The kano-backlog CLI command
-# - All runtime dependencies
-# - Development tools (pytest, black, isort, mypy)
+pixi run build-dev
 ```
 
-**What `-e` (editable mode) does:**
-- Creates a link to the source code instead of copying files
-- Code changes take effect immediately without reinstalling
-- Perfect for development and testing
+### Step 2: Run the Native Smoke Tests
+
+```bash
+pixi run quick-test
+```
 
 ### Step 3: Verify Installation
 
@@ -81,12 +41,11 @@ pip install -e ".[dev]"
 bash scripts/internal/show-version.sh
 # Expected output: kob version from VERSION
 
-# Inspect repo-local launcher surface (native first, Python fallback)
+# Inspect repo-local native launcher surface
 bash scripts/kob --help
 
 # Run environment check
 bash scripts/kob doctor
-# All checks should pass (✅)
 ```
 
 ## Initialization: Create First Backlog
@@ -270,54 +229,33 @@ bash scripts/kob item create --type task --title "My task" --product my-app
 
 ## Troubleshooting
 
-### Windows: "ModuleNotFoundError: No module named 'kano_backlog_cli'"
+### Windows: stale Python module errors
 
-**Problem:** The public Python-installed `kano-backlog.exe` path can behave differently from repo-local development workflows in some Windows environments
+**Problem:** A stale Python-installed `kano-backlog.exe` from an older release is being used instead of the repo-local native launcher. Typical errors mention missing `kano_backlog_cli` or `kano_backlog_core` modules.
 
-**Solution (Repo-local launcher):** If you are working from a repo clone, use the repo-local launcher. It prefers a native binary when present and otherwise falls back to Python from `src/python`:
+**Solution (Repo-local launcher):** Build the native binary and invoke the repo-local launcher from the clone:
 
 ```powershell
-# Use the local launcher from the repo root
+pixi run build-dev
 bash scripts/kob item create --type task --title "My task" --product my-app --agent kiro
 ```
 
 **Why this happens:**
-- The packaged Python wrapper and repo-local development launchers are different execution paths
-- The repo-local launcher prefers the current native build output and falls back to Python when the native binary is missing
+- The old packaged Python wrapper and the repo-local native launcher are different execution paths
+- The repo-local launcher now requires the current native build output
 
-**Alternative:** Reinstall in a clean venv:
-```powershell
-# Deactivate current venv
-deactivate
-
-# Remove old venv
-Remove-Item -Recurse -Force .venv
-
-# Create fresh venv
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-
-# Reinstall
-cd skills/kano-agent-backlog-skill
-pip install -e ".[dev]"
-```
+**Alternative:** Remove the stale Python console script from PATH and keep using `bash scripts/kob` from the repository root.
 
 ### "kob: command not found"
 
-**Problem:** CLI not in PATH after installation
+**Problem:** CLI not in PATH after installation.
 
-**Solution:**
-```bash
-# Verify installation
-pip show kano-agent-backlog-skill
+**Solution:** Use the repo-local launcher:
 
-# If installed but not in PATH, use the repo-local launcher:
+```powershell
+pixi run build-dev
 bash scripts/internal/show-version.sh
 bash scripts/kob --help
-
-# Or reinstall:
-pip uninstall kano-agent-backlog-skill
-pip install -e ".[dev]"
 ```
 
 ### "Missing --agent parameter"
@@ -344,19 +282,6 @@ bash scripts/kob item create --type task --title "My task" --product my-app --ag
 - `topic create`
 
 See the [Agent Identity](#agent-identity-critical) section for valid agent IDs.
-
-### "No module named 'kano_backlog_core'"
-
-**Problem:** Package not installed or installed incorrectly
-
-**Solution:**
-```bash
-# Ensure you're in the skill directory
-cd skills/kano-agent-backlog-skill
-
-# Reinstall in editable mode
-pip install -e ".[dev]"
-```
 
 ### "Invalid state transition"
 
@@ -395,7 +320,8 @@ bash scripts/kob workitem update-state <ID> --state Done --product <product>
 ### Installation
 ```bash
 cd skills/kano-agent-backlog-skill
-pip install -e ".[dev]"
+pixi run build-dev
+pixi run quick-test
 bash scripts/internal/show-version.sh
 bash scripts/kob --help
 bash scripts/kob doctor
@@ -425,21 +351,6 @@ bash scripts/kob adr create --title "<title>" --product <product> --agent <agent
 bash scripts/kob doctor
 ```
 
-## For Users: Installing from PyPI
-
-If the user wants to install the released version instead of development mode:
-
-```bash
-# Install from PyPI (when available)
-pip install kano-agent-backlog-skill
-
-# Verify
-kano-backlog --help
-kano-backlog doctor
-```
-
-See [Quick Start Guide](quick-start.md) for the standard installation workflow.
-
 ## Next Steps
 
 After setup, guide the user through:
@@ -461,7 +372,6 @@ After setup, guide the user through:
 ---
 
 **Remember:** 
-- **Always use a virtual environment** (`.venv`) to avoid package conflicts
 - **Always provide explicit `--agent` flags** for auditability
 - **On Windows, if you encounter module or wrapper issues**, prefer the repo-local `kob` launcher after running the native build step
-- Install with `pip install -e ".[dev]"` for development mode
+- Use `pixi run build-dev` and `pixi run quick-test` for native development

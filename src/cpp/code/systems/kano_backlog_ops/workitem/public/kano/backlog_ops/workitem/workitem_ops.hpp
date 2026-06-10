@@ -13,7 +13,6 @@ class WorkitemOps {
 public:
     /**
      * Create a new backlog item.
-     * Ported from workitem.py:create_item
      */
     static kano::backlog_core::CreateItemResult create_item(
         BacklogIndex& index,
@@ -31,7 +30,6 @@ public:
 
     /**
      * Update item state with transition validation.
-     * Ported from workitem.py:update_state
      */
     static kano::backlog_core::UpdateStateResult update_state(
         BacklogIndex& index,

@@ -8,55 +8,11 @@ on:
   workflow_dispatch:
 
 jobs:
-  python-gates:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install Python and docs dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
-          python -m pip install mkdocs mkdocs-material "mkdocstrings[python]" pyyaml
-
-      - name: Version checks
-        run: |
-          bash src/shell/support/show-version.sh
-          python -m pytest tests/test_version.py tests/test_version_management.py -q
-
-      - name: Package build
-        run: python -m build --sdist --wheel --outdir dist-test
-
-      - name: Python regression suite
-        run: bash src/shell/test/quick-test.sh
-
-      - name: Advisory lint gate
-        run: bash src/shell/test/lint.sh
-
-      - name: Docs build
-        run: bash src/shell/docs/build-and-deploy.sh --ci
-
   native-gates-linux:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Set up Python for launcher fallback and tooling
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
 
       - name: Install native build dependencies
         run: |
@@ -71,10 +27,18 @@ jobs:
       - name: Build native debug CLI
         run: bash src/shell/support/self-build.sh debug
 
-      - name: Run native tests
-        run: bash src/shell/test/native-test.sh
+      - name: Run native quick tests
+        run: bash src/shell/test/quick-test.sh
 
-      - name: Verify repo-local launcher
+      - name: Verify native runtime gate
+        run: bash src/shell/test/native-runtime-gate.sh
+
+      - name: Run native release phase1 gate
         run: |
-          bash scripts/kob --version
-          bash scripts/kob doctor
+          mkdir -p "$RUNNER_TEMP/backlog"
+          bash scripts/kob admin release check \
+            --version "$(tr -d '\r\n' < VERSION)" \
+            --topic release-gate \
+            --agent ci \
+            --phase phase1 \
+            --backlog-root "$RUNNER_TEMP/backlog"

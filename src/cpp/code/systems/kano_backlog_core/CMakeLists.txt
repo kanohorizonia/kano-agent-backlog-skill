@@ -22,6 +22,7 @@ target_sources(kano_backlog_core
     refs/private/ref_parser.cpp
     refs/public/kano/backlog_core/refs/ref_resolver.hpp
     refs/private/ref_resolver.cpp
+    process/public/kano/backlog_core/process/noninteractive_errors.hpp
 )
 
 add_library(kano::backlog_core ALIAS kano_backlog_core)
@@ -42,6 +43,7 @@ target_include_directories(kano_backlog_core
       state/public
       validation/public
       refs/public
+      process/public
     PRIVATE
       version/private
       models/private

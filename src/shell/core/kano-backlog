@@ -5,30 +5,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 EXPECTED_VERSION="$(tr -d '\r\n' < "$SKILL_ROOT/VERSION")"
 
-find_python_bin() {
-  local candidate
-  for candidate in \
-    "$SKILL_ROOT/.pixi/envs/default/python.exe" \
-    "$SKILL_ROOT/.pixi/envs/default/bin/python" \
-    "$SKILL_ROOT/.venv/Scripts/python.exe" \
-    "$SKILL_ROOT/.venv/bin/python" \
-    "$HOME/.pixi/bin/python" \
-    python \
-    python3 \
-    py
-  do
-    if command -v "$candidate" >/dev/null 2>&1; then
-      printf '%s\n' "$candidate"
-      return 0
-    fi
-    if [[ -x "$candidate" ]]; then
-      printf '%s\n' "$candidate"
-      return 0
-    fi
-  done
-  return 1
-}
-
 resolve_workspace_root() {
   local start_dir="${PWD}"
   while [[ "$start_dir" != "/" && ! -f "$start_dir/.kano/backlog_config.toml" ]]; do
@@ -97,30 +73,17 @@ native_bin_matches_version() {
 
 NATIVE_BIN="$(find_native_bin || true)"
 
-if [[ "${1-}" == "repo-hygiene" || "${1-}" == "export" ]]; then
-  NATIVE_BIN=""
-fi
-
 if [[ -n "$NATIVE_BIN" ]] && native_bin_matches_version "$NATIVE_BIN"; then
   cd "$WORKSPACE_ROOT"
   exec "$NATIVE_BIN" "$@"
 fi
 
-PYTHON_BIN="$(find_python_bin || true)"
-if [[ -z "$PYTHON_BIN" ]]; then
-  echo "Neither a native kano-backlog binary nor a Python interpreter was found." >&2
-  echo "Build native with: bash scripts/internal/self-build.sh debug" >&2
-  echo "Or run via Python after installing deps: python -m pip install -e \".[dev]\"" >&2
-  exit 1
+if [[ -n "$NATIVE_BIN" ]]; then
+  echo "Native kano-backlog binary exists but does not match VERSION $EXPECTED_VERSION." >&2
+  echo "Build native with: pixi run build-dev" >&2
+else
+  echo "Native kano-backlog binary was not found." >&2
+  echo "Build native with: pixi run build-dev" >&2
 fi
-
-cd "$WORKSPACE_ROOT"
-MODULE_ROOT="$SKILL_ROOT/src/python"
-case "$(uname -s 2>/dev/null || printf 'unknown')" in
-  MINGW*|MSYS*|CYGWIN*)
-    if command -v cygpath >/dev/null 2>&1; then
-      MODULE_ROOT="$(cygpath -w "$MODULE_ROOT")"
-    fi
-    ;;
-esac
-exec "$PYTHON_BIN" -c "import sys; sys.path.insert(0, r'$MODULE_ROOT'); from kano_backlog_cli.cli import app; app(prog_name='kano-backlog')" "$@"
+echo "Python fallback has been removed from the repo-local launcher. Build the native binary with: pixi run build-dev" >&2
+exit 127

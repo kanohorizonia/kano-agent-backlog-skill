@@ -17,7 +17,6 @@ references/**/*.json
 references/**/*.sql
 
 # Examples and templates
-examples/**/*.py
 templates/**/*.md
 
 # Exclude patterns (prefix with !)
@@ -25,7 +24,5 @@ templates/**/*.md
 # Exclude derived/generated data
 !htmlcov/
 !.hypothesis/
-!.pytest_cache/
 !.kano/
 !src/
-!tests/

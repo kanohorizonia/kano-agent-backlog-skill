@@ -69,7 +69,9 @@ find "$DEPLOY_DIR" -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
 cp -r "$BUILD_DIR/staged"/* "$DEPLOY_DIR/"
 
 # Restore CNAME for custom-domain GitHub Pages deployments.
-SITE_HOST=$(python -c "from urllib.parse import urlparse; print(urlparse('$SITE_URL').hostname or '')")
+SITE_HOST="${SITE_URL#*://}"
+SITE_HOST="${SITE_HOST%%/*}"
+SITE_HOST="${SITE_HOST%%:*}"
 if [[ -n "$SITE_HOST" && "$SITE_HOST" != *.github.io ]]; then
   printf '%s\n' "$SITE_HOST" > "$DEPLOY_DIR/CNAME"
 fi

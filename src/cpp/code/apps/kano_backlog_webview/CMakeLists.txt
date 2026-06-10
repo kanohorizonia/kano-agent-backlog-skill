@@ -2,6 +2,7 @@ add_executable(kano_backlog_webview main.cpp)
 
 target_link_libraries(kano_backlog_webview
   PRIVATE
+    kano::backlog_core
     kano::kano_backlog_webview_core
 )
 

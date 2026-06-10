@@ -1,3 +1,0 @@
-# Marker file for PEP 561 typed package
-# This file indicates that the kano_backlog_cli package supports type checking
-# and includes inline type annotations that can be used by type checkers like mypy.

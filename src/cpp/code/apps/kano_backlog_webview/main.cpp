@@ -6,6 +6,7 @@
 
 #include <drogon/drogon.h>
 
+#include "kano/backlog_core/process/noninteractive_errors.hpp"
 #include "KanoBacklog.BacklogWebviewService.hpp"
 
 namespace {
@@ -749,6 +750,8 @@ R"HTML(    function typeIcon(type) {
 }  // namespace
 
 int main(int argc, char** argv) {
+  kano::backlog_core::ConfigureNoninteractiveErrorHandling();
+
   const auto productsRoot = ResolveProductsRoot(argc, argv);
   const auto port = ResolvePort(argc, argv);
 

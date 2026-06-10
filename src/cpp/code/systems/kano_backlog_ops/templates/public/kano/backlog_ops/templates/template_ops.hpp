@@ -11,7 +11,7 @@ class TemplateOps {
 public:
     /**
      * Render the complete markdown content for a new item.
-     * Mirrored from item_templates.py:render_item_body
+     * Render the native canonical item body.
      */
     static std::string render_item_body(
         const kano::backlog_core::BacklogItem& item,
@@ -22,7 +22,7 @@ public:
 
     /**
      * Render an Epic index MOC (Map of Content).
-     * Mirrored from item_templates.py:render_epic_index
+     * Render the native canonical epic index.
      */
     static std::string render_epic_index(
         const std::string& item_id,

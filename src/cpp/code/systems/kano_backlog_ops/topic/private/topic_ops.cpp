@@ -49,6 +49,74 @@ std::vector<std::string> json_array_to_strings(const Json::Value& value) {
     return result;
 }
 
+std::vector<int> json_array_to_ints(const Json::Value& value) {
+    std::vector<int> result;
+    if (!value.isArray()) {
+        return result;
+    }
+    for (const auto& entry : value) {
+        if (entry.isInt()) {
+            result.push_back(entry.asInt());
+        }
+    }
+    return result;
+}
+
+std::optional<std::string> json_optional_string(const Json::Value& value) {
+    if (value.isString()) {
+        return value.asString();
+    }
+    return std::nullopt;
+}
+
+TopicOps::TopicManifest::SnippetRef parse_snippet_ref(const Json::Value& value) {
+    TopicOps::TopicManifest::SnippetRef snippet;
+    if (!value.isObject()) {
+        return snippet;
+    }
+    snippet.type = value.get("type", "snippet").asString();
+    snippet.repo = value.get("repo", "local").asString();
+    snippet.revision = json_optional_string(value["revision"]);
+    snippet.file = value.get("file", "").asString();
+    snippet.lines = json_array_to_ints(value["lines"]);
+    snippet.hash = value.get("hash", "").asString();
+    snippet.cached_text = json_optional_string(value["cached_text"]);
+    snippet.collected_at = json_optional_string(value["collected_at"]);
+    snippet.collector = json_optional_string(value["collector"]);
+    return snippet;
+}
+
+std::vector<TopicOps::TopicManifest::SnippetRef> json_array_to_snippets(const Json::Value& value) {
+    std::vector<TopicOps::TopicManifest::SnippetRef> result;
+    if (!value.isArray()) {
+        return result;
+    }
+    for (const auto& entry : value) {
+        if (entry.isObject()) {
+            result.push_back(parse_snippet_ref(entry));
+        }
+    }
+    return result;
+}
+
+Json::Value snippet_ref_to_json(const TopicOps::TopicManifest::SnippetRef& snippet) {
+    Json::Value value(Json::objectValue);
+    value["type"] = snippet.type.empty() ? "snippet" : snippet.type;
+    value["repo"] = snippet.repo.empty() ? "local" : snippet.repo;
+    value["revision"] = snippet.revision ? Json::Value(*snippet.revision) : Json::Value(Json::nullValue);
+    value["file"] = snippet.file;
+    Json::Value lines(Json::arrayValue);
+    for (const auto line : snippet.lines) {
+        lines.append(line);
+    }
+    value["lines"] = lines;
+    value["hash"] = snippet.hash;
+    value["cached_text"] = snippet.cached_text ? Json::Value(*snippet.cached_text) : Json::Value(Json::nullValue);
+    value["collected_at"] = snippet.collected_at ? Json::Value(*snippet.collected_at) : Json::Value(Json::nullValue);
+    value["collector"] = snippet.collector ? Json::Value(*snippet.collector) : Json::Value(Json::nullValue);
+    return value;
+}
+
 std::optional<TopicOps::TopicManifest> parse_manifest(const std::string& content) {
     Json::CharReaderBuilder builder;
     builder["collectComments"] = false;
@@ -66,8 +134,12 @@ std::optional<TopicOps::TopicManifest> parse_manifest(const std::string& content
     m.created_at = root.get("created_at", "").asString();
     m.updated_at = root.get("updated_at", "").asString();
     m.status = root.get("status", "open").asString();
+    m.closed_at = json_optional_string(root["closed_at"]);
     m.seed_items = json_array_to_strings(root["seed_items"]);
     m.pinned_docs = json_array_to_strings(root["pinned_docs"]);
+    m.snippet_refs = json_array_to_snippets(root["snippet_refs"]);
+    m.related_topics = json_array_to_strings(root["related_topics"]);
+    m.has_spec = root.get("has_spec", false).asBool();
 
     if (m.topic.empty()) return std::nullopt;
     return m;
@@ -88,7 +160,7 @@ std::string current_iso_timestamp() {
 }
 
 // ---------------------------------------------------------------------------
-// Item resolution helpers (ported from workset.py _resolve_item_ref)
+// Item resolution helpers shared by topic and workset-style commands.
 // ---------------------------------------------------------------------------
 
 /**
@@ -254,6 +326,7 @@ void TopicOps::save_manifest(
     root["created_at"] = manifest.created_at;
     root["updated_at"] = manifest.updated_at;
     root["status"] = manifest.status;
+    root["closed_at"] = manifest.closed_at ? Json::Value(*manifest.closed_at) : Json::Value(Json::nullValue);
 
     Json::Value seed_items(Json::arrayValue);
     for (const auto& item : manifest.seed_items) {
@@ -266,6 +339,19 @@ void TopicOps::save_manifest(
         pinned_docs.append(doc);
     }
     root["pinned_docs"] = pinned_docs;
+
+    Json::Value snippet_refs(Json::arrayValue);
+    for (const auto& snippet : manifest.snippet_refs) {
+        snippet_refs.append(snippet_ref_to_json(snippet));
+    }
+    root["snippet_refs"] = snippet_refs;
+
+    Json::Value related_topics(Json::arrayValue);
+    for (const auto& topic : manifest.related_topics) {
+        related_topics.append(topic);
+    }
+    root["related_topics"] = related_topics;
+    root["has_spec"] = manifest.has_spec;
 
     Json::StreamWriterBuilder builder;
     builder["indentation"] = "  ";
@@ -455,6 +541,16 @@ std::filesystem::path TopicOps::distill(
     ofs << "**Generated**: " << current_iso_timestamp() << "\n";
     ofs << "**Agent**: " << manifest->agent << "\n\n";
 
+    ofs << "## Related Topics\n\n";
+    if (manifest->related_topics.empty()) {
+        ofs << "- (none)\n\n";
+    } else {
+        for (const auto& topic : manifest->related_topics) {
+            ofs << "- " << topic << "\n";
+        }
+        ofs << "\n";
+    }
+
     if (!manifest->seed_items.empty()) {
         ofs << "## Items (" << manifest->seed_items.size() << ")\n\n";
         for (const auto& item : manifest->seed_items) {
@@ -469,6 +565,46 @@ std::filesystem::path TopicOps::distill(
             ofs << "- " << doc << "\n";
         }
         ofs << "\n";
+    }
+
+    auto spec_dir = topic_path / "spec";
+    if (std::filesystem::exists(spec_dir)) {
+        std::vector<std::pair<std::filesystem::path, std::string>> spec_files = {
+            {spec_dir / "requirements.md", "Requirements"},
+            {spec_dir / "design.md", "Design"},
+            {spec_dir / "tasks.md", "Tasks"}
+        };
+        bool wrote_spec_heading = false;
+        for (const auto& [path, label] : spec_files) {
+            if (!std::filesystem::exists(path)) {
+                continue;
+            }
+            if (!wrote_spec_heading) {
+                ofs << "## Specification\n\n";
+                wrote_spec_heading = true;
+            }
+            ofs << "- [" << label << "](spec/" << path.filename().string() << ")\n";
+        }
+        if (wrote_spec_heading) {
+            ofs << "\n";
+        }
+    }
+
+    ofs << "## Snippet Refs\n\n";
+    if (manifest->snippet_refs.empty()) {
+        ofs << "- (none)\n";
+    } else {
+        for (const auto& snippet : manifest->snippet_refs) {
+            std::string range;
+            if (snippet.lines.size() >= 2) {
+                range = "#L" + std::to_string(snippet.lines[0]) + "-L" + std::to_string(snippet.lines[1]);
+            }
+            ofs << "- " << snippet.file << range;
+            if (!snippet.hash.empty()) {
+                ofs << " (" << snippet.hash << ")";
+            }
+            ofs << "\n";
+        }
     }
 
     ofs.flush();

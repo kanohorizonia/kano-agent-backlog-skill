@@ -15,6 +15,11 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export KOB_CPP_ROOT="${KOB_CPP_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
+export CI="${CI:-true}"
+export KANO_BACKLOG_NONINTERACTIVE=1
+export KANO_TEST_NONINTERACTIVE=1
+export GIT_TERMINAL_PROMPT=0
+export KANO_NATIVE_TEST_TIMEOUT_SECONDS="${KANO_NATIVE_TEST_TIMEOUT_SECONDS:-120}"
 
 PRESET="${1:-windows-ninja-msvc}"
 WITH_E2E="${2:-}"
@@ -87,12 +92,21 @@ write_junit_report() {
   echo "[INFO] JUnit report written: $output_path"
 }
 
+run_native_test_binary() {
+  local test_path="$1"
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "${KANO_NATIVE_TEST_TIMEOUT_SECONDS}s" "$test_path"
+  else
+    "$test_path"
+  fi
+}
+
 for test_exe in backlog_core_smoke_test workitem_ops_smoke_test cli_repo_smoke_test; do
   TEST_PATH="$BIN_DIR/${test_exe}.exe"
   if [[ -f "$TEST_PATH" ]]; then
     echo ""
     echo "[TEST] Running: $test_exe"
-    if "$TEST_PATH"; then
+    if run_native_test_binary "$TEST_PATH"; then
       echo "[PASS] $test_exe"
       add_junit_case "$test_exe" pass
     else

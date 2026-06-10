@@ -169,10 +169,9 @@ UpdateStateResult WorkitemOps::update_state(
                     parent_next_state = ItemState::InProgress;
                 }
             } else if (new_state == ItemState::Done) {
-                // Check siblings
-                // For now, this requires a list_items which we'll stub or implement simply
-                // In Python: siblings = list_items(parent=item.parent, ...)
-                // We'll skip complex sibling check for now to avoid dependency loop or implement a simple index query
+                // Parent synchronization is forward-only. Child completion does not
+                // automatically complete the parent because sibling readiness and
+                // acceptance ownership require an explicit parent transition.
             }
 
             if (parent_next_state != parent_item.state) {
@@ -232,7 +231,7 @@ TrashItemResult WorkitemOps::trash_item(
     
     // 5. Remove from index (or update path if we still want to track it as trashed)
     // For now we'll remove it to be clean, or we could have a 'Trashed' state.
-    // Python implementation moves it out of 'items/' so it's effectively gone from active index.
+    // Moving it out of 'items/' removes it from the active item index.
     index.remove_item(item.id);
     
     return {item_ref, source_path, trashed_path, "trashed", reason};

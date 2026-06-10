@@ -1,20 +1,38 @@
-# Version policy
+# Version Policy
 
-This document records the current public release policy for `kano-agent-backlog-skill`.
+This document records the current release policy for
+`kano-agent-backlog-skill`.
 
-## Current policy
+## Current Policy
 
 - `0.0.2` is already released.
-- `0.0.3` is the current public OSS-readiness release target.
-- `0.0.3` focuses on public-facing cleanup: README/docs coherence, GitHub Pages, package metadata, release hygiene, Codex for OSS positioning, and validation cleanup.
+- `0.0.3` remains the historical OSS-readiness release line.
+- The current native migration milestone is a new contract milestone, not an
+  extension of the old `0.0.3` Python-public package contract.
 
-## Native implementation direction
+## Native Executable Contract
 
-- The current public release still includes the Python implementation and Python packaging path.
-- Native C++ CLI work is a future direction intended to reduce runtime dependencies and improve distribution, CI, and repeated agent CLI ergonomics.
-- Native implementation work should not be presented as the stable public CLI until tests and docs validate it at the same level as the Python path.
+- Repo-local execution is native C++ only through `scripts/kob`,
+  `scripts/kano-backlog`, or the built `kano-backlog` binary.
+- Python package entrypoints, editable installs, pytest oracle tests, and PyPI
+  publishing are retired for this native milestone.
+- Data formats remain compatible: Markdown backlog files, TOML config, and
+  derived SQLite caches continue to be the source-of-truth model.
+- Future exact tokenizer or embedding providers must be implemented as native
+  adapters before they can enter the executable contract.
 
-## Future milestone framing
+## Release Gate Policy
 
-- `0.1.0` and broader native migration work remain future/internal planning until validated.
-- References to `0.1.0` in planning notes should be read as forward-looking, not as the current public release target.
+Native releases must prove:
+
+- the native binary version matches `VERSION`,
+- quick native smoke tests pass,
+- the native runtime gate passes,
+- strict native command coverage passes,
+- no repo-local `.py` or `.pyi` runtime/type-stub files remain outside generated
+  build/cache paths,
+- CI and package artifacts do not expose Python package entrypoints.
+
+Historical release notes may still describe the retired Python path for the
+release where it was true. Current docs and automation should describe the
+native executable contract.

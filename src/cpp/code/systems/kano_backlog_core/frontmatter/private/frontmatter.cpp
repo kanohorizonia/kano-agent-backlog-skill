@@ -47,7 +47,7 @@ std::string Frontmatter::serialize(const FrontmatterContext& ctx) {
 std::map<std::string, std::string> Frontmatter::parse_body_sections(const std::string& body) {
     std::map<std::string, std::string> sections;
     
-    // Define predictable section markers (matching python canonical.py)
+    // Define predictable section markers for canonical body updates.
     static const std::map<std::string, std::string> section_markers = {
         {"context", "# Context"},
         {"goal", "# Goal"},

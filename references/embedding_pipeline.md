@@ -51,9 +51,10 @@ max_tokens = 8192                  # Maximum tokens per model context (optional)
 
 - **adapter** (string, default: "heuristic"): Tokenizer implementation
   - `"heuristic"`: Fast approximation based on character counts and language detection
-  - `"tiktoken"`: Precise tokenization using OpenAI's tiktoken library
 - **model** (string, default: "text-embedding-3-small"): Model identifier for token counting rules
 - **max_tokens** (integer, optional): Override model's default context limit
+
+Python in-process tokenizers such as `tiktoken` and HuggingFace tokenizers are not part of the native executable contract. Exact token behavior must be added through future native adapters.
 
 ### Available Models
 
@@ -76,29 +77,20 @@ dimension = 1536            # Vector dimension
 ### Parameters
 
 - **provider** (string, default: "noop"): Embedding service provider
-  - `"noop"`: Testing provider that generates random vectors
-  - `"openai"`: OpenAI embedding API
-  - `"gemini"`: Google Gemini embedding API (google-genai)
-  - `"sentence-transformers"`: Local embeddings via HuggingFace sentence-transformers (optional dependency)
+  - `"noop"`: Native placeholder provider used by the current executable contract
 - **model** (string): Model identifier for embedding generation
 - **dimension** (integer, default: 1536): Vector dimension size
 
+The current native executable records embedding provider metadata, but build/query/status use deterministic native noop/heuristic behavior. Hosted or local embedding providers must be implemented as native adapters before becoming supported runtime providers. Python in-process providers are retired.
+
 ### Provider-Specific Models
 
-**NoOp Provider** (for testing):
-- `noop-embedding`: Generates consistent random vectors
+**NoOp Provider**:
+- `noop-embedding`: Native placeholder model for deterministic smoke tests and local-first indexing metadata
 
-**OpenAI Provider**:
-- `text-embedding-3-small`: 1536 dimensions
-- `text-embedding-3-large`: 3072 dimensions  
-- `text-embedding-ada-002`: 1536 dimensions
-
-**Gemini Provider**:
-- `gemini-embedding-001`: typically 3072 dimensions (configurable via `output_dimensionality`)
-
-**sentence-transformers Provider** (local):
-- Model IDs like `sentence-transformers/all-MiniLM-L6-v2` (384 dimensions)
-- Or a local directory path containing a downloaded model (no network)
+**Future native provider adapters**:
+- Hosted providers such as OpenAI or Gemini may be supported only through native adapters.
+- Local model providers must not require Python packages or in-process Python runtimes.
 
 ### Additional Options
 
@@ -106,32 +98,10 @@ Provider-specific options can be added under `[embedding.options]`:
 
 ```toml
 [embedding.options]
-api_key = "sk-..."          # OpenAI API key (for openai provider)
-base_url = "https://..."    # Custom API endpoint
-timeout = 30                # Request timeout in seconds
-
-# Gemini options (for gemini provider)
-# api_key = "env:GEMINI_API_KEY"   # or env:GOOGLE_API_KEY
-# output_dimensionality = 3072     # Optional dimension override
-# task_type = "RETRIEVAL_DOCUMENT" # Optional task hint for embeddings
-
-# sentence-transformers options (for sentence-transformers provider)
-device = "cpu"              # Optional; defaults to sentence-transformers behavior
-batch_size = 32              # Optional
-normalize_embeddings = false # Optional
-max_seq_length = 256         # Optional
+timeout = 30                # Reserved for future native hosted providers
 ```
 
-### Caching and offline mode
-
-sentence-transformers uses HuggingFace Hub caching. Useful environment variables:
-
-- `HF_HOME`: root cache directory
-- `SENTENCE_TRANSFORMERS_HOME`: sentence-transformers cache root
-- `TRANSFORMERS_CACHE`: transformers cache (legacy)
-- `HF_HUB_OFFLINE=1` and/or `TRANSFORMERS_OFFLINE=1`: force offline mode
-
-If you want fully offline runs, download the model once, then point `embedding.model` at the local model directory.
+Python package cache variables are intentionally out of scope for this native executable milestone.
 
 ## [vector] Section
 
@@ -198,9 +168,9 @@ collection = "backlog"
 metric = "cosine"
 ```
 
-### Production Profile with OpenAI
+### Hosted Provider Placeholder
 
-Configuration for production use with OpenAI embeddings:
+Configuration metadata for a future hosted native provider:
 
 ```toml
 [chunking]
@@ -209,7 +179,7 @@ max_tokens = 1024
 overlap_tokens = 64
 
 [tokenizer]
-adapter = "tiktoken"
+adapter = "heuristic"
 model = "text-embedding-3-small"
 max_tokens = 8192
 
@@ -219,7 +189,6 @@ model = "text-embedding-3-small"
 dimension = 1536
 
 [embedding.options]
-api_key = "${OPENAI_API_KEY}"
 timeout = 30
 
 [vector]
@@ -228,6 +197,8 @@ path = ".cache/vector"
 collection = "backlog"
 metric = "cosine"
 ```
+
+This profile records intended provider metadata. It does not enable a Python provider or bypass the current native noop/heuristic runtime behavior.
 
 ### High-Capacity Configuration
 
@@ -240,7 +211,7 @@ max_tokens = 2048
 overlap_tokens = 128
 
 [tokenizer]
-adapter = "tiktoken"
+adapter = "heuristic"
 model = "text-embedding-3-large"
 max_tokens = 8192
 

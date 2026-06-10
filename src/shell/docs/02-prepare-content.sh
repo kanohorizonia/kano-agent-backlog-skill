@@ -1,14 +1,6 @@
 #!/bin/bash
 set -euo pipefail
 
-docs_python() {
-  if [ "${KANO_DOCS_USE_PIXI:-0}" = "1" ]; then
-    pixi run python "$@"
-    return
-  fi
-  python "$@"
-}
-
 # Enhanced content preparation with YAML-based configuration
 # Supports content mapping, navigation structure, and automatic index generation
 
@@ -34,23 +26,8 @@ mkdir -p "$BUILD_DIR/content_quartz"
 echo "Checking prerequisites..."
 PREREQ_MISSING=false
 
-if [ "${KANO_DOCS_USE_PIXI:-0}" = "1" ]; then
-  if ! command -v pixi >/dev/null 2>&1; then
-    echo "ERROR: pixi not found for docs Python launcher"
-    PREREQ_MISSING=true
-  fi
-elif ! command -v python >/dev/null 2>&1; then
-  echo "ERROR: Python not found"
-  PREREQ_MISSING=true
-fi
-
 if [ ! -x "$REPO_ROOT/scripts/kob" ] && ! command -v kob >/dev/null 2>&1; then
   echo "WARNING: kob command surface not available - CLI docs will be limited"
-fi
-
-if ! command -v mkdocs >/dev/null 2>&1; then
-  echo "WARNING: MkDocs not available - API docs will be limited"
-  echo "Install with: pip install mkdocs mkdocs-material mkdocstrings[python]"
 fi
 
 if [ "$PREREQ_MISSING" = true ]; then
@@ -109,50 +86,30 @@ echo "---" >> "$BUILD_DIR/content_quartz/api/overview.md"
 echo "" >> "$BUILD_DIR/content_quartz/api/overview.md"
 echo "# API Overview" >> "$BUILD_DIR/content_quartz/api/overview.md"
 echo "" >> "$BUILD_DIR/content_quartz/api/overview.md"
-echo "Python API reference for Kano Agent Backlog Skill." >> "$BUILD_DIR/content_quartz/api/overview.md"
+echo "Native executable API reference for Kano Agent Backlog Skill." >> "$BUILD_DIR/content_quartz/api/overview.md"
 echo "" >> "$BUILD_DIR/content_quartz/api/overview.md"
-echo "## Core Modules" >> "$BUILD_DIR/content_quartz/api/overview.md"
+echo "## Public Contract" >> "$BUILD_DIR/content_quartz/api/overview.md"
 echo "" >> "$BUILD_DIR/content_quartz/api/overview.md"
-echo "- **kano_backlog_skill.core** - Core backlog management functionality" >> "$BUILD_DIR/content_quartz/api/overview.md"
-echo "- **kano_backlog_skill.cli** - Command-line interface" >> "$BUILD_DIR/content_quartz/api/overview.md"
-echo "- **kano_backlog_skill.models** - Data models and schemas" >> "$BUILD_DIR/content_quartz/api/overview.md"
-echo "- **kano_backlog_skill.services** - Business logic services" >> "$BUILD_DIR/content_quartz/api/overview.md"
+echo "- **scripts/kob** - Repo-local launcher for the native CLI" >> "$BUILD_DIR/content_quartz/api/overview.md"
+echo "- **scripts/kano-backlog** - Compatibility launcher for the native CLI" >> "$BUILD_DIR/content_quartz/api/overview.md"
+echo "- **kano-backlog native binary** - C++ executable command surface" >> "$BUILD_DIR/content_quartz/api/overview.md"
 echo "" >> "$BUILD_DIR/content_quartz/api/overview.md"
-echo "## Documentation" >> "$BUILD_DIR/content_quartz/api/overview.md"
+echo "Python import APIs are not a supported public runtime contract for this native milestone." >> "$BUILD_DIR/content_quartz/api/overview.md"
 echo "" >> "$BUILD_DIR/content_quartz/api/overview.md"
-echo "- [Full API Documentation](mkdocs.md) - Complete API reference with detailed documentation" >> "$BUILD_DIR/content_quartz/api/overview.md"
 
-# Create MkDocs entry point
-echo "---" > "$BUILD_DIR/content_quartz/api/mkdocs.md"
-echo "title: Full API Documentation" >> "$BUILD_DIR/content_quartz/api/mkdocs.md"
-echo "---" >> "$BUILD_DIR/content_quartz/api/mkdocs.md"
-echo "" >> "$BUILD_DIR/content_quartz/api/mkdocs.md"
-echo "# Full API Documentation" >> "$BUILD_DIR/content_quartz/api/mkdocs.md"
-echo "" >> "$BUILD_DIR/content_quartz/api/mkdocs.md"
-echo "Complete Python API reference generated with MkDocs and mkdocstrings." >> "$BUILD_DIR/content_quartz/api/mkdocs.md"
-echo "" >> "$BUILD_DIR/content_quartz/api/mkdocs.md"
-echo "## Access Full Documentation" >> "$BUILD_DIR/content_quartz/api/mkdocs.md"
-echo "" >> "$BUILD_DIR/content_quartz/api/mkdocs.md"
-echo "The complete API documentation is available at:" >> "$BUILD_DIR/content_quartz/api/mkdocs.md"
-echo "" >> "$BUILD_DIR/content_quartz/api/mkdocs.md"
-echo "**[https://agentskill-backlog.kanohorizonia.com/api-docs/](https://agentskill-backlog.kanohorizonia.com/api-docs/)**" >> "$BUILD_DIR/content_quartz/api/mkdocs.md"
+# Create native API entry point
+echo "---" > "$BUILD_DIR/content_quartz/api/native.md"
+echo "title: Native Executable API" >> "$BUILD_DIR/content_quartz/api/native.md"
+echo "---" >> "$BUILD_DIR/content_quartz/api/native.md"
+echo "" >> "$BUILD_DIR/content_quartz/api/native.md"
+echo "# Native Executable API" >> "$BUILD_DIR/content_quartz/api/native.md"
+echo "" >> "$BUILD_DIR/content_quartz/api/native.md"
+echo "Run \`scripts/kob --help\` for the authoritative command surface." >> "$BUILD_DIR/content_quartz/api/native.md"
+echo "" >> "$BUILD_DIR/content_quartz/api/native.md"
 
 # Process content with YAML config supporting multiple source directories
 if [ -d "$DEMO_DIR" ]; then
-  echo "Processing content with YAML config..."
-  
-  # Load config path helper
-  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  source "$SCRIPT_DIR/help/config-paths.sh"
-  
-  # Find publish config
-  PUBLISH_CONFIG=$(find_config_file "publish.config.yml" "$SCRIPT_DIR" "$REPO_ROOT")
-  if validate_config_file "$PUBLISH_CONFIG" "publish.config.yml"; then
-    echo "Using publish config: $PUBLISH_CONFIG"
-    docs_python "$SCRIPT_DIR/help/process_yaml_config.py" "$REPO_ROOT/_ws/src" "$BUILD_DIR/content_quartz" "$PUBLISH_CONFIG"
-  else
-    echo "WARNING: publish.config.yml not found - skipping YAML processing"
-  fi
+  echo "YAML-driven docs expansion is retired from the native executable docs pipeline."
 fi
 
 echo "Enhanced content preparation completed successfully"

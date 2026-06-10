@@ -98,7 +98,7 @@ public:
     
     ProductDefinition product_def;
 
-    // Equivalent to from_path in python
+    // Resolve effective context from a resource path.
     static BacklogContext resolve(
         const std::filesystem::path& resource_path, 
         const std::optional<std::string>& product_name, 

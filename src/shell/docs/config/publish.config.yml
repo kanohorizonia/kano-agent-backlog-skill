@@ -119,9 +119,6 @@ navigation:
     title: "Examples & Templates"
     description: "Code examples and templates"
     items:
-      - source: "skill/examples/**/*.py"
-        target: "examples/"
-        preserve_structure: true
       - source: "skill/templates/**/*.md"
         target: "templates/"
         preserve_structure: true
@@ -146,7 +143,7 @@ navigation:
 
   API:
     title: "API Reference"
-    description: "Python API documentation"
+    description: "Native C++ API documentation"
     items:
       - target: "api/overview.md"
         title: "API Overview"
@@ -175,10 +172,8 @@ exclude:
   - "docs/**/*-wip.md"
   - "skill/htmlcov/"
   - "skill/.hypothesis/"
-  - "skill/.pytest_cache/"
   - "skill/.kano/"
   - "skill/src/"
-  - "skill/tests/"
 
 # Site configuration
 site:
@@ -191,33 +186,28 @@ site:
 # MkDocs API documentation configuration
 api_navigation:
   site_name: "Kano Agent Backlog Skill API"
-  site_description: "Python API documentation for Kano Agent Backlog Skill"
+  site_description: "Native CLI documentation for Kano Agent Backlog Skill"
   site_url: "https://agentskill-backlog.kanohorizonia.com/api-docs/"
   
   # Main page content
   home_content: |
     # Kano Agent Backlog Skill API
     
-    Complete Python API reference for the Kano Agent Backlog Skill.
+    Native C++ CLI reference for the Kano Agent Backlog Skill.
     
     ## Quick Start
     
-    ```python
-    from kano_backlog_core import BacklogManager
-    from kano_backlog_ops import WorkItem
-    
-    # Initialize backlog operations
-    manager = BacklogManager()
-    
-    # Create work items
-    item = WorkItem.create(title="New feature", type="task")
+    ```bash
+    pixi run build-dev
+    bash scripts/kob --help
     ```
     
-    ## Core Modules
+    ## Native Surfaces
     
-    - [Core](api/core/) - Core backlog management (`kano_backlog_core`)
-    - [CLI](api/cli/) - Command-line interface (`kano_backlog_cli`) 
-    - [Operations](api/ops/) - Business operations (`kano_backlog_ops`)
+    - `scripts/kob` - repo-local launcher
+    - `src/cpp/code/apps/kano_backlog_cli` - native CLI entrypoint
+    - `src/cpp/code/systems/kano_backlog_core` - core data/config/frontmatter logic
+    - `src/cpp/code/systems/kano_backlog_ops` - backlog operations
     
     ## Navigation
     
@@ -231,10 +221,7 @@ api_navigation:
       items:
         - title: "Core"
           file: "api/core.md"
-          module: "kano_backlog_core"
         - title: "CLI"
           file: "api/cli.md"
-          module: "kano_backlog_cli"
         - title: "Operations"
           file: "api/ops.md"
-          module: "kano_backlog_ops"

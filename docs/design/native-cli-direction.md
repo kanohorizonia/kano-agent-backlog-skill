@@ -1,38 +1,45 @@
-# Native CLI direction
+# Native CLI Direction
 
-Status: accepted as a **future direction**, not the public `0.0.3` contract.
+Status: accepted as the current executable contract for the native migration
+milestone.
 
 ## Context
 
-Historically, Python was attractive for this project because it is easy for humans to learn, write, debug, and extend. It has no compile step and has a broad library ecosystem, which made it a sensible first public implementation.
+The project began with a Python implementation because it was fast to iterate,
+easy to inspect, and had broad library support. That was a reasonable first
+implementation while the backlog model, command shape, and data formats were
+still settling.
 
-Agentic programming changes part of that tradeoff.
-
-When AI agents are the primary operator, they can tolerate stricter compile/debug loops and may invoke the same tool many times while exploring, validating, repairing, and re-checking a task. In that environment, interpreter startup and repeated import overhead matter more than they do in occasional human usage.
+Agentic usage changes the tradeoff. Agents invoke the CLI repeatedly while
+planning, validating, repairing, and re-checking work. In that environment,
+startup cost, dependency drift, import failures, and Python package installation
+friction become operational risks.
 
 ## Direction
 
-A native CLI remains an attractive future direction because it can:
+The repo-local executable surface is now native C++:
 
-- reduce repeated interpreter and import overhead
-- simplify distribution as a single binary in some environments
-- improve CI and agent sandbox ergonomics
-- reduce dependency friction for repeated automated invocation
+- `scripts/kob` and `scripts/kano-backlog` require a built native binary,
+- command behavior lives in native C++ systems/apps under `src/cpp/`,
+- shell wrappers stay thin and do not own product behavior,
+- Python package entrypoints and pytest oracle tests are retired,
+- optional exact tokenizer or embedding behavior must arrive through future
+  native provider adapters.
 
-## What this does **not** mean for 0.0.3
+## What This Means For Releases
 
-- Python remains the public implementation for `0.0.3`.
-- The public package path remains Python-based.
-- The native C++ CLI is **not** declared stable public interface in `0.0.3`.
+This native migration milestone is distinct from the old `0.0.3` Python-public
+release contract. Historical release notes may still describe the Python package
+path for releases where that was true, but current automation and repo-local
+usage target the native executable contract.
 
-## Release-policy consequence
+## Verification
 
-Python removal or a switch to a native-first public contract requires a separate parity milestone. That milestone must demonstrate test, documentation, and operational parity for the native implementation before any public deprecation or removal of the Python path is considered.
+The native direction is enforced by:
 
-## Why record this now
-
-The repository already contains native work and native build infrastructure. This note makes the intent explicit without overclaiming maturity:
-
-- native CLI work is real
-- native CLI work is future-facing
-- `0.0.3` remains an OSS-readiness release, not a Python-removal release
+- native build and smoke tests,
+- strict native command coverage,
+- runtime gates that reject launcher fallback and repo-local `.py`/`.pyi`
+  files,
+- release workflows that build and test the native binary instead of running
+  Python package gates.

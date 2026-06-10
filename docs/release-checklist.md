@@ -4,13 +4,14 @@ This checklist ensures consistent release process and catches issues before publ
 
 ## Pre-Release
 
-- [ ] Update `VERSION` and `src/python/kano_backlog_core/__version__.py`
+- [ ] Update `VERSION`
 - [ ] Update CHANGELOG.md with release notes
-- [ ] Run full Python regression gate: `bash src/shell/test/quick-test.sh`
-- [ ] Run lint/type gate: `bash src/shell/test/lint.sh`
-- [ ] Verify version surface: `bash src/shell/support/show-version.sh`
-- [ ] Build native CLI: `bash src/shell/support/self-build.sh debug`
-- [ ] Run native tests: `bash src/shell/test/native-test.sh`
+- [ ] Build native CLI: `pixi run build-dev`
+- [ ] Run native tests: `pixi run quick-test`
+- [ ] Run native coverage report: `bash src/shell/test/native-command-coverage.sh --strict`
+- [ ] Run native runtime gate: `pixi run native-runtime-gate`
+- [ ] Run native contract lint: `bash src/shell/test/lint.sh`
+- [ ] Verify version surface: `bash scripts/internal/show-version.sh`
 - [ ] Verify repo-local launcher version: `bash scripts/kob --version` (or `bash scripts/kob --help`)
 - [ ] Verify repo-local launcher doctor: `bash scripts/kob doctor`
 - [ ] Test multi-product workflow
@@ -18,39 +19,25 @@ This checklist ensures consistent release process and catches issues before publ
 
 ## Build
 
-- [ ] Clean previous builds: `rm -rf dist/ dist-test/ build/ *.egg-info`
-- [ ] Build package: `python -m build --sdist --wheel --outdir dist-test`
-- [ ] Verify `dist-test/` contains .tar.gz and .whl
-- [ ] Inspect wheel contents: `python -m zipfile -l dist-test/*.whl`
+- [ ] Build release binary: `pixi run build-release`
+- [ ] Run release gate workflow locally where possible
+- [ ] Verify archive export: `bash scripts/kob export --single --validate-release-archive`
 
 ### Native build notes
 
 - [ ] Confirm CI/build environment has network access when using default FetchContent dependency modes.
 - [ ] If deterministic/offline builds are required, document and use a pinned system/submodule/vcpkg strategy instead of implicit network fetches.
 
-## Test Installation
+## Native Smoke Installation
 
-- [ ] Create fresh venv: `python -m venv test-venv`
-- [ ] Install from wheel: `pip install dist/*.whl`
-- [ ] Verify CLI available: `which kano-backlog` (or `where kano-backlog` on Windows)
-- [ ] Run `bash scripts/internal/show-version.sh`
-- [ ] Run `kano-backlog doctor`
+- [ ] Start from a clean clone
+- [ ] Run `pixi run build-dev`
+- [ ] Run `bash scripts/kob doctor`
 - [ ] Test basic workflow (init, create item, update state)
 
-## Upload to Test PyPI
+## Python Package Publishing
 
-- [ ] Upload with the maintainer script: `./src/shell/release/publish_to_pypi.sh test` (or `.\src\shell\release\publish_to_pypi.ps1 -Environment test` on Windows)
-- [ ] Create fresh venv for testing
-- [ ] Install from test.pypi: `pip install --index-url https://test.pypi.org/simple/ kano-agent-backlog-skill`
-- [ ] Verify installation and basic functionality
-
-## Upload to PyPI
-
-- [ ] Upload with the maintainer script: `./src/shell/release/publish_to_pypi.sh prod` (or `.\src\shell\release\publish_to_pypi.ps1 -Environment prod` on Windows)
-- [ ] Verify package appears on pypi.org
-- [ ] Create fresh venv
-- [ ] Install from PyPI: `pip install kano-agent-backlog-skill`
-- [ ] Verify installation and basic functionality
+Python package publishing is retired for this native milestone. Do not upload to Test PyPI or PyPI from this repo.
 
 ## Publish GitHub Pages docs
 
@@ -65,11 +52,11 @@ This checklist ensures consistent release process and catches issues before publ
 - [ ] Create git tag: `git tag -a v0.0.3 -m "Release 0.0.3"`
 - [ ] Push tag: `git push origin v0.0.3`
 - [ ] Create GitHub release with release notes
-- [ ] Attach dist files to GitHub release
+- [ ] Attach native binary/archive artifacts to GitHub release
 
 ## Post-Release
 
-- [ ] Verify pip install works: `pip install kano-agent-backlog-skill`
+- [ ] Verify repo-local native binary works from a clean clone
 - [ ] Update documentation if needed
 - [ ] Announce release (if applicable)
 - [ ] Monitor for issues

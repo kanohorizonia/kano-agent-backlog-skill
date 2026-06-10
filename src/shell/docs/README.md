@@ -34,9 +34,9 @@ Source Repos → Content Preparation → Quartz Build → MkDocs Integration →
 | Script | Purpose | Dependencies |
 |--------|---------|-------------|
 | `01-setup-workspace.sh` | Clone the demo repo, clone Quartz, and snapshot the local skill repo | Git, tar |
-| `02-prepare-content.sh` | Process YAML config and prepare content | 01 |
+| `02-prepare-content.sh` | Prepare native CLI/API overview content | 01 |
 | `03-build-site.sh` | Build static site with Quartz | 02, Node.js 22 |
-| `04-deploy-mkdocs.sh` | Build and integrate MkDocs API docs into the staged site | 03, Python deps |
+| `04-deploy-mkdocs.sh` | Write native API placeholder into the staged site | 03 |
 | `05-deploy-quartz.sh` | Copy the staged site into a local gh-pages working tree | 04 |
 | `06-push-remote.sh` | Commit and push the gh-pages working tree, explicit use only | 05 |
 | `build-and-deploy.sh` | Main entrypoint, builds and stages output by default | 01 to 04 |
@@ -46,14 +46,12 @@ Source Repos → Content Preparation → Quartz Build → MkDocs Integration →
 |------|---------|
 | `config/build.json` | Build parameters, repository URLs, deployment metadata |
 | `config/quartz.config.ts` | Quartz theme and plugin configuration |
-| `config/mkdocs.yml` | MkDocs API documentation preprocessing |
-| `config/publish.config.yml` | Content mapping and navigation structure |
+| `config/mkdocs.yml` | Retired MkDocs placeholder retained for legacy script arguments |
+| `config/publish.config.yml` | Historical content mapping reference |
 
 ### Helper Tools
 | File | Purpose |
 |------|---------|
-| `help/process_yaml_config.py` | YAML configuration processor and index generator |
-| `help/mkdocs-content-generator.py` | MkDocs nav and stub page generator |
 | `help/config-paths.sh` | Shared config path resolution |
 
 ## Content Publishing System
@@ -135,8 +133,7 @@ Only run this if you intentionally want the legacy git based publish step.
 
 - **Git** for repository cloning
 - **Node.js 22** for Quartz build
-- **Python 3** for YAML and MkDocs helpers
-- **MkDocs toolchain** if you want API docs generated locally
+- **Native kano-backlog binary** built with `pixi run build-dev`
 - **GitHub push rights** only if you explicitly run the remote publish step
 
 ## Configuration
@@ -162,7 +159,7 @@ Current canonical site URL:
 - content copied from `demo/` and `skill/`
 - generated section indexes
 - home page source selection
-- API docs site URL metadata
+  - native API docs site URL metadata
 
 ## GitHub Pages Integration
 
@@ -188,13 +185,9 @@ Run:
 
 Make sure `src/shell/docs/config/publish.config.yml` exists in the skill repo checkout.
 
-### Python dependency errors
+### Native docs pipeline
 
-Install the local docs dependencies you need, for example:
-
-```bash
-pip install mkdocs mkdocs-material "mkdocstrings[python]" pyyaml
-```
+The docs pipeline no longer requires Python, MkDocs, mkdocstrings, or YAML helper scripts. It builds the Quartz site and writes a native API placeholder for the supported executable contract.
 
 ## Local Testing
 
@@ -204,9 +197,7 @@ pip install mkdocs mkdocs-material "mkdocstrings[python]" pyyaml
 
 Example:
 
-```bash
-cd _ws/build/staged && python -m http.server 8000
-```
+Use any static file server for `_ws/build/staged`.
 
 ## Security Notes
 

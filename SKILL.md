@@ -41,10 +41,10 @@ Use this skill to:
 
 **If you're helping a user set up this skill from a cloned repository:**
 
-1. **Install in development mode:**
+1. **Build the native binary:**
    ```bash
    cd skills/kano-agent-backlog-skill
-   pip install -e ".[dev]"
+   pixi run build-dev
    ```
 
 2. **Verify installation:**
@@ -137,7 +137,7 @@ Use this skill to:
 ## First-run bootstrap (prereqs + initialization)
 
 Before using this skill in a repo, the agent must confirm:
-1) Python prerequisites are available (or install them), and
+1) the native `kano-backlog` binary is available (build it if needed), and
 2) the backlog scaffold exists for the target product/root.
 
 If the backlog structure is missing, propose the bootstrap commands and wait for user approval before writing files.
@@ -158,48 +158,38 @@ If the backlog structure is missing, propose the bootstrap commands and wait for
    - `scripts/` is **executable-only**: no reusable module code.
    - `src/` is **import-only**: core logic lives here, never executed directly.
    - All agent-callable operations go through `scripts/kano-backlog` CLI.
-3. Place new code in the correct package:
-   - Models/config/errors → `src/kano_backlog_core/`
-   - Use-cases (create/update/view) → `src/kano_backlog_ops/`
-   - Storage backends → `src/kano_backlog_adapters/`
-   - CLI commands → `src/kano_backlog_cli/commands/`
+3. Place new code in the correct native C++ boundary:
+   - Models/config/frontmatter/state/validation → `src/cpp/code/systems/kano_backlog_core/`
+   - Use-cases (create/update/view/topic/workset/index) → `src/cpp/code/systems/kano_backlog_ops/`
+   - CLI command wiring → `src/cpp/code/apps/kano_backlog_cli/`
+   - Tests → `src/cpp/code/tests/`
 
 Violating these boundaries will be flagged in code review.
 
-### Prerequisite install (Python)
+### Prerequisite install
 
 Detect:
 - Run `kob doctor`.
 
-If packages are missing, install once (recommended):
-- **Default**: `python -m pip install -e skills/kano-agent-backlog-skill`
-- **Skill contributors**: `python -m pip install -e skills/kano-agent-backlog-skill[dev]`
-- Optional heavy dependencies (FAISS, sentence-transformers) should be installed manually per platform requirements before running the CLI against embedding features.
+If the native binary is missing, build once:
+- `pixi run build-dev`
+
+Python package installation is no longer supported for this skill. Optional exact tokenizer or embedding providers must be added through future native adapters, not in-process Python packages.
 
 ### Container/Docker environments (agents)
 
-If you run inside a restricted container (no `pip`, no build tools), `admin init` will fail because
-the CLI cannot install its Python dependencies. In that case, use a prebuilt image or rebuild the
-image with Python + pip available.
+If you run inside a restricted container, `admin init` requires a native
+`kano-backlog` binary built for that container platform. Use a prebuilt native
+artifact or run `pixi run build-dev` inside an image with the C++ toolchain
+available.
 
 **Minimum requirements in the container**:
-- Python 3.11+
-- `pip` (or an equivalent package manager)
-- Ability to install the skill dependencies
+- Git
+- CMake/Ninja
+- A supported C++ compiler toolchain
+- The repo-local native binary built from `src/cpp/`
 
-**Recommended flow (container)**:
-```bash
-python -m venv .venv
-./.venv/Scripts/python -m pip install -e skills/kano-agent-backlog-skill
-./kob admin init --product <product> --agent <agent-id>
-```
-
-If your container cannot install packages (no pip / no build tools), do **not** run the CLI there.
-Instead, run the CLI in a proper Python environment and mount the generated `_kano/backlog` and
-`.kano/backlog_config.toml` into the container.
-
-**Say this to your agent**:
-"I'm in a container without pip. Please run `kob admin init` in a Python environment that has pip, then copy/mount `_kano/backlog` and `.kano/backlog_config.toml` into the container. If pip is available, install the skill in a venv and run `admin init` inside the container."
+Python and pip are not supported prerequisites for this skill.
 
 ### Backlog initialization (file scaffold + config + dashboards)
 
@@ -508,18 +498,18 @@ Repo-local usage now centers on `kob` plus thin wrappers under `scripts/core/`. 
 ## Profile overlays (user-facing config presets)
 
 This skill supports **optional, file-based profile overlays** for end users who want
-simple presets (for example, switching between `noop`, local Hugging Face, or a hosted
-embedding provider) without editing the repo’s main `.kano/backlog_config.toml`.
+simple presets (for example, switching between `noop`, native heuristic, or a hosted
+native embedding provider) without editing the repo’s main `.kano/backlog_config.toml`.
 
 **Where profiles live**
 - `<repo>/.kano/backlog_config/<group>/<name>.toml`
-  - Example: `.kano/backlog_config/embedding/local-sentence-transformers-minilm.toml`
+  - Example: `.kano/backlog_config/embedding/native-heuristic.toml`
 
 **How to use a profile**
 - Pass `--profile <group>/<name>` to `kob` (global option).
   - Example:
     - `kob --profile embedding/local-noop config show --product <product>`
-    - `kob --profile embedding/local-sentence-transformers-minilm embedding build --product <product>`
+    - `kob --profile embedding/native-heuristic embedding build --product <product>`
     - `kob --profile embedding/gemini-embedding-001 embedding build --product <product>`
 
 **Optional: set a default profile in `.kano/backlog_config.toml`**

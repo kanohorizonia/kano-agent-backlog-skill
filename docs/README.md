@@ -34,7 +34,7 @@ If you are reading the repository directly, start here instead of `docs/index.md
 
 For a cloned repository, use `bash scripts/kob ...`.
 
-- It prefers the native `kano-backlog` binary when one has been built locally.
-- If no native binary is available, it falls back to `python -m kano_backlog_cli.cli` using `src/python`.
+- It requires a native `kano-backlog` binary built locally under `src/cpp/out`.
+- If no native binary is available, build one with `pixi run build-dev`.
 
-The public packaged release path for `0.0.3` still remains Python-based.
+The former Python runtime and pytest oracle have been removed. Verification is native C++ only.

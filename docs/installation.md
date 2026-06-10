@@ -1,16 +1,16 @@
 # Installation
 
-Install the package from PyPI when you want the published CLI:
+Repo-local execution uses the native C++ CLI. Build it from a clone:
 
 ```bash
-pip install kano-agent-backlog-skill
+pixi run build-dev
 ```
 
-Verify the install:
+Verify the native launcher:
 
 ```bash
-kano-backlog
-kano-backlog doctor
+bash scripts/kob --version
+bash scripts/kob doctor
 ```
 
 If you are working from a clone of the skill repository, start with the repo level guidance in these pages:
@@ -18,17 +18,18 @@ If you are working from a clone of the skill repository, start with the repo lev
 - [Agent quick start](agent-quick-start.md)
 - [Main repository README](https://github.com/kanohorizonia/kano-agent-backlog-skill#quick-start)
 
-For repo-local execution, use `bash scripts/kob`. It prefers a built native binary and falls back to the Python CLI from `src/python` when native output is missing.
+For repo-local execution, use `bash scripts/kob`. It requires a built native binary and does not fall back to Python.
 
 For docs maintenance, the local docs pipeline lives under `src/shell/docs/` and builds into `_ws/build/staged` by default.
 
-## Editable install for contributors
+## Contributor setup
 
 ```bash
-python -m pip install -e ".[dev]"
+pixi run build-dev
+pixi run quick-test
 ```
 
-This is the recommended path when working on the skill itself, because it keeps the CLI and Python package tied to your local checkout.
+This is the supported path when working on the native executable. Python package metadata has been retired for this native milestone.
 
 ## Platform notes
 
@@ -38,6 +39,6 @@ This is the recommended path when working on the skill itself, because it keeps 
 
 ## Troubleshooting
 
-- If `kob` is not found, confirm the environment where the package was installed is active.
-- If docs dependencies are missing, install `mkdocs`, `mkdocs-material`, `mkdocstrings[python]`, and `pyyaml` before running the docs pipeline.
-- If tests cannot import the package from source, use the provided `src/shell/test/*.sh` wrappers, which set `PYTHONPATH` correctly.
+- If `kob` cannot find a binary, run `pixi run build-dev`.
+- If docs dependencies are missing, use the native docs scripts under `src/shell/docs/`.
+- If tests fail before launching the CLI, use `pixi run quick-test` to exercise the native smoke lane.

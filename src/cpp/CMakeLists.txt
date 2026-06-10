@@ -315,6 +315,7 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(sqlite3)
 target_include_directories(SQLite3 INTERFACE $<BUILD_INTERFACE:${sqlite3_SOURCE_DIR}>)
+target_compile_definitions(SQLite3 PUBLIC SQLITE_ENABLE_FTS5)
 set(_sqlite3_target SQLite3)
 
 # ---------------------------------------------------------------------------

@@ -4,6 +4,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 
+export CI="${CI:-true}"
+export KANO_BACKLOG_NONINTERACTIVE=1
+export KANO_TEST_NONINTERACTIVE=1
+export GIT_TERMINAL_PROMPT=0
+export KANO_NATIVE_TEST_TIMEOUT_SECONDS="${KANO_NATIVE_TEST_TIMEOUT_SECONDS:-120}"
+
 cleanup_subst_drive() {
   local drive="$1"
   if [[ -z "$drive" ]]; then
@@ -46,7 +52,11 @@ run_windows_native_smoke_tests() {
       echo "Missing native smoke test executable: $bin_root/$exe" >&2
       return 1
     fi
-    "$bin_root/$exe"
+    if command -v timeout >/dev/null 2>&1; then
+      timeout "${KANO_NATIVE_TEST_TIMEOUT_SECONDS}s" "$bin_root/$exe"
+    else
+      "$bin_root/$exe"
+    fi
   done
 }
 

@@ -7,11 +7,6 @@ platforms = ["win-64", "linux-64", "osx-64", "osx-arm64"]
 cmake = ">=3.21"
 git = "*"
 ninja = "*"
-python = ">=3.12,<3.13"
-pip = "*"
-
-[pypi-dependencies]
-kano-agent-backlog-skill = { path = ".", editable = true }
 
 [target.linux-64.dependencies]
 bash = "*"
@@ -27,6 +22,8 @@ bash = "*"
 # =============================================================================
 [tasks]
 env-summary = "git --version && cmake --version && ninja --version"
+native-command-coverage = "bash src/shell/test/native-command-coverage.sh"
+native-runtime-gate = "bash src/shell/test/native-runtime-gate.sh"
 
 # =============================================================================
 # Windows-specific (win-64)

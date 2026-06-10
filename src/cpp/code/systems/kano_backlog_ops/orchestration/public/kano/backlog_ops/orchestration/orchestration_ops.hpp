@@ -10,7 +10,7 @@ namespace kano::backlog_ops {
 
 /**
  * OrchestrationOps manages high-level backlog workflows.
- * Ported from init.py and other coordination logic.
+ * Native product initialization and coordination logic.
  */
 class OrchestrationOps {
 public:

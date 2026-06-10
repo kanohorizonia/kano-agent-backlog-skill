@@ -2,7 +2,7 @@
 
 **Complete command reference with practical examples for kano-agent-backlog-skill**
 
-This guide provides comprehensive examples for each major CLI command group, showing common workflows and expected outputs. All examples assume you have installed the package via `pip install kano-agent-backlog-skill`.
+This guide provides examples for each major CLI command group, showing common workflows and expected outputs. All examples assume you are using the native `scripts/kob` launcher.
 
 ## Table of Contents
 
@@ -935,20 +935,19 @@ kob doctor
 ```
 Running environment checks...
 
-✓ Python version: 3.11.5 (>= 3.8 required)
-✓ SQLite version: 3.42.0 (>= 3.8 required)
+✓ Native binary: available
+✓ SQLite support: available
 ✓ Backlog root: _kano/backlog/ (exists and writable)
 ✓ Product config: Valid
 ✓ Required directories: All present
 ✓ Sequence files: Valid
 
 Optional dependencies:
-  ✓ [dev] pytest, black, mypy, isort (installed)
-  ⚠ [vector] sentence-transformers, faiss-cpu (not installed)
-    Install with: pip install kano-agent-backlog-skill[vector]
+  ✓ native runtime gate (passed)
+  ⚠ exact-token/vector providers (native provider not configured)
 
 Recommendations:
-  - Consider installing [vector] dependencies for semantic search
+  - Configure a native vector provider when exact semantic search is required
   - Run 'kob admin sync-sequences --product my-app' to ensure sequence numbers are current
 
 Overall status: ✓ Healthy
@@ -960,8 +959,8 @@ Overall status: ✓ Healthy
 ```
 Running environment checks...
 
-✓ Python version: 3.11.5 (>= 3.8 required)
-✓ SQLite version: 3.42.0 (>= 3.8 required)
+✓ Native binary: available
+✓ SQLite support: available
 ❌ Backlog root: _kano/backlog/ (not found)
   → Run: kob admin init --product <name> --agent <agent>
 

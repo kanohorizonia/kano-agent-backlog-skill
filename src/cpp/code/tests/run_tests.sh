@@ -5,6 +5,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CPP_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
+export CI="${CI:-true}"
+export KANO_BACKLOG_NONINTERACTIVE=1
+export KANO_TEST_NONINTERACTIVE=1
+export GIT_TERMINAL_PROMPT=0
+export KANO_NATIVE_TEST_TIMEOUT_SECONDS="${KANO_NATIVE_TEST_TIMEOUT_SECONDS:-120}"
+
 PRESET="${1:-windows-ninja-msvc-release}"
 LANE_MODE="${2:-default}"
 RUNNER_PRESET="$PRESET"

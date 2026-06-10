@@ -10,7 +10,6 @@ on:
       - "README.md"
       - "REFERENCE.md"
       - "CHANGELOG.md"
-      - "pyproject.toml"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -35,14 +34,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "22"
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install Python docs dependencies
-        run: python -m pip install mkdocs mkdocs-material "mkdocstrings[python]" pyyaml
 
       - name: Build staged docs site
         run: bash src/shell/docs/build-and-deploy.sh --ci

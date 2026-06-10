@@ -4,7 +4,7 @@ add_executable(kano_backlog_cli
 
 set_target_properties(kano_backlog_cli PROPERTIES OUTPUT_NAME kano-backlog)
 
-target_link_libraries(kano_backlog_cli PRIVATE kano::backlog_core kano::backlog_ops CLI11::CLI11)
+target_link_libraries(kano_backlog_cli PRIVATE kano::backlog_core kano::backlog_ops CLI11::CLI11 ${_jsoncpp_target})
 
 # CLI11 v2.4 uses <codecvt> which is removed in MSVC 19.50 (VS 2026)
 target_compile_definitions(kano_backlog_cli PRIVATE CLI11_HAS_CODECVT=0)
@@ -16,3 +16,5 @@ if(MSVC AND TARGET CLI11::CLI11)
         target_include_directories(kano_backlog_cli PRIVATE "${_cli11_inc}")
     endif()
 endif()
+
+target_include_directories(kano_backlog_cli PRIVATE ${_jsoncpp_include_dir})

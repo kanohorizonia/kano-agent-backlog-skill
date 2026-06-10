@@ -10,7 +10,6 @@ namespace kano::backlog_ops {
 
 /**
  * WorksetOps manages per-item execution caches.
- * Ported from workset.py
  *
  * Workset directory structure (under _kano/backlog/.cache/worksets/items/<item_id>/):
  *   meta.json     — workset metadata (uid, item_ref, agent, timestamps, ttl)

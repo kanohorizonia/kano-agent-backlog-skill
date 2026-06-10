@@ -17,7 +17,7 @@ class DoctorOps {
 public:
     /**
      * Run all environment health checks.
-     * Ported from doctor.py
+     * Native doctor command result.
      */
     static std::vector<DoctorCheckResult> run_all_checks(const std::filesystem::path& start_path);
 

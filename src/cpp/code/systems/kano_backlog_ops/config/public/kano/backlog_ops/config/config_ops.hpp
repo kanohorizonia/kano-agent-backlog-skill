@@ -10,7 +10,6 @@ class ConfigOps {
 public:
     /**
      * Dump the effective configuration for a given context as a JSON string.
-     * Ported from config_cmd.py:config_show
      */
     static std::string dump_effective_config_json(const kano::backlog_core::BacklogContext& ctx);
 

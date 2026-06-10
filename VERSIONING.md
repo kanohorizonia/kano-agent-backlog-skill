@@ -5,7 +5,7 @@ This skill uses **Git tags** as the source of truth for released versions: `vX.Y
 ## Where to check the current version
 
 - File: `VERSION` (the intended version for the next release tag)
-- Command: `python -c "import pathlib; print(pathlib.Path('VERSION').read_text().strip())"`
+- Command: `cat VERSION`
 - Release notes: `CHANGELOG.md`
 
 ## Pre-1.0 policy
@@ -44,7 +44,7 @@ Non-exhaustive examples:
   - Phase1 (version/docs checks):
     - `bash scripts/kob admin release check --version <version> --topic release-<version-dashed> --agent <id> --phase phase1 --product kano-agent-backlog-skill`
     - Expected report: `_kano/backlog/topics/release-<version-dashed>/publish/release_check_<version>_phase1.md`
-  - Phase2 (doctor/pytest/smoke):
+  - Phase2 (doctor/native smoke):
     - `bash scripts/kob admin release check --version <version> --topic release-<version-dashed> --agent <id> --phase phase2 --product kano-agent-backlog-skill --sandbox release-<version-dashed>-smoke`
     - Expected report: `_kano/backlog/topics/release-<version-dashed>/publish/release_check_<version>_phase2.md`
     - Expected artifacts: `_kano/backlog/topics/release-<version-dashed>/publish/phase2_*.txt`

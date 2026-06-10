@@ -5,6 +5,7 @@
 #include <stdexcept>
 
 #include "kano/backlog_core/models/models.hpp"
+#include "kano/backlog_core/process/noninteractive_errors.hpp"
 #include "kano/backlog_ops/index/backlog_index.hpp"
 #include "kano/backlog_ops/workitem/workitem_ops.hpp"
 
@@ -35,6 +36,8 @@ std::filesystem::path make_temp_root() {
 } // namespace
 
 int main() {
+    kano::backlog_core::ConfigureNoninteractiveErrorHandling();
+
     using kano::backlog_core::ItemState;
     using kano::backlog_core::ItemType;
     using kano::backlog_ops::BacklogIndex;

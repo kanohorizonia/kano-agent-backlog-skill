@@ -10,7 +10,7 @@ namespace kano::backlog_ops {
 
 /**
  * TopicOps manages "topic-scoped" work context.
- * Ported from topic.py
+ * Native topic context operations.
  *
  * Topic directory structure (under _kano/backlog/topics/<name>/):
  *   manifest.json    — metadata (created, agent, seed_items, pinned_docs)
@@ -31,13 +31,29 @@ public:
     // -------------------------------------------------------------------------
 
     struct TopicManifest {
+        struct SnippetRef {
+            std::string type = "snippet";
+            std::string repo = "local";
+            std::optional<std::string> revision;
+            std::string file;
+            std::vector<int> lines;
+            std::string hash;
+            std::optional<std::string> cached_text;
+            std::optional<std::string> collected_at;
+            std::optional<std::string> collector;
+        };
+
         std::string topic;
         std::string agent;
         std::string created_at;     // ISO 8601
         std::string updated_at;      // ISO 8601
         std::string status;          // "open" | "closed"
+        std::optional<std::string> closed_at;
         std::vector<std::string> seed_items;
         std::vector<std::string> pinned_docs;
+        std::vector<SnippetRef> snippet_refs;
+        std::vector<std::string> related_topics;
+        bool has_spec = false;
     };
 
     struct TopicStatus {

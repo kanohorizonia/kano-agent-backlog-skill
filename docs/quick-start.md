@@ -18,24 +18,24 @@ For schema details, see [../references/schema.md](../references/schema.md). For 
 ## 1. Install
 
 ```bash
-pip install kano-agent-backlog-skill
+pixi run build-dev
 ```
 
 Verify the CLI surface:
 
 ```bash
-kano-backlog
-kano-backlog doctor
+bash scripts/kob
+bash scripts/kob doctor
 ```
 
-If you are working from a cloned repository, use the longer setup in [agent-quick-start.md](agent-quick-start.md) and [installation.md](installation.md). In a clone, the repo-local launcher is `bash scripts/kob` (native first, Python fallback).
+Use the longer setup in [agent-quick-start.md](agent-quick-start.md) and [installation.md](installation.md). In a clone, the repo-local launcher is `bash scripts/kob` and it requires the native binary.
 
 ## 2. Initialize a backlog
 
 From the repository where you want durable workflow memory:
 
 ```bash
-kano-backlog admin init --product my-app --agent my-agent
+bash scripts/kob admin init --product my-app --agent my-agent
 ```
 
 This scaffolds local markdown artifacts under `_kano/backlog/`, including product config, backlog items, decisions, and generated views.
@@ -50,7 +50,7 @@ _kano/backlog/_shared/logs
 ## 3. Create a task before coding
 
 ```bash
-kano-backlog item create --type task --title "Add authentication" --product my-app --agent my-agent
+bash scripts/kob item create --type task --title "Add authentication" --product my-app --agent my-agent
 ```
 
 This workflow is tickets first. Before implementation, create the work item that explains the change.
@@ -68,7 +68,7 @@ Tasks and bugs are expected to carry enough context before active execution. Fil
 Example:
 
 ```bash
-kano-backlog workitem set-ready MYAPP-TSK-0001 \
+bash scripts/kob workitem set-ready MYAPP-TSK-0001 \
   --product my-app \
   --context "Users need a reliable sign in flow" \
   --goal "Add authentication with clear verification steps" \
@@ -82,8 +82,8 @@ kano-backlog workitem set-ready MYAPP-TSK-0001 \
 Worksets are per item execution caches that help reduce agent drift.
 
 ```bash
-kano-backlog workset init --item MYAPP-TSK-0001 --agent my-agent
-kano-backlog workset next --item MYAPP-TSK-0001
+bash scripts/kob workset init --item MYAPP-TSK-0001 --agent my-agent
+bash scripts/kob workset next --item MYAPP-TSK-0001
 ```
 
 Use worksets when one task needs a staged checklist, working notes, or deliverables before promotion back to canonical backlog artifacts. See [workset.md](workset.md).

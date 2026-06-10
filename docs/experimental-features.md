@@ -27,7 +27,7 @@ These features are under active development and may change significantly:
 - **Status**: Experimental
 - **Commands**: `kob search hybrid`, `kob embedding`
 - **Why experimental**: Performance optimization ongoing, API may change
-- **Dependencies**: Requires `[vector]` extras: `pip install kano-agent-backlog-skill[vector]`
+- **Dependencies**: Native provider support only. Python extras are retired.
 - **Known limitations**: 
   - Large backlogs may have slow indexing
   - Embedding model selection is limited
@@ -54,16 +54,7 @@ These features are under active development and may change significantly:
 
 When using experimental features, you may see runtime warnings:
 
-```python
-import logging
-logging.warning("Vector search is experimental and may change in future releases")
-```
-
-To suppress these warnings (not recommended):
-```python
-import warnings
-warnings.filterwarnings("ignore", category=UserWarning, module="kano_backlog_ops.backlog_vector_index")
-```
+Native vector and embedding commands report experimental status directly in CLI output. There is no Python warning filter path in the native executable contract.
 
 ## Feedback
 

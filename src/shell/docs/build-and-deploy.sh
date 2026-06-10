@@ -46,11 +46,6 @@ if [ -z "$REPO_ROOT" ]; then
   REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 fi
 
-# CI docs pipeline defaults to pixi-backed Python execution for reproducibility.
-if [ "$CI_MODE" = true ]; then
-  KANO_DOCS_USE_PIXI="${KANO_DOCS_USE_PIXI:-1}"
-fi
-
 echo "=== Documentation Build Pipeline ==="
 echo "Repository root: $REPO_ROOT"
 echo "CI mode: $CI_MODE"

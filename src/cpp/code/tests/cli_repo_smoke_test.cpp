@@ -19,7 +19,11 @@ void expect(bool condition, const std::string& message) {
 }
 
 int run_command(const std::filesystem::path& binary, const std::vector<std::string>& args) {
+#ifdef _WIN32
     std::string command = "cd /d \"" + std::filesystem::current_path().string() + "\" && \"" + binary.string() + "\"";
+#else
+    std::string command = "cd \"" + std::filesystem::current_path().string() + "\" && \"" + binary.string() + "\"";
+#endif
     for (const auto& arg : args) {
         command += " ";
         command += "\"";
@@ -30,7 +34,11 @@ int run_command(const std::filesystem::path& binary, const std::vector<std::stri
 }
 
 int run_command_capture(const std::filesystem::path& binary, const std::vector<std::string>& args, const std::filesystem::path& output_path) {
+#ifdef _WIN32
     std::string command = "cd /d \"" + std::filesystem::current_path().string() + "\" && \"" + binary.string() + "\"";
+#else
+    std::string command = "cd \"" + std::filesystem::current_path().string() + "\" && \"" + binary.string() + "\"";
+#endif
     for (const auto& arg : args) {
         command += " ";
         command += "\"";
@@ -111,9 +119,33 @@ int main(int argc, char** argv) {
         const std::filesystem::path repo_root(KANO_REPO_ROOT);
         const std::filesystem::path executable_path =
             (argc > 0 && argv != nullptr) ? std::filesystem::absolute(argv[0]) : std::filesystem::path();
-        std::filesystem::path binary = executable_path.parent_path() / "kano-backlog.exe";
-        if (!std::filesystem::exists(binary)) {
-            binary = repo_root / "src/cpp/out/bin/windows-ninja-msvc/debug/kano-backlog.exe";
+        const std::string exe_suffix =
+#ifdef _WIN32
+            ".exe";
+#else
+            "";
+#endif
+        std::vector<std::filesystem::path> binary_candidates = {
+            executable_path.parent_path() / ("kano-backlog" + exe_suffix),
+            repo_root / ("src/cpp/out/bin/windows-ninja-msvc/debug/kano-backlog" + exe_suffix),
+            repo_root / ("src/cpp/out/bin/windows-ninja-msvc/release/kano-backlog" + exe_suffix),
+            repo_root / ("src/cpp/out/bin/linux-ninja-clang/debug/kano-backlog" + exe_suffix),
+            repo_root / ("src/cpp/out/bin/linux-ninja-clang/release/kano-backlog" + exe_suffix),
+            repo_root / ("src/cpp/out/bin/linux-ninja-gcc/debug/kano-backlog" + exe_suffix),
+            repo_root / ("src/cpp/out/bin/linux-ninja-gcc/release/kano-backlog" + exe_suffix),
+            repo_root / ("src/cpp/out/bin/macos-ninja-clang/debug/kano-backlog" + exe_suffix),
+            repo_root / ("src/cpp/out/bin/macos-ninja-clang/release/kano-backlog" + exe_suffix),
+            repo_root / ("src/cpp/out/bin/macos-ninja-clang-x64/debug/kano-backlog" + exe_suffix),
+            repo_root / ("src/cpp/out/bin/macos-ninja-clang-x64/release/kano-backlog" + exe_suffix),
+            repo_root / ("src/cpp/out/bin/macos-ninja-clang-arm64/debug/kano-backlog" + exe_suffix),
+            repo_root / ("src/cpp/out/bin/macos-ninja-clang-arm64/release/kano-backlog" + exe_suffix)
+        };
+        std::filesystem::path binary;
+        for (const auto& candidate : binary_candidates) {
+            if (std::filesystem::exists(candidate)) {
+                binary = candidate;
+                break;
+            }
         }
 
         expect(std::filesystem::exists(binary), "native binary not found for cli_repo_smoke_test");

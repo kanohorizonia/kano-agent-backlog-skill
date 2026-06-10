@@ -206,6 +206,7 @@ int main(int argc, char** argv) {
 
         const auto original_cwd = std::filesystem::current_path();
         std::filesystem::current_path(temp_root);
+        set_env_var("KANO_BACKLOG_DEBUG_INIT", "1");
 
         expect(run_command(binary, {"admin", "init", "--product", "kano-ai-3d-asset-skill", "--agent", "tester", "--skip-refresh-views"}) == 0, "admin init command failed");
         expect(run_command(binary, {"admin", "init", "--product", "kano-ai-3d-asset-skill", "--agent", "tester", "--skip-refresh-views"}) != 0, "duplicate admin init should fail without --force");

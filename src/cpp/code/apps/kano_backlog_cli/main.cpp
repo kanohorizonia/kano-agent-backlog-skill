@@ -10950,6 +10950,184 @@ int main(int InArgc, char* InArgv[]) {
             return 0;
         };
 
+        auto try_run_topic_cleanup_fast_path = [&]() -> std::optional<int> {
+            int topic_index = -1;
+            for (int i = 1; i + 1 < parse_argc; ++i) {
+                if (std::string(parse_argv[i]) == "topic" && std::string(parse_argv[i + 1]) == "cleanup") {
+                    topic_index = i;
+                    break;
+                }
+            }
+            if (topic_index < 0) {
+                return std::nullopt;
+            }
+
+            std::string local_path = ".";
+            std::string local_product;
+            std::string local_sandbox;
+            std::string format = "plain";
+            int ttl_days = 14;
+            bool apply = false;
+            bool delete_topic_dir = false;
+
+            const auto option_value = [&](int& index, const std::string& option) -> std::optional<std::string> {
+                const std::string arg = parse_argv[index];
+                const std::string prefix_text = option + "=";
+                if (arg.rfind(prefix_text, 0) == 0) {
+                    return arg.substr(prefix_text.size());
+                }
+                if (arg == option && index + 1 < parse_argc) {
+                    ++index;
+                    return std::string(parse_argv[index]);
+                }
+                return std::nullopt;
+            };
+
+            const auto parse_context_option = [&](int& index) -> bool {
+                if (auto value = option_value(index, "-p")) {
+                    local_path = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "--path")) {
+                    local_path = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "-P")) {
+                    local_product = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "--product")) {
+                    local_product = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "-s")) {
+                    local_sandbox = *value;
+                    return true;
+                }
+                if (auto value = option_value(index, "--sandbox")) {
+                    local_sandbox = *value;
+                    return true;
+                }
+                return false;
+            };
+
+            for (int i = 1; i < topic_index; ++i) {
+                if (!parse_context_option(i)) {
+                    return std::nullopt;
+                }
+            }
+
+            for (int i = topic_index + 2; i < parse_argc; ++i) {
+                const std::string arg = parse_argv[i];
+                if (arg == "-h" || arg == "--help") {
+                    return std::nullopt;
+                }
+                if (auto value = option_value(i, "--ttl-days")) {
+                    ttl_days = std::stoi(*value);
+                    continue;
+                }
+                if (auto value = option_value(i, "--format")) {
+                    format = *value;
+                    continue;
+                }
+                if (arg == "--apply") {
+                    apply = true;
+                    continue;
+                }
+                if (arg == "--delete-topic") {
+                    delete_topic_dir = true;
+                    continue;
+                }
+                if (parse_context_option(i)) {
+                    continue;
+                }
+                return std::nullopt;
+            }
+
+            const auto format_norm = lower_copy(format.empty() ? std::string("plain") : format);
+            if (format_norm != "plain" && format_norm != "json") {
+                throw std::runtime_error("format must be one of: plain, json");
+            }
+            if (ttl_days <= 0) {
+                throw std::runtime_error("ttl-days must be > 0");
+            }
+
+            auto ctx = BacklogContext::resolve(
+                local_path,
+                local_product.empty() ? std::nullopt : std::optional<std::string>(local_product),
+                local_sandbox.empty() ? std::nullopt : std::optional<std::string>(local_sandbox)
+            );
+
+            const auto cutoff = topic_cutoff_timestamp(ttl_days);
+            const auto topics_root = ctx.backlog_root / "topics";
+            Json::Value deleted_paths(Json::arrayValue);
+            int topics_scanned = 0;
+            int topics_cleaned = 0;
+            int materials_deleted = 0;
+
+            if (std::filesystem::exists(topics_root)) {
+                for (const auto& entry : std::filesystem::directory_iterator(topics_root)) {
+                    if (!entry.is_directory()) {
+                        continue;
+                    }
+                    ++topics_scanned;
+                    const auto topic_name_local = entry.path().filename().string();
+                    Json::Value manifest;
+                    try {
+                        manifest = load_topic_manifest_json(ctx.backlog_root, topic_name_local);
+                    } catch (...) {
+                        continue;
+                    }
+                    const auto closed_at = manifest.get("closed_at", "").asString();
+                    if (manifest.get("status", "open").asString() != "closed" || closed_at.empty() || closed_at > cutoff) {
+                        continue;
+                    }
+
+                    std::vector<std::filesystem::path> targets;
+                    if (delete_topic_dir) {
+                        targets.push_back(entry.path());
+                    } else if (std::filesystem::exists(entry.path() / "materials")) {
+                        targets.push_back(entry.path() / "materials");
+                    }
+                    if (targets.empty()) {
+                        continue;
+                    }
+
+                    ++topics_cleaned;
+                    for (const auto& target : targets) {
+                        if (!is_inside_path(target, topics_root)) {
+                            throw std::runtime_error("Refusing to delete target outside topics root: " + target.string());
+                        }
+                        deleted_paths.append(target.string());
+                        if (apply) {
+                            std::error_code ec;
+                            materials_deleted += static_cast<int>(std::filesystem::remove_all(target, ec));
+                            if (ec) {
+                                throw std::runtime_error("Failed to delete " + target.string() + ": " + ec.message());
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (format_norm == "json") {
+                Json::Value payload(Json::objectValue);
+                payload["topics_scanned"] = topics_scanned;
+                payload["topics_cleaned"] = topics_cleaned;
+                payload["materials_deleted"] = materials_deleted;
+                payload["deleted_paths"] = deleted_paths;
+                payload["dry_run"] = !apply;
+                std::cout << json_to_string(payload, true) << "\n";
+            } else {
+                std::cout << (apply ? "APPLY" : "DRY RUN") << ": scanned=" << topics_scanned
+                          << " cleaned=" << topics_cleaned << "\n";
+                for (const auto& path : deleted_paths) {
+                    std::cout << "  - " << path.asString() << "\n";
+                }
+            }
+            return 0;
+        };
+
         if (auto topic_create_rc = try_run_topic_create_fast_path()) {
             return *topic_create_rc;
         }
@@ -10976,6 +11154,9 @@ int main(int InArgc, char* InArgv[]) {
         }
         if (auto topic_legacy_rc = try_run_topic_legacy_fast_path()) {
             return *topic_legacy_rc;
+        }
+        if (auto topic_cleanup_rc = try_run_topic_cleanup_fast_path()) {
+            return *topic_cleanup_rc;
         }
 
         auto topic_safe_snapshot_name = [](const std::string& value) {

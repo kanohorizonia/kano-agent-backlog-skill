@@ -4098,6 +4098,118 @@ std::string render_native_release_report_markdown(const NativeReleaseReport& rep
     return out.str();
 }
 
+std::optional<int> try_run_admin_init_fast_path(int argc, char** argv) {
+    if (argc < 3 || argv == nullptr) {
+        return std::nullopt;
+    }
+
+    int admin_index = -1;
+    for (int i = 1; i + 1 < argc; ++i) {
+        if (std::string(argv[i]) == "admin" && std::string(argv[i + 1]) == "init") {
+            admin_index = i;
+            break;
+        }
+    }
+    if (admin_index < 0) {
+        return std::nullopt;
+    }
+
+    std::string path_str = ".";
+    std::string global_product;
+    std::string init_product;
+    std::string init_agent;
+    std::string init_backlog_root;
+    std::string init_product_name;
+    std::string init_prefix;
+    bool init_force = false;
+    bool init_skip_refresh_views = false;
+
+    const auto option_value = [&](int& index, const std::string& option) -> std::optional<std::string> {
+        const std::string arg = argv[index];
+        const std::string prefix = option + "=";
+        if (arg.rfind(prefix, 0) == 0) {
+            return arg.substr(prefix.size());
+        }
+        if (arg == option && index + 1 < argc) {
+            ++index;
+            return std::string(argv[index]);
+        }
+        return std::nullopt;
+    };
+
+    for (int i = 1; i < admin_index; ++i) {
+        const std::string arg = argv[i];
+        if (auto value = option_value(i, "-p")) {
+            path_str = *value;
+        } else if (auto value = option_value(i, "--path")) {
+            path_str = *value;
+        } else if (auto value = option_value(i, "-P")) {
+            global_product = *value;
+        } else if (auto value = option_value(i, "--product")) {
+            global_product = *value;
+        } else if (option_value(i, "-s") || option_value(i, "--sandbox")) {
+            continue;
+        } else {
+            return std::nullopt;
+        }
+    }
+
+    for (int i = admin_index + 2; i < argc; ++i) {
+        const std::string arg = argv[i];
+        if (auto value = option_value(i, "--agent")) {
+            init_agent = *value;
+        } else if (auto value = option_value(i, "--product")) {
+            init_product = *value;
+        } else if (auto value = option_value(i, "--backlog-root")) {
+            init_backlog_root = *value;
+        } else if (auto value = option_value(i, "--product-name")) {
+            init_product_name = *value;
+        } else if (auto value = option_value(i, "--prefix")) {
+            init_prefix = *value;
+        } else if (arg == "--force") {
+            init_force = true;
+        } else if (arg == "--skip-refresh-views") {
+            init_skip_refresh_views = true;
+        } else {
+            return std::nullopt;
+        }
+    }
+
+    const std::string effective_product = !init_product.empty() ? init_product : global_product;
+    if (effective_product.empty()) {
+        throw std::runtime_error("Product name is required. Pass --product or global -P/--product.");
+    }
+    if (init_agent.empty()) {
+        throw std::runtime_error("Agent ID is required");
+    }
+
+    OrchestrationOps::InitOptions options;
+    options.start_path = path_str;
+    options.product = effective_product;
+    options.agent = init_agent;
+    options.force = init_force;
+    options.refresh_views = !init_skip_refresh_views;
+    if (!init_backlog_root.empty()) {
+        options.backlog_root = std::filesystem::path(init_backlog_root);
+    }
+    if (!init_product_name.empty()) {
+        options.product_name = init_product_name;
+    }
+    if (!init_prefix.empty()) {
+        options.prefix = init_prefix;
+    }
+
+    auto result = OrchestrationOps::initialize_backlog(options);
+    std::cout << "Initialized backlog product: " << effective_product << "\n";
+    std::cout << "Project root: " << result.project_root.string() << "\n";
+    std::cout << "Backlog root: " << result.backlog_root.string() << "\n";
+    std::cout << "Product root: " << result.product_root.string() << "\n";
+    std::cout << "Config: " << result.config_path.string() << "\n";
+    std::cout << "Created paths: " << result.created_paths.size() << "\n";
+    std::cout << "Refreshed dashboards: " << result.views_refreshed.size() << "\n";
+    return 0;
+}
+
 } // namespace
 
 int main(int InArgc, char* InArgv[]) {
@@ -4164,6 +4276,15 @@ int main(int InArgc, char* InArgv[]) {
         }
         parse_argc = static_cast<int>(rewritten_argv.size());
         parse_argv = rewritten_argv.data();
+    }
+
+    try {
+        if (auto rc = try_run_admin_init_fast_path(parse_argc, parse_argv)) {
+            return *rc;
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "Fatal error: " << e.what() << "\n";
+        return 1;
     }
 
     CLI::App app{

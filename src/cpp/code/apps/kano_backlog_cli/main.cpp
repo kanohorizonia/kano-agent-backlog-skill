@@ -2057,6 +2057,24 @@ int run_repo_hygiene(const std::filesystem::path& repo_root, bool fix, bool arch
     return 1;
 }
 
+struct RepoHygieneCommandState {
+    std::string repo = ".";
+    std::string command = "check";
+    bool archive_safe = false;
+    bool handled = false;
+    bool check_archive_safe = false;
+    bool fix_archive_safe = false;
+    bool validate_archive_safe = false;
+};
+
+struct ExportCommandState {
+    bool single = false;
+    bool validate_release_archive = true;
+    bool no_validate_release_archive = false;
+    std::string repo = ".";
+    std::string output;
+};
+
 std::uintmax_t file_size_or_zero(const std::filesystem::path& path) {
     std::error_code ec;
     const auto size = std::filesystem::file_size(path, ec);
@@ -18890,16 +18908,13 @@ int main(int InArgc, char* InArgv[]) {
         // ============================================================
         {
             auto* repoHygieneCmd = app.add_subcommand("repo-hygiene", "Detect and fix Git-index executable bits and CRLF/LF issues");
-            std::string hygiene_repo = ".";
-            std::string hygiene_command = "check";
-            bool hygiene_archive_safe = false;
-            bool hygiene_handled = false;
-            repoHygieneCmd->add_option("--repo", hygiene_repo, "Target repository root path");
-            repoHygieneCmd->add_option("command", hygiene_command, "Legacy hygiene subcommand")->expected(0, 1);
-            repoHygieneCmd->add_flag("--archive-safe", hygiene_archive_safe, "Run strict archive-safe checks");
+            auto hygiene_state = std::make_shared<RepoHygieneCommandState>();
+            repoHygieneCmd->add_option("--repo", hygiene_state->repo, "Target repository root path");
+            repoHygieneCmd->add_option("command", hygiene_state->command, "Legacy hygiene subcommand")->expected(0, 1);
+            repoHygieneCmd->add_flag("--archive-safe", hygiene_state->archive_safe, "Run strict archive-safe checks");
             repoHygieneCmd->allow_extras();
 
-            auto run_hygiene_command = [&](const std::string& raw_command, bool archive_safe) {
+            auto run_hygiene_command = [hygiene_state](const std::string& raw_command, bool archive_safe) {
                 const auto lowered = lower_copy(trim_copy(raw_command));
                 const bool fix = lowered == "fix";
                 if (lowered != "check" && lowered != "validate" && lowered != "verify" && lowered != "fix") {
@@ -18907,62 +18922,58 @@ int main(int InArgc, char* InArgv[]) {
                         "repo-hygiene: unknown subcommand '" + raw_command +
                         "' (expected check, validate, verify, or fix)");
                 }
-                const auto rc = run_repo_hygiene(std::filesystem::path(hygiene_repo), fix, archive_safe);
+                const auto rc = run_repo_hygiene(std::filesystem::path(hygiene_state->repo), fix, archive_safe);
                 if (rc != 0) {
                     std::exit(rc);
                 }
             };
 
-            bool check_archive_safe = false;
             auto* hygieneCheckCmd = repoHygieneCmd->add_subcommand("check", "Check repository hygiene");
-            hygieneCheckCmd->add_flag("--archive-safe", check_archive_safe, "Run strict archive-safe checks");
-            hygieneCheckCmd->callback([&]() {
-                hygiene_handled = true;
-                run_hygiene_command("check", check_archive_safe || hygiene_archive_safe);
+            hygieneCheckCmd->add_flag("--archive-safe", hygiene_state->check_archive_safe, "Run strict archive-safe checks");
+            hygieneCheckCmd->callback([hygiene_state, run_hygiene_command]() {
+                hygiene_state->handled = true;
+                run_hygiene_command("check", hygiene_state->check_archive_safe || hygiene_state->archive_safe);
             });
 
-            bool fix_archive_safe = false;
             auto* hygieneFixCmd = repoHygieneCmd->add_subcommand("fix", "Fix repository hygiene issues automatically");
-            hygieneFixCmd->add_flag("--archive-safe", fix_archive_safe, "Apply strict archive-safe checks before mutation");
-            hygieneFixCmd->callback([&]() {
-                hygiene_handled = true;
-                run_hygiene_command("fix", fix_archive_safe || hygiene_archive_safe);
+            hygieneFixCmd->add_flag("--archive-safe", hygiene_state->fix_archive_safe, "Apply strict archive-safe checks before mutation");
+            hygieneFixCmd->callback([hygiene_state, run_hygiene_command]() {
+                hygiene_state->handled = true;
+                run_hygiene_command("fix", hygiene_state->fix_archive_safe || hygiene_state->archive_safe);
             });
 
-            bool validate_archive_safe = false;
             auto* hygieneValidateCmd = repoHygieneCmd->add_subcommand("validate", "Alias for repo-hygiene check");
-            hygieneValidateCmd->add_flag("--archive-safe", validate_archive_safe, "Run strict archive-safe checks");
-            hygieneValidateCmd->callback([&]() {
-                hygiene_handled = true;
-                run_hygiene_command("validate", validate_archive_safe || hygiene_archive_safe);
+            hygieneValidateCmd->add_flag("--archive-safe", hygiene_state->validate_archive_safe, "Run strict archive-safe checks");
+            hygieneValidateCmd->callback([hygiene_state, run_hygiene_command]() {
+                hygiene_state->handled = true;
+                run_hygiene_command("validate", hygiene_state->validate_archive_safe || hygiene_state->archive_safe);
             });
 
-            repoHygieneCmd->callback([&]() {
-                if (hygiene_handled) {
+            repoHygieneCmd->callback([hygiene_state, run_hygiene_command]() {
+                if (hygiene_state->handled) {
                     return;
                 }
-                run_hygiene_command(hygiene_command, hygiene_archive_safe);
+                run_hygiene_command(hygiene_state->command, hygiene_state->archive_safe);
             });
         }
 
         {
             auto* exportCmd = app.add_subcommand("export", "Create a native Git release archive");
-            bool export_single = false;
-            bool validate_release_archive = true;
-            bool no_validate_release_archive = false;
-            std::string export_repo = ".";
-            std::string export_output;
-            exportCmd->add_flag("--single", export_single, "Compatibility flag for legacy callsites; native export currently writes one archive");
-            exportCmd->add_flag("--validate-release-archive", validate_release_archive, "Run archive-safe repo hygiene before archive creation");
-            exportCmd->add_flag("--no-validate-release-archive", no_validate_release_archive, "Skip archive-safe repo hygiene before archive creation");
-            exportCmd->add_option("--repo", export_repo, "Target repository root path");
-            exportCmd->add_option("-o,--output", export_output, "Output directory or .tar file path");
-            exportCmd->callback([&]() {
-                if (no_validate_release_archive) {
-                    validate_release_archive = false;
-                }
-                (void)export_single;
-                const auto rc = run_export_archive(std::filesystem::path(export_repo), export_output, validate_release_archive);
+            auto export_state = std::make_shared<ExportCommandState>();
+            exportCmd->add_flag("--single", export_state->single, "Compatibility flag for legacy callsites; native export currently writes one archive");
+            exportCmd->add_flag("--validate-release-archive", export_state->validate_release_archive, "Run archive-safe repo hygiene before archive creation");
+            exportCmd->add_flag("--no-validate-release-archive", export_state->no_validate_release_archive, "Skip archive-safe repo hygiene before archive creation");
+            exportCmd->add_option("--repo", export_state->repo, "Target repository root path");
+            exportCmd->add_option("-o,--output", export_state->output, "Output directory or .tar file path");
+            exportCmd->callback([export_state]() {
+                (void)export_state->single;
+                const bool validate_release_archive =
+                    export_state->validate_release_archive && !export_state->no_validate_release_archive;
+                const auto rc = run_export_archive(
+                    std::filesystem::path(export_state->repo),
+                    export_state->output,
+                    validate_release_archive
+                );
                 if (rc != 0) {
                     std::exit(rc);
                 }

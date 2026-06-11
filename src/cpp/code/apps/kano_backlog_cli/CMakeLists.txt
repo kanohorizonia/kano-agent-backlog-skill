@@ -9,6 +9,10 @@ target_link_libraries(kano_backlog_cli PRIVATE kano::backlog_core kano::backlog_
 # CLI11 v2.4 uses <codecvt> which is removed in MSVC 19.50 (VS 2026)
 target_compile_definitions(kano_backlog_cli PRIVATE CLI11_HAS_CODECVT=0)
 
+if(MSVC)
+    target_compile_options(kano_backlog_cli PRIVATE /bigobj)
+endif()
+
 # Workaround for MSVC SYSTEM include bug (<string> missing)
 if(MSVC AND TARGET CLI11::CLI11)
     get_target_property(_cli11_inc CLI11::CLI11 INTERFACE_INCLUDE_DIRECTORIES)

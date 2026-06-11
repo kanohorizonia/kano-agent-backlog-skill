@@ -2,13 +2,23 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+KOB_CPP_ROOT_EFFECTIVE="${KOB_CPP_ROOT:-${KABSD_CPP_ROOT:-$SCRIPT_DIR/../../..}}"
 
-KOB_INFRA_MACOS_REMOTE_BUILD_SH="${KOB_CPP_ROOT:-${KABSD_CPP_ROOT:-$SCRIPT_DIR/../../..}}/shared/infra/scripts/common/macos_remote_build.sh"
-if [[ ! -f "$KOB_INFRA_MACOS_REMOTE_BUILD_SH" ]]; then
-  KOB_INFRA_MACOS_REMOTE_BUILD_SH="$SCRIPT_DIR/../../../shared/infra/scripts/common/macos_remote_build.sh"
-fi
-if [[ ! -f "$KOB_INFRA_MACOS_REMOTE_BUILD_SH" ]]; then
-  echo "shared infra macOS remote build script not found: $KOB_INFRA_MACOS_REMOTE_BUILD_SH" >&2
+KOB_INFRA_MACOS_REMOTE_BUILD_SH=""
+for candidate in \
+  "$KOB_CPP_ROOT_EFFECTIVE/shared/infra/scripts/lib/macos_remote_build.sh" \
+  "$KOB_CPP_ROOT_EFFECTIVE/shared/infra/scripts/common/macos_remote_build.sh" \
+  "$SCRIPT_DIR/../../../shared/infra/scripts/lib/macos_remote_build.sh" \
+  "$SCRIPT_DIR/../../../shared/infra/scripts/common/macos_remote_build.sh"
+do
+  if [[ -f "$candidate" ]]; then
+    KOB_INFRA_MACOS_REMOTE_BUILD_SH="$candidate"
+    break
+  fi
+done
+
+if [[ -z "$KOB_INFRA_MACOS_REMOTE_BUILD_SH" ]]; then
+  echo "shared infra macOS remote build script not found under: $KOB_CPP_ROOT_EFFECTIVE/shared/infra/scripts/{lib,common}" >&2
   exit 1
 fi
 

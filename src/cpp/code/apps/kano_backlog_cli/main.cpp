@@ -2075,6 +2075,30 @@ struct ExportCommandState {
     std::string output;
 };
 
+struct EvidenceAddCommandState {
+    std::string item_ref;
+    std::string claim_id;
+    std::string source;
+    std::string content;
+    std::string notes;
+    std::string evidence_id;
+    std::string backlog_root;
+    std::string format = "plain";
+    double relevance = 0.5;
+    double reliability = 0.5;
+    double sufficiency = 0.5;
+    double verifiability = 0.5;
+    double independence = 0.5;
+};
+
+struct EvidenceItemCommandState {
+    std::string item_ref;
+    std::string claim_id;
+    std::string evidence_id;
+    std::string backlog_root;
+    std::string format = "plain";
+};
+
 std::uintmax_t file_size_or_zero(const std::filesystem::path& path) {
     std::error_code ec;
     const auto size = std::filesystem::file_size(path, ec);
@@ -15407,46 +15431,45 @@ int main(int InArgc, char* InArgv[]) {
             // evidence add
             {
                 auto* addCmd = evidenceCmd->add_subcommand("add", "Add an evidence record to a workset evidence store");
-                std::string item_ref, claim_id, source, content, notes, evidence_id, backlog_root_str, format_str = "plain";
-                double relevance = 0.5, reliability = 0.5, sufficiency = 0.5, verifiability = 0.5, independence = 0.5;
-                addCmd->add_option("--item", item_ref, "Item ID, UID, or path")->required();
-                addCmd->add_option("--claim-id", claim_id, "ID of the claim this evidence supports")->required();
-                addCmd->add_option("--source", source, "Source of the evidence")->required();
-                addCmd->add_option("--content", content, "Evidence content/text")->required();
-                addCmd->add_option("--relevance", relevance, "Relevance score (0.0-1.0)");
-                addCmd->add_option("--reliability", reliability, "Reliability score (0.0-1.0)");
-                addCmd->add_option("--sufficiency", sufficiency, "Sufficiency score (0.0-1.0)");
-                addCmd->add_option("--verifiability", verifiability, "Verifiability score (0.0-1.0)");
-                addCmd->add_option("--independence", independence, "Independence score (0.0-1.0)");
-                addCmd->add_option("--notes", notes, "Optional notes");
-                addCmd->add_option("--evidence-id", evidence_id, "Explicit evidence ID");
-                addCmd->add_option("--backlog-root", backlog_root_str, "Path to _kano/backlog");
-                addCmd->add_option("--format", format_str, "Output format: plain|json");
-                addCmd->callback([&]() {
-                    validate_score(relevance, "relevance");
-                    validate_score(reliability, "reliability");
-                    validate_score(sufficiency, "sufficiency");
-                    validate_score(verifiability, "verifiability");
-                    validate_score(independence, "independence");
+                auto state = std::make_shared<EvidenceAddCommandState>();
+                addCmd->add_option("--item", state->item_ref, "Item ID, UID, or path")->required();
+                addCmd->add_option("--claim-id", state->claim_id, "ID of the claim this evidence supports")->required();
+                addCmd->add_option("--source", state->source, "Source of the evidence")->required();
+                addCmd->add_option("--content", state->content, "Evidence content/text")->required();
+                addCmd->add_option("--relevance", state->relevance, "Relevance score (0.0-1.0)");
+                addCmd->add_option("--reliability", state->reliability, "Reliability score (0.0-1.0)");
+                addCmd->add_option("--sufficiency", state->sufficiency, "Sufficiency score (0.0-1.0)");
+                addCmd->add_option("--verifiability", state->verifiability, "Verifiability score (0.0-1.0)");
+                addCmd->add_option("--independence", state->independence, "Independence score (0.0-1.0)");
+                addCmd->add_option("--notes", state->notes, "Optional notes");
+                addCmd->add_option("--evidence-id", state->evidence_id, "Explicit evidence ID");
+                addCmd->add_option("--backlog-root", state->backlog_root, "Path to _kano/backlog");
+                addCmd->add_option("--format", state->format, "Output format: plain|json");
+                addCmd->callback([state]() {
+                    validate_score(state->relevance, "relevance");
+                    validate_score(state->reliability, "reliability");
+                    validate_score(state->sufficiency, "sufficiency");
+                    validate_score(state->verifiability, "verifiability");
+                    validate_score(state->independence, "independence");
 
-                    const auto backlog_root = resolve_backlog_root_arg(backlog_root_str);
-                    auto resolved = resolve_item_any_product(item_ref, backlog_root);
+                    const auto backlog_root = resolve_backlog_root_arg(state->backlog_root);
+                    auto resolved = resolve_item_any_product(state->item_ref, backlog_root);
                     if (!resolved) {
-                        throw std::runtime_error("Item not found for evidence: " + item_ref);
+                        throw std::runtime_error("Item not found for evidence: " + state->item_ref);
                     }
 
                     EvidenceRecordNative record;
-                    record.id = evidence_id.empty() ? CanonicalStore::generate_uuid_v7().substr(0, 8) : evidence_id;
-                    record.claim_id = claim_id;
-                    record.source = source;
-                    record.content = content;
-                    record.relevance = relevance;
-                    record.reliability = reliability;
-                    record.sufficiency = sufficiency;
-                    record.verifiability = verifiability;
-                    record.independence = independence;
-                    if (!notes.empty()) {
-                        record.notes = notes;
+                    record.id = state->evidence_id.empty() ? CanonicalStore::generate_uuid_v7().substr(0, 8) : state->evidence_id;
+                    record.claim_id = state->claim_id;
+                    record.source = state->source;
+                    record.content = state->content;
+                    record.relevance = state->relevance;
+                    record.reliability = state->reliability;
+                    record.sufficiency = state->sufficiency;
+                    record.verifiability = state->verifiability;
+                    record.independence = state->independence;
+                    if (!state->notes.empty()) {
+                        record.notes = state->notes;
                     }
 
                     const auto store_path = evidence_store_path(backlog_root, resolved->item.id);
@@ -15464,7 +15487,7 @@ int main(int InArgc, char* InArgv[]) {
                     }
                     save_evidence_records(store_path, records);
 
-                    if (format_str == "json") {
+                    if (state->format == "json") {
                         Json::Value payload(Json::objectValue);
                         payload["evidence_id"] = record.id;
                         payload["item_id"] = resolved->item.id;
@@ -15480,25 +15503,25 @@ int main(int InArgc, char* InArgv[]) {
             // evidence list
             {
                 auto* listCmd = evidenceCmd->add_subcommand("list", "List evidence records for an item");
-                std::string item_ref, claim_id, backlog_root_str, format_str = "plain";
-                listCmd->add_option("--item", item_ref, "Item ID, UID, or path")->required();
-                listCmd->add_option("--claim-id", claim_id, "Filter by claim ID");
-                listCmd->add_option("--backlog-root", backlog_root_str, "Path to _kano/backlog");
-                listCmd->add_option("--format", format_str, "Output format: plain|json");
-                listCmd->callback([&]() {
-                    const auto backlog_root = resolve_backlog_root_arg(backlog_root_str);
-                    auto resolved = resolve_item_any_product(item_ref, backlog_root);
+                auto state = std::make_shared<EvidenceItemCommandState>();
+                listCmd->add_option("--item", state->item_ref, "Item ID, UID, or path")->required();
+                listCmd->add_option("--claim-id", state->claim_id, "Filter by claim ID");
+                listCmd->add_option("--backlog-root", state->backlog_root, "Path to _kano/backlog");
+                listCmd->add_option("--format", state->format, "Output format: plain|json");
+                listCmd->callback([state]() {
+                    const auto backlog_root = resolve_backlog_root_arg(state->backlog_root);
+                    auto resolved = resolve_item_any_product(state->item_ref, backlog_root);
                     if (!resolved) {
-                        throw std::runtime_error("Item not found for evidence: " + item_ref);
+                        throw std::runtime_error("Item not found for evidence: " + state->item_ref);
                     }
                     auto records = load_evidence_records(evidence_store_path(backlog_root, resolved->item.id));
-                    if (!claim_id.empty()) {
-                        records.erase(std::remove_if(records.begin(), records.end(), [&](const auto& record) {
-                            return record.claim_id != claim_id;
+                    if (!state->claim_id.empty()) {
+                        records.erase(std::remove_if(records.begin(), records.end(), [state](const auto& record) {
+                            return record.claim_id != state->claim_id;
                         }), records.end());
                     }
 
-                    if (format_str == "json") {
+                    if (state->format == "json") {
                         Json::Value payload(Json::objectValue);
                         payload["item_id"] = resolved->item.id;
                         payload["evidence_count"] = static_cast<Json::UInt64>(records.size());
@@ -15534,25 +15557,25 @@ int main(int InArgc, char* InArgv[]) {
             // evidence get
             {
                 auto* getCmd = evidenceCmd->add_subcommand("get", "Get a specific evidence record by ID");
-                std::string item_ref, evidence_id, backlog_root_str, format_str = "plain";
-                getCmd->add_option("--item", item_ref, "Item ID, UID, or path")->required();
-                getCmd->add_option("--evidence-id", evidence_id, "Evidence record ID")->required();
-                getCmd->add_option("--backlog-root", backlog_root_str, "Path to _kano/backlog");
-                getCmd->add_option("--format", format_str, "Output format: plain|json");
-                getCmd->callback([&]() {
-                    const auto backlog_root = resolve_backlog_root_arg(backlog_root_str);
-                    auto resolved = resolve_item_any_product(item_ref, backlog_root);
+                auto state = std::make_shared<EvidenceItemCommandState>();
+                getCmd->add_option("--item", state->item_ref, "Item ID, UID, or path")->required();
+                getCmd->add_option("--evidence-id", state->evidence_id, "Evidence record ID")->required();
+                getCmd->add_option("--backlog-root", state->backlog_root, "Path to _kano/backlog");
+                getCmd->add_option("--format", state->format, "Output format: plain|json");
+                getCmd->callback([state, print_evidence_plain]() {
+                    const auto backlog_root = resolve_backlog_root_arg(state->backlog_root);
+                    auto resolved = resolve_item_any_product(state->item_ref, backlog_root);
                     if (!resolved) {
-                        throw std::runtime_error("Item not found for evidence: " + item_ref);
+                        throw std::runtime_error("Item not found for evidence: " + state->item_ref);
                     }
                     auto records = load_evidence_records(evidence_store_path(backlog_root, resolved->item.id));
-                    auto found = std::find_if(records.begin(), records.end(), [&](const auto& record) {
-                        return record.id == evidence_id;
+                    auto found = std::find_if(records.begin(), records.end(), [state](const auto& record) {
+                        return record.id == state->evidence_id;
                     });
                     if (found == records.end()) {
-                        throw std::runtime_error("Evidence record '" + evidence_id + "' not found for item '" + resolved->item.id + "'");
+                        throw std::runtime_error("Evidence record '" + state->evidence_id + "' not found for item '" + resolved->item.id + "'");
                     }
-                    if (format_str == "json") {
+                    if (state->format == "json") {
                         std::cout << json_to_string(evidence_to_json(*found), true) << "\n";
                     } else {
                         print_evidence_plain(*found);
@@ -15563,35 +15586,35 @@ int main(int InArgc, char* InArgv[]) {
             // evidence delete
             {
                 auto* deleteCmd = evidenceCmd->add_subcommand("delete", "Delete an evidence record by ID");
-                std::string item_ref, evidence_id, backlog_root_str, format_str = "plain";
-                deleteCmd->add_option("--item", item_ref, "Item ID, UID, or path")->required();
-                deleteCmd->add_option("--evidence-id", evidence_id, "Evidence record ID")->required();
-                deleteCmd->add_option("--backlog-root", backlog_root_str, "Path to _kano/backlog");
-                deleteCmd->add_option("--format", format_str, "Output format: plain|json");
-                deleteCmd->callback([&]() {
-                    const auto backlog_root = resolve_backlog_root_arg(backlog_root_str);
-                    auto resolved = resolve_item_any_product(item_ref, backlog_root);
+                auto state = std::make_shared<EvidenceItemCommandState>();
+                deleteCmd->add_option("--item", state->item_ref, "Item ID, UID, or path")->required();
+                deleteCmd->add_option("--evidence-id", state->evidence_id, "Evidence record ID")->required();
+                deleteCmd->add_option("--backlog-root", state->backlog_root, "Path to _kano/backlog");
+                deleteCmd->add_option("--format", state->format, "Output format: plain|json");
+                deleteCmd->callback([state]() {
+                    const auto backlog_root = resolve_backlog_root_arg(state->backlog_root);
+                    auto resolved = resolve_item_any_product(state->item_ref, backlog_root);
                     if (!resolved) {
-                        throw std::runtime_error("Item not found for evidence: " + item_ref);
+                        throw std::runtime_error("Item not found for evidence: " + state->item_ref);
                     }
                     const auto store_path = evidence_store_path(backlog_root, resolved->item.id);
                     auto records = load_evidence_records(store_path);
                     const auto original_count = records.size();
-                    records.erase(std::remove_if(records.begin(), records.end(), [&](const auto& record) {
-                        return record.id == evidence_id;
+                    records.erase(std::remove_if(records.begin(), records.end(), [state](const auto& record) {
+                        return record.id == state->evidence_id;
                     }), records.end());
                     const bool deleted = records.size() != original_count;
                     if (deleted) {
                         save_evidence_records(store_path, records);
                     }
-                    if (format_str == "json") {
+                    if (state->format == "json") {
                         Json::Value payload(Json::objectValue);
                         payload["deleted"] = deleted;
                         std::cout << json_to_string(payload, false) << "\n";
                     } else if (deleted) {
-                        std::cout << "OK: Deleted evidence " << evidence_id << "\n";
+                        std::cout << "OK: Deleted evidence " << state->evidence_id << "\n";
                     } else {
-                        std::cout << "Evidence " << evidence_id << " not found\n";
+                        std::cout << "Evidence " << state->evidence_id << " not found\n";
                     }
                 });
             }
@@ -15599,15 +15622,15 @@ int main(int InArgc, char* InArgv[]) {
             // evidence summary
             {
                 auto* summaryCmd = evidenceCmd->add_subcommand("summary", "Compute summary statistics for all evidence records");
-                std::string item_ref, backlog_root_str, format_str = "plain";
-                summaryCmd->add_option("--item", item_ref, "Item ID, UID, or path")->required();
-                summaryCmd->add_option("--backlog-root", backlog_root_str, "Path to _kano/backlog");
-                summaryCmd->add_option("--format", format_str, "Output format: plain|json");
-                summaryCmd->callback([&]() {
-                    const auto backlog_root = resolve_backlog_root_arg(backlog_root_str);
-                    auto resolved = resolve_item_any_product(item_ref, backlog_root);
+                auto state = std::make_shared<EvidenceItemCommandState>();
+                summaryCmd->add_option("--item", state->item_ref, "Item ID, UID, or path")->required();
+                summaryCmd->add_option("--backlog-root", state->backlog_root, "Path to _kano/backlog");
+                summaryCmd->add_option("--format", state->format, "Output format: plain|json");
+                summaryCmd->callback([state]() {
+                    const auto backlog_root = resolve_backlog_root_arg(state->backlog_root);
+                    auto resolved = resolve_item_any_product(state->item_ref, backlog_root);
                     if (!resolved) {
-                        throw std::runtime_error("Item not found for evidence: " + item_ref);
+                        throw std::runtime_error("Item not found for evidence: " + state->item_ref);
                     }
                     auto records = load_evidence_records(evidence_store_path(backlog_root, resolved->item.id));
                     const double n = static_cast<double>(records.size());
@@ -15628,7 +15651,7 @@ int main(int InArgc, char* InArgv[]) {
                     payload["avg_independence"] = avg([](const auto& r) { return r.independence; });
                     payload["avg_overall"] = avg([](const auto& r) { return r.overall_score(); });
 
-                    if (format_str == "json") {
+                    if (state->format == "json") {
                         std::cout << json_to_string(payload, true) << "\n";
                     } else {
                         std::cout << "Evidence summary for " << resolved->item.id << ":\n";

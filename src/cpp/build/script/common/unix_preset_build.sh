@@ -11,6 +11,28 @@ if [[ -z "${KOB_CPP_ROOT:-${KABSD_CPP_ROOT:-}}" ]]; then
   exit 1
 fi
 
+KOB_CPP_ROOT_EFFECTIVE="${KOB_CPP_ROOT:-${KABSD_CPP_ROOT:-}}"
+KOB_INFRA_UNIX_PRESET_BUILD_SH=""
+for candidate in \
+  "$KOB_CPP_ROOT_EFFECTIVE/shared/infra/scripts/lib/unix_preset_build.sh" \
+  "$KOB_CPP_ROOT_EFFECTIVE/shared/infra/scripts/common/unix_preset_build.sh" \
+  "$SCRIPT_DIR/../../../shared/infra/scripts/lib/unix_preset_build.sh" \
+  "$SCRIPT_DIR/../../../shared/infra/scripts/common/unix_preset_build.sh"
+do
+  if [[ -f "$candidate" ]]; then
+    KOB_INFRA_UNIX_PRESET_BUILD_SH="$candidate"
+    break
+  fi
+done
+
+if [[ -z "$KOB_INFRA_UNIX_PRESET_BUILD_SH" ]]; then
+  echo "shared infra Unix preset build script not found under: $KOB_CPP_ROOT_EFFECTIVE/shared/infra/scripts/{lib,common}" >&2
+  exit 1
+fi
+
+# shellcheck disable=SC1091
+source "$KOB_INFRA_UNIX_PRESET_BUILD_SH"
+
 # =============================================================================
 # kob_run_unix_build — backlog-skill wrapper around kano_cpp_run_unix_preset
 # =============================================================================

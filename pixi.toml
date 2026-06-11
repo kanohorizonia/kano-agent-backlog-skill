@@ -1,7 +1,7 @@
 [workspace]
 name = "kano-agent-backlog-skill"
 channels = ["conda-forge"]
-platforms = ["win-64", "linux-64", "osx-64", "osx-arm64"]
+platforms = ["win-64", "linux-64", "linux-aarch64", "osx-64", "osx-arm64"]
 
 [dependencies]
 cmake = ">=3.21"
@@ -9,6 +9,9 @@ git = "*"
 ninja = "*"
 
 [target.linux-64.dependencies]
+bash = "*"
+
+[target.linux-aarch64.dependencies]
 bash = "*"
 
 [target.osx-64.dependencies]
@@ -61,6 +64,14 @@ build-dev = "bash src/cpp/build/script/linux/build_linux_ninja_clang_debug.sh"
 build-release = "bash src/cpp/build/script/linux/build_linux_ninja_gcc_release.sh"
 
 # Tests: linux-64 test runner TBD (no src/cpp/build/script/linux/run_tests.sh)
+
+# =============================================================================
+# Linux ARM64-specific (linux-aarch64)
+# =============================================================================
+[target.linux-aarch64.tasks]
+build = "bash src/cpp/build/script/linux/build_linux_ninja_clang_debug.sh"
+build-dev = "bash src/cpp/build/script/linux/build_linux_ninja_clang_debug.sh"
+build-release = "bash src/cpp/build/script/linux/build_linux_ninja_gcc_release.sh"
 
 # =============================================================================
 # macOS Intel-specific (osx-64)

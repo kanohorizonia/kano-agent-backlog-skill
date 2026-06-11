@@ -9,7 +9,15 @@ else
 fi
 
 if [[ ! -f "$KOB_SHARED_BUILD_METADATA_SH" ]]; then
-  echo "shared infra build metadata script not found: $KOB_SHARED_BUILD_METADATA_SH" >&2
+  if [[ -n "${KOB_CPP_ROOT:-${KABSD_CPP_ROOT:-}}" ]]; then
+    KOB_SHARED_BUILD_METADATA_SH="${KOB_CPP_ROOT:-${KABSD_CPP_ROOT:-}}/shared/infra/scripts/lib/build_metadata.sh"
+  else
+    KOB_SHARED_BUILD_METADATA_SH="$SCRIPT_DIR/../../../shared/infra/scripts/lib/build_metadata.sh"
+  fi
+fi
+
+if [[ ! -f "$KOB_SHARED_BUILD_METADATA_SH" ]]; then
+  echo "shared infra build metadata script not found in scripts/common or scripts/lib: $KOB_SHARED_BUILD_METADATA_SH" >&2
   exit 1
 fi
 

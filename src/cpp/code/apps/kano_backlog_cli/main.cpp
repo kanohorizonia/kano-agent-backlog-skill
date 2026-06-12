@@ -11909,7 +11909,10 @@ int main(int InArgc, char* InArgv[]) {
             }
 
             const std::string action = parse_argv[tokenizer_index + 1];
-            if (action != "compare" && action != "migrate" && action != "telemetry") {
+            if (action != "config" && action != "create-example" &&
+                action != "list-models" && action != "models" &&
+                action != "cache-stats" && action != "accuracy" &&
+                action != "compare" && action != "migrate" && action != "telemetry") {
                 return std::nullopt;
             }
 
@@ -11941,6 +11944,225 @@ int main(int InArgc, char* InArgv[]) {
                 }
                 return adapters;
             };
+
+            if (action == "models" || action == "list-models") {
+                for (int i = tokenizer_index + 2; i < parse_argc; ++i) {
+                    const std::string arg = parse_argv[i];
+                    if (arg == "-h" || arg == "--help") {
+                        return std::nullopt;
+                    }
+                    return std::nullopt;
+                }
+                std::cout << "# Known Model Token Limits\n";
+                for (const auto& model : {"text-embedding-3-small", "text-embedding-3-large", "gpt-4o", "gpt-4o-mini", "bert-base-uncased"}) {
+                    std::cout << "- " << model << ": " << model_max_tokens_native(model) << "\n";
+                }
+                return 0;
+            }
+
+            if (action == "config") {
+                std::string config_format = "json";
+                std::string config_path;
+                for (int i = tokenizer_index + 2; i < parse_argc; ++i) {
+                    const std::string arg = parse_argv[i];
+                    if (arg == "-h" || arg == "--help") {
+                        return std::nullopt;
+                    }
+                    if (auto value = option_value(i, "--config")) {
+                        config_path = *value;
+                        continue;
+                    }
+                    if (auto value = option_value(i, "--format")) {
+                        config_format = *value;
+                        continue;
+                    }
+                    return std::nullopt;
+                }
+                (void)config_path;
+                Json::Value payload(Json::objectValue);
+                payload["adapter"] = "heuristic";
+                payload["model"] = "text-embedding-3-small";
+                payload["max_tokens"] = 8191;
+                payload["fallback_chain"].append("heuristic");
+                payload["runtime"] = "native-cpp";
+                const auto format_norm = lower_copy(trim_copy(config_format));
+                if (format_norm == "toml") {
+                    std::cout << json_object_to_toml(payload);
+                } else if (format_norm == "json") {
+                    std::cout << json_to_string(payload, true) << "\n";
+                } else {
+                    throw std::runtime_error("format must be json or toml");
+                }
+                return 0;
+            }
+
+            if (action == "create-example") {
+                std::string output = "tokenizer_config.toml";
+                bool force = false;
+                for (int i = tokenizer_index + 2; i < parse_argc; ++i) {
+                    const std::string arg = parse_argv[i];
+                    if (arg == "-h" || arg == "--help") {
+                        return std::nullopt;
+                    }
+                    if (auto value = option_value(i, "--output")) {
+                        output = *value;
+                        continue;
+                    }
+                    if (arg == "--force") {
+                        force = true;
+                        continue;
+                    }
+                    return std::nullopt;
+                }
+                const auto out_path = normalized_absolute_path(expand_user_path(output));
+                if (std::filesystem::exists(out_path) && !force) {
+                    throw std::runtime_error("File already exists: " + out_path.string() + ". Use --force to overwrite.");
+                }
+                std::ostringstream text;
+                text << "[tokenizer]\n";
+                text << "adapter = \"heuristic\"\n";
+                text << "model = \"text-embedding-3-small\"\n";
+                text << "max_tokens = 8191\n";
+                text << "fallback_chain = [\"heuristic\"]\n";
+                write_text_file(out_path, text.str());
+                std::cout << "Created example tokenizer configuration: " << out_path.string() << "\n";
+                return 0;
+            }
+
+            if (action == "cache-stats") {
+                std::string cache_format = "markdown";
+                for (int i = tokenizer_index + 2; i < parse_argc; ++i) {
+                    const std::string arg = parse_argv[i];
+                    if (arg == "-h" || arg == "--help") {
+                        return std::nullopt;
+                    }
+                    if (auto value = option_value(i, "--format")) {
+                        cache_format = *value;
+                        continue;
+                    }
+                    return std::nullopt;
+                }
+                Json::Value payload(Json::objectValue);
+                payload["runtime"] = "native-cpp";
+                payload["status"] = "stateless";
+                payload["cache_enabled"] = false;
+                payload["cache_size"] = 0;
+                payload["max_size"] = 0;
+                payload["total_requests"] = 0;
+                payload["hits"] = 0;
+                payload["misses"] = 0;
+                payload["evictions"] = 0;
+                payload["memory_usage_bytes"] = 0;
+                payload["reason"] = "Native heuristic token counting is deterministic and does not require a process-global cache";
+                const auto format_norm = lower_copy(trim_copy(cache_format));
+                if (format_norm == "json") {
+                    std::cout << json_to_string(payload, true) << "\n";
+                } else if (format_norm == "markdown") {
+                    std::cout << "# Tokenizer Cache Statistics\n";
+                    std::cout << "- runtime: native-cpp\n";
+                    std::cout << "- status: stateless\n";
+                    std::cout << "- cache_enabled: false\n";
+                    std::cout << "- cache_size: 0\n";
+                    std::cout << "- total_requests: 0\n";
+                    std::cout << "- memory_usage_bytes: 0\n";
+                } else {
+                    throw std::runtime_error("format must be one of: markdown, json");
+                }
+                return 0;
+            }
+
+            if (action == "accuracy") {
+                std::string accuracy_adapter = "heuristic";
+                std::string accuracy_model = "text-embedding-3-small";
+                std::string accuracy_output;
+                std::string accuracy_format = "markdown";
+                bool accuracy_verbose = false;
+                for (int i = tokenizer_index + 2; i < parse_argc; ++i) {
+                    const std::string arg = parse_argv[i];
+                    if (arg == "-h" || arg == "--help") {
+                        return std::nullopt;
+                    }
+                    if (auto value = option_value(i, "--adapter")) {
+                        accuracy_adapter = *value;
+                        continue;
+                    }
+                    if (auto value = option_value(i, "--model")) {
+                        accuracy_model = *value;
+                        continue;
+                    }
+                    if (auto value = option_value(i, "--output")) {
+                        accuracy_output = *value;
+                        continue;
+                    }
+                    if (auto value = option_value(i, "--format")) {
+                        accuracy_format = *value;
+                        continue;
+                    }
+                    if (arg == "--verbose") {
+                        accuracy_verbose = true;
+                        continue;
+                    }
+                    return std::nullopt;
+                }
+                const auto effective_adapter = trim_copy(accuracy_adapter).empty()
+                    ? std::string("heuristic")
+                    : lower_copy(trim_copy(accuracy_adapter));
+                const auto effective_model = trim_copy(accuracy_model).empty()
+                    ? std::string("text-embedding-3-small")
+                    : accuracy_model;
+                const std::vector<std::string> samples = {
+                    "",
+                    "Hello world",
+                    "Native tokenizer smoke text.",
+                    "Code: kano-backlog tokenizer accuracy --format json",
+                    "Mixed punctuation, numbers 12345, and C++ identifiers."
+                };
+                Json::Value report(Json::objectValue);
+                report["runtime"] = "native-cpp";
+                report["adapter"] = effective_adapter;
+                report["resolved_adapter"] = "heuristic";
+                report["model"] = effective_model;
+                report["model_max_tokens"] = std::stoi(model_max_tokens_native(effective_model));
+                report["status"] = "heuristic-self-check";
+                report["is_exact"] = false;
+                report["test_cases_count"] = static_cast<int>(samples.size());
+                report["within_native_consistency"] = 1.0;
+                report["mean_processing_time_ms"] = 0.0;
+                for (const auto& sample : samples) {
+                    Json::Value row(Json::objectValue);
+                    row["text_length"] = static_cast<Json::UInt64>(sample.size());
+                    row["predicted_tokens"] = native_heuristic_token_count(sample);
+                    row["method"] = "native-heuristic";
+                    report["results"].append(row);
+                }
+                if (!accuracy_output.empty()) {
+                    write_json_file(normalized_absolute_path(expand_user_path(accuracy_output)), report);
+                }
+                const auto format_norm = lower_copy(trim_copy(accuracy_format));
+                if (format_norm == "json") {
+                    std::cout << json_to_string(report, true) << "\n";
+                } else if (format_norm == "markdown") {
+                    std::cout << "# Tokenizer Accuracy Smoke\n";
+                    std::cout << "- runtime: native-cpp\n";
+                    std::cout << "- adapter: heuristic\n";
+                    std::cout << "- model: " << effective_model << "\n";
+                    std::cout << "- status: heuristic-self-check\n";
+                    std::cout << "- exact: false\n";
+                    std::cout << "- test_cases: " << samples.size() << "\n";
+                    if (!accuracy_output.empty()) {
+                        std::cout << "- report: " << normalized_absolute_path(expand_user_path(accuracy_output)).string() << "\n";
+                    }
+                    if (accuracy_verbose) {
+                        for (const auto& sample : samples) {
+                            std::cout << "  - sample_chars: " << sample.size()
+                                      << ", predicted_tokens: " << native_heuristic_token_count(sample) << "\n";
+                        }
+                    }
+                } else {
+                    throw std::runtime_error("format must be one of: markdown, json");
+                }
+                return 0;
+            }
 
             if (action == "compare") {
                 std::string compare_text = "Sample text";

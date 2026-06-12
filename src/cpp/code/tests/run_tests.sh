@@ -12,7 +12,8 @@ export GIT_TERMINAL_PROMPT=0
 export KANO_NATIVE_TEST_TIMEOUT_SECONDS="${KANO_NATIVE_TEST_TIMEOUT_SECONDS:-120}"
 
 PRESET="${1:-windows-ninja-msvc-release}"
-LANE_MODE="${2:-default}"
+CONFIG="${2:-Debug}"
+LANE_MODE="${3:-default}"
 RUNNER_PRESET="$PRESET"
 
 case "$RUNNER_PRESET" in
@@ -42,7 +43,8 @@ EOF
 echo "=== kano-backlog code/tests wrapper ==="
 echo "  CPP_ROOT: $CPP_ROOT"
 echo "  PRESET: $PRESET"
+echo "  CONFIG: $CONFIG"
 echo "  LANE: $LANE_MODE"
 
-bash "$CPP_ROOT/build/script/windows/run_tests.sh" "$RUNNER_PRESET"
+bash "$CPP_ROOT/../shell/test/native-test.sh" "$RUNNER_PRESET" "$CONFIG"
 write_placeholder_junit

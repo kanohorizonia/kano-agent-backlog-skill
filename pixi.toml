@@ -38,8 +38,8 @@ build-dev = "KOB_CPP_ROOT=src/cpp KABSD_BUILD_PREFIX=KOB KABSD_CMAKE_VAR_PREFIX=
 build-dev-win = "KOB_CPP_ROOT=src/cpp KABSD_BUILD_PREFIX=KOB KABSD_CMAKE_VAR_PREFIX=KB bash src/cpp/shared/infra/scripts/platform/win64/ninja-msvc-debug.sh"
 
 # Release build (optimized)
-build-release = "KOB_CPP_ROOT=src/cpp KABSD_BUILD_PREFIX=KOB KABSD_CMAKE_VAR_PREFIX=KB bash src/cpp/shared/infra/scripts/platform/win64/ninja-msvc-release.sh"
-build-release-win = "KOB_CPP_ROOT=src/cpp KABSD_BUILD_PREFIX=KOB KABSD_CMAKE_VAR_PREFIX=KB bash src/cpp/shared/infra/scripts/platform/win64/ninja-msvc-release.sh"
+build-release = "KOB_CPP_ROOT=src/cpp KABSD_BUILD_PREFIX=KOB KABSD_CMAKE_VAR_PREFIX=KB INF_CMAKE_CACHE_ARGS_JSON='{\"KB_BUILD_TESTS\":\"ON\"}' bash src/cpp/shared/infra/scripts/platform/win64/ninja-msvc-release.sh"
+build-release-win = "KOB_CPP_ROOT=src/cpp KABSD_BUILD_PREFIX=KOB KABSD_CMAKE_VAR_PREFIX=KB INF_CMAKE_CACHE_ARGS_JSON='{\"KB_BUILD_TESTS\":\"ON\"}' bash src/cpp/shared/infra/scripts/platform/win64/ninja-msvc-release.sh"
 
 # Coverage workflow (CI-ready) - all steps use infra scripts
 build-coverage = "KOB_CPP_ROOT=src/cpp KABSD_BUILD_PREFIX=KOB KABSD_CMAKE_VAR_PREFIX=KB bash src/cpp/shared/infra/scripts/platform/win64/ninja-msvc-coverage-build.sh"
@@ -50,7 +50,7 @@ report-coverage = "bash src/cpp/build/script/windows/ninja-msvc-coverage-report.
 coverage-all = "KOB_CPP_ROOT=src/cpp KABSD_BUILD_PREFIX=KOB KABSD_CMAKE_VAR_PREFIX=KB bash src/cpp/shared/infra/scripts/platform/win64/ninja-msvc-coverage-build.sh && bash src/cpp/build/script/windows/ninja-msvc-coverage-run.sh && bash src/cpp/build/script/windows/ninja-msvc-coverage-report.sh"
 
 # Tests
-quick-test = "bash src/cpp/code/tests/run_tests.sh windows-ninja-msvc"
+quick-test = "bash src/cpp/code/tests/run_tests.sh windows-ninja-msvc Release"
 
 # =============================================================================
 # Linux-specific (linux-64)
@@ -61,7 +61,8 @@ build = "bash src/cpp/build/script/linux/build_linux_ninja_clang_debug.sh"
 build-dev = "bash src/cpp/build/script/linux/build_linux_ninja_clang_debug.sh"
 
 # Release build (optimized)
-build-release = "bash src/cpp/build/script/linux/build_linux_ninja_gcc_release.sh"
+build-release = "INF_CMAKE_CACHE_ARGS_JSON='{\"KB_BUILD_TESTS\":\"ON\"}' bash src/cpp/build/script/linux/build_linux_ninja_gcc_release.sh"
+quick-test = "bash src/cpp/code/tests/run_tests.sh linux-ninja-gcc Release"
 
 # Tests: linux-64 test runner TBD (no src/cpp/build/script/linux/run_tests.sh)
 
@@ -71,7 +72,8 @@ build-release = "bash src/cpp/build/script/linux/build_linux_ninja_gcc_release.s
 [target.linux-aarch64.tasks]
 build = "bash src/cpp/build/script/linux/build_linux_ninja_clang_debug.sh"
 build-dev = "bash src/cpp/build/script/linux/build_linux_ninja_clang_debug.sh"
-build-release = "bash src/cpp/build/script/linux/build_linux_ninja_gcc_release.sh"
+build-release = "INF_CMAKE_CACHE_ARGS_JSON='{\"KB_BUILD_TESTS\":\"ON\"}' bash src/cpp/build/script/linux/build_linux_ninja_gcc_release.sh"
+quick-test = "bash src/cpp/code/tests/run_tests.sh linux-ninja-gcc Release"
 
 # =============================================================================
 # macOS Intel-specific (osx-64)
@@ -79,7 +81,8 @@ build-release = "bash src/cpp/build/script/linux/build_linux_ninja_gcc_release.s
 [target.osx-64.tasks]
 build = "bash src/cpp/build/script/macos/build_macos_ninja_clang_x64_debug.sh"
 build-dev = "bash src/cpp/build/script/macos/build_macos_ninja_clang_x64_debug.sh"
-build-release = "bash src/cpp/build/script/macos/build_macos_ninja_clang_x64_release.sh"
+build-release = "INF_CMAKE_CACHE_ARGS_JSON='{\"KB_BUILD_TESTS\":\"ON\"}' bash src/cpp/build/script/macos/build_macos_ninja_clang_x64_release.sh"
+quick-test = "bash src/cpp/code/tests/run_tests.sh macos-ninja-clang-x64 Release"
 
 # =============================================================================
 # macOS Apple Silicon-specific (osx-arm64)
@@ -87,4 +90,5 @@ build-release = "bash src/cpp/build/script/macos/build_macos_ninja_clang_x64_rel
 [target.osx-arm64.tasks]
 build = "bash src/cpp/build/script/macos/build_macos_ninja_clang_arm64_debug.sh"
 build-dev = "bash src/cpp/build/script/macos/build_macos_ninja_clang_arm64_debug.sh"
-build-release = "bash src/cpp/build/script/macos/build_macos_ninja_clang_arm64_release.sh"
+build-release = "INF_CMAKE_CACHE_ARGS_JSON='{\"KB_BUILD_TESTS\":\"ON\"}' bash src/cpp/build/script/macos/build_macos_ninja_clang_arm64_release.sh"
+quick-test = "bash src/cpp/code/tests/run_tests.sh macos-ninja-clang-arm64 Release"

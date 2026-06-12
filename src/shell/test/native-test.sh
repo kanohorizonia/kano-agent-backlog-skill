@@ -80,9 +80,40 @@ shift $(( $# > 0 ? 1 : 0 )) || true
 
 prepare_windows_ctest_drive
 
-if [[ "$PRESET" == windows-* ]]; then
-  run_windows_native_smoke_tests
-  exit $?
-fi
+run_ctest_with_junit() {
+  local build_dir="$SKILL_ROOT/src/cpp/out/obj/$PRESET"
+  local test_count
 
-ctest --test-dir "$SKILL_ROOT/src/cpp/out/obj/$PRESET" -C "$CONFIG" --output-on-failure "$@"
+  if [[ ! -d "$build_dir" ]]; then
+    echo "Missing CTest build directory: $build_dir" >&2
+    return 1
+  fi
+
+  test_count="$(
+    ctest --test-dir "$build_dir" -C "$CONFIG" -N 2>/dev/null |
+      awk '/^  Test #[0-9]+:/ { count++ } END { print count + 0 }'
+  )"
+  if [[ "$test_count" == "0" ]]; then
+    echo "No CTest tests are registered for preset=$PRESET config=$CONFIG. Was KB_BUILD_TESTS enabled?" >&2
+    return 1
+  fi
+
+  if [[ -n "${KANO_TEST_XML:-}" ]]; then
+    case "$KANO_TEST_XML" in
+      /*|[A-Za-z]:/*|[A-Za-z]:\\*) ;;
+      *) KANO_TEST_XML="$SKILL_ROOT/$KANO_TEST_XML" ;;
+    esac
+    mkdir -p "$(dirname "$KANO_TEST_XML")"
+    ctest --test-dir "$build_dir" -C "$CONFIG" --output-on-failure --output-junit "$KANO_TEST_XML" "$@"
+    if [[ ! -f "$KANO_TEST_XML" ]]; then
+      echo "CTest completed but did not write JUnit report: $KANO_TEST_XML" >&2
+      return 1
+    fi
+    echo "[INFO] JUnit report written: $KANO_TEST_XML"
+    return 0
+  fi
+
+  ctest --test-dir "$build_dir" -C "$CONFIG" --output-on-failure "$@"
+}
+
+run_ctest_with_junit

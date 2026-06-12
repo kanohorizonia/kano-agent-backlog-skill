@@ -337,6 +337,25 @@ jobs:
               writer = csv.DictWriter(handle, fieldnames=["path", "type", "size"])
               writer.writeheader()
               writer.writerows(entries)
+          manifest_summary = {
+              "schemaVersion": 1,
+              "sidecarKind": "kano-archive-manifest-summary",
+              "archivePath": archive_path.name,
+              "entryCount": len(entries),
+              "totalFileSizeBytes": sum(item["size"] for item in entries),
+              "sha256": hashlib.sha256(archive_path.read_bytes()).hexdigest(),
+              "manifestCsv": manifest_csv.name,
+          }
+          (artifact_root / f"{archive_path.name}.manifest.summary.json").write_text(
+              json.dumps(manifest_summary, indent=2) + "\n",
+              encoding="utf-8",
+          )
+
+          junit_source = Path("out/reports/test-reports/cloud/tests.xml")
+          if junit_source.is_file():
+              report_dest = artifact_root / "reports" / platform / "test-reports" / f"{safe_component(package_id)}-{safe_component(platform)}" / "tests.xml"
+              report_dest.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(junit_source, report_dest)
 
           files = []
           for path in sorted(p for p in artifact_root.iterdir() if p.is_file()):

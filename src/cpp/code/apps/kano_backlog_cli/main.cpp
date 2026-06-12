@@ -15445,7 +15445,7 @@ int main(int InArgc, char* InArgv[]) {
                 addCmd->add_option("--evidence-id", state->evidence_id, "Explicit evidence ID");
                 addCmd->add_option("--backlog-root", state->backlog_root, "Path to _kano/backlog");
                 addCmd->add_option("--format", state->format, "Output format: plain|json");
-                addCmd->callback([state]() {
+                addCmd->callback([state, &resolve_backlog_root_arg]() {
                     validate_score(state->relevance, "relevance");
                     validate_score(state->reliability, "reliability");
                     validate_score(state->sufficiency, "sufficiency");
@@ -15508,7 +15508,7 @@ int main(int InArgc, char* InArgv[]) {
                 listCmd->add_option("--claim-id", state->claim_id, "Filter by claim ID");
                 listCmd->add_option("--backlog-root", state->backlog_root, "Path to _kano/backlog");
                 listCmd->add_option("--format", state->format, "Output format: plain|json");
-                listCmd->callback([state]() {
+                listCmd->callback([state, &resolve_backlog_root_arg]() {
                     const auto backlog_root = resolve_backlog_root_arg(state->backlog_root);
                     auto resolved = resolve_item_any_product(state->item_ref, backlog_root);
                     if (!resolved) {
@@ -15562,7 +15562,7 @@ int main(int InArgc, char* InArgv[]) {
                 getCmd->add_option("--evidence-id", state->evidence_id, "Evidence record ID")->required();
                 getCmd->add_option("--backlog-root", state->backlog_root, "Path to _kano/backlog");
                 getCmd->add_option("--format", state->format, "Output format: plain|json");
-                getCmd->callback([state, print_evidence_plain]() {
+                getCmd->callback([state, print_evidence_plain, &resolve_backlog_root_arg]() {
                     const auto backlog_root = resolve_backlog_root_arg(state->backlog_root);
                     auto resolved = resolve_item_any_product(state->item_ref, backlog_root);
                     if (!resolved) {
@@ -15591,7 +15591,7 @@ int main(int InArgc, char* InArgv[]) {
                 deleteCmd->add_option("--evidence-id", state->evidence_id, "Evidence record ID")->required();
                 deleteCmd->add_option("--backlog-root", state->backlog_root, "Path to _kano/backlog");
                 deleteCmd->add_option("--format", state->format, "Output format: plain|json");
-                deleteCmd->callback([state]() {
+                deleteCmd->callback([state, &resolve_backlog_root_arg]() {
                     const auto backlog_root = resolve_backlog_root_arg(state->backlog_root);
                     auto resolved = resolve_item_any_product(state->item_ref, backlog_root);
                     if (!resolved) {
@@ -15626,7 +15626,7 @@ int main(int InArgc, char* InArgv[]) {
                 summaryCmd->add_option("--item", state->item_ref, "Item ID, UID, or path")->required();
                 summaryCmd->add_option("--backlog-root", state->backlog_root, "Path to _kano/backlog");
                 summaryCmd->add_option("--format", state->format, "Output format: plain|json");
-                summaryCmd->callback([state]() {
+                summaryCmd->callback([state, &resolve_backlog_root_arg]() {
                     const auto backlog_root = resolve_backlog_root_arg(state->backlog_root);
                     auto resolved = resolve_item_any_product(state->item_ref, backlog_root);
                     if (!resolved) {

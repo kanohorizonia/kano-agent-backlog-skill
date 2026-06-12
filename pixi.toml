@@ -7,6 +7,7 @@ platforms = ["win-64", "linux-64", "linux-aarch64", "osx-64", "osx-arm64"]
 cmake = ">=3.21"
 git = "*"
 ninja = "*"
+zlib = ">=1.3.2,<2"
 
 [target.linux-64.dependencies]
 bash = "*"
@@ -37,62 +38,8 @@ build = "KOB_CPP_ROOT=src/cpp KABSD_BUILD_PREFIX=KOB KABSD_CMAKE_VAR_PREFIX=KB b
 build-dev = "KOB_CPP_ROOT=src/cpp KABSD_BUILD_PREFIX=KOB KABSD_CMAKE_VAR_PREFIX=KB bash src/cpp/shared/infra/scripts/platform/win64/ninja-msvc-debug.sh"
 build-dev-win = "KOB_CPP_ROOT=src/cpp KABSD_BUILD_PREFIX=KOB KABSD_CMAKE_VAR_PREFIX=KB bash src/cpp/shared/infra/scripts/platform/win64/ninja-msvc-debug.sh"
 build-webview = "KOB_CPP_ROOT=src/cpp KABSD_BUILD_PREFIX=KOB KABSD_CMAKE_VAR_PREFIX=KB INF_CMAKE_CACHE_ARGS_JSON='{\"KB_BUILD_WEBVIEW\":\"ON\"}' bash src/cpp/shared/infra/scripts/platform/win64/ninja-msvc-debug.sh"
-webview-serve = "bash scripts/kob webview serve --backlog-root ~/.agents/skills/kano/_kano/backlog --port 8799"
+build-webview-release = "KOB_CPP_ROOT=src/cpp KABSD_BUILD_PREFIX=KOB KABSD_CMAKE_VAR_PREFIX=KB INF_CMAKE_CACHE_ARGS_JSON='{\"KB_BUILD_WEBVIEW\":\"ON\"}' bash src/cpp/shared/infra/scripts/platform/win64/ninja-msvc-release.sh"
+webview-serve = "bash scripts/kob webview serve --backlog-root ../_kano/backlog --port 8799"
 webview-open = "powershell -NoProfile -Command Start-Process http://127.0.0.1:8799"
 webview = "pixi run build-webview && pixi run webview-serve"
-
-# Release build (optimized)
-build-release = "KOB_CPP_ROOT=src/cpp KABSD_BUILD_PREFIX=KOB KABSD_CMAKE_VAR_PREFIX=KB INF_CMAKE_CACHE_ARGS_JSON='{\"KB_BUILD_TESTS\":\"ON\"}' bash src/cpp/shared/infra/scripts/platform/win64/ninja-msvc-release.sh"
-build-release-win = "KOB_CPP_ROOT=src/cpp KABSD_BUILD_PREFIX=KOB KABSD_CMAKE_VAR_PREFIX=KB INF_CMAKE_CACHE_ARGS_JSON='{\"KB_BUILD_TESTS\":\"ON\"}' bash src/cpp/shared/infra/scripts/platform/win64/ninja-msvc-release.sh"
-
-# Coverage workflow (CI-ready) - all steps use infra scripts
-build-coverage = "KOB_CPP_ROOT=src/cpp KABSD_BUILD_PREFIX=KOB KABSD_CMAKE_VAR_PREFIX=KB bash src/cpp/shared/infra/scripts/platform/win64/ninja-msvc-coverage-build.sh"
-test-coverage = "bash src/cpp/build/script/windows/ninja-msvc-coverage-run.sh"
-report-coverage = "bash src/cpp/build/script/windows/ninja-msvc-coverage-report.sh"
-
-# Full coverage workflow: build + test + report
-coverage-all = "KOB_CPP_ROOT=src/cpp KABSD_BUILD_PREFIX=KOB KABSD_CMAKE_VAR_PREFIX=KB bash src/cpp/shared/infra/scripts/platform/win64/ninja-msvc-coverage-build.sh && bash src/cpp/build/script/windows/ninja-msvc-coverage-run.sh && bash src/cpp/build/script/windows/ninja-msvc-coverage-report.sh"
-
-# Tests
-quick-test = "bash src/cpp/code/tests/run_tests.sh windows-ninja-msvc Release"
-
-# =============================================================================
-# Linux-specific (linux-64)
-# =============================================================================
-[target.linux-64.tasks]
-# Development build (Debug preset - fast iteration)
-build = "bash src/cpp/build/script/linux/build_linux_ninja_clang_debug.sh"
-build-dev = "bash src/cpp/build/script/linux/build_linux_ninja_clang_debug.sh"
-
-# Release build (optimized)
-build-release = "INF_CMAKE_CACHE_ARGS_JSON='{\"KB_BUILD_TESTS\":\"ON\"}' bash src/cpp/build/script/linux/build_linux_ninja_gcc_release.sh"
-quick-test = "bash src/cpp/code/tests/run_tests.sh linux-ninja-gcc Release"
-
-# Tests: linux-64 test runner TBD (no src/cpp/build/script/linux/run_tests.sh)
-
-# =============================================================================
-# Linux ARM64-specific (linux-aarch64)
-# =============================================================================
-[target.linux-aarch64.tasks]
-build = "bash src/cpp/build/script/linux/build_linux_ninja_clang_debug.sh"
-build-dev = "bash src/cpp/build/script/linux/build_linux_ninja_clang_debug.sh"
-build-release = "INF_CMAKE_CACHE_ARGS_JSON='{\"KB_BUILD_TESTS\":\"ON\"}' bash src/cpp/build/script/linux/build_linux_ninja_gcc_release.sh"
-quick-test = "bash src/cpp/code/tests/run_tests.sh linux-ninja-gcc Release"
-
-# =============================================================================
-# macOS Intel-specific (osx-64)
-# =============================================================================
-[target.osx-64.tasks]
-build = "bash src/cpp/build/script/macos/build_macos_ninja_clang_x64_debug.sh"
-build-dev = "bash src/cpp/build/script/macos/build_macos_ninja_clang_x64_debug.sh"
-build-release = "INF_CMAKE_CACHE_ARGS_JSON='{\"KB_BUILD_TESTS\":\"ON\"}' bash src/cpp/build/script/macos/build_macos_ninja_clang_x64_release.sh"
-quick-test = "bash src/cpp/code/tests/run_tests.sh macos-ninja-clang-x64 Release"
-
-# =============================================================================
-# macOS Apple Silicon-specific (osx-arm64)
-# =============================================================================
-[target.osx-arm64.tasks]
-build = "bash src/cpp/build/script/macos/build_macos_ninja_clang_arm64_debug.sh"
-build-dev = "bash src/cpp/build/script/macos/build_macos_ninja_clang_arm64_debug.sh"
-build-release = "INF_CMAKE_CACHE_ARGS_JSON='{\"KB_BUILD_TESTS\":\"ON\"}' bash src/cpp/build/script/macos/build_macos_ninja_clang_arm64_release.sh"
-quick-test = "bash src/cpp/code/tests/run_tests.sh macos-ninja-clang-arm64 Release"
+webview-release = "pixi run build-webview-release && pixi run webview-serve"

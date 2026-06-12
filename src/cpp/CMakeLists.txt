@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.20)
 project(kano_backlog VERSION 0.0.3 DESCRIPTION "Kano Agent Backlog — ticket-first AI agent collaboration" LANGUAGES C CXX)
-
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 enable_testing()
 
 # ---------------------------------------------------------------------------
@@ -16,6 +18,7 @@ if(MSVC)
         "$<$<COMPILE_LANGUAGE:CXX>:/EHsc>"
         "$<$<COMPILE_LANGUAGE:CXX>:/GR>"
         "$<$<COMPILE_LANGUAGE:CXX>:/utf-8>"
+        "$<$<COMPILE_LANGUAGE:CXX>:/Zc:__cplusplus>"
     )
     # Tell CMake to pass /I before system include paths for TryCompile tests.
     # Without this, external projects (yaml-cpp, sqlite3) can't find STL headers.
@@ -305,7 +308,12 @@ set(YAML_CPP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(YAML_CPP_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(YAML_CPP_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(yaml-cpp)
-
+if(MSVC AND TARGET yaml-cpp)
+    target_compile_options(yaml-cpp PRIVATE
+        /wd4244
+        /wd4267
+    )
+endif()
 # SQLite3 — azadkuh/sqlite-amalgamation (CMake-compatible fork)
 include(FetchContent)
 FetchContent_Declare(
@@ -336,6 +344,21 @@ FetchContent_Declare(
     GIT_TAG 1.9.7
 )
 FetchContent_MakeAvailable(jsoncpp)
+foreach(_kb_jsoncpp_build_target IN ITEMS jsoncpp_static jsoncpp_lib)
+    if(TARGET ${_kb_jsoncpp_build_target})
+        set_target_properties(${_kb_jsoncpp_build_target} PROPERTIES
+            CXX_STANDARD 17
+            CXX_STANDARD_REQUIRED ON
+            CXX_EXTENSIONS OFF
+        )
+        if(MSVC)
+            target_compile_options(${_kb_jsoncpp_build_target}
+                PRIVATE
+                    /Zc:__cplusplus
+            )
+        endif()
+    endif()
+endforeach()
 if(TARGET jsoncpp_static)
     set(_jsoncpp_target jsoncpp_static)
 elseif(TARGET jsoncpp_lib)
@@ -345,6 +368,112 @@ elseif(TARGET JsonCpp::JsonCpp)
 endif()
 set(_jsoncpp_include_dir ${jsoncpp_SOURCE_DIR}/include)
 
+# =============================================================================
+# Optional webview dependency: Drogon
+# =============================================================================
+set(KB_DROGON_SOURCE_MODE "auto" CACHE STRING "Drogon source mode: auto|fetch|system")
+set_property(CACHE KB_DROGON_SOURCE_MODE PROPERTY STRINGS auto fetch system)
+set(KB_DROGON_GIT_TAG "v1.9.10" CACHE STRING "Drogon Git tag used when KB_DROGON_SOURCE_MODE fetches from Git")
+
+function(kb_import_drogon_alias_if_needed)
+    if(TARGET drogon)
+        return()
+    endif()
+    if(TARGET Drogon::Drogon)
+        add_library(drogon INTERFACE IMPORTED GLOBAL)
+        target_link_libraries(drogon INTERFACE Drogon::Drogon)
+        return()
+    endif()
+    if(TARGET Drogon)
+        add_library(drogon INTERFACE IMPORTED GLOBAL)
+        target_link_libraries(drogon INTERFACE Drogon)
+        return()
+    endif()
+endfunction()
+
+function(kb_prepare_drogon_jsoncpp_variables)
+    if(NOT DEFINED jsoncpp_SOURCE_DIR OR NOT EXISTS "${jsoncpp_SOURCE_DIR}/include/json/json.h")
+        message(FATAL_ERROR "jsoncpp FetchContent source is not available before Drogon configuration.")
+    endif()
+
+    set(JSONCPP_INCLUDE_DIRS "${jsoncpp_SOURCE_DIR}/include" CACHE PATH "jsoncpp include dir for Drogon" FORCE)
+    set(JSONCPP_INCLUDE_DIR "${jsoncpp_SOURCE_DIR}/include" CACHE PATH "jsoncpp include dir for Drogon" FORCE)
+
+    if(TARGET jsoncpp_static)
+        set(JSONCPP_LIBRARIES jsoncpp_static CACHE STRING "jsoncpp library target for Drogon" FORCE)
+    elseif(TARGET jsoncpp_lib)
+        set(JSONCPP_LIBRARIES jsoncpp_lib CACHE STRING "jsoncpp library target for Drogon" FORCE)
+    elseif(TARGET JsonCpp::JsonCpp)
+        set(JSONCPP_LIBRARIES JsonCpp::JsonCpp CACHE STRING "jsoncpp library target for Drogon" FORCE)
+    elseif(DEFINED _jsoncpp_target AND TARGET ${_jsoncpp_target})
+        set(JSONCPP_LIBRARIES ${_jsoncpp_target} CACHE STRING "jsoncpp library target for Drogon" FORCE)
+    else()
+        message(FATAL_ERROR "No usable jsoncpp target is available for Drogon. Expected jsoncpp_static, jsoncpp_lib, or JsonCpp::JsonCpp.")
+    endif()
+endfunction()
+
+function(kb_ensure_drogon_target)
+    if(TARGET drogon OR TARGET Drogon::Drogon OR TARGET Drogon)
+        kb_import_drogon_alias_if_needed()
+        return()
+    endif()
+
+    if(KB_DROGON_SOURCE_MODE STREQUAL "auto" OR KB_DROGON_SOURCE_MODE STREQUAL "system")
+        find_package(Drogon CONFIG QUIET)
+        kb_import_drogon_alias_if_needed()
+        if(TARGET drogon)
+            return()
+        endif()
+        if(KB_DROGON_SOURCE_MODE STREQUAL "system")
+            message(FATAL_ERROR "KB_DROGON_SOURCE_MODE=system but Drogon was not found. Install Drogon or use -DKB_DROGON_SOURCE_MODE=fetch.")
+        endif()
+    endif()
+
+    if(KB_DROGON_SOURCE_MODE STREQUAL "auto" OR KB_DROGON_SOURCE_MODE STREQUAL "fetch")
+        include(FetchContent)
+        set(BUILD_CTL OFF CACHE BOOL "" FORCE)
+        set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+        set(BUILD_ORM OFF CACHE BOOL "" FORCE)
+        set(BUILD_POSTGRESQL OFF CACHE BOOL "" FORCE)
+        set(BUILD_MYSQL OFF CACHE BOOL "" FORCE)
+        set(BUILD_SQLITE OFF CACHE BOOL "" FORCE)
+        set(BUILD_REDIS OFF CACHE BOOL "" FORCE)
+        set(BUILD_YAML_CONFIG OFF CACHE BOOL "" FORCE)
+        set(BUILD_BROTLI OFF CACHE BOOL "" FORCE)
+        set(BUILD_DOC OFF CACHE BOOL "" FORCE)
+        set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+        FetchContent_Declare(
+            drogon
+            GIT_REPOSITORY https://github.com/drogonframework/drogon.git
+            GIT_TAG ${KB_DROGON_GIT_TAG}
+            GIT_SHALLOW TRUE
+            GIT_SUBMODULES trantor
+            GIT_SUBMODULES_RECURSE TRUE
+        )
+        kb_prepare_drogon_jsoncpp_variables()
+        FetchContent_MakeAvailable(drogon)
+        if(MSVC)
+            foreach(_kb_third_party_target IN ITEMS drogon trantor)
+                if(TARGET ${_kb_third_party_target})
+                    target_compile_options(${_kb_third_party_target} PRIVATE
+                        /wd4244
+                        /wd4267
+                        /wd4251
+                        /wd4275
+                    )
+                endif()
+            endforeach()
+        endif()
+        set(BUILD_TESTING "${_kb_saved_build_testing}" CACHE BOOL "" FORCE)
+        kb_import_drogon_alias_if_needed()
+        if(NOT TARGET drogon)
+            message(FATAL_ERROR "Drogon dependency did not define a usable CMake target. Expected drogon, Drogon::Drogon, or Drogon.")
+        endif()
+        return()
+    endif()
+
+    message(FATAL_ERROR "Unsupported KB_DROGON_SOURCE_MODE: ${KB_DROGON_SOURCE_MODE} (expected auto|fetch|system)")
+endfunction()
 # =============================================================================
 # Test infrastructure
 # =============================================================================
@@ -389,6 +518,7 @@ add_subdirectory(code/systems/kano_backlog_ops)
 
 option(KB_BUILD_WEBVIEW "Build kano-backlog webview targets (requires drogon)" OFF)
 if(KB_BUILD_WEBVIEW)
+    kb_ensure_drogon_target()
     add_subdirectory(code/systems/kano_backlog_webview_core)
     add_subdirectory(code/apps/kano_backlog_webview)
 endif()

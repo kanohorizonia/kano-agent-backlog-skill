@@ -7,7 +7,7 @@
   "macAgentLabel": "mac && lightweight",
   "bRunReleasePhase": false,
   "bUseReleasePlatformMatrix": true,
-  "bNormalizePlatformPackages": false,
+  "bNormalizePlatformPackages": true,
   "bRunTests": true,
   "buildTasks": ["build-release"],
   "testTasks": ["quick-test"],

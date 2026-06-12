@@ -76,6 +76,27 @@ void expect_command_capture_success(
     throw std::runtime_error(detail.str());
 }
 
+void expect_command_capture_failure(
+    int rc,
+    const std::filesystem::path& output_path,
+    const std::string& message,
+    const std::string& expected_fragment
+) {
+    if (rc == 0) {
+        throw std::runtime_error(message + " (command unexpectedly succeeded)");
+    }
+
+    const auto output = std::filesystem::exists(output_path) ? read_text(output_path) : std::string();
+    if (!expected_fragment.empty() && output.find(expected_fragment) == std::string::npos) {
+        std::ostringstream detail;
+        detail << message << " (missing expected output fragment: " << expected_fragment << ")";
+        if (!output.empty()) {
+            detail << "\n--- command output ---\n" << output;
+        }
+        throw std::runtime_error(detail.str());
+    }
+}
+
 void write_text(const std::filesystem::path& path, const std::string& text) {
     std::filesystem::create_directories(path.parent_path());
     std::ofstream out(path, std::ios::binary);
@@ -208,7 +229,13 @@ int main(int argc, char** argv) {
         std::filesystem::current_path(temp_root);
 
         expect(run_command(binary, {"admin", "init", "--product", "kano-ai-3d-asset-skill", "--agent", "tester", "--skip-refresh-views"}) == 0, "admin init command failed");
-        expect(run_command(binary, {"admin", "init", "--product", "kano-ai-3d-asset-skill", "--agent", "tester", "--skip-refresh-views"}) != 0, "duplicate admin init should fail without --force");
+        const auto duplicate_admin_init_output = temp_root / "admin-init-duplicate.txt";
+        expect_command_capture_failure(
+            run_command_capture(binary, {"admin", "init", "--product", "kano-ai-3d-asset-skill", "--agent", "tester", "--skip-refresh-views"}, duplicate_admin_init_output),
+            duplicate_admin_init_output,
+            "duplicate admin init should fail without --force",
+            "Product backlog already exists"
+        );
         expect(run_command(binary, {"admin", "init", "--product", "kano-ai-3d-asset-skill", "--agent", "tester", "--product-name", "Kano AI 3D Asset Skill", "--force", "--skip-refresh-views"}) == 0, "forced admin init with spaced product name failed");
 
         const auto config_path = temp_root / ".kano" / "backlog_config.toml";
@@ -1360,18 +1387,54 @@ int main(int argc, char** argv) {
         }) == 0, "evidence delete failed");
         expect(read_text(evidence_store).find("ev-smoke") == std::string::npos, "evidence delete did not remove record");
 
-        expect(run_command(binary, {"admin", "init", "--agent", "tester", "--product", "bad product"}) != 0, "admin init accepted product ID with spaces");
-        expect(run_command(binary, {"admin", "init", "--agent", "tester", "--product", "bad.product"}) != 0, "admin init accepted product ID with dot");
-        expect(run_command(binary, {"admin", "init", "--agent", "tester", "--product", "bad[product]"}) != 0, "admin init accepted product ID with brackets");
-        expect(run_command(binary, {"admin", "init", "--agent", "tester", "--product", "../bad"}) != 0, "admin init accepted product ID path traversal");
-        expect(run_command(binary, {"admin", "init", "--agent", "bad agent", "--product", "safe-product"}) != 0, "admin init accepted unsafe agent ID");
+        const auto invalid_product_spaces_output = temp_root / "admin-init-invalid-product-spaces.txt";
+        expect_command_capture_failure(
+            run_command_capture(binary, {"admin", "init", "--agent", "tester", "--product", "bad product"}, invalid_product_spaces_output),
+            invalid_product_spaces_output,
+            "admin init accepted product ID with spaces",
+            "Product ID must use only letters"
+        );
+        const auto invalid_product_dot_output = temp_root / "admin-init-invalid-product-dot.txt";
+        expect_command_capture_failure(
+            run_command_capture(binary, {"admin", "init", "--agent", "tester", "--product", "bad.product"}, invalid_product_dot_output),
+            invalid_product_dot_output,
+            "admin init accepted product ID with dot",
+            "Product ID must use only letters"
+        );
+        const auto invalid_product_brackets_output = temp_root / "admin-init-invalid-product-brackets.txt";
+        expect_command_capture_failure(
+            run_command_capture(binary, {"admin", "init", "--agent", "tester", "--product", "bad[product]"}, invalid_product_brackets_output),
+            invalid_product_brackets_output,
+            "admin init accepted product ID with brackets",
+            "Product ID must use only letters"
+        );
+        const auto invalid_product_path_output = temp_root / "admin-init-invalid-product-path.txt";
+        expect_command_capture_failure(
+            run_command_capture(binary, {"admin", "init", "--agent", "tester", "--product", "../bad"}, invalid_product_path_output),
+            invalid_product_path_output,
+            "admin init accepted product ID path traversal",
+            "Product ID must use only letters"
+        );
+        const auto invalid_agent_output = temp_root / "admin-init-invalid-agent.txt";
+        expect_command_capture_failure(
+            run_command_capture(binary, {"admin", "init", "--agent", "bad agent", "--product", "safe-product"}, invalid_agent_output),
+            invalid_agent_output,
+            "admin init accepted unsafe agent ID",
+            "Agent ID must use only letters"
+        );
 
         const auto explicit_root_project = temp_root / "explicit-root-project";
         std::filesystem::create_directories(explicit_root_project);
         std::filesystem::current_path(explicit_root_project);
         expect(run_command(binary, {"admin", "init", "--agent", "tester", "--product", "explicit-product", "--backlog-root", "_kano/backlog/products"}) == 0, "admin init failed with explicit products backlog root");
         expect(std::filesystem::exists(explicit_root_project / "_kano" / "backlog" / "products" / "explicit-product"), "explicit products backlog root was not normalized to backlog root");
-        expect(run_command(binary, {"admin", "init", "--agent", "tester", "--product", "escape-product", "--backlog-root", "../escaped-backlog"}) != 0, "admin init accepted escaping backlog root");
+        const auto invalid_backlog_root_output = explicit_root_project / "admin-init-invalid-backlog-root.txt";
+        expect_command_capture_failure(
+            run_command_capture(binary, {"admin", "init", "--agent", "tester", "--product", "escape-product", "--backlog-root", "../escaped-backlog"}, invalid_backlog_root_output),
+            invalid_backlog_root_output,
+            "admin init accepted escaping backlog root",
+            "Backlog root must stay inside the project root"
+        );
         std::filesystem::current_path(temp_root);
 
         const auto doctor_output = temp_root / "doctor.txt";

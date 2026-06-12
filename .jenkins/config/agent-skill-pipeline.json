@@ -26,6 +26,8 @@
   "gitUrl": "https://github.com/kanohorizonia/kano-agent-backlog-skill.git",
   "gitCredentialsId": "github-kanohorizonia-jenkins",
   "gitBranch": "__DEFAULT_BRANCH__",
+  "windowsValidateCommand": "scripts\\kob.bat repo-hygiene check --archive-safe",
+  "windowsExportCommand": "scripts\\kob.bat export --single --no-validate-release-archive",
   "linuxValidateCommand": "./scripts/kob repo-hygiene check --archive-safe",
   "linuxExportCommand": "./scripts/kob export --single --validate-release-archive",
   "macValidateCommand": "./scripts/kob repo-hygiene check --archive-safe",

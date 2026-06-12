@@ -3,4 +3,4 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-exec "$SCRIPT_DIR/../src/shell/core/kano-backlog" "$@"
+exec bash "$SCRIPT_DIR/../src/shell/core/kano-backlog" "$@"

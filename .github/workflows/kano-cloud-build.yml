@@ -262,7 +262,6 @@ jobs:
           import os
           import shutil
           import tarfile
-          import zipfile
           from pathlib import Path
 
           platform = os.environ["KANO_PLATFORM"]
@@ -317,20 +316,13 @@ jobs:
               shutil.copy2(path, target)
 
           archive_base = f"{safe_component(package_id)}-{safe_component(platform)}-{safe_component(version)}-Release-cli"
-          archive_path = artifact_root / (archive_base + (".zip" if platform.startswith("windows-") else ".tar.gz"))
+          archive_path = artifact_root / (archive_base + ".tar.gz")
           entries = []
-          if archive_path.suffix == ".zip":
-              with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-                  for path in sorted(p for p in payload_root.rglob("*") if p.is_file()):
-                      arcname = path.relative_to(payload_root.parent).as_posix()
-                      archive.write(path, arcname)
-                      entries.append({"path": arcname, "type": "file", "size": path.stat().st_size})
-          else:
-              with tarfile.open(archive_path, "w:gz") as archive:
-                  for path in sorted(p for p in payload_root.rglob("*") if p.is_file()):
-                      arcname = path.relative_to(payload_root.parent).as_posix()
-                      archive.add(path, arcname=arcname)
-                      entries.append({"path": arcname, "type": "file", "size": path.stat().st_size})
+          with tarfile.open(archive_path, "w:gz") as archive:
+              for path in sorted(p for p in payload_root.rglob("*") if p.is_file()):
+                  arcname = path.relative_to(payload_root.parent).as_posix()
+                  archive.add(path, arcname=arcname)
+                  entries.append({"path": arcname, "type": "file", "size": path.stat().st_size})
 
           manifest_csv = artifact_root / f"{archive_path.name}.manifest.csv"
           with manifest_csv.open("w", newline="", encoding="utf-8") as handle:

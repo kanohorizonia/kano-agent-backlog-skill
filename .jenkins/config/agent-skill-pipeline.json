@@ -37,6 +37,7 @@
   "distRoot": "dist",
   "jenkinsRoot": "out/jenkins",
   "cppTestSkillRoot": "_tools/kano-cpp-test-skill",
+  "bCheckoutWorkspaceDependencies": true,
   "workspaceDependencyCheckouts": [
     {
       "name": "kano-cpp-test-skill",

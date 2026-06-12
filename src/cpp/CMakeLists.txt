@@ -390,8 +390,8 @@ add_subdirectory(code/systems/kano_backlog_ops)
 option(KB_BUILD_WEBVIEW "Build kano-backlog webview targets (requires drogon)" OFF)
 if(KB_BUILD_WEBVIEW)
     add_subdirectory(code/systems/kano_backlog_webview_core)
+    add_subdirectory(code/apps/kano_backlog_webview)
 endif()
-
 # =============================================================================
 # CLI executable
 # =============================================================================

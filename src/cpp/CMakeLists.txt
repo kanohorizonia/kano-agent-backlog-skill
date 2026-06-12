@@ -15,6 +15,7 @@ set(CMAKE_OBJECT_PATH_MAX 500)
 # ---------------------------------------------------------------------------
 if(MSVC)
     add_compile_options(
+        "$<$<COMPILE_LANGUAGE:C>:/utf-8>"
         "$<$<COMPILE_LANGUAGE:CXX>:/EHsc>"
         "$<$<COMPILE_LANGUAGE:CXX>:/GR>"
         "$<$<COMPILE_LANGUAGE:CXX>:/utf-8>"

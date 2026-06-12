@@ -9,9 +9,13 @@ if [[ -z "${KOB_CPP_ROOT:-${KABSD_CPP_ROOT:-}}" ]]; then
   exit 1
 fi
 
-KOB_INFRA_WINDOWS_PRESET_IMPL="${KOB_CPP_ROOT:-${KABSD_CPP_ROOT:-}}/shared/infra/scripts/platform/win64/windows_preset_build.sh"
+KOB_INFRA_ROOT="${KOB_CPP_ROOT:-${KABSD_CPP_ROOT:-}}/shared/infra/scripts"
+KOB_INFRA_WINDOWS_PRESET_IMPL="$KOB_INFRA_ROOT/lib/windows_preset_build.sh"
 if [[ ! -f "$KOB_INFRA_WINDOWS_PRESET_IMPL" ]]; then
-  echo "infra windows preset build script not found: $KOB_INFRA_WINDOWS_PRESET_IMPL" >&2
+  KOB_INFRA_WINDOWS_PRESET_IMPL="$KOB_INFRA_ROOT/platform/win64/windows_preset_build.sh"
+fi
+if [[ ! -f "$KOB_INFRA_WINDOWS_PRESET_IMPL" ]]; then
+  echo "infra windows preset build script not found under: $KOB_INFRA_ROOT" >&2
   exit 1
 fi
 

@@ -334,6 +334,12 @@ jobs:
         continue-on-error: true
         run: |
           set -euo pipefail
+          export KANO_REPORT_SLUG="${KANO_PACKAGE_ID}-${KANO_PLATFORM}"
+          export KANO_REPORT_ROOT="$GITHUB_WORKSPACE/out/coverage"
+          export KANO_TEST_REPORTS_ROOT="$GITHUB_WORKSPACE/out/reports/test-reports"
+          export KANO_COVERAGE_REPORTS_ROOT="$GITHUB_WORKSPACE/out/coverage/coverage-reports"
+          export KANO_CPP_INFRA_PGO_GATHER_TEST_BINARY=backlog_core_smoke_test
+          export KANO_CPP_INFRA_PGO_GATHER_TEST_FILTER=
           export KOB_CPP_ROOT="$GITHUB_WORKSPACE/src/cpp"
           export KABSD_CPP_ROOT="$KOB_CPP_ROOT"
           export KABSD_BUILD_PREFIX=KOB
@@ -341,9 +347,16 @@ jobs:
           export INF_CMAKE_CACHE_ARGS_JSON='{"KB_BUILD_TESTS":"ON"}'
           export KANO_TEST_BINARY_NAME=cli_repo_smoke_test
           export KANO_COVERAGE_TEST_BINARY_WINDOWS=cli_repo_smoke_test.exe
-          export KANO_COVERAGE_TEST_BINARY_LINUX=cli_repo_smoke_test
-          export KANO_COVERAGE_TEST_BINARY_MACOS=cli_repo_smoke_test
-          pixi run --manifest-path pixi.toml coverage-all
+          export KANO_COVERAGE_TEST_BINARY_LINUX=backlog_core_smoke_test
+          export KANO_COVERAGE_TEST_BINARY_MACOS=backlog_core_smoke_test
+          case "$KANO_PLATFORM" in
+            linux-x64|linux-arm64)
+              pixi run --manifest-path src/cpp/shared/infra/pixi.toml ci-linux-coverage-all
+              ;;
+            *)
+              pixi run --manifest-path pixi.toml coverage-all
+              ;;
+          esac
 
       - name: Gather native report site
         if: always() && !cancelled()

@@ -422,6 +422,7 @@ jobs:
           platform = os.environ["KANO_PLATFORM"]
           package_id = os.environ["KANO_PACKAGE_ID"]
           version = os.environ["KANO_PACKAGE_VERSION"]
+          source_ref = os.environ.get("KANO_SOURCE_REF", "main")
           request_id = os.environ["KANO_REQUEST_ID"]
           required = os.environ.get("KANO_REQUIRED", "false").lower() == "true"
           experimental = os.environ.get("KANO_EXPERIMENTAL", "false").lower() == "true"
@@ -432,6 +433,16 @@ jobs:
           def safe_component(value: str) -> str:
               text = "".join(ch if ch.isalnum() or ch in "._+-" else "-" for ch in value.strip())
               return text.strip("-") or "artifact"
+
+          def branch_component(value: str) -> str:
+              text = value.strip() or "main"
+              for prefix in ("refs/heads/", "refs/remotes/origin/", "origin/"):
+                  if text.startswith(prefix):
+                      text = text[len(prefix):]
+                      break
+              if text in {"__DEFAULT_BRANCH__", "__SOURCE_BRANCH__", "__BUILD_BRANCH__"}:
+                  text = "main"
+              return safe_component(text)
 
           binary_dirs = {
               "windows-x64": Path("src/cpp/out/bin/windows-ninja-msvc/release"),
@@ -470,7 +481,7 @@ jobs:
               target.parent.mkdir(parents=True, exist_ok=True)
               shutil.copy2(path, target)
 
-          archive_base = f"{safe_component(package_id)}-{safe_component(platform)}-{safe_component(version)}-Release-cli"
+          archive_base = f"{safe_component(package_id)}-{safe_component(platform)}-{branch_component(source_ref)}-{safe_component(version)}-Release-cli"
           archive_path = artifact_root / (archive_base + ".tar.gz")
           entries = []
           with tarfile.open(archive_path, "w:gz") as archive:

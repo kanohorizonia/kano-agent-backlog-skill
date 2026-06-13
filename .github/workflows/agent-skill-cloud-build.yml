@@ -373,6 +373,7 @@ jobs:
             --output-root _github-reports \
             --require-junit "$require_junit" \
             --strict-coverage false
+          printf '%s\n' '_github-reports' > github-report-artifact-root.txt
           cat _github-reports/summary/github-summary.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload GitHub report artifacts
@@ -380,7 +381,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.artifact.outputs.report_artifact_name }}
-          path: _github-reports/**
+          path: |
+            _github-reports/**
+            github-report-artifact-root.txt
           if-no-files-found: error
           retention-days: ${{ steps.artifact.outputs.retention_days }}
 

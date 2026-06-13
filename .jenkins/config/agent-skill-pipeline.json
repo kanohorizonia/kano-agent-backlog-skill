@@ -79,7 +79,7 @@
   "githubActionsArtifactRetentionDays": 1,
   "bGithubActionsRunPythonTests": true,
   "bGithubActionsRunNativeTests": true,
-  "bGithubActionsRunCoverage": false,
+  "bGithubActionsRunCoverage": true,
   "bGithubActionsPublishCodeQualityCoverage": false,
   "githubActionsReportRetentionDays": 1,
   "githubActionsReportArtifactPrefix": "kano-agent-backlog-skill",

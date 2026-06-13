@@ -7,12 +7,34 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   native-gates-linux:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
     steps:
+      - name: Create kanohorizonia Jenkins app token
+        id: jenkins-app-token
+        if: ${{ vars.KANO_JENKINS_APP_CLIENT_ID != '' }}
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.KANO_JENKINS_APP_CLIENT_ID }}
+          private-key: ${{ secrets.KANO_JENKINS_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: |
+            kano-agent-backlog-skill
+            kano-cpp-infra
+          permission-contents: read
+
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+          token: ${{ steps.jenkins-app-token.outputs.token || github.token }}
+          persist-credentials: false
 
       - name: Install native build dependencies
         run: |

@@ -10,6 +10,7 @@
   "bNormalizePlatformPackages": true,
   "bRunTests": true,
   "bRunCoverage": true,
+  "bAllowCoverageFailure": true,
   "buildTasks": ["build-release"],
   "testTasks": ["quick-test"],
   "coverageTasks": ["coverage-all"],

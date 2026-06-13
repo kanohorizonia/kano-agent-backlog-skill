@@ -42,6 +42,11 @@ find_native_bin() {
     MINGW*|MSYS*|CYGWIN*) exe_suffix=".exe" ;;
   esac
 
+  if [[ -n "${KANO_BACKLOG_BINARY:-}" && -f "${KANO_BACKLOG_BINARY}" ]]; then
+    printf '%s\n' "$KANO_BACKLOG_BINARY"
+    return 0
+  fi
+
   for preset in "${presets[@]}"; do
     for config in "${configs[@]}"; do
       candidate="$SKILL_ROOT/src/cpp/out/bin/$preset/$config/kano-backlog$exe_suffix"

@@ -46,11 +46,11 @@ jobs:
           echo "Default native presets may fetch third-party dependencies from the network."
           echo "For stricter deterministic builds, use system/submodule/vcpkg dependency modes."
 
-      - name: Build native debug CLI
-        run: bash src/shell/support/self-build.sh debug
+      - name: Build native release CLI
+        run: bash src/shell/support/self-build.sh release
 
-      - name: Run native quick tests
-        run: bash src/shell/test/quick-test.sh
+      - name: Run native release smoke tests
+        run: bash src/shell/test/native-test.sh linux-ninja-clang Release
 
       - name: Verify native runtime gate
         run: bash src/shell/test/native-runtime-gate.sh

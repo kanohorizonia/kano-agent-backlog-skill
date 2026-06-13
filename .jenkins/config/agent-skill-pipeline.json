@@ -32,6 +32,8 @@
   "testBinaryName": "cli_repo_smoke_test",
   "coverageTestBinary": "cli_repo_smoke_test",
   "windowsCoverageTestBinary": "cli_repo_smoke_test.exe",
+  "pgoUseBinaryName": "kano-backlog",
+  "pgoUseBinaryEnvVar": "KANO_BACKLOG_BINARY",
   "reportRoot": "out/reports",
   "coverageRoot": "out/coverage",
   "distRoot": "dist",

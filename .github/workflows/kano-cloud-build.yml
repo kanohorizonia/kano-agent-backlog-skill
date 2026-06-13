@@ -1,6 +1,6 @@
 name: Kano Cloud Build
 
-run-name: kano-cloud-build ${{ inputs.request_id }} ${{ inputs.platform }}
+run-name: Jenkins_${{ inputs.platform }}_${{ inputs.jenkins_build_name || inputs.request_id }}
 
 on:
   workflow_dispatch:
@@ -8,6 +8,11 @@ on:
       request_id:
         description: Jenkins request identifier.
         required: true
+        type: string
+      jenkins_build_name:
+        description: Human-readable Jenkins build name for GitHub Actions run lists.
+        required: false
+        default: ""
         type: string
       package_id:
         description: Package identifier used in artifact names.

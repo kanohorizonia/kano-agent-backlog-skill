@@ -6,65 +6,23 @@
       <description>Last 10 notes on Kano Agent Backlog Skill</description>
       <generator>Quartz -- quartz.jzhao.xyz</generator>
       <item>
-    <title>Releases</title>
-    <link>https://agentskill-backlog.kanohorizonia.com/releases/</link>
-    <guid>https://agentskill-backlog.kanohorizonia.com/releases/</guid>
-    <description>Releases Published release notes and change history Release 0.0.3 Release 0.0.1 Changelog .</description>
-    <pubDate>Tue, 02 Jun 2026 05:09:32 GMT</pubDate>
+    <title>Native Executable API</title>
+    <link>https://agentskill-backlog.kanohorizonia.com/api/native</link>
+    <guid>https://agentskill-backlog.kanohorizonia.com/api/native</guid>
+    <description>Native Executable API Run scripts/kob --help for the authoritative command surface.</description>
+    <pubDate>Sun, 14 Jun 2026 02:48:55 GMT</pubDate>
   </item><item>
-    <title>changelog</title>
-    <link>https://agentskill-backlog.kanohorizonia.com/releases/changelog</link>
-    <guid>https://agentskill-backlog.kanohorizonia.com/releases/changelog</guid>
-    <description>Changelog All notable changes to kano-agent-backlog-skill will be documented in this file. This project uses Git tags as releases: vX.Y.Z. The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.</description>
-    <pubDate>Tue, 02 Jun 2026 05:09:32 GMT</pubDate>
+    <title>API Overview</title>
+    <link>https://agentskill-backlog.kanohorizonia.com/api/overview</link>
+    <guid>https://agentskill-backlog.kanohorizonia.com/api/overview</guid>
+    <description>API Overview Native executable API reference for Kano Agent Backlog Skill. Public Contract scripts/kob - Repo-local launcher for the native CLI scripts/kano-backlog - Compatibility launcher for the native CLI kano-backlog native binary - C++ executable command surface Python import APIs are not a supported public runtime contract for this native milestone.</description>
+    <pubDate>Sun, 14 Jun 2026 02:48:55 GMT</pubDate>
   </item><item>
-    <title>0.0.1</title>
-    <link>https://agentskill-backlog.kanohorizonia.com/releases/0.0.1</link>
-    <guid>https://agentskill-backlog.kanohorizonia.com/releases/0.0.1</guid>
-    <description>0.0.1 — Initial local-first backlog workflow (MVP) This is the first public cut of the Kano Agent Backlog demo workspace: a local-first, file-based backlog that supports agent collaboration ...</description>
-    <pubDate>Tue, 02 Jun 2026 05:09:32 GMT</pubDate>
-  </item><item>
-    <title>0.0.3</title>
-    <link>https://agentskill-backlog.kanohorizonia.com/releases/0.0.3</link>
-    <guid>https://agentskill-backlog.kanohorizonia.com/releases/0.0.3</guid>
-    <description>0.0.3 — Config/Profiles hardening + effective-config artifacts + release gate stabilization Release target: 0.0.3. Previous released version: 0.0.2. This release also aligns public and native-facing version metadata on the 0.0.3 line so the repository no longer presents 0.1.0 as the current public release.</description>
-    <pubDate>Tue, 02 Jun 2026 05:09:32 GMT</pubDate>
-  </item><item>
-    <title>API Reference</title>
-    <link>https://agentskill-backlog.kanohorizonia.com/api/</link>
-    <guid>https://agentskill-backlog.kanohorizonia.com/api/</guid>
-    <description>API Reference Python API documentation API Overview Full API Documentation .</description>
-    <pubDate>Tue, 02 Jun 2026 05:09:32 GMT</pubDate>
-  </item><item>
-    <title>CLI Reference</title>
-    <link>https://agentskill-backlog.kanohorizonia.com/cli/</link>
-    <guid>https://agentskill-backlog.kanohorizonia.com/cli/</guid>
-    <description>CLI Reference Command-line interface documentation CLI Commands .</description>
-    <pubDate>Tue, 02 Jun 2026 05:09:32 GMT</pubDate>
-  </item><item>
-    <title>Technical References</title>
-    <link>https://agentskill-backlog.kanohorizonia.com/references/</link>
-    <guid>https://agentskill-backlog.kanohorizonia.com/references/</guid>
-    <description>Technical References Technical documentation and references bases config-simplification context_graph embedding_pipeline gitignore indexing logging processes project-config-implementation ...</description>
-    <pubDate>Tue, 02 Jun 2026 05:09:32 GMT</pubDate>
-  </item><item>
-    <title>workflow</title>
-    <link>https://agentskill-backlog.kanohorizonia.com/references/workflow</link>
-    <guid>https://agentskill-backlog.kanohorizonia.com/references/workflow</guid>
-    <description>Workflow SOP A) Planning (discussion → tickets) Pre-planning: Sync DB sequences Before creating any work items, ensure the DB sequence is synchronized: # Sync sequences from filesystem ...</description>
-    <pubDate>Tue, 02 Jun 2026 05:09:32 GMT</pubDate>
-  </item><item>
-    <title>views</title>
-    <link>https://agentskill-backlog.kanohorizonia.com/references/views</link>
-    <guid>https://agentskill-backlog.kanohorizonia.com/references/views</guid>
-    <description>Views (Obsidian Dataview) If you want fewer plugin dependencies, consider Obsidian Bases as a plugin-free alternative for table-style dashboards. See references/bases.md.</description>
-    <pubDate>Tue, 02 Jun 2026 05:09:32 GMT</pubDate>
-  </item><item>
-    <title>templates</title>
-    <link>https://agentskill-backlog.kanohorizonia.com/references/templates</link>
-    <guid>https://agentskill-backlog.kanohorizonia.com/references/templates</guid>
-    <description>Templates Work item template Place the file under _kano/backlog/items/&lt;type&gt;/. Use the ID prefix derived from config/profile.env → PROJECT_NAME (example: kano-agent-backlog-skill-demo → KABSD).</description>
-    <pubDate>Tue, 02 Jun 2026 05:09:32 GMT</pubDate>
+    <title>CLI Commands</title>
+    <link>https://agentskill-backlog.kanohorizonia.com/cli/commands</link>
+    <guid>https://agentskill-backlog.kanohorizonia.com/cli/commands</guid>
+    <description>CLI Commands Complete command-line interface documentation for the kob tool. kob Command not available .</description>
+    <pubDate>Sun, 14 Jun 2026 02:48:55 GMT</pubDate>
   </item>
     </channel>
   </rss>

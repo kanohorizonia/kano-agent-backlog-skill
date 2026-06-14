@@ -69,7 +69,7 @@
   "githubTokenCredentialId": "github-release-token",
   "bUseGithubActionsCloudBuild": true,
   "bGithubActionsCloudBuildDryRun": false,
-  "bAllowCloudBuildFallback": false,
+  "bAllowCloudBuildFallback": true,
   "githubActionsRepo": "kanohorizonia/kano-agent-backlog-skill",
   "githubActionsWorkflow": "agent-skill-cloud-build.yml",
   "githubActionsRef": "main",

@@ -1,6 +1,6 @@
-name: Kano Agent Skill Cloud Build
+name: KanoAgentSkills / Cloud Build
 
-run-name: Jenkins_${{ inputs.platform || 'linux-x64' }}_${{ inputs.jenkins_build_name || inputs.request_id || github.run_id }}
+run-name: ${{ github.event_name == 'workflow_dispatch' && format('Jenkins_{0}_{1}', inputs.platform || 'linux-x64', inputs.jenkins_build_name || inputs.request_id || github.run_id) || format('GitHub_cloud-build_{0}_{1}_{2}', github.event.repository.name, github.ref_name, github.run_number) }}
 
 on:
   push:
@@ -603,7 +603,7 @@ jobs:
           PY
 
       - name: Upload cloud artifact
-        if: ${{ always() }}
+        if: ${{ success() }}
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.artifact.outputs.artifact_name }}

@@ -42,7 +42,7 @@ Python package publishing is retired for this native milestone. Do not upload to
 ## Publish GitHub Pages docs
 
 - [ ] If docs changed, merge the docs changes to `main` or run `.github/workflows/pages.yml` with `workflow_dispatch`
-- [ ] Confirm the `Publish docs to GitHub Pages` workflow completes successfully
+- [ ] Confirm the `KanoAgentSkills / Publish Pages` workflow completes successfully
 - [ ] Verify the updated site is live at `https://agentskill-backlog.kanohorizonia.com/`
 - [ ] If using the branch-based fallback publish flow, confirm `CNAME` is restored in `gh-pages`
 

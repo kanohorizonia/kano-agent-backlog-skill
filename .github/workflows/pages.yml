@@ -1,4 +1,6 @@
-name: Publish docs to GitHub Pages
+name: KanoAgentSkills / Publish Pages
+
+run-name: ${{ format('GitHub_publish-pages_{0}_{1}_{2}', github.event.repository.name, github.ref_name, github.run_number) }}
 
 on:
   push:
@@ -14,45 +16,29 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: pages
   cancel-in-progress: false
 
 jobs:
-  build:
+  build-and-publish:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Configure Pages
-        uses: actions/configure-pages@v5
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "22"
 
-      - name: Build staged docs site
-        run: bash src/shell/docs/build-and-deploy.sh --ci
+      - name: Configure gh-pages branch push auth
+        env:
+          GH_PAGES_TOKEN: ${{ github.token }}
+        run: |
+          git config --global url."https://x-access-token:${GH_PAGES_TOKEN}@github.com/".insteadOf "https://github.com/"
 
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v4
-        with:
-          path: _ws/build/staged
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+      - name: Build and publish gh-pages branch
+        run: bash src/shell/docs/build-and-deploy.sh --ci --prep-deploy --push

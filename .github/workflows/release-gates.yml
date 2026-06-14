@@ -1,4 +1,6 @@
-name: Release readiness gates
+name: KanoAgentSkills / Release Gates
+
+run-name: ${{ format('GitHub_release-gates_{0}_{1}_{2}', github.event.repository.name, github.ref_name, github.run_number) }}
 
 on:
   push:

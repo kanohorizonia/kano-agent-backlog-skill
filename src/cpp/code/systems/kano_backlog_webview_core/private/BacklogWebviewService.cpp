@@ -7,6 +7,7 @@
 #include <regex>
 #include <set>
 #include <sstream>
+#include <unordered_set>
 
 import KanoBacklogWebview.Strings;
 
@@ -70,6 +71,67 @@ std::string ReadTextFile(const std::filesystem::path& path, bool& ok,
 
 bool StartsWith(const std::string& value, const std::string& prefix) {
   return value.rfind(prefix, 0) == 0;
+}
+
+std::vector<std::string> SplitCsv(const std::string& value) {
+  std::vector<std::string> result;
+  std::stringstream stream(value);
+  std::string token;
+  while (std::getline(stream, token, ',')) {
+    auto trimmed = Trim(token);
+    if (!trimmed.empty()) {
+      result.push_back(trimmed);
+    }
+  }
+  return result;
+}
+
+std::string JoinStrings(const std::vector<std::string>& values,
+                        const std::string& separator) {
+  std::ostringstream out;
+  for (size_t i = 0; i < values.size(); ++i) {
+    if (i > 0) {
+      out << separator;
+    }
+    out << values[i];
+  }
+  return out.str();
+}
+
+bool ContainsToken(const std::vector<std::string>& tokens,
+                   const std::string& value) {
+  if (tokens.empty()) {
+    return true;
+  }
+  const auto lowered = text::ToLower(value);
+  for (const auto& token : tokens) {
+    if (text::ToLower(token) == lowered) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void AppendUnique(std::vector<std::string>& values, const std::string& value) {
+  if (value.empty()) {
+    return;
+  }
+  if (std::find(values.begin(), values.end(), value) == values.end()) {
+    values.push_back(value);
+  }
+}
+
+size_t ParseSizeOrDefault(const std::string& value, const size_t fallback,
+                          const size_t maximum) {
+  if (Trim(value).empty()) {
+    return fallback;
+  }
+  try {
+    const auto parsed = static_cast<size_t>(std::stoull(value));
+    return std::min(parsed, maximum);
+  } catch (...) {
+    return fallback;
+  }
 }
 
 }  // namespace
@@ -188,6 +250,80 @@ bool BacklogWebviewService::ShouldSkipPath(const std::filesystem::path& path) {
   return false;
 }
 
+std::vector<std::string> BacklogWebviewService::ResolveSelectedProducts(
+    const std::vector<std::string>& requestedProducts) const {
+  std::vector<std::string> selected;
+  bool wantsAll = requestedProducts.empty();
+  for (const auto& product : requestedProducts) {
+    if (text::ToLower(product) == "all") {
+      wantsAll = true;
+      break;
+    }
+  }
+
+  if (wantsAll) {
+    if (!std::filesystem::exists(productsRoot)) {
+      return selected;
+    }
+    for (const auto& entry : std::filesystem::directory_iterator(productsRoot)) {
+      if (!entry.is_directory()) {
+        continue;
+      }
+      const auto candidate = entry.path() / "items";
+      if (std::filesystem::exists(candidate) && std::filesystem::is_directory(candidate)) {
+        selected.push_back(entry.path().filename().string());
+      }
+    }
+  } else {
+    for (const auto& product : requestedProducts) {
+      if (!IsValidProductName(product)) {
+        continue;
+      }
+      const auto root = ProductRoot(product);
+      if (std::filesystem::exists(root / "items")) {
+        selected.push_back(product);
+      }
+    }
+  }
+
+  std::sort(selected.begin(), selected.end());
+  selected.erase(std::unique(selected.begin(), selected.end()), selected.end());
+  return selected;
+}
+
+std::unordered_map<std::string, std::vector<std::string>>
+BacklogWebviewService::BuildTopicLookup() const {
+  std::unordered_map<std::string, std::vector<std::string>> byRef;
+  const auto topicsRoot = productsRoot.parent_path() / "topics";
+  if (!std::filesystem::exists(topicsRoot)) {
+    return byRef;
+  }
+
+  for (const auto& entry : std::filesystem::directory_iterator(topicsRoot)) {
+    if (!entry.is_directory()) {
+      continue;
+    }
+    const auto manifestPath = entry.path() / "manifest.json";
+    if (!std::filesystem::exists(manifestPath)) {
+      continue;
+    }
+    bool ok = false;
+    std::string error;
+    const auto manifest = ParseJsonFile(manifestPath, ok, error);
+    if (!ok) {
+      continue;
+    }
+    const auto topic = manifest.get("topic", entry.path().filename().string()).asString();
+    if (!manifest.isMember("seed_items") || !manifest["seed_items"].isArray()) {
+      continue;
+    }
+    for (const auto& seed : manifest["seed_items"]) {
+      AppendUnique(byRef[seed.asString()], topic);
+    }
+  }
+  return byRef;
+}
+
 std::string BacklogWebviewService::NormalizeTypeFromPath(
     const std::filesystem::path& itemPath, const std::string& declaredType) {
   if (!declaredType.empty()) {
@@ -302,6 +438,7 @@ ItemRecord BacklogWebviewService::ParseItem(const std::filesystem::path& itemPat
   }
 
   item.id = map["id"];
+  item.uid = map["uid"];
   item.type = NormalizeTypeFromPath(itemPath, map["type"]);
   item.title = map["title"];
   item.state = map["state"];
@@ -476,12 +613,16 @@ ItemRecord BacklogWebviewService::ParseWorksetManifest(
 Json::Value BacklogWebviewService::ItemToJson(const ItemRecord& item,
                                               const bool includeContent) {
   Json::Value value(Json::objectValue);
+  value["product"] = item.product;
   value["id"] = item.id;
+  value["uid"] = item.uid;
   value["type"] = item.type;
   value["source_kind"] = item.sourceKind;
   value["title"] = item.title;
   value["state"] = item.state;
   value["parent"] = item.parent;
+  value["topic"] = item.topic.empty() ? Json::Value(Json::nullValue)
+                                      : Json::Value(item.topic);
   value["created"] = item.created;
   value["updated"] = item.updated;
   value["path"] = item.relativePath;
@@ -524,6 +665,7 @@ void BacklogWebviewService::LoadProduct(const std::string& product,
   ProductCache productCache;
   const auto productRoot = ProductRoot(product);
   const auto itemsRoot = productRoot / "items";
+  const auto topicLookup = BuildTopicLookup();
   productCache.latestMtime = ScanLatestMtime(productRoot);
 
   if (!std::filesystem::exists(itemsRoot)) {
@@ -541,6 +683,16 @@ void BacklogWebviewService::LoadProduct(const std::string& product,
     }
 
     auto item = ParseItem(entry.path(), productRoot);
+    item.product = product;
+    const auto uidTopicIt = topicLookup.find(item.uid);
+    if (uidTopicIt != topicLookup.end()) {
+      item.topic = JoinStrings(uidTopicIt->second, ", ");
+    } else {
+      const auto idTopicIt = topicLookup.find(item.id);
+      if (idTopicIt != topicLookup.end()) {
+        item.topic = JoinStrings(idTopicIt->second, ", ");
+      }
+    }
     const auto index = productCache.allItems.size();
     if (!item.valid) {
       productCache.warnings.push_back("Invalid item: " + item.relativePath +
@@ -559,6 +711,7 @@ void BacklogWebviewService::LoadProduct(const std::string& product,
         continue;
       }
       auto item = ParseDecision(entry.path(), productRoot);
+      item.product = product;
       if (!item.valid) {
         productCache.warnings.push_back("Invalid decision: " + item.relativePath +
                                         " - " + item.parseError);
@@ -579,6 +732,8 @@ void BacklogWebviewService::LoadProduct(const std::string& product,
         continue;
       }
       auto item = ParseTopicManifest(manifestPath, backlogRoot);
+      item.product = product;
+      item.topic = item.title;
       if (!item.valid) {
         productCache.warnings.push_back("Invalid topic: " + item.relativePath +
                                         " - " + item.parseError);
@@ -598,6 +753,7 @@ void BacklogWebviewService::LoadProduct(const std::string& product,
         continue;
       }
       auto item = ParseWorksetManifest(manifestPath, backlogRoot);
+      item.product = product;
       if (!item.valid) {
         productCache.warnings.push_back("Invalid workset: " + item.relativePath +
                                         " - " + item.parseError);
@@ -659,6 +815,14 @@ Json::Value BacklogWebviewService::ListProducts() {
 
 Json::Value BacklogWebviewService::ListItems(const std::string& product,
                                              bool forceRefresh) {
+  if (product.empty() || text::ToLower(product) == "all" ||
+      product.find(',') != std::string::npos) {
+    ItemQueryOptions options;
+    options.products = SplitCsv(product);
+    options.forceRefresh = forceRefresh;
+    return QueryItems(options);
+  }
+
   Json::Value response(Json::objectValue);
   response["items"] = Json::arrayValue;
   response["warnings"] = Json::arrayValue;
@@ -691,12 +855,115 @@ Json::Value BacklogWebviewService::ListItems(const std::string& product,
   }
 
   response["cached_at"] = ToIsoString(productCache.latestMtime);
+  response["total"] = static_cast<Json::UInt64>(response["items"].size());
+  response["limit"] = static_cast<Json::UInt64>(response["items"].size());
+  response["offset"] = 0U;
+  return response;
+}
+
+Json::Value BacklogWebviewService::QueryItems(const ItemQueryOptions& options) {
+  Json::Value response(Json::objectValue);
+  response["items"] = Json::arrayValue;
+  response["products"] = Json::arrayValue;
+  response["warnings"] = Json::arrayValue;
+
+  const auto selectedProducts = ResolveSelectedProducts(options.products);
+  for (const auto& product : selectedProducts) {
+    response["products"].append(product);
+  }
+
+  const size_t maxLimit = 1000;
+  const size_t limit = std::min(options.limit == 0 ? size_t{200} : options.limit, maxLimit);
+  const size_t offset = options.offset;
+  const auto textFilter = Trim(options.text);
+
+  std::vector<Json::Value> matches;
+  std::unordered_set<std::string> emittedSharedItems;
+  for (const auto& product : selectedProducts) {
+    LoadProduct(product, options.forceRefresh);
+    const auto cacheIt = cacheByProduct.find(product);
+    if (cacheIt == cacheByProduct.end()) {
+      response["warnings"].append("Product not found: " + product);
+      continue;
+    }
+
+    const auto& productCache = cacheIt->second;
+    for (const auto& warning : productCache.warnings) {
+      response["warnings"].append(product + ": " + warning);
+    }
+
+    for (const auto& [id, primaryIndex] : productCache.primaryById) {
+      const auto& item = productCache.allItems[primaryIndex];
+      if (!ContainsToken(options.types, item.type)) {
+        continue;
+      }
+      if (!ContainsToken(options.states, item.state)) {
+        continue;
+      }
+      if (item.sourceKind == "Topic" || item.sourceKind == "Workset") {
+        const auto key = item.sourceKind + "\n" + item.id;
+        if (!emittedSharedItems.insert(key).second) {
+          continue;
+        }
+      }
+      if (!textFilter.empty() &&
+          !text::ContainsCaseInsensitive(item.id, textFilter) &&
+          !text::ContainsCaseInsensitive(item.title, textFilter) &&
+          !text::ContainsCaseInsensitive(item.rawContent, textFilter) &&
+          !text::ContainsCaseInsensitive(item.product, textFilter) &&
+          !text::ContainsCaseInsensitive(item.topic, textFilter)) {
+        continue;
+      }
+
+      auto value = ItemToJson(item);
+      const auto duplicateIt = productCache.idIndexes.find(id);
+      if (duplicateIt != productCache.idIndexes.end()) {
+        value["duplicate_count"] =
+            static_cast<Json::UInt64>(duplicateIt->second.size());
+      }
+      matches.push_back(value);
+    }
+  }
+
+  std::sort(matches.begin(), matches.end(), [](const Json::Value& left,
+                                               const Json::Value& right) {
+    const auto lp = left["product"].asString();
+    const auto rp = right["product"].asString();
+    if (lp != rp) {
+      return lp < rp;
+    }
+    return left["id"].asString() < right["id"].asString();
+  });
+
+  response["total"] = static_cast<Json::UInt64>(matches.size());
+  response["limit"] = static_cast<Json::UInt64>(limit);
+  response["offset"] = static_cast<Json::UInt64>(offset);
+  const auto end = std::min(matches.size(), offset + limit);
+  if (offset < matches.size()) {
+    for (size_t i = offset; i < end; ++i) {
+      response["items"].append(matches[i]);
+    }
+  }
   return response;
 }
 
 Json::Value BacklogWebviewService::GetItem(const std::string& product,
                                            const std::string& id,
                                            bool forceRefresh) {
+  if (product.empty() || text::ToLower(product) == "all" ||
+      product.find(',') != std::string::npos) {
+    const auto products = ResolveSelectedProducts(SplitCsv(product));
+    for (const auto& selectedProduct : products) {
+      auto data = GetItem(selectedProduct, id, forceRefresh);
+      if (!data.isMember("error")) {
+        return data;
+      }
+    }
+    Json::Value response(Json::objectValue);
+    response["error"] = "Item not found";
+    return response;
+  }
+
   Json::Value response(Json::objectValue);
   if (!IsValidProductName(product)) {
     response["error"] = "Invalid product name";
@@ -730,15 +997,29 @@ Json::Value BacklogWebviewService::GetItem(const std::string& product,
 
 Json::Value BacklogWebviewService::BuildTree(const std::string& product,
                                              bool forceRefresh) {
+  ItemQueryOptions options;
+  options.products = SplitCsv(product);
+  options.forceRefresh = forceRefresh;
+  return BuildTree(options);
+}
+
+Json::Value BacklogWebviewService::BuildTree(const ItemQueryOptions& options) {
   Json::Value response(Json::objectValue);
   response["roots"] = Json::arrayValue;
   response["warnings"] = Json::arrayValue;
 
-  auto itemsResponse = ListItems(product, forceRefresh);
+  auto itemsResponse = QueryItems(options);
   if (itemsResponse.isMember("error")) {
     response["error"] = itemsResponse["error"];
     return response;
   }
+
+  auto makeKey = [](const Json::Value& item) {
+    return item["product"].asString() + "\n" + item["id"].asString();
+  };
+  auto makeParentKey = [](const Json::Value& item) {
+    return item["product"].asString() + "\n" + item["parent"].asString();
+  };
 
   std::unordered_map<std::string, Json::Value> byId;
   std::unordered_map<std::string, std::vector<std::string>> childIds;
@@ -754,15 +1035,18 @@ Json::Value BacklogWebviewService::BuildTree(const std::string& product,
     if (id.empty()) {
       continue;
     }
-    allIds.insert(id);
+    const auto key = makeKey(item);
+    allIds.insert(key);
     Json::Value node(Json::objectValue);
     node["id"] = id;
+    node["product"] = item["product"].asString();
     node["title"] = item["title"].asString();
     node["type"] = item["type"].asString();
     node["state"] = item["state"].asString();
     node["parent"] = item["parent"].asString();
+    node["topic"] = item["topic"];
     node["children"] = Json::arrayValue;
-    byId[id] = node;
+    byId[key] = node;
   }
 
   for (const auto& item : itemsResponse["items"]) {
@@ -777,8 +1061,8 @@ Json::Value BacklogWebviewService::BuildTree(const std::string& product,
     }
     const auto parent = item["parent"].asString();
     if (!parent.empty()) {
-      childIds[parent].push_back(id);
-      if (!allIds.count(parent)) {
+      childIds[makeParentKey(item)].push_back(makeKey(item));
+      if (!allIds.count(makeParentKey(item))) {
         response["warnings"].append("Orphan parent missing for item " + id +
                                      ": " + parent);
       }
@@ -788,24 +1072,24 @@ Json::Value BacklogWebviewService::BuildTree(const std::string& product,
   std::set<std::string> visiting;
   std::set<std::string> visited;
   std::function<void(Json::Value&, const std::string&)> attachChildren;
-  attachChildren = [&](Json::Value& node, const std::string& nodeId) {
-    visiting.insert(nodeId);
-    visited.insert(nodeId);
+  attachChildren = [&](Json::Value& node, const std::string& nodeKey) {
+    visiting.insert(nodeKey);
+    visited.insert(nodeKey);
 
-    for (const auto& childId : childIds[nodeId]) {
-      if (!byId.count(childId)) {
+    for (const auto& childKey : childIds[nodeKey]) {
+      if (!byId.count(childKey)) {
         continue;
       }
-      if (visiting.count(childId)) {
-        response["warnings"].append("Cycle detected at " + childId);
+      if (visiting.count(childKey)) {
+        response["warnings"].append("Cycle detected at " + childKey);
         continue;
       }
-      auto child = byId[childId];
-      attachChildren(child, childId);
+      auto child = byId[childKey];
+      attachChildren(child, childKey);
       node["children"].append(child);
     }
 
-    visiting.erase(nodeId);
+    visiting.erase(nodeKey);
   };
 
   for (const auto& item : itemsResponse["items"]) {
@@ -819,12 +1103,13 @@ Json::Value BacklogWebviewService::BuildTree(const std::string& product,
       continue;
     }
     const auto parent = item["parent"].asString();
-    const bool isRoot = parent.empty() || !allIds.count(parent);
-    if (!isRoot || visited.count(id)) {
+    const auto key = makeKey(item);
+    const bool isRoot = parent.empty() || !allIds.count(makeParentKey(item));
+    if (!isRoot || visited.count(key)) {
       continue;
     }
-    auto root = byId[id];
-    attachChildren(root, id);
+    auto root = byId[key];
+    attachChildren(root, key);
     response["roots"].append(root);
   }
 
@@ -837,6 +1122,13 @@ Json::Value BacklogWebviewService::BuildTree(const std::string& product,
 
 Json::Value BacklogWebviewService::BuildKanban(const std::string& product,
                                                bool forceRefresh) {
+  ItemQueryOptions options;
+  options.products = SplitCsv(product);
+  options.forceRefresh = forceRefresh;
+  return BuildKanban(options);
+}
+
+Json::Value BacklogWebviewService::BuildKanban(const ItemQueryOptions& options) {
   Json::Value response(Json::objectValue);
   response["lanes"] = Json::objectValue;
   response["lanes"]["Backlog"] = Json::arrayValue;
@@ -846,7 +1138,7 @@ Json::Value BacklogWebviewService::BuildKanban(const std::string& product,
   response["lanes"]["Done"] = Json::arrayValue;
   response["warnings"] = Json::arrayValue;
 
-  auto itemsResponse = ListItems(product, forceRefresh);
+  auto itemsResponse = QueryItems(options);
   if (itemsResponse.isMember("error")) {
     response["error"] = itemsResponse["error"];
     return response;
@@ -880,7 +1172,7 @@ Json::Value BacklogWebviewService::BuildKanban(const std::string& product,
 
 Json::Value BacklogWebviewService::Refresh(const std::string& product) {
   Json::Value response(Json::objectValue);
-  if (product.empty()) {
+  if (product.empty() || text::ToLower(product) == "all") {
     cacheByProduct.clear();
     response["refreshed"] = "all";
     return response;
@@ -937,6 +1229,24 @@ void RegisterBacklogWebviewRoutes(
         appendCommonMeta) {
   using namespace drogon;
   const auto metaAppender = appendCommonMeta;
+  auto queryOptionsFromRequest = [](const HttpRequestPtr& request) {
+    ItemQueryOptions options;
+    const auto products = request->getParameter("products");
+    const auto product = request->getParameter("product");
+    if (!products.empty()) {
+      options.products = SplitCsv(products);
+    } else if (!product.empty()) {
+      options.products = SplitCsv(product);
+    }
+    options.text = request->getParameter("q");
+    options.states = SplitCsv(request->getParameter("state"));
+    options.types = SplitCsv(request->getParameter("type"));
+    options.limit =
+        ParseSizeOrDefault(request->getParameter("limit"), 200, 1000);
+    options.offset =
+        ParseSizeOrDefault(request->getParameter("offset"), 0, 1000000);
+    return options;
+  };
 
   app().registerHandler(
       "/healthz",
@@ -1009,22 +1319,9 @@ void RegisterBacklogWebviewRoutes(
 
   app().registerHandler(
       "/api/items",
-      [metaAppender, &service](const HttpRequestPtr& request,
+      [metaAppender, &service, queryOptionsFromRequest](const HttpRequestPtr& request,
           std::function<void(const HttpResponsePtr&)>&& callback) {
-        const auto product = request->getParameter("product");
-        const auto q = request->getParameter("q");
-        auto data = service.ListItems(product);
-
-        if (data.isMember("items") && !q.empty()) {
-          Json::Value filtered(Json::arrayValue);
-          for (const auto& item : data["items"]) {
-            if (text::ContainsCaseInsensitive(item["title"].asString(), q) ||
-                text::ContainsCaseInsensitive(item["id"].asString(), q)) {
-              filtered.append(item);
-            }
-          }
-          data["items"] = filtered;
-        }
+        auto data = service.QueryItems(queryOptionsFromRequest(request));
 
         Json::Value body(Json::objectValue);
         body["ok"] = !data.isMember("error");
@@ -1044,7 +1341,13 @@ void RegisterBacklogWebviewRoutes(
       [metaAppender, &service](const HttpRequestPtr& request,
           std::function<void(const HttpResponsePtr&)>&& callback,
           const std::string& itemId) {
-        const auto product = request->getParameter("product");
+        auto product = request->getParameter("product");
+        if (product.empty()) {
+          product = request->getParameter("products");
+        }
+        if (product.empty()) {
+          product = "all";
+        }
         auto data = service.GetItem(product, itemId);
         Json::Value body(Json::objectValue);
         body["ok"] = !data.isMember("error");
@@ -1061,10 +1364,9 @@ void RegisterBacklogWebviewRoutes(
 
   app().registerHandler(
       "/api/tree",
-      [metaAppender, &service](const HttpRequestPtr& request,
+      [metaAppender, &service, queryOptionsFromRequest](const HttpRequestPtr& request,
           std::function<void(const HttpResponsePtr&)>&& callback) {
-        const auto product = request->getParameter("product");
-        auto data = service.BuildTree(product);
+        auto data = service.BuildTree(queryOptionsFromRequest(request));
         Json::Value body(Json::objectValue);
         body["ok"] = !data.isMember("error");
         body["data"] = data;
@@ -1080,10 +1382,9 @@ void RegisterBacklogWebviewRoutes(
 
   app().registerHandler(
       "/api/kanban",
-      [metaAppender, &service](const HttpRequestPtr& request,
+      [metaAppender, &service, queryOptionsFromRequest](const HttpRequestPtr& request,
           std::function<void(const HttpResponsePtr&)>&& callback) {
-        const auto product = request->getParameter("product");
-        auto data = service.BuildKanban(product);
+        auto data = service.BuildKanban(queryOptionsFromRequest(request));
         Json::Value body(Json::objectValue);
         body["ok"] = !data.isMember("error");
         body["data"] = data;

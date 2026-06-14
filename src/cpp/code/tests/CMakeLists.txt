@@ -40,3 +40,19 @@ set_tests_properties(cli_repo_smoke_test PROPERTIES
     TIMEOUT 120
     ENVIRONMENT "CI=true;KANO_BACKLOG_NONINTERACTIVE=1;KANO_TEST_NONINTERACTIVE=1;GIT_TERMINAL_PROMPT=0"
 )
+
+if(TARGET kano::kano_backlog_webview_core)
+    add_executable(webview_service_smoke_test
+        webview_service_smoke_test.cpp
+    )
+    target_compile_features(webview_service_smoke_test PRIVATE cxx_std_23)
+    target_link_libraries(webview_service_smoke_test PRIVATE
+        kano::kano_backlog_webview_core
+        kano::backlog_core
+    )
+    add_test(NAME webview_service_smoke_test COMMAND webview_service_smoke_test)
+    set_tests_properties(webview_service_smoke_test PROPERTIES
+        TIMEOUT 120
+        ENVIRONMENT "CI=true;KANO_BACKLOG_NONINTERACTIVE=1;KANO_TEST_NONINTERACTIVE=1;GIT_TERMINAL_PROMPT=0"
+    )
+endif()

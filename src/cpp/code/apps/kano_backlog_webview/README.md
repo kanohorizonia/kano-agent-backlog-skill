@@ -5,15 +5,17 @@ Local-only backlog visualization service.
 ## Scope (MVP)
 
 - Read canonical markdown backlog files under `_kano/backlog/products/*/items/`
+- Default to an all-products view, with explicit single-product and multi-product filters.
+- Expose item metadata needed for review scans: product, type, state, source kind, UID, and topic membership when a topic manifest references the item.
 - Read-only APIs:
   - `GET /healthz`
   - `GET /api/products`
-  - `GET /api/items?product=<name>[&q=...]`
-  - `GET /api/items/<id>?product=<name>`
-  - `GET /api/tree?product=<name>`
-  - `GET /api/kanban?product=<name>`
-  - `GET /api/refresh[?product=<name>]`
-- UI: product switcher + tree + kanban at `/`
+  - `GET /api/items?product=all|<name>[&products=a,b][&q=...][&state=Ready,Doing][&type=task,feature][&limit=200][&offset=0]`
+  - `GET /api/items/<id>?product=all|<name>[&products=a,b]`
+  - `GET /api/tree?product=all|<name>[&products=a,b][&q=...][&state=...][&type=...][&limit=...]`
+  - `GET /api/kanban?product=all|<name>[&products=a,b][&q=...][&state=...][&type=...][&limit=...]`
+  - `GET /api/refresh[?product=all|<name>][&products=a,b]`
+- UI: product/state/type/search filters + context summary + tree + kanban at `/`
 
 ## Security Defaults
 

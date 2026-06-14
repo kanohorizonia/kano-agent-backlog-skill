@@ -10,18 +10,31 @@
 namespace kano::backlog::webview {
 
 struct ItemRecord {
+  std::string product;
   std::string id;
+  std::string uid;
   std::string type;
   std::string sourceKind;
   std::string title;
   std::string state;
   std::string parent;
+  std::string topic;
   std::string created;
   std::string updated;
   std::string relativePath;
   std::string rawContent;
   bool valid;
   std::string parseError;
+};
+
+struct ItemQueryOptions {
+  std::vector<std::string> products;
+  std::vector<std::string> states;
+  std::vector<std::string> types;
+  std::string text;
+  size_t limit = 200;
+  size_t offset = 0;
+  bool forceRefresh = false;
 };
 
 class BacklogWebviewService {
@@ -32,11 +45,14 @@ class BacklogWebviewService {
 
   Json::Value ListProducts();
   Json::Value ListItems(const std::string& product, bool forceRefresh = false);
+  Json::Value QueryItems(const ItemQueryOptions& options);
   Json::Value GetItem(const std::string& product, const std::string& id,
                      bool forceRefresh = false);
   Json::Value BuildTree(const std::string& product, bool forceRefresh = false);
+  Json::Value BuildTree(const ItemQueryOptions& options);
   Json::Value BuildKanban(const std::string& product,
                           bool forceRefresh = false);
+  Json::Value BuildKanban(const ItemQueryOptions& options);
   Json::Value Refresh(const std::string& product);
   Json::Value GetWorkspaceInfo() const;
   Json::Value SwitchWorkspace(const std::string& inputPath);
@@ -65,6 +81,9 @@ class BacklogWebviewService {
 
   static bool IsMarkdownItemFile(const std::filesystem::path& path);
   static bool ShouldSkipPath(const std::filesystem::path& path);
+  std::vector<std::string> ResolveSelectedProducts(
+      const std::vector<std::string>& requestedProducts) const;
+  std::unordered_map<std::string, std::vector<std::string>> BuildTopicLookup() const;
   static std::string NormalizeTypeFromPath(
       const std::filesystem::path& itemPath, const std::string& declaredType);
 

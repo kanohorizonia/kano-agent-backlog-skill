@@ -102,8 +102,12 @@ const char* kIndexHtml = R"HTML(
     .tree .leaf-spacer { display: inline-block; width: 12px; }
     .btn { border: 1px solid #cfd9ea; background: #fff; border-radius: 6px; padding: 4px 10px; cursor: pointer; }
     .btn:hover { background: #f2f6ff; }
-    .filters { display: flex; gap: 10px; flex-wrap: wrap; margin: 8px 0 10px 0; }
+    .filter-panel { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+    .filter-group { display: flex; flex-direction: column; gap: 8px; }
+    .filter-group-title { font-size: 12px; font-weight: 700; color: #3c4a63; text-transform: uppercase; }
+    .filters { display: flex; gap: 10px; flex-wrap: wrap; margin: 0; }
     .filters label { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; }
+    .limit-input { width: 80px; }
     .item-link { color: #1f4fa3; text-decoration: none; }
     .item-link:hover { text-decoration: underline; }
     .modal-backdrop { position: fixed; inset: 0; background: rgba(20, 28, 44, 0.45); display: none; align-items: center; justify-content: center; padding: 24px; }
@@ -144,11 +148,28 @@ const char* kIndexHtml = R"HTML(
 
     <main>
   <div class="row panel">
-    <label for="product">Product:</label>
+    <label for="product">Scope:</label>
     <select id="product"></select>
-    <input id="search" placeholder="Search id/title" />
+    <input id="search" placeholder="Search id/title/topic/content" />
+    <label for="limit">Limit:</label>
+    <input id="limit" class="limit-input" type="number" min="1" max="1000" value="200" />
     <button id="refresh">Refresh</button>
     <span id="status" class="muted"></span>
+  </div>
+
+  <div class="panel filter-panel">
+    <div class="filter-group">
+      <div class="filter-group-title">Products</div>
+      <div class="filters" id="product-filters"></div>
+    </div>
+    <div class="filter-group">
+      <div class="filter-group-title">States</div>
+      <div class="filters" id="state-filters"></div>
+    </div>
+    <div class="filter-group">
+      <div class="filter-group-title">Types</div>
+      <div class="filters" id="type-filters"></div>
+    </div>
   </div>
 
   <div class="panel">
@@ -170,12 +191,6 @@ const char* kIndexHtml = R"HTML(
 
   <div id="page-kanban" class="panel page">
       <h3>Kanban</h3>
-      <div class="filters" id="kanban-type-filters">
-        <label><input type="checkbox" value="Epic" checked /> Epic</label>
-        <label><input type="checkbox" value="Feature" checked /> Feature</label>
-        <label><input type="checkbox" value="UserStory" checked /> UserStory</label>
-        <label><input type="checkbox" value="Task" checked /> Task</label>
-      </div>
       <div id="kanban" class="kanban"></div>
   </div>
 
@@ -202,17 +217,23 @@ R"HTML(  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></scrip
   <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/highlight.min.js"></script>
   <script>
     const state = {
-      product: '',
+      product: 'all',
+      products: [],
+      selectedProducts: new Set(['all']),
+      selectedStates: new Set(['Proposed', 'Ready', 'InProgress', 'Blocked', 'Review', 'Done', 'Dropped']),
+      selectedTypes: new Set(['Theme', 'Epic', 'Feature', 'UserStory', 'Task', 'Bug', 'ADR', 'Topic', 'Workset']),
       q: '',
+      limit: 200,
       workspace: '',
       workspaces: [],
       treeOpen: new Set(),
       treeTouched: false,
       activeTab: 'tree',
-      kanbanTypes: new Set(['Epic', 'Feature', 'UserStory', 'Task']),
       allItems: []
     };
     const lanes = ['Backlog', 'Doing', 'Blocked', 'Review', 'Done'];
+    const itemStates = ['Proposed', 'Ready', 'InProgress', 'Blocked', 'Review', 'Done', 'Dropped'];
+    const itemTypes = ['Theme', 'Epic', 'Feature', 'UserStory', 'Task', 'Bug', 'ADR', 'Topic', 'Workset'];
     const workspaceStorageKey = 'kano_webview_workspaces_v2';
 
     async function getJson(url) {
@@ -426,6 +447,69 @@ R"HTML(  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></scrip
       return esc(v).replaceAll('"', '&quot;');
     }
 
+    function selectedProductValues() {
+      const values = [...state.selectedProducts].filter((p) => p && p !== 'all');
+      if (state.selectedProducts.has('all') || values.length === 0) {
+        return ['all'];
+      }
+      return values;
+    }
+
+    function productScopeLabel() {
+      const products = selectedProductValues();
+      if (products.length === 1 && products[0] === 'all') {
+        return 'all products';
+      }
+      if (products.length === 1) {
+        return products[0];
+      }
+      return `${products.length} products`;
+    }
+
+    function selectedTokens(values, allValues) {
+      if (values.size === allValues.length) {
+        return '';
+      }
+      return values.size === 0 ? '__none__' : [...values].join(',');
+    }
+
+    function queryString() {
+      const params = new URLSearchParams();
+      const products = selectedProductValues();
+      if (products.length === 1) {
+        params.set('product', products[0]);
+      } else {
+        params.set('products', products.join(','));
+      }
+      if (state.q) {
+        params.set('q', state.q);
+      }
+      const states = selectedTokens(state.selectedStates, itemStates);
+      if (states) {
+        params.set('state', states);
+      }
+      const types = selectedTokens(state.selectedTypes, itemTypes);
+      if (types) {
+        params.set('type', types);
+      }
+      params.set('limit', String(state.limit || 200));
+      return params.toString();
+    }
+
+    function renderMeta(item) {
+      const parts = [];
+      if (item.product) parts.push(item.product);
+      if (item.type) parts.push(item.type);
+      if (item.state) parts.push(item.state);
+      if (item.source_kind) parts.push(item.source_kind);
+      parts.push(item.topic ? `Topic: ${item.topic}` : 'Topic: none');
+      return parts.join(' / ');
+    }
+
+    function treeNodeKey(node) {
+      return `${node.product || ''}::${node.id || ''}`;
+    }
+
     function renderMarkdownWithObsidian(raw) {
       let text = String(raw || '');
 
@@ -485,24 +569,25 @@ R"HTML(    function typeIcon(type) {
 
     function renderTreeNode(node, depth = 0) {
       const children = node.children || [];
-      const label = `<span class="node-line"><span>${typeIcon(node.type)}</span><code>${esc(node.id)}</code><a href="#" class="item-link" data-item-id="${escAttr(node.id)}">${esc(node.title)}</a><span class="muted">(${esc(node.type)} / ${esc(node.state)})</span></span>`;
+      const nodeKey = treeNodeKey(node);
+      const label = `<span class="node-line"><span>${typeIcon(node.type)}</span><code>${esc(node.id)}</code><a href="#" class="item-link" data-item-id="${escAttr(node.id)}" data-item-product="${escAttr(node.product || '')}">${esc(node.title)}</a><span class="muted">(${esc(renderMeta(node))})</span></span>`;
       if (!children.length) {
         return `<li><span class="leaf-spacer"></span>${label}</li>`;
       }
-      const isOpen = state.treeOpen.has(node.id) || depth <= 1 ? 'open' : '';
-      return `<li><details data-node-id="${escAttr(node.id)}" ${isOpen}><summary>${label}</summary><ul>${children.map((child) => renderTreeNode(child, depth + 1)).join('')}</ul></details></li>`;
+      const isOpen = state.treeOpen.has(nodeKey) || depth <= 1 ? 'open' : '';
+      return `<li><details data-node-key="${escAttr(nodeKey)}" ${isOpen}><summary>${label}</summary><ul>${children.map((child) => renderTreeNode(child, depth + 1)).join('')}</ul></details></li>`;
     }
 
     function bindTreeToggles() {
-      document.querySelectorAll('#tree details[data-node-id]').forEach((detail) => {
+      document.querySelectorAll('#tree details[data-node-key]').forEach((detail) => {
         detail.addEventListener('toggle', () => {
-          const id = detail.getAttribute('data-node-id');
-          if (!id) return;
+          const key = detail.getAttribute('data-node-key');
+          if (!key) return;
           state.treeTouched = true;
           if (detail.open) {
-            state.treeOpen.add(id);
+            state.treeOpen.add(key);
           } else {
-            state.treeOpen.delete(id);
+            state.treeOpen.delete(key);
           }
         });
       });
@@ -512,8 +597,9 @@ R"HTML(    function typeIcon(type) {
           event.preventDefault();
           event.stopPropagation();
           const id = link.getAttribute('data-item-id');
+          const product = link.getAttribute('data-item-product') || '';
           if (!id) return;
-          await openItemModal(id);
+          await openItemModal(id, product);
         });
       });
     }
@@ -528,15 +614,16 @@ R"HTML(    function typeIcon(type) {
       document.getElementById('item-modal-backdrop').classList.remove('open');
     }
 
-    async function openItemModal(itemId) {
-      const data = await getJson(`/api/items/${encodeURIComponent(itemId)}?product=${encodeURIComponent(state.product)}`);
+    async function openItemModal(itemId, product = '') {
+      const productScope = product || (selectedProductValues().length === 1 ? selectedProductValues()[0] : 'all');
+      const data = await getJson(`/api/items/${encodeURIComponent(itemId)}?product=${encodeURIComponent(productScope)}`);
       const item = data?.data?.item;
       if (!item) {
         openModal(itemId, '<div class="muted">Item not found.</div>');
         return;
       }
       const contentHtml = renderMarkdownWithObsidian(item.content || '(no content)');
-      const body = `<div class="row"><code>${esc(item.id)}</code><span class="muted">${esc(item.type)} / ${esc(item.state)} / ${esc(item.source_kind || '')}</span></div><div class="muted" style="margin-bottom:8px;">${esc(item.path || '')}</div><div class="md-view">${contentHtml}</div>`;
+      const body = `<div class="row"><code>${esc(item.id)}</code><span class="muted">${esc(renderMeta(item))}</span></div><div class="muted" style="margin-bottom:8px;">${esc(item.path || '')}</div><div class="md-view">${contentHtml}</div>`;
       openModal(item.title || item.id, body);
 
       document.querySelectorAll('#item-modal-body .obs-wikilink[data-item-id]').forEach((link) => {
@@ -544,7 +631,7 @@ R"HTML(    function typeIcon(type) {
           event.preventDefault();
           const target = link.getAttribute('data-item-id');
           if (!target) return;
-          await openItemModal(target);
+          await openItemModal(target, item.product || product);
         });
       });
 
@@ -558,25 +645,89 @@ R"HTML(    function typeIcon(type) {
       }
     }
 
+)HTML"
+R"HTML(
+    function syncProductSelect() {
+      const select = document.getElementById('product');
+      const products = selectedProductValues();
+      const customValue = '__selected__';
+      const custom = select.querySelector(`option[value="${customValue}"]`);
+      if (products.length > 1) {
+        if (!custom) {
+          const opt = document.createElement('option');
+          opt.value = customValue;
+          select.insertBefore(opt, select.firstChild?.nextSibling || null);
+        }
+        select.querySelector(`option[value="${customValue}"]`).textContent =
+            `${products.length} selected products`;
+        select.value = customValue;
+      } else {
+        if (custom) {
+          custom.remove();
+        }
+        select.value = products[0] || 'all';
+      }
+      state.product = products.length === 1 ? products[0] : customValue;
+    }
+
+    function renderProductFilters() {
+      const allChecked = state.selectedProducts.has('all');
+      const entries = [
+        { value: 'all', label: 'All products', checked: allChecked },
+        ...state.products.map((product) => ({
+          value: product,
+          label: product,
+          checked: !allChecked && state.selectedProducts.has(product),
+        })),
+      ];
+      document.getElementById('product-filters').innerHTML = entries.map((entry) =>
+        `<label><input type="checkbox" data-filter-product="${escAttr(entry.value)}" ${entry.checked ? 'checked' : ''} /> ${esc(entry.label)}</label>`
+      ).join('');
+      syncProductSelect();
+    }
+
+    function renderTokenFilters(containerId, values, selected, attrName) {
+      document.getElementById(containerId).innerHTML = values.map((value) =>
+        `<label><input type="checkbox" ${attrName}="${escAttr(value)}" ${selected.has(value) ? 'checked' : ''} /> ${esc(value)}</label>`
+      ).join('');
+    }
+
+    function renderFilters() {
+      renderProductFilters();
+      renderTokenFilters('state-filters', itemStates, state.selectedStates, 'data-filter-state');
+      renderTokenFilters('type-filters', itemTypes, state.selectedTypes, 'data-filter-type');
+    }
+
     async function loadProducts() {
       const result = await getJson('/api/products');
       const select = document.getElementById('product');
+      state.products = result.data || [];
       select.innerHTML = '';
-      for (const product of (result.data || [])) {
+      const allOpt = document.createElement('option');
+      allOpt.value = 'all';
+      allOpt.textContent = 'All products';
+      select.appendChild(allOpt);
+      for (const product of state.products) {
         const opt = document.createElement('option');
         opt.value = product;
         opt.textContent = product;
         select.appendChild(opt);
       }
-      state.product = select.value || '';
+      const currentProducts = selectedProductValues();
+      const validSelection = currentProducts.length === 1 &&
+          (currentProducts[0] === 'all' || state.products.includes(currentProducts[0]));
+      if (!validSelection) {
+        state.selectedProducts = new Set(['all']);
+      }
+      renderFilters();
     }
 
     async function loadTree() {
-      const result = await getJson(`/api/tree?product=${encodeURIComponent(state.product)}`);
+      const result = await getJson(`/api/tree?${queryString()}`);
       const roots = result?.data?.roots || [];
       if (!state.treeTouched && state.treeOpen.size === 0) {
         for (const root of roots) {
-          if (root.id) state.treeOpen.add(root.id);
+          if (root.id) state.treeOpen.add(treeNodeKey(root));
         }
       }
       document.getElementById('tree').innerHTML = `<ul>${roots.map((node) => renderTreeNode(node, 0)).join('')}</ul>`;
@@ -584,14 +735,12 @@ R"HTML(    function typeIcon(type) {
     }
 
     async function loadKanban() {
-      const q = state.q ? `&q=${encodeURIComponent(state.q)}` : '';
-      const result = await getJson(`/api/kanban?product=${encodeURIComponent(state.product)}${q}`);
+      const result = await getJson(`/api/kanban?${queryString()}`);
       const lanesData = result?.data?.lanes || {};
       const html = lanes.map((lane) => {
         const cards = (lanesData[lane] || [])
-          .filter((item) => state.kanbanTypes.has(item.type))
           .map((item) =>
-          `<div class="card"><div><code>${esc(item.id)}</code></div><div><a href="#" class="item-link" data-item-id="${escAttr(item.id)}">${esc(item.title)}</a></div><div class="muted">${esc(item.type)} / ${esc(item.state)} / ${esc(item.source_kind || '')}</div></div>`
+          `<div class="card"><div><code>${esc(item.id)}</code></div><div><a href="#" class="item-link" data-item-id="${escAttr(item.id)}" data-item-product="${escAttr(item.product || '')}">${esc(item.title)}</a></div><div class="muted">${esc(renderMeta(item))}</div></div>`
           ).join('');
         return `<div class="lane"><strong>${lane}</strong>${cards || '<div class="muted">No items</div>'}</div>`;
       }).join('');
@@ -600,15 +749,15 @@ R"HTML(    function typeIcon(type) {
         link.addEventListener('click', async (event) => {
           event.preventDefault();
           const id = link.getAttribute('data-item-id');
+          const product = link.getAttribute('data-item-product') || '';
           if (!id) return;
-          await openItemModal(id);
+          await openItemModal(id, product);
         });
       });
     }
 
     async function loadContext() {
-      const q = state.q ? `&q=${encodeURIComponent(state.q)}` : '';
-      const result = await getJson(`/api/items?product=${encodeURIComponent(state.product)}${q}`);
+      const result = await getJson(`/api/items?${queryString()}`);
       const items = (result?.data?.items || []);
       state.allItems = items;
       const contextItems = items.filter((item) => {
@@ -625,7 +774,7 @@ R"HTML(    function typeIcon(type) {
           `ADR: ${counts.ADR || 0} | Topic: ${counts.Topic || 0} | Workset: ${counts.Workset || 0}`;
 
       const listHtml = contextItems.map((item) =>
-        `<div class="card"><div><code>${esc(item.id)}</code></div><div><a href="#" class="item-link" data-item-id="${escAttr(item.id)}">${esc(item.title)}</a></div><div class="muted">${esc(item.type)} / ${esc(item.state)} / ${esc(item.source_kind || '')}</div></div>`
+        `<div class="card"><div><code>${esc(item.id)}</code></div><div><a href="#" class="item-link" data-item-id="${escAttr(item.id)}" data-item-product="${escAttr(item.product || '')}">${esc(item.title)}</a></div><div class="muted">${esc(renderMeta(item))}</div></div>`
       ).join('');
       document.getElementById('context-list').innerHTML = listHtml || '<div class="muted">No context items</div>';
 
@@ -633,8 +782,9 @@ R"HTML(    function typeIcon(type) {
         link.addEventListener('click', async (event) => {
           event.preventDefault();
           const id = link.getAttribute('data-item-id');
+          const product = link.getAttribute('data-item-product') || '';
           if (!id) return;
-          await openItemModal(id);
+          await openItemModal(id, product);
         });
       });
     }
@@ -652,18 +802,25 @@ R"HTML(    function typeIcon(type) {
       document.getElementById('page-context').classList.toggle('active', isContext);
     }
 
+)HTML"
+R"HTML(
     async function refreshAll() {
-      if (!state.product) {
+      if (selectedProductValues().length === 0) {
         document.getElementById('status').textContent = 'No product found';
         return;
       }
       document.getElementById('status').textContent = 'Loading...';
       await Promise.all([loadTree(), loadKanban(), loadContext()]);
-      document.getElementById('status').textContent = `Loaded ${state.product}`;
+      document.getElementById('status').textContent = `Loaded ${productScopeLabel()}`;
     }
 
     document.getElementById('product').addEventListener('change', async (e) => {
-      state.product = e.target.value;
+      const value = e.target.value;
+      if (value === '__selected__') {
+        return;
+      }
+      state.selectedProducts = new Set([value || 'all']);
+      renderProductFilters();
       state.treeOpen.clear();
       state.treeTouched = false;
       await refreshAll();
@@ -671,7 +828,9 @@ R"HTML(    function typeIcon(type) {
 
     document.getElementById('search').addEventListener('input', async (e) => {
       state.q = e.target.value.trim();
-      await Promise.all([loadKanban(), loadContext()]);
+      state.treeTouched = false;
+      state.treeOpen.clear();
+      await refreshAll();
     });
 
     document.getElementById('workspace-add').addEventListener('click', async () => {
@@ -708,35 +867,86 @@ R"HTML(    function typeIcon(type) {
       });
     });
 
-    document.querySelectorAll('#kanban-type-filters input[type="checkbox"]').forEach((checkbox) => {
-      checkbox.addEventListener('change', async () => {
-        const type = checkbox.value;
+    document.getElementById('product-filters').addEventListener('change', async (event) => {
+      const checkbox = event.target;
+      if (!checkbox?.matches?.('input[data-filter-product]')) {
+        return;
+      }
+      const value = checkbox.getAttribute('data-filter-product');
+      if (value === 'all') {
+        state.selectedProducts = new Set(['all']);
+      } else {
+        const next = new Set([...state.selectedProducts].filter((p) => p !== 'all'));
         if (checkbox.checked) {
-          state.kanbanTypes.add(type);
+          next.add(value);
         } else {
-          state.kanbanTypes.delete(type);
+          next.delete(value);
         }
-        await loadKanban();
-      });
+        state.selectedProducts = next.size ? next : new Set(['all']);
+      }
+      renderProductFilters();
+      state.treeOpen.clear();
+      state.treeTouched = false;
+      await refreshAll();
+    });
+
+    document.getElementById('state-filters').addEventListener('change', async (event) => {
+      const checkbox = event.target;
+      if (!checkbox?.matches?.('input[data-filter-state]')) {
+        return;
+      }
+      const value = checkbox.getAttribute('data-filter-state');
+      if (checkbox.checked) {
+        state.selectedStates.add(value);
+      } else {
+        state.selectedStates.delete(value);
+      }
+      state.treeOpen.clear();
+      state.treeTouched = false;
+      await refreshAll();
+    });
+
+    document.getElementById('type-filters').addEventListener('change', async (event) => {
+      const checkbox = event.target;
+      if (!checkbox?.matches?.('input[data-filter-type]')) {
+        return;
+      }
+      const value = checkbox.getAttribute('data-filter-type');
+      if (checkbox.checked) {
+        state.selectedTypes.add(value);
+      } else {
+        state.selectedTypes.delete(value);
+      }
+      state.treeOpen.clear();
+      state.treeTouched = false;
+      await refreshAll();
+    });
+
+    document.getElementById('limit').addEventListener('change', async (event) => {
+      const parsed = Number.parseInt(event.target.value, 10);
+      state.limit = Number.isFinite(parsed) ? Math.max(1, Math.min(parsed, 1000)) : 200;
+      event.target.value = String(state.limit);
+      await refreshAll();
     });
 
     document.getElementById('refresh').addEventListener('click', async () => {
-      if (!state.product) return;
-      await getJson(`/api/refresh?product=${encodeURIComponent(state.product)}`);
+      const products = selectedProductValues();
+      const refreshScope = products.length === 1 ? products[0] : 'all';
+      await getJson(`/api/refresh?product=${encodeURIComponent(refreshScope)}`);
       await refreshAll();
     });
 
     document.getElementById('expand-all').addEventListener('click', () => {
-      document.querySelectorAll('#tree details[data-node-id]').forEach((detail) => {
+      document.querySelectorAll('#tree details[data-node-key]').forEach((detail) => {
         detail.open = true;
-        const id = detail.getAttribute('data-node-id');
-        if (id) state.treeOpen.add(id);
+        const key = detail.getAttribute('data-node-key');
+        if (key) state.treeOpen.add(key);
       });
       state.treeTouched = true;
     });
 
     document.getElementById('collapse-all').addEventListener('click', () => {
-      document.querySelectorAll('#tree details[data-node-id]').forEach((detail) => {
+      document.querySelectorAll('#tree details[data-node-key]').forEach((detail) => {
         detail.open = false;
       });
       state.treeOpen.clear();

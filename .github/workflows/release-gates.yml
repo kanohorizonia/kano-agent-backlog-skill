@@ -1,6 +1,6 @@
 name: KanoAgentSkills / Release Gates
 
-run-name: ${{ format('GitHub_release-gates_{0}_{1}_{2}', github.event.repository.name, github.ref_name, github.run_number) }}
+run-name: ${{ github.event.inputs.jenkins_build_name && format('Jenkins_{0}_{1}', github.event.inputs.jenkins_stage_name || 'release-gates', github.event.inputs.jenkins_build_name) || format('GitHub_release-gates_{0}_{1}_{2}', github.event.repository.name, github.ref_name, github.run_number) }}
 
 on:
   push:
@@ -8,6 +8,17 @@ on:
       - main
   pull_request:
   workflow_dispatch:
+    inputs:
+      jenkins_build_name:
+        description: Human-readable Jenkins build name for GitHub Actions run lists.
+        required: false
+        default: ""
+        type: string
+      jenkins_stage_name:
+        description: Jenkins stage/job slug to show in the GitHub Actions run name.
+        required: false
+        default: release-gates
+        type: string
 
 permissions:
   contents: read

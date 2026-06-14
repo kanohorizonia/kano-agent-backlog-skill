@@ -1,12 +1,8 @@
 name: KanoAgentSkills / Cloud Build
 
-run-name: ${{ github.event_name == 'workflow_dispatch' && format('Jenkins_{0}_{1}', inputs.platform || 'linux-x64', inputs.jenkins_build_name || inputs.request_id || github.run_id) || format('GitHub_cloud-build_{0}_{1}_{2}', github.event.repository.name, github.ref_name, github.run_number) }}
+run-name: ${{ inputs.jenkins_build_name != '' && format('Jenkins_{0}_{1}', inputs.platform || 'linux-x64', inputs.jenkins_build_name) || format('Manual_{0}_{1}', inputs.platform || 'linux-x64', inputs.request_id || github.run_id) }}
 
 on:
-  push:
-    branches:
-      - main
-  pull_request:
   workflow_dispatch:
     inputs:
       request_id:

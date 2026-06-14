@@ -48,6 +48,23 @@ uint16_t ResolvePort(int argc, char** argv) {
   return port;
 }
 
+std::string ResolveHost(int argc, char** argv) {
+  std::string host = "127.0.0.1";
+  for (int i = 1; i < argc; ++i) {
+    const std::string arg = argv[i];
+    if (arg == "--host" && (i + 1) < argc) {
+      return argv[i + 1];
+    }
+  }
+
+  if (const char* envHost = std::getenv("KANO_WEBVIEW_HOST"); envHost != nullptr) {
+    if (std::strlen(envHost) > 0) {
+      host = envHost;
+    }
+  }
+  return host;
+}
+
 const char* kIndexHtml = R"HTML(
 <!doctype html>
 <html lang="en">
@@ -753,6 +770,7 @@ int main(int argc, char** argv) {
   kano::backlog_core::ConfigureNoninteractiveErrorHandling();
 
   const auto productsRoot = ResolveProductsRoot(argc, argv);
+  const auto host = ResolveHost(argc, argv);
   const auto port = ResolvePort(argc, argv);
 
   kano::backlog::webview::BacklogWebviewService service(productsRoot);
@@ -777,7 +795,7 @@ int main(int argc, char** argv) {
 
   drogon::app().setLogLevel(trantor::Logger::kWarn);
   drogon::app().setThreadNum(1);
-  drogon::app().addListener("127.0.0.1", port);
+  drogon::app().addListener(host, port);
   drogon::app().run();
   return 0;
 }

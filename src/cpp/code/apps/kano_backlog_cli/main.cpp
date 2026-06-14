@@ -17865,24 +17865,55 @@ int main(int InArgc, char* InArgv[]) {
                         if (!uid_product.empty() && uid_product != product_name) continue;
 
                         auto product_root = entry.path();
-                        CanonicalStore store(product_root);
-                        auto item_paths = store.list_items();
+                        auto items_root = product_root / "items";
+                        std::vector<std::filesystem::path> item_paths;
+                        if (std::filesystem::exists(items_root)) {
+                            for (const auto& item_entry : std::filesystem::recursive_directory_iterator(items_root)) {
+                                if (!item_entry.is_regular_file() || item_entry.path().extension() != ".md") {
+                                    continue;
+                                }
+                                const auto filename = item_entry.path().filename().string();
+                                if (filename.size() >= 9 && filename.substr(filename.size() - 9) == ".index.md") {
+                                    continue;
+                                }
+                                item_paths.push_back(item_entry.path());
+                            }
+                        }
                         int product_checked = 0;
                         int product_violations = 0;
 
                         for (const auto& item_path : item_paths) {
                             try {
-                                auto item = store.read(item_path);
+                                std::ifstream input(item_path);
+                                if (!input.is_open()) {
+                                    throw std::runtime_error("Failed to open file");
+                                }
+                                std::stringstream buffer;
+                                buffer << input.rdbuf();
+                                auto fm_ctx = Frontmatter::parse(buffer.str());
+                                if (fm_ctx.metadata.IsNull()) {
+                                    throw std::runtime_error("Invalid or missing frontmatter");
+                                }
+                                std::string item_id = item_path.filename().string();
+                                const YAML::Node id_node = fm_ctx.metadata["id"];
+                                if (id_node && id_node.IsScalar()) {
+                                    item_id = id_node.as<std::string>();
+                                }
+                                std::string uid;
+                                const YAML::Node uid_node = fm_ctx.metadata["uid"];
+                                if (uid_node && uid_node.IsScalar()) {
+                                    uid = uid_node.as<std::string>();
+                                }
                                 ++product_checked;
                                 // Check UID format: should be UUIDv7
-                                if (item.uid.size() != 36) {
+                                if (uid.size() != 36) {
                                     ++product_violations;
-                                    std::cout << "FAIL " << item.id << ": invalid UID length\n";
+                                    std::cout << "FAIL " << item_id << ": invalid UID length\n";
                                 } else {
                                     // Basic UUIDv7 format check: xxxxxxxx-xxxx-7xxx-xxxx-xxxxxxxxxxxx
                                     bool valid = true;
-                                    for (size_t i = 0; i < item.uid.size(); ++i) {
-                                        char c = item.uid[i];
+                                    for (size_t i = 0; i < uid.size(); ++i) {
+                                        char c = uid[i];
                                         if (i == 8 || i == 13 || i == 18 || i == 23) {
                                             if (c != '-') valid = false;
                                         } else if (i == 14) {
@@ -17893,7 +17924,7 @@ int main(int InArgc, char* InArgv[]) {
                                     }
                                     if (!valid) {
                                         ++product_violations;
-                                        std::cout << "FAIL " << item.id << ": malformed UID\n";
+                                        std::cout << "FAIL " << item_id << ": malformed UID\n";
                                     }
                                 }
                             } catch (const std::exception& e) {

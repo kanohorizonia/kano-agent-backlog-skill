@@ -50,6 +50,11 @@ ci-linux-test-report = "cd src/cpp/shared/infra && pixi run ci-linux-test-report
 ci-linux-coverage-all = "cd src/cpp/shared/infra && pixi run ci-linux-coverage-all"
 ci-linux-validate = "cd src/cpp/shared/infra && pixi run ci-linux-validate"
 ci-linux-export = "cd src/cpp/shared/infra && pixi run ci-linux-export"
+webview-compose-build = "docker compose -f docker-compose.webview.yml build webview"
+webview-compose-up = "docker compose -f docker-compose.webview.yml up --build webview"
+webview-compose-up-detached = "docker compose -f docker-compose.webview.yml up -d --build webview"
+webview-compose-down = "docker compose -f docker-compose.webview.yml down"
+webview-compose-logs = "docker compose -f docker-compose.webview.yml logs -f webview"
 
 # =============================================================================
 # Windows-specific (win-64)

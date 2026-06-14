@@ -61,3 +61,17 @@ scripts\build\build_win_ninja_msvc.bat
   - default: `8787`
   - env: `KANO_WEBVIEW_PORT`
   - arg: `--port <number>`
+- Bind host:
+  - default: `127.0.0.1`
+  - env: `KANO_WEBVIEW_HOST`
+  - arg: `--host <address>`
+
+## Docker Compose
+
+From the repository root:
+
+```bash
+pixi run webview-compose-up-detached
+```
+
+The compose path binds the webview to `0.0.0.0` inside the container, publishes it on host port `8799`, and mounts `../_kano/backlog` read-only at `/workspace/_kano/backlog`.

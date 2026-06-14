@@ -1,0 +1,23 @@
+services:
+  webview:
+    build:
+      context: .
+      dockerfile: Dockerfile.webview
+    image: kano-agent-backlog-webview:local
+    environment:
+      KANO_BACKLOG_PRODUCTS_ROOT: /workspace/_kano/backlog/products
+      KANO_WEBVIEW_HOST: 0.0.0.0
+      KANO_WEBVIEW_PORT: 8799
+    ports:
+      - "${KANO_WEBVIEW_HOST_PORT:-8799}:8799"
+    volumes:
+      - type: bind
+        source: ../_kano/backlog
+        target: /workspace/_kano/backlog
+        read_only: true
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8799/healthz >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 5s

@@ -17,7 +17,7 @@ find_native_bin() {
     macos-ninja-clang-x64
     macos-ninja-clang-arm64
   )
-  local -a configs=(debug release relwithdebinfo minsizerel)
+  local -a configs=(release debug relwithdebinfo minsizerel)
   local preset
   local config
   local candidate
@@ -101,5 +101,19 @@ fi
 
 "$SKILL_ROOT/scripts/kob" --version >/dev/null
 "$SKILL_ROOT/scripts/kob" doctor >/dev/null
+
+# ---------------------------------------------------------------------------
+# Wrapper pollution gate: reject wrong-product KOG launchers in backlog scripts.
+# KOG launchers (kog, kog.bat, kano-git, kano-git.bat) belong exclusively to
+# kano-git-master-skill and must never appear in kano-agent-backlog-skill.
+# ---------------------------------------------------------------------------
+_BAD_LAUNCHERS=(kog kog.bat kano-git kano-git.bat)
+for _launcher in "${_BAD_LAUNCHERS[@]}"; do
+  if [[ -e "$SKILL_ROOT/scripts/$_launcher" ]]; then
+    echo "Wrong-product launcher found in kano-agent-backlog-skill/scripts: $_launcher" >&2
+    echo "KOG launchers belong to kano-git-master-skill, not backlog skill." >&2
+    exit 1
+  fi
+done
 
 echo "Native runtime gate passed."

@@ -1,0 +1,55 @@
+FROM ubuntu:26.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        cmake \
+        curl \
+        git \
+        libcli11-dev \
+        libdrogon-dev \
+        libbrotli-dev \
+        libhiredis-dev \
+        libjsoncpp-dev \
+        libmariadb-dev \
+        libpq-dev \
+        libsqlite3-dev \
+        libssl-dev \
+        libtomlplusplus-dev \
+        libyaml-cpp-dev \
+        ninja-build \
+        pkg-config \
+        uuid-dev \
+        zlib1g-dev \
+    && (apt-get install -y --no-install-recommends gcc-15 g++-15 \
+        || apt-get install -y --no-install-recommends gcc g++) \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace
+COPY . /workspace
+
+RUN set -eux; \
+    if command -v gcc-15 >/dev/null 2>&1 && command -v g++-15 >/dev/null 2>&1; then \
+      export CC=gcc-15 CXX=g++-15; \
+    else \
+      export CC=gcc CXX=g++; \
+    fi; \
+    cmake -S src/cpp -B src/cpp/out/obj/docker-webview -G "Ninja Multi-Config" \
+      -DKB_CLI11_SOURCE_MODE=system \
+      -DKB_TOMLPP_SOURCE_MODE=system \
+      -DKB_BUILD_TESTS=OFF \
+      -DKB_BUILD_WEBVIEW=ON \
+      -DKB_DROGON_SOURCE_MODE=system \
+      -DKB_ENABLE_MODULES=OFF \
+      -DKB_PRESET_NAME=docker-webview; \
+    cmake --build src/cpp/out/obj/docker-webview --config Release --target kano_backlog_webview --parallel
+
+ENV KANO_BACKLOG_PRODUCTS_ROOT=/workspace/_kano/backlog/products
+ENV KANO_WEBVIEW_HOST=0.0.0.0
+ENV KANO_WEBVIEW_PORT=8799
+
+EXPOSE 8799
+
+CMD ["bash", "-lc", "set -euo pipefail; bin=/workspace/src/cpp/out/bin/docker-webview/release/kano_backlog_webview; if [ ! -x \"$bin\" ]; then bin=\"$(find /workspace/src/cpp/out -type f -name kano_backlog_webview -perm /111 | sort | head -n 1)\"; fi; if [ -z \"${bin:-}\" ]; then echo 'kano_backlog_webview binary not found' >&2; exit 1; fi; exec \"$bin\" --backlog-root \"${KANO_BACKLOG_PRODUCTS_ROOT:-/workspace/_kano/backlog/products}\" --host \"${KANO_WEBVIEW_HOST:-0.0.0.0}\" --port \"${KANO_WEBVIEW_PORT:-8799}\""]

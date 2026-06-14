@@ -25,7 +25,21 @@ pixi run env-summary
 ### Step 1: Build the Native CLI
 
 ```bash
+# Recommended: use self build (defaults to release)
+bash scripts/kob self build
+
+# Or via pixi
 pixi run build-dev
+```
+
+`bash scripts/kob self build` is equivalent to `bash scripts/kob self build release`. Always builds release unless you pass `debug` explicitly.
+
+To check status or rebuild from scratch:
+
+```bash
+bash scripts/kob self status    # shows binary path, mode, version
+bash scripts/kob self rebuild   # clean + rebuild (release by default)
+bash scripts/kob self doctor    # full health check
 ```
 
 ### Step 2: Run the Native Smoke Tests
@@ -320,9 +334,16 @@ bash scripts/kob workitem update-state <ID> --state Done --product <product>
 ### Installation
 ```bash
 cd skills/kano-agent-backlog-skill
+
+# Build (release by default)
+bash scripts/kob self build
+
+# Or via pixi
 pixi run build-dev
-pixi run quick-test
-bash scripts/internal/show-version.sh
+
+# Verify
+bash scripts/kob self status
+bash scripts/kob self doctor
 bash scripts/kob --help
 bash scripts/kob doctor
 ```

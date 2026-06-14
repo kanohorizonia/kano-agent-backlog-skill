@@ -50,6 +50,26 @@ bash scripts/kob doctor
 
 If you are working from a clone, start with [docs/agent-quick-start.md](docs/agent-quick-start.md). The repo-local launcher is `bash scripts/kob`; it routes to the native binary only.
 
+## Backlog webview with Docker Compose
+
+When the host-native webview binary is missing or blocked, start the read-only webview through Docker Compose:
+
+```bash
+pixi run webview-compose-up-detached
+```
+
+Then open <http://localhost:8799/>. The compose service mounts the shared backlog at `../_kano/backlog` and serves it from inside the container. Stop it with:
+
+```bash
+pixi run webview-compose-down
+```
+
+To run it in the foreground for logs:
+
+```bash
+pixi run webview-compose-up
+```
+
 ## Documentation
 
 - [GitHub Pages documentation site](https://agentskill-backlog.kanohorizonia.com/)

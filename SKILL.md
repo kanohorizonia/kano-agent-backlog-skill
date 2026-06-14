@@ -22,6 +22,8 @@ metadata:
 
 **For agents:** When you see deprecated patterns or inconsistent interfaces, refactor them directly. Do not preserve old code paths "for compatibility."
 
+This follows the Kano pre-1.0.0 compatibility policy. See `kano-skill-dev-convention` → `references/pre-1.0-compatibility-policy.md` for the full rule set and examples.
+
 ## Scope
 
 Use this skill to:
@@ -106,6 +108,32 @@ Use this skill to:
   - Planned: approved but not started.
   - Ready gate applies before InProgress: Context, Goal, Approach, Acceptance Criteria, Risks must be filled.
   - InProgress: active work; strict Ready gate enforcement unless `--force` is used.
+
+## Implementation Work Item Lifecycle Gate
+
+For any work that changes code, docs, scripts, views, configs, schemas, tests, build logic, or persistent design decisions:
+
+**Before implementation:**
+1. Reuse an existing Task/Bug if it already covers the work; otherwise create one.
+2. Fill the Ready gate: Context, Goal, Approach, Acceptance Criteria, Risks.
+3. Move the item to `InProgress` **before** editing implementation files.
+4. Append a Worklog entry that implementation is starting.
+
+**During implementation:**
+1. Append Worklog entries for meaningful decisions, scope changes, blockers, or validation evidence.
+2. Attach artifacts or reports under the corresponding item when useful.
+3. Do not create extra duplicate items for the same focused session.
+
+**After implementation:**
+1. Run the relevant validation commands.
+2. Append a Worklog entry summarizing files changed, commands run, test results, and known gaps.
+3. If all acceptance criteria are complete, move the item to `Done`.
+4. If incomplete, leave it `InProgress`, `Review`, or `Blocked` with a clear Worklog entry.
+5. Refresh views after backlog changes: `kob view refresh --agent <id> --product <name> --backlog-root <path>`.
+
+Do not open items for pure exploratory discussion unless it changes code or design direction. Record minor discussion in an existing Worklog instead.
+
+For pre-1.0.0 Kano skills: prefer clean in-place migration over deprecated/superseded compatibility artifacts unless the human explicitly asks for compatibility.
 - Hierarchy is in frontmatter links, not folder nesting; avoid moving files to reflect scope changes.
 - Filenames stay stable; use ASCII slugs.
 - Never include secrets in backlog files or logs.

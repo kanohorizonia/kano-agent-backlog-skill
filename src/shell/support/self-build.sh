@@ -14,7 +14,7 @@ Build the active native kob surface for this demo repo using src/cpp/scripts.
 EOF
 }
 
-MODE="${1:-debug}"
+MODE="${1:-release}"
 case "$MODE" in
   debug|release) ;;
   -h|--help) usage; exit 0 ;;

@@ -119,7 +119,36 @@ The gate verifies:
 - no repo-local `.py` or `.pyi` files remain outside generated build/cache paths,
 - default Pixi manifest and lock have no Python runtime/package records,
 - Windows assert/error-dialog suppression is centralized for native automation,
-- repo-local `scripts/kob` can execute the native binary.
+- repo-local `scripts/kob` can execute the native binary,
+- no wrong-product KOG launchers (`kog`, `kog.bat`, `kano-git`, `kano-git.bat`) exist in `scripts/`.
+
+## Native self lifecycle
+
+The launcher supports a built-in `self` command group for developer checkouts:
+
+```bash
+# Build native binary (release by default)
+bash scripts/kob self build
+bash scripts/kob self build release   # same as above
+bash scripts/kob self build debug     # debug only, must be explicit
+
+# Rebuild from scratch
+bash scripts/kob self rebuild         # release by default
+bash scripts/kob self rebuild debug   # debug only, must be explicit
+
+# Status: shows binary path, mode, version, python_runtime=false
+bash scripts/kob self status
+
+# Full health check
+bash scripts/kob self doctor
+```
+
+**Semantic rules:**
+- `self build` default = `release`. Debug requires explicit `debug` argument.
+- `self rebuild` default = `release`. Clears canonical preset's obj/bin, then calls `self build`.
+- Binary resolution in the launcher is release-first. Use `KANO_BACKLOG_BINARY=` to override.
+- `self build`/`self rebuild` require developer checkout (`VERSION` + `src/cpp/CMakeLists.txt` + `pixi.toml`).
+- No Python fallback. No `~/.kano` build contract. No `pyproject.toml`.
 
 ## Test and release entrypoints
 

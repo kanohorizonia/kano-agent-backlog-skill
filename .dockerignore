@@ -1,0 +1,16 @@
+.git
+.github
+.githooks
+.hypothesis
+.kano/tmp
+.mypy_cache
+.pixi
+.ruff_cache
+dist-test
+out
+src/cpp/.kano/tmp
+src/cpp/_deps
+src/cpp/out
+**/.DS_Store
+**/__pycache__
+**/*.pyc

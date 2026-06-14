@@ -19,49 +19,96 @@ resolve_workspace_root() {
   printf '%s\n' "$PWD"
 }
 
-WORKSPACE_ROOT="$(resolve_workspace_root)"
+# ---------------------------------------------------------------------------
+# Self commands: handled before native binary resolution.
+# These must work even when native binary does not exist yet.
+# ---------------------------------------------------------------------------
+if [[ "${1:-}" == "self" ]]; then
+  case "${2:-}" in
+    build)
+      exec bash "$SKILL_ROOT/src/shell/support/self-build.sh" "${3:-release}"
+      ;;
+    rebuild)
+      exec bash "$SKILL_ROOT/src/shell/support/self-rebuild.sh" "${3:-release}"
+      ;;
+    status)
+      exec bash "$SKILL_ROOT/src/shell/support/self-status.sh"
+      ;;
+    doctor)
+      exec bash "$SKILL_ROOT/src/shell/support/self-doctor.sh"
+      ;;
+    "")
+      echo "Usage: kob self <build|rebuild|status|doctor> [release|debug]" >&2
+      exit 1
+      ;;
+    *)
+      echo "Unknown self command: ${2:-}" >&2
+      echo "Usage: kob self <build|rebuild|status|doctor> [release|debug]" >&2
+      exit 1
+      ;;
+  esac
+fi
 
+# ---------------------------------------------------------------------------
+# Native binary resolution: release-first.
+# Env override takes precedence over all auto-detection.
+# ---------------------------------------------------------------------------
 find_native_bin() {
   local exe_suffix=""
-  local -a presets=(
-    windows-ninja-msvc
-    windows-ninja-clang
-    windows-msbuild
-    linux-ninja-clang
-    linux-ninja-gcc
-    macos-ninja-clang
-    macos-ninja-clang-x64
-    macos-ninja-clang-arm64
-  )
-  local -a configs=(debug release relwithdebinfo minsizerel)
-  local preset
-  local config
-  local candidate
 
   case "$(uname -s 2>/dev/null || printf 'unknown')" in
     MINGW*|MSYS*|CYGWIN*) exe_suffix=".exe" ;;
   esac
 
+  # Env override
   if [[ -n "${KANO_BACKLOG_BINARY:-}" && -f "${KANO_BACKLOG_BINARY}" ]]; then
     printf '%s\n' "$KANO_BACKLOG_BINARY"
     return 0
   fi
 
-  for preset in "${presets[@]}"; do
-    for config in "${configs[@]}"; do
-      candidate="$SKILL_ROOT/src/cpp/out/bin/$preset/$config/kano-backlog$exe_suffix"
-      if [[ -f "$candidate" ]]; then
-        printf '%s\n' "$candidate"
-        return 0
-      fi
-    done
+  local candidate
 
-    candidate="$SKILL_ROOT/src/cpp/out/bin/$preset/kano-backlog$exe_suffix"
+  case "$(uname -s 2>/dev/null || printf 'unknown')" in
+    MINGW*|MSYS*|CYGWIN*)
+      local -a search_paths=(
+        "$SKILL_ROOT/src/cpp/out/bin/windows-ninja-msvc/release/kano-backlog.exe"
+        "$SKILL_ROOT/src/cpp/out/bin/windows-ninja-msvc/debug/kano-backlog.exe"
+        "$SKILL_ROOT/src/cpp/out/bin/windows-msbuild/release/kano-backlog.exe"
+        "$SKILL_ROOT/src/cpp/out/bin/windows-msbuild/debug/kano-backlog.exe"
+      )
+      ;;
+    Linux)
+      local -a search_paths=(
+        "$SKILL_ROOT/src/cpp/out/bin/linux-ninja-clang/release/kano-backlog"
+        "$SKILL_ROOT/src/cpp/out/bin/linux-ninja-clang/debug/kano-backlog"
+        "$SKILL_ROOT/src/cpp/out/bin/linux-ninja-gcc/release/kano-backlog"
+        "$SKILL_ROOT/src/cpp/out/bin/linux-ninja-gcc/debug/kano-backlog"
+      )
+      ;;
+    Darwin)
+      local -a search_paths=(
+        "$SKILL_ROOT/src/cpp/out/bin/macos-ninja-clang/release/kano-backlog"
+        "$SKILL_ROOT/src/cpp/out/bin/macos-ninja-clang/debug/kano-backlog"
+      )
+      ;;
+    *)
+      local -a search_paths=()
+      ;;
+  esac
+
+  for candidate in "${search_paths[@]+"${search_paths[@]}"}"; do
     if [[ -f "$candidate" ]]; then
       printf '%s\n' "$candidate"
       return 0
     fi
   done
+
+  # Legacy flat-layout fallback (pre-preset builds)
+  candidate="$SKILL_ROOT/src/cpp/out/bin/kano-backlog$exe_suffix"
+  if [[ -f "$candidate" ]]; then
+    printf '%s\n' "$candidate"
+    return 0
+  fi
 
   return 1
 }
@@ -76,6 +123,7 @@ native_bin_matches_version() {
   [[ -n "$detected_version" && "$detected_version" == "$EXPECTED_VERSION" ]]
 }
 
+WORKSPACE_ROOT="$(resolve_workspace_root)"
 NATIVE_BIN="$(find_native_bin || true)"
 
 if [[ -n "$NATIVE_BIN" ]] && native_bin_matches_version "$NATIVE_BIN"; then
@@ -85,10 +133,10 @@ fi
 
 if [[ -n "$NATIVE_BIN" ]]; then
   echo "Native kano-backlog binary exists but does not match VERSION $EXPECTED_VERSION." >&2
-  echo "Build native with: pixi run build-dev" >&2
+  echo "Rebuild native with: bash scripts/kob self rebuild" >&2
 else
   echo "Native kano-backlog binary was not found." >&2
-  echo "Build native with: pixi run build-dev" >&2
+  echo "Build native with: bash scripts/kob self build" >&2
 fi
-echo "Python fallback has been removed from the repo-local launcher. Build the native binary with: pixi run build-dev" >&2
+echo "Python fallback has been removed. Build the native binary with: bash scripts/kob self build" >&2
 exit 127

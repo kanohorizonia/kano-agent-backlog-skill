@@ -4696,6 +4696,180 @@ std::optional<int> try_run_workitem_set_ready_fast_path(int argc, char** argv) {
     return 0;
 }
 
+std::optional<int> try_run_workitem_update_state_fast_path(int argc, char** argv) {
+    if (argc < 5 || argv == nullptr) {
+        return std::nullopt;
+    }
+
+    int workitem_index = -1;
+    for (int i = 1; i + 1 < argc; ++i) {
+        const std::string arg = argv[i];
+        if ((arg == "workitem" || arg == "item") && std::string(argv[i + 1]) == "update-state") {
+            workitem_index = i;
+            break;
+        }
+    }
+    if (workitem_index < 0) {
+        return std::nullopt;
+    }
+
+    std::string path_str = ".";
+    std::string product;
+    std::string sandbox;
+    std::string ref;
+    std::string state_str;
+    std::string state_opt_str;
+    std::string agent;
+    std::string message;
+    std::string message_file;
+    bool consume_input_files = false;
+    bool force = false;
+
+    const auto option_value = [&](int& index, const std::string& option) -> std::optional<std::string> {
+        const std::string arg = argv[index];
+        const std::string prefix = option + "=";
+        if (arg.rfind(prefix, 0) == 0) {
+            return arg.substr(prefix.size());
+        }
+        if (arg == option && index + 1 < argc) {
+            ++index;
+            return std::string(argv[index]);
+        }
+        return std::nullopt;
+    };
+
+    const auto parse_context_option = [&](int& index) -> bool {
+        if (auto value = option_value(index, "-p")) {
+            path_str = *value;
+            return true;
+        }
+        if (auto value = option_value(index, "--path")) {
+            path_str = *value;
+            return true;
+        }
+        if (auto value = option_value(index, "-P")) {
+            product = *value;
+            return true;
+        }
+        if (auto value = option_value(index, "--product")) {
+            product = *value;
+            return true;
+        }
+        if (auto value = option_value(index, "-s")) {
+            sandbox = *value;
+            return true;
+        }
+        if (auto value = option_value(index, "--sandbox")) {
+            sandbox = *value;
+            return true;
+        }
+        return false;
+    };
+
+    for (int i = 1; i < workitem_index; ++i) {
+        if (!parse_context_option(i)) {
+            return std::nullopt;
+        }
+    }
+
+    for (int i = workitem_index + 2; i < argc; ++i) {
+        const std::string arg = argv[i];
+        if (arg == "-h" || arg == "--help") {
+            return std::nullopt;
+        }
+        if (parse_context_option(i)) {
+            continue;
+        }
+        if (auto value = option_value(i, "--state")) {
+            state_opt_str = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--agent")) {
+            agent = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "-m")) {
+            message = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--message")) {
+            message = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--message-file")) {
+            message_file = *value;
+            continue;
+        }
+        if (arg == "--consume-input-files") {
+            consume_input_files = true;
+            continue;
+        }
+        if (arg == "-f" || arg == "--force") {
+            force = true;
+            continue;
+        }
+        if (arg.rfind("-", 0) != 0) {
+            if (ref.empty()) {
+                ref = arg;
+                continue;
+            }
+            if (state_str.empty()) {
+                state_str = arg;
+                continue;
+            }
+        }
+        return std::nullopt;
+    }
+
+    if (ref.empty()) {
+        return std::nullopt;
+    }
+    if (agent.empty()) {
+        throw std::runtime_error("Missing required option: --agent");
+    }
+    const std::string effective_state = !state_opt_str.empty() ? state_opt_str : state_str;
+    if (effective_state.empty()) {
+        throw std::runtime_error("Missing required state. Use positional <state> or --state <state>");
+    }
+    auto state_opt = parse_item_state(effective_state);
+    if (!state_opt) {
+        throw std::runtime_error("Invalid item state: " + effective_state);
+    }
+
+    apply_text_file_option(message, message_file, "-m/--message", "--message-file");
+
+    auto ctx = BacklogContext::resolve(
+        path_str,
+        product.empty() ? std::nullopt : std::optional<std::string>(product),
+        sandbox.empty() ? std::nullopt : std::optional<std::string>(sandbox)
+    );
+    BacklogIndex index(ctx.backlog_root / ".cache" / "index" / "backlog.db");
+    auto result = WorkitemOps::update_state(
+        index,
+        ctx.product_root,
+        ref,
+        *state_opt,
+        agent,
+        message.empty() ? std::nullopt : std::optional<std::string>(message),
+        force
+    );
+
+    if (result.worklog_appended) {
+        std::cout << "Updated " << result.id << ": " << to_string(result.old_state) << " -> " << to_string(result.new_state);
+        if (result.parent_synced) {
+            std::cout << " [Parent synced]";
+        }
+        std::cout << "\n";
+    } else {
+        std::cout << "Item " << result.id << " is already in state " << to_string(result.new_state) << "\n";
+    }
+
+    if (consume_input_files) {
+        consume_backlog_text_file(message_file, "--message-file");
+    }
+    return 0;
+}
+
 std::optional<int> try_run_worklog_append_fast_path(int argc, char** argv) {
     if (argc < 4 || argv == nullptr) {
         return std::nullopt;
@@ -6859,6 +7033,9 @@ int main(int InArgc, char* InArgv[]) {
             return *rc;
         }
         if (auto rc = try_run_workitem_create_fast_path(parse_argc, parse_argv)) {
+            return *rc;
+        }
+        if (auto rc = try_run_workitem_update_state_fast_path(parse_argc, parse_argv)) {
             return *rc;
         }
         if (auto rc = try_run_workitem_set_ready_fast_path(parse_argc, parse_argv)) {

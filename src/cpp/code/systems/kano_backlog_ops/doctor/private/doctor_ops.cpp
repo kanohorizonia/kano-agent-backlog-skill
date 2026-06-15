@@ -8,6 +8,13 @@
 #include <sstream>
 #include <sqlite3.h>
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
 namespace kano::backlog_ops {
 
 namespace {
@@ -91,9 +98,16 @@ std::vector<std::filesystem::path> doctor_config_candidates(
     std::vector<std::filesystem::path> candidates;
     std::set<std::string> seen;
     auto add_candidate = [&](const std::filesystem::path& candidate) {
-        const auto normalized = normalized_absolute_path(candidate);
-        if (seen.insert(normalized.string()).second) {
-            candidates.push_back(normalized);
+        std::error_code ec;
+        auto display_path = std::filesystem::absolute(candidate, ec);
+        if (ec) {
+            display_path = candidate;
+            ec.clear();
+        }
+        display_path = display_path.lexically_normal();
+        const auto key = normalized_absolute_path(display_path).string();
+        if (seen.insert(key).second) {
+            candidates.push_back(display_path);
         }
     };
 
@@ -209,6 +223,66 @@ std::string recommended_command(const std::filesystem::path& backlog_root) {
     return out.str();
 }
 
+#ifdef _WIN32
+std::optional<std::filesystem::path> windows_temp_directory_path_alias(const std::filesystem::path& path) {
+    std::error_code ec;
+    const auto temp_root = std::filesystem::temp_directory_path(ec);
+    if (ec || temp_root.empty()) {
+        return std::nullopt;
+    }
+
+    const auto normalized_temp = normalized_absolute_path(temp_root);
+    const auto normalized_path = normalized_absolute_path(path);
+    auto relative = std::filesystem::relative(normalized_path, normalized_temp, ec);
+    if (ec || relative.empty() || relative.is_absolute()) {
+        return std::nullopt;
+    }
+    for (const auto& part : relative) {
+        if (part == "..") {
+            return std::nullopt;
+        }
+    }
+    return (temp_root / relative).lexically_normal();
+}
+
+std::optional<std::filesystem::path> windows_short_path(const std::filesystem::path& path) {
+    const auto wide_path = path.wstring();
+    const DWORD required = GetShortPathNameW(wide_path.c_str(), nullptr, 0);
+    if (required == 0) {
+        return std::nullopt;
+    }
+
+    std::wstring buffer(required, L'\0');
+    const DWORD written = GetShortPathNameW(wide_path.c_str(), buffer.data(), required);
+    if (written == 0 || written >= required) {
+        return std::nullopt;
+    }
+    buffer.resize(written);
+    return std::filesystem::path(buffer);
+}
+
+void append_windows_short_path_alias(
+    std::ostringstream& details,
+    const std::string& label,
+    const std::filesystem::path& path
+) {
+    const auto short_path = windows_short_path(path);
+    if (short_path && short_path->string() != path.string()) {
+        details << "\n       " << label << " short path: " << short_path->string();
+    }
+    const auto temp_alias = windows_temp_directory_path_alias(path);
+    if (temp_alias && temp_alias->string() != path.string() && (!short_path || temp_alias->string() != short_path->string())) {
+        details << "\n       " << label << " temp path: " << temp_alias->string();
+    }
+}
+#else
+void append_windows_short_path_alias(
+    std::ostringstream&,
+    const std::string&,
+    const std::filesystem::path&
+) {}
+#endif
+
 struct DoctorDiscovery {
     std::filesystem::path start_path;
     std::vector<std::filesystem::path> checked_config_paths;
@@ -308,8 +382,10 @@ DoctorCheckResult check_backlog_discovery(const DoctorDiscovery& discovery) {
     res.message = discovery.shared_layout ? "Detected shared backlog root" : "Detected backlog root";
     std::ostringstream details;
     details << "Backlog root: " << discovery.backlog_root->string();
+    append_windows_short_path_alias(details, "Backlog root", *discovery.backlog_root);
     if (discovery.config_path && exists_path(*discovery.config_path)) {
         details << "\n       Config path: " << discovery.config_path->string();
+        append_windows_short_path_alias(details, "Config path", *discovery.config_path);
     } else {
         details << "\n       Config path: not found";
     }

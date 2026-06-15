@@ -1441,6 +1441,48 @@ int main(int argc, char** argv) {
         expect(run_command_capture(binary, {"doctor"}, doctor_output) == 0, "doctor command failed after init");
         expect(read_text(doctor_output).find("[FAIL]") == std::string::npos, "doctor reported a failure after init");
 
+        const auto shared_layout_project = temp_root / "shared-layout-project";
+        const auto shared_layout_backlog_root = shared_layout_project / "_kano" / "backlog";
+        const auto shared_layout_config = shared_layout_backlog_root / ".kano" / "backlog_config.toml";
+        const auto shared_layout_product = shared_layout_backlog_root / "products" / "shared-product";
+        std::filesystem::create_directories(shared_layout_product / "items");
+        write_text(shared_layout_config,
+            "[products.shared-product]\n"
+            "name = \"shared-product\"\n"
+            "prefix = \"SP\"\n"
+            "backlog_root = \"products/shared-product\"\n"
+        );
+
+        std::filesystem::current_path(shared_layout_project);
+        const auto shared_config_show_output = temp_root / "shared-layout-config-show.txt";
+        expect(run_command_capture(binary, {"-P", "shared-product", "config", "show"}, shared_config_show_output) == 0, "config show failed from shared layout workspace root");
+        expect(read_text(shared_config_show_output).find("shared-product") != std::string::npos, "config show did not discover shared layout config");
+
+        const auto shared_workspace_doctor_output = temp_root / "doctor-shared-workspace.txt";
+        expect(run_command_capture(binary, {"doctor"}, shared_workspace_doctor_output) == 0, "doctor failed from shared layout workspace root");
+        const auto shared_workspace_doctor_text = read_text(shared_workspace_doctor_output);
+        expect(shared_workspace_doctor_text.find("[FAIL]") == std::string::npos, "doctor reported a failure from shared layout workspace root");
+        expect(shared_workspace_doctor_text.find("Detected shared backlog root") != std::string::npos, "doctor did not report shared backlog root discovery");
+        expect(shared_workspace_doctor_text.find(shared_layout_config.string()) != std::string::npos, "doctor did not report shared layout config path");
+        expect(shared_workspace_doctor_text.find("Available products: shared-product") != std::string::npos, "doctor did not list shared layout products");
+        expect(shared_workspace_doctor_text.find("Recommended: cd ") != std::string::npos, "doctor did not print recommended cd guidance");
+
+        std::filesystem::current_path(shared_layout_backlog_root);
+        const auto shared_backlog_root_doctor_output = temp_root / "doctor-shared-backlog-root.txt";
+        expect(run_command_capture(binary, {"doctor"}, shared_backlog_root_doctor_output) == 0, "doctor failed from shared backlog root");
+        expect(read_text(shared_backlog_root_doctor_output).find("[FAIL]") == std::string::npos, "doctor reported a failure from shared backlog root");
+
+        std::filesystem::current_path(temp_root);
+        const auto shared_explicit_doctor_output = temp_root / "doctor-shared-explicit.txt";
+        expect(run_command_capture(binary, {
+            "doctor",
+            "--backlog-root", shared_layout_backlog_root.string(),
+            "--config", shared_layout_config.string()
+        }, shared_explicit_doctor_output) == 0, "doctor failed with explicit shared layout overrides");
+        const auto shared_explicit_doctor_text = read_text(shared_explicit_doctor_output);
+        expect(shared_explicit_doctor_text.find("[FAIL]") == std::string::npos, "doctor reported a failure with explicit shared layout overrides");
+        expect(shared_explicit_doctor_text.find("Override:") != std::string::npos, "doctor did not report explicit override usage");
+
         std::filesystem::current_path(original_cwd);
         std::filesystem::remove_all(temp_root);
 

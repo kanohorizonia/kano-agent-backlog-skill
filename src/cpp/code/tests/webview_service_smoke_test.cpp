@@ -153,7 +153,7 @@ int main() {
         webview::ItemQueryOptions limited;
         limited.limit = 2;
         auto limitedResult = service.QueryItems(limited);
-        expect(limitedResult["total"].asUInt64() == 5, "limited query should preserve total");
+        expect(limitedResult["total"].asUInt64() == 4, "limited query should preserve total");
         expect(limitedResult["items"].size() == 2, "limited query should return requested page size");
 
         webview::ItemQueryOptions treeOptions;

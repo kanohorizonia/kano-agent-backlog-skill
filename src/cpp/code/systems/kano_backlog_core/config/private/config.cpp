@@ -228,19 +228,46 @@ std::optional<std::filesystem::path> ProjectConfig::resolve_backlog_root(const s
 }
 
 // ConfigLoader Implementation
-std::optional<std::filesystem::path> ConfigLoader::find_project_config(const std::filesystem::path& start_path) {
-    std::filesystem::path current = std::filesystem::is_directory(start_path) ? start_path : start_path.parent_path();
-    
-    while (true) {
-        std::filesystem::path config_path = current / ".kano" / "backlog_config.toml";
-        if (std::filesystem::exists(config_path)) {
-            return config_path;
+std::vector<std::filesystem::path> ConfigLoader::project_config_candidates(const std::filesystem::path& start_path) {
+    std::error_code ec;
+    std::filesystem::path current = std::filesystem::is_directory(start_path, ec) ? start_path : start_path.parent_path();
+    if (current.empty()) {
+        current = ".";
+    }
+    current = std::filesystem::absolute(current, ec);
+    if (ec) {
+        current = start_path.lexically_normal();
+        ec.clear();
+    }
+    current = current.lexically_normal();
+
+    std::vector<std::filesystem::path> candidates;
+    std::set<std::string> seen;
+    auto add_candidate = [&](const std::filesystem::path& candidate) {
+        const auto normalized = candidate.lexically_normal();
+        const auto key = normalized.string();
+        if (seen.insert(key).second) {
+            candidates.push_back(normalized);
         }
-        
+    };
+
+    while (true) {
+        add_candidate(current / ".kano" / "backlog_config.toml");
+        add_candidate(current / "_kano" / "backlog" / ".kano" / "backlog_config.toml");
+
         if (!current.has_parent_path() || current == current.parent_path()) {
             break;
         }
         current = current.parent_path();
+    }
+    return candidates;
+}
+
+std::optional<std::filesystem::path> ConfigLoader::find_project_config(const std::filesystem::path& start_path) {
+    for (const auto& config_path : project_config_candidates(start_path)) {
+        if (std::filesystem::exists(config_path)) {
+            return config_path;
+        }
     }
     return std::nullopt;
 }

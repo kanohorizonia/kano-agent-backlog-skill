@@ -84,6 +84,40 @@ std::optional<std::filesystem::path> first_existing_config(const std::vector<std
     return std::nullopt;
 }
 
+std::vector<std::filesystem::path> doctor_config_candidates(
+    const std::filesystem::path& start_path,
+    const std::optional<std::filesystem::path>& backlog_root
+) {
+    std::vector<std::filesystem::path> candidates;
+    std::set<std::string> seen;
+    auto add_candidate = [&](const std::filesystem::path& candidate) {
+        const auto normalized = normalized_absolute_path(candidate);
+        if (seen.insert(normalized.string()).second) {
+            candidates.push_back(normalized);
+        }
+    };
+
+    auto current = start_directory(start_path);
+    while (true) {
+        add_candidate(current / ".kano" / "backlog_config.toml");
+        add_candidate(current / "_kano" / "backlog" / ".kano" / "backlog_config.toml");
+        if (!current.has_parent_path() || current == current.parent_path()) {
+            break;
+        }
+        current = current.parent_path();
+    }
+
+    if (backlog_root && !backlog_root->empty()) {
+        const auto root = normalized_absolute_path(*backlog_root);
+        add_candidate(root / ".kano" / "backlog_config.toml");
+        if (root.filename() == "backlog" && root.parent_path().filename() == "_kano") {
+            add_candidate(root.parent_path().parent_path() / ".kano" / "backlog_config.toml");
+        }
+    }
+
+    return candidates;
+}
+
 std::optional<std::filesystem::path> resolve_backlog_root_from_config(
     const ProjectConfig& config,
     const std::filesystem::path& config_path
@@ -113,6 +147,26 @@ std::optional<std::filesystem::path> resolve_backlog_root_from_config(
             return normalized_absolute_path(*project_root);
         }
     }
+    return std::nullopt;
+}
+
+std::optional<std::filesystem::path> resolve_backlog_root_from_config_location(
+    const std::filesystem::path& config_path
+) {
+    auto project_root = ConfigLoader::resolve_project_root(config_path);
+    if (!project_root) {
+        return std::nullopt;
+    }
+
+    if (looks_like_backlog_root(*project_root)) {
+        return normalized_absolute_path(*project_root);
+    }
+
+    const auto shared_root = *project_root / "_kano" / "backlog";
+    if (looks_like_backlog_root(shared_root)) {
+        return normalized_absolute_path(shared_root);
+    }
+
     return std::nullopt;
 }
 
@@ -170,7 +224,9 @@ struct DoctorDiscovery {
 
 DoctorDiscovery discover_backlog(const DoctorOptions& options) {
     DoctorDiscovery discovery;
-    discovery.start_path = options.start_path.empty() ? std::filesystem::path(".") : options.start_path;
+    discovery.start_path = start_directory(
+        options.start_path.empty() ? std::filesystem::path(".") : options.start_path
+    );
 
     if (options.backlog_root && !options.backlog_root->empty()) {
         discovery.explicit_backlog_root = true;
@@ -182,7 +238,7 @@ DoctorDiscovery discover_backlog(const DoctorOptions& options) {
         discovery.config_path = normalized_absolute_path(*options.config_path);
         discovery.checked_config_paths.push_back(*discovery.config_path);
     } else {
-        discovery.checked_config_paths = ConfigLoader::project_config_candidates(discovery.start_path);
+        discovery.checked_config_paths = doctor_config_candidates(discovery.start_path, discovery.backlog_root);
         discovery.config_path = first_existing_config(discovery.checked_config_paths);
         if (!discovery.config_path && discovery.backlog_root) {
             const auto root_config = *discovery.backlog_root / ".kano" / "backlog_config.toml";
@@ -198,6 +254,9 @@ DoctorDiscovery discover_backlog(const DoctorOptions& options) {
             discovery.project_config = ProjectConfig::load_from_toml(*discovery.config_path);
             if (discovery.project_config) {
                 discovery.products = sorted_product_names(*discovery.project_config);
+                if (!discovery.backlog_root) {
+                    discovery.backlog_root = resolve_backlog_root_from_config_location(*discovery.config_path);
+                }
                 if (!discovery.backlog_root) {
                     discovery.backlog_root = resolve_backlog_root_from_config(*discovery.project_config, *discovery.config_path);
                 }

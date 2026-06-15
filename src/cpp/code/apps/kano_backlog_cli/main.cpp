@@ -7980,18 +7980,18 @@ int main(int InArgc, char* InArgv[]) {
         // ============================================================
         {
             auto* doctorCmd = app.add_subcommand("doctor", "Environment healthy check");
-            std::string doctor_backlog_root;
-            std::string doctor_config_path;
-            doctorCmd->add_option("--backlog-root", doctor_backlog_root, "Explicit backlog root path");
-            doctorCmd->add_option("--config", doctor_config_path, "Explicit .kano/backlog_config.toml path");
-            doctorCmd->callback([&]() {
+            auto doctor_backlog_root = std::make_shared<std::string>();
+            auto doctor_config_path = std::make_shared<std::string>();
+            doctorCmd->add_option("--backlog-root", *doctor_backlog_root, "Explicit backlog root path");
+            doctorCmd->add_option("--config", *doctor_config_path, "Explicit .kano/backlog_config.toml path");
+            doctorCmd->callback([&path_str, doctor_backlog_root, doctor_config_path]() {
                 DoctorOptions options;
                 options.start_path = path_str;
-                if (!doctor_backlog_root.empty()) {
-                    options.backlog_root = std::filesystem::path(doctor_backlog_root);
+                if (!doctor_backlog_root->empty()) {
+                    options.backlog_root = std::filesystem::path(*doctor_backlog_root);
                 }
-                if (!doctor_config_path.empty()) {
-                    options.config_path = std::filesystem::path(doctor_config_path);
+                if (!doctor_config_path->empty()) {
+                    options.config_path = std::filesystem::path(*doctor_config_path);
                 }
                 auto results = DoctorOps::run_all_checks(options);
                 for (const auto& res : results) {

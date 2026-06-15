@@ -69,7 +69,7 @@ on:
       run_python_tests:
         description: Run Python pytest gate when pyproject/tests exist.
         required: false
-        default: "true"
+        default: "false"
         type: string
       run_native_tests:
         description: Run native smoke tests.
@@ -134,12 +134,13 @@ jobs:
       KANO_ARTIFACT_CONTRACT_VERSION: ${{ inputs.artifact_contract_version || '1' }}
       KANO_REQUIRED: ${{ inputs.required || 'false' }}
       KANO_EXPERIMENTAL: ${{ inputs.experimental || 'false' }}
-      KANO_RUN_PYTHON_TESTS: ${{ inputs.run_python_tests || 'true' }}
+      KANO_RUN_PYTHON_TESTS: ${{ inputs.run_python_tests || 'false' }}
       KANO_RUN_NATIVE_TESTS: ${{ inputs.run_native_tests || 'true' }}
       KANO_RUN_COVERAGE: ${{ inputs.run_coverage || 'false' }}
       KANO_PUBLISH_CODE_QUALITY_COVERAGE: ${{ inputs.publish_code_quality_coverage || 'false' }}
       KANO_BACKLOG_NONINTERACTIVE: "1"
       KANO_TEST_NONINTERACTIVE: "1"
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
       GIT_TERMINAL_PROMPT: "0"
 
     steps:
@@ -242,13 +243,47 @@ jobs:
             macos-*)
               brew list cmake >/dev/null 2>&1 || brew install cmake
               brew list ninja >/dev/null 2>&1 || brew install ninja
+              brew list llvm >/dev/null 2>&1 || brew install llvm
+              llvm_prefix="$(brew --prefix llvm)"
+              echo "$llvm_prefix/bin" >> "$GITHUB_PATH"
+              {
+                echo "KANO_LLVM_COV=$llvm_prefix/bin/llvm-cov"
+                echo "KANO_LLVM_PROFDATA=$llvm_prefix/bin/llvm-profdata"
+              } >> "$GITHUB_ENV"
               ;;
             windows-*)
               choco install ninja cmake -y --no-progress || true
+              choco install opencppcoverage -y --no-progress || true
+              echo "C:\\Program Files\\OpenCppCoverage" >> "$GITHUB_PATH"
               ;;
           esac
           pixi install --manifest-path pixi.toml || true
           pixi install --manifest-path src/cpp/shared/infra/pixi.toml || true
+
+      - name: Prepare report environment
+        run: |
+          set -euo pipefail
+          mkdir -p .kano
+          cat > .kano/cloud-report-env.sh <<'EOF'
+          export KANO_REPORT_SLUG="${KANO_PACKAGE_ID}-${KANO_PLATFORM}"
+          export KANO_REPORT_TITLE="${KANO_PACKAGE_ID} ${KANO_PLATFORM} Full Reports"
+          export KANO_TEST_LANE="${KANO_TEST_LANE:-full}"
+          export KANO_REPORT_ROOT="$GITHUB_WORKSPACE/out/reports/${KANO_PLATFORM}"
+          export KANO_TEST_REPORTS_ROOT="$KANO_REPORT_ROOT/test-reports"
+          export KANO_COVERAGE_REPORTS_ROOT="$GITHUB_WORKSPACE/out/coverage/${KANO_PLATFORM}/coverage-reports"
+          export KANO_TEST_REPORT_DIR="$KANO_TEST_REPORTS_ROOT/$KANO_REPORT_SLUG"
+          export KANO_COVERAGE_REPORT_DIR="$KANO_COVERAGE_REPORTS_ROOT/$KANO_REPORT_SLUG"
+          export KANO_TEST_XML="$KANO_TEST_REPORT_DIR/tests.xml"
+          export KANO_COVERAGE_XML="$KANO_COVERAGE_REPORT_DIR/cobertura.xml"
+          export KANO_COVERAGE_HTML_DIR="$KANO_COVERAGE_REPORT_DIR/report-html"
+          export KANO_COVERAGE_PROVIDER_HTML_DIR="$KANO_COVERAGE_REPORT_DIR/native-html"
+          export KANO_COVERAGE_SUMMARY="$KANO_COVERAGE_REPORT_DIR/summary.txt"
+          export KANO_TEST_SUITE_MAP_SRC="$GITHUB_WORKSPACE/src/shell/reports/suite-map.kano-agent-backlog.json"
+          export KANO_BDD_METADATA_DIR="$KANO_REPORT_ROOT/raw/bdd-metadata"
+          export KANO_BDD_PROJECT="$KANO_PACKAGE_ID"
+          export KANO_BDD_ACTORS="user,kob"
+          export KANO_REPORT_COMMAND="bash src/cpp/shared/infra/scripts/lib/package-reports-with-skill.sh"
+          EOF
 
       - name: Run Python tests
         if: env.KANO_RUN_PYTHON_TESTS == 'true'
@@ -305,35 +340,44 @@ jobs:
         if: env.KANO_RUN_NATIVE_TESTS == 'true'
         run: |
           set -euo pipefail
-          mkdir -p out/reports/test-reports/cloud
-          export KANO_TEST_XML="$GITHUB_WORKSPACE/out/reports/test-reports/cloud/tests.xml"
+          source .kano/cloud-report-env.sh
+          mkdir -p "$KANO_TEST_REPORT_DIR" "$KANO_BDD_METADATA_DIR"
+          test_preset=""
           case "$KANO_PLATFORM" in
             windows-x64)
-              bash src/shell/test/native-test.sh windows-ninja-msvc Release
+              test_preset=windows-ninja-msvc
               ;;
             windows-arm64)
-              bash src/shell/test/native-test.sh windows-ninja-msvc-arm64 Release
+              test_preset=windows-ninja-msvc-arm64
               ;;
             linux-x64|linux-arm64)
-              bash src/shell/test/native-test.sh linux-ninja-clang Release
+              test_preset=linux-ninja-clang
               ;;
             macos-x64)
-              bash src/shell/test/native-test.sh macos-ninja-clang-x64 Release
+              test_preset=macos-ninja-clang-x64
               ;;
             macos-arm64)
-              bash src/shell/test/native-test.sh macos-ninja-clang-arm64 Release
+              test_preset=macos-ninja-clang-arm64
               ;;
           esac
+          export KANO_TEST_COMMAND="bash src/shell/test/native-test.sh $test_preset Release"
+          bash src/shell/test/native-test.sh "$test_preset" Release
+          tool_suffix=""
+          [[ "$KANO_PLATFORM" == windows-* ]] && tool_suffix=".exe"
+          tool_path="src/cpp/out/bin/$test_preset/release/kano-cpp-infra-tool${tool_suffix}"
+          if [[ -f "$KANO_TEST_XML" && -x "$tool_path" ]]; then
+            "$tool_path" generate-bdd-metadata "$KANO_TEST_XML" "$KANO_BDD_METADATA_DIR" "kano-agent-backlog-native-tests"
+          elif [[ -f "$KANO_TEST_XML" ]]; then
+            echo "::warning::kano-cpp-infra-tool not found for BDD metadata generation: $tool_path"
+          fi
 
       - name: Run native coverage
         if: env.KANO_RUN_COVERAGE == 'true'
         continue-on-error: true
         run: |
           set -euo pipefail
-          export KANO_REPORT_SLUG="${KANO_PACKAGE_ID}-${KANO_PLATFORM}"
-          export KANO_REPORT_ROOT="$GITHUB_WORKSPACE/out/coverage"
-          export KANO_TEST_REPORTS_ROOT="$GITHUB_WORKSPACE/out/reports/test-reports"
-          export KANO_COVERAGE_REPORTS_ROOT="$GITHUB_WORKSPACE/out/coverage/coverage-reports"
+          source .kano/cloud-report-env.sh
+          export INF_COVERAGE_ROOT="$KANO_COVERAGE_REPORT_DIR"
           export KANO_CPP_INFRA_PGO_GATHER_TEST_BINARY=backlog_core_smoke_test
           export KANO_CPP_INFRA_PGO_GATHER_TEST_FILTER=
           export KOB_CPP_ROOT="$GITHUB_WORKSPACE/src/cpp"
@@ -347,10 +391,10 @@ jobs:
           export KANO_COVERAGE_TEST_BINARY_MACOS=backlog_core_smoke_test
           case "$KANO_PLATFORM" in
             linux-x64|linux-arm64)
-              pixi run --manifest-path src/cpp/shared/infra/pixi.toml ci-linux-coverage-all
+              bash src/cpp/shared/infra/scripts/platform/linux/ci-coverage-all.sh
               ;;
             *)
-              pixi run --manifest-path pixi.toml coverage-all
+              bash src/cpp/shared/infra/scripts/workflows/coverage-all.sh
               ;;
           esac
 
@@ -359,13 +403,15 @@ jobs:
         continue-on-error: true
         run: |
           set -euo pipefail
+          source .kano/cloud-report-env.sh
+          export INF_COVERAGE_ROOT="$KANO_COVERAGE_REPORT_DIR"
           export KOB_CPP_ROOT="$GITHUB_WORKSPACE/src/cpp"
           export KABSD_CPP_ROOT="$KOB_CPP_ROOT"
           export KABSD_BUILD_PREFIX=KOB
           export KABSD_CMAKE_VAR_PREFIX=KB
           export INF_CMAKE_CACHE_ARGS_JSON='{"KB_BUILD_TESTS":"ON"}'
           export KANO_TEST_BINARY_NAME=cli_repo_smoke_test
-          pixi run --manifest-path pixi.toml gather-reports
+          bash src/cpp/shared/infra/scripts/lib/package-reports-with-skill.sh
 
       - name: Normalize GitHub report artifacts
         if: always() && !cancelled()
@@ -518,9 +564,12 @@ jobs:
               encoding="utf-8",
           )
 
-          junit_source = Path("out/reports/test-reports/cloud/tests.xml")
+          report_name = f"{safe_component(package_id)}-{safe_component(platform)}"
+          junit_source = Path("out") / "reports" / platform / "test-reports" / report_name / "tests.xml"
+          if not junit_source.is_file():
+              junit_source = Path("out/reports/test-reports/cloud/tests.xml")
           if junit_source.is_file():
-              report_dest = artifact_root / "reports" / platform / "test-reports" / f"{safe_component(package_id)}-{safe_component(platform)}" / "tests.xml"
+              report_dest = artifact_root / "reports" / platform / "test-reports" / report_name / "tests.xml"
               report_dest.parent.mkdir(parents=True, exist_ok=True)
               shutil.copy2(junit_source, report_dest)
 

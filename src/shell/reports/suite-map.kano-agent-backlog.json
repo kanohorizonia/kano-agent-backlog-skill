@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "kind": "kano-test-suite-map",
+  "product": "kano-agent-backlog-skill",
+  "rules": [
+    {
+      "suite": "backlog-core",
+      "title": "Backlog Core",
+      "match": {
+        "any": ["feature:backlog-core", "backlog core", "frontmatter", "state model", "config contract"]
+      }
+    },
+    {
+      "suite": "workitem-ops",
+      "title": "Workitem Operations",
+      "match": {
+        "any": ["feature:workitem-ops", "workitem", "item create", "canonical store", "template"]
+      }
+    },
+    {
+      "suite": "cli-workflow",
+      "title": "CLI Workflow",
+      "match": {
+        "any": ["feature:cli-workflow", "kob cli", "repo workflow", "workspace root", "topic workflow"]
+      }
+    },
+    {
+      "suite": "coverage-pgo",
+      "title": "Coverage / PGO",
+      "match": {
+        "any": ["coverage", "pgo", "cobertura", "llvm", "opencppcoverage"]
+      }
+    },
+    {
+      "suite": "infra",
+      "title": "Infra",
+      "match": {
+        "any": ["pixi", "cmake", "jenkins", "github actions", "platform"]
+      }
+    }
+  ]
+}

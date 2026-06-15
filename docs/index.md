@@ -1,29 +1,53 @@
-# Kano Agent Backlog Skill
+# Kano Agent Backlog Skill Technical Release
 
-Local first backlog tooling for agent driven software work, with durable work items, worklogs, ADRs, and release evidence stored in the repo.
+> Kano Agent Backlog Skill is local-first backlog tooling for agent-driven software work. It keeps durable work items, worklogs, ADRs, release evidence, and reviewable automation output in ordinary repository files.
 
 > This file is the GitHub Pages home page source. If you are browsing the repository directly on GitHub, use [docs/README.md](README.md) for repo-local links.
 
+## Publish identity
+
+| Field | Value |
+| --- | --- |
+| Product | `kano-agent-backlog-skill` |
+| CLI | `kob` / `kano-backlog` |
+| Current release line | `0.0.4` native C++ |
+| Source repository | [kanohorizonia/kano-agent-backlog-skill](https://github.com/kanohorizonia/kano-agent-backlog-skill) |
+| CI workflow | [KanoAgentSkills / Cloud Build](https://github.com/kanohorizonia/kano-agent-backlog-skill/actions/workflows/agent-skill-cloud-build.yml) |
+
 ## Start here
 
-- [Main repository](https://github.com/kanohorizonia/kano-agent-backlog-skill)
-- [Demo repository](https://github.com/dorgonman/kano-agent-backlog-skill-demo)
-- [Quick start](guides/quick-start.md)
-- [Clone quick start](guides/agent-quick-start.md)
-- [Installation](guides/installation.md)
-- [Configuration](guides/configuration.md)
-- [Version policy](guides/version-policy.md)
-- [CLI reference](cli/commands.md)
-- [Maintainer automation](automation/maintainer-automation.md)
-- [Docs pipeline](automation/docs-pipeline.md)
-- [Codex for OSS](guides/codex-for-oss.md)
-- [Demo maintenance](guides/demo-maintenance.md)
-- [Architecture decisions](adr/overview.md)
-- [Release 0.0.3 notes](releases/0.0.3.md)
+| Destination | Why open it |
+| --- | --- |
+| [Quick start](guides/quick-start.md) | Install and run the backlog CLI in a local repo. |
+| [CLI reference](cli/commands.md) | Generated command surface for `kob`. |
+| [Release 0.0.4 notes](releases/0.0.4.md) | Native C++ release scope and channel notes. |
+| [Release channels](guides/release-channels.md) | How CI, GitHub Releases, Homebrew, winget, and apt publishing are intended to work. |
+| [Architecture decisions](adr/overview.md) | Backlog model, ID policy, indexing, and local-first decisions. |
+| [GitHub Actions](https://github.com/kanohorizonia/kano-agent-backlog-skill/actions) | Current cloud build, test, report, and Pages runs. |
+
+## Release quality snapshot
+
+| Signal | Current release policy |
+| --- | --- |
+| Required platform | Windows x64 |
+| Optional cloud platforms | Windows arm64, Linux x64, Linux arm64, macOS x64, macOS arm64 |
+| Test lane | Full native CTest lane with JUnit output |
+| Public test report | Feature-first HTML report plus BDD scenario pages |
+| Coverage report | Public source-level coverage is allowed for this open-source project |
+| Package artifacts | Native CLI payloads and installers are produced by Jenkins release jobs |
+
+## Feature highlights
+
+| Area | What the automation validates |
+| --- | --- |
+| Backlog core | Config loading, frontmatter parsing, state model behavior, and file layout contracts. |
+| Workitem operations | Canonical item creation, IDs, templates, and repo-backed persistence. |
+| CLI workflow | Repo-root discovery, noninteractive execution, topic/workset flows, and user-facing command behavior. |
+| Release automation | Jenkins and GitHub Actions generate platform artifacts, test reports, coverage reports, and package-manager metadata. |
 
 ## What this site covers
 
-This site brings together the published skill docs, generated CLI docs, the Quartz and MkDocs build pipeline, and selected demo workspace artifacts that explain how the backlog model is used in practice.
+This site brings together release-facing documentation, generated CLI docs, architecture decisions, release notes, and the CI report contract used by Jenkins and GitHub Actions. CI report pages are expected to expose both test detail and coverage detail because the project is open source.
 
 ## Core guides
 
@@ -46,4 +70,4 @@ This site brings together the published skill docs, generated CLI docs, the Quar
 
 The docs build keeps the existing Quartz plus MkDocs hybrid. Local runs now stop at build and staging by default. The repository currently supports branch-based `gh-pages` publishing through `src/shell/docs/`, and that flow restores the `CNAME` file from docs build config so the custom domain stays attached.
 
-This project is currently preparing the `0.0.3` public OSS-readiness release. Experimental native and search-related areas remain available, but they are not the first thing a new reviewer should see.
+This project is currently preparing the `0.0.4` native C++ release. The repo-local executable contract is native only; Python package entrypoints and PyPI publishing are retired for this release line.

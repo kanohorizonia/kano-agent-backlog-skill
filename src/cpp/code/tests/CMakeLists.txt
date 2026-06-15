@@ -12,8 +12,9 @@ add_executable(backlog_core_smoke_test
 )
 target_compile_features(backlog_core_smoke_test PRIVATE cxx_std_23)
 target_link_libraries(backlog_core_smoke_test PRIVATE kano::backlog_core)
-add_test(NAME backlog_core_smoke_test COMMAND backlog_core_smoke_test)
-set_tests_properties(backlog_core_smoke_test PROPERTIES
+set(KB_TEST_BACKLOG_CORE "[bdd][featured][feature:backlog-core][scenario:KOB-BDD-CORE-001] Backlog core loads config, state, and frontmatter contracts")
+add_test(NAME "${KB_TEST_BACKLOG_CORE}" COMMAND backlog_core_smoke_test)
+set_tests_properties("${KB_TEST_BACKLOG_CORE}" PROPERTIES
     TIMEOUT 120
     ENVIRONMENT "CI=true;KANO_BACKLOG_NONINTERACTIVE=1;KANO_TEST_NONINTERACTIVE=1;GIT_TERMINAL_PROMPT=0"
 )
@@ -23,8 +24,9 @@ add_executable(workitem_ops_smoke_test
 )
 target_compile_features(workitem_ops_smoke_test PRIVATE cxx_std_23)
 target_link_libraries(workitem_ops_smoke_test PRIVATE kano::backlog_ops)
-add_test(NAME workitem_ops_smoke_test COMMAND workitem_ops_smoke_test)
-set_tests_properties(workitem_ops_smoke_test PROPERTIES
+set(KB_TEST_WORKITEM_OPS "[bdd][featured][feature:workitem-ops][scenario:KOB-BDD-WORKITEM-001] Workitem operations create canonical backlog items and templates")
+add_test(NAME "${KB_TEST_WORKITEM_OPS}" COMMAND workitem_ops_smoke_test)
+set_tests_properties("${KB_TEST_WORKITEM_OPS}" PROPERTIES
     TIMEOUT 120
     ENVIRONMENT "CI=true;KANO_BACKLOG_NONINTERACTIVE=1;KANO_TEST_NONINTERACTIVE=1;GIT_TERMINAL_PROMPT=0"
 )
@@ -35,8 +37,9 @@ add_executable(cli_repo_smoke_test
 target_compile_features(cli_repo_smoke_test PRIVATE cxx_std_23)
 target_compile_definitions(cli_repo_smoke_test PRIVATE KANO_REPO_ROOT="${KB_REPO_ROOT}")
 target_link_libraries(cli_repo_smoke_test PRIVATE kano::backlog_core)
-add_test(NAME cli_repo_smoke_test COMMAND cli_repo_smoke_test)
-set_tests_properties(cli_repo_smoke_test PROPERTIES
+set(KB_TEST_CLI_REPO "[bdd][featured][feature:cli-workflow][scenario:KOB-BDD-CLI-001] KOB CLI discovers repo roots and runs backlog workflows")
+add_test(NAME "${KB_TEST_CLI_REPO}" COMMAND cli_repo_smoke_test)
+set_tests_properties("${KB_TEST_CLI_REPO}" PROPERTIES
     TIMEOUT 120
     ENVIRONMENT "CI=true;KANO_BACKLOG_NONINTERACTIVE=1;KANO_TEST_NONINTERACTIVE=1;GIT_TERMINAL_PROMPT=0"
 )
@@ -50,8 +53,9 @@ if(TARGET kano::kano_backlog_webview_core)
         kano::kano_backlog_webview_core
         kano::backlog_core
     )
-    add_test(NAME webview_service_smoke_test COMMAND webview_service_smoke_test)
-    set_tests_properties(webview_service_smoke_test PROPERTIES
+    set(KB_TEST_WEBVIEW_SERVICE "[bdd][feature:cli-workflow][scenario:KOB-BDD-WEBVIEW-001] Backlog webview service exposes reviewable project data")
+    add_test(NAME "${KB_TEST_WEBVIEW_SERVICE}" COMMAND webview_service_smoke_test)
+    set_tests_properties("${KB_TEST_WEBVIEW_SERVICE}" PROPERTIES
         TIMEOUT 120
         ENVIRONMENT "CI=true;KANO_BACKLOG_NONINTERACTIVE=1;KANO_TEST_NONINTERACTIVE=1;GIT_TERMINAL_PROMPT=0"
     )

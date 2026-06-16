@@ -254,8 +254,10 @@ jobs:
             windows-*)
               choco install ninja cmake -y --no-progress || true
               choco install opencppcoverage -y --no-progress || true
+              dotnet tool update --global Microsoft.CodeCoverage.Console || dotnet tool install --global Microsoft.CodeCoverage.Console || true
               echo "C:\\Program Files\\OpenCppCoverage" >> "$GITHUB_PATH"
               echo "C:\\Program Files (x86)\\OpenCppCoverage" >> "$GITHUB_PATH"
+              echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
               ;;
           esac
           pixi install --manifest-path pixi.toml || true

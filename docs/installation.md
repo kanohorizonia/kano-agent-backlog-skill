@@ -1,6 +1,75 @@
 # Installation
 
-Repo-local execution uses the native C++ CLI. Build it from a clone.
+Installable public artifacts are published on GitHub Releases. Repo-local
+developer execution uses the native C++ CLI built from a clone.
+
+## Release downloads
+
+Use the [latest GitHub Release](https://github.com/kanohorizonia/kano-agent-backlog-skill/releases/latest)
+for normal installation. For the 0.0.4 line, the expected release tag is
+[`v0.0.4`](https://github.com/kanohorizonia/kano-agent-backlog-skill/releases/tag/v0.0.4).
+
+The release page must contain platform artifacts and checksum/index metadata
+from the matching Jenkins `Build_CI` source version. If the release page or
+assets are missing, that version has not completed the release gate.
+
+Expected artifact naming:
+
+| Platform | Artifact selector |
+| --- | --- |
+| Windows x64 | `KanoHorizonia.KanoBacklog-windows-x64-*-Release-cli.tar.gz` |
+| Windows arm64 | `KanoHorizonia.KanoBacklog-windows-arm64-*-Release-cli.tar.gz` |
+| Linux x64 | `KanoHorizonia.KanoBacklog-linux-x64-*-Release-cli.tar.gz` |
+| Linux arm64 | `KanoHorizonia.KanoBacklog-linux-arm64-*-Release-cli.tar.gz` |
+| macOS x64 | `KanoHorizonia.KanoBacklog-macos-x64-*-Release-cli.tar.gz` |
+| macOS arm64 | `KanoHorizonia.KanoBacklog-macos-arm64-*-Release-cli.tar.gz` |
+
+Download the archive matching your platform, verify it with the published
+checksum/index metadata, then extract it into your skills directory.
+
+## Manual install from an archive
+
+Linux and macOS:
+
+```bash
+mkdir -p "$HOME/.agents/skills/kano-agent-backlog-skill"
+tar -xzf KanoHorizonia.KanoBacklog-<platform>-main-<version>-Release-cli.tar.gz \
+  -C "$HOME/.agents/skills/kano-agent-backlog-skill" --strip-components 1
+export PATH="$HOME/.agents/skills/kano-agent-backlog-skill/scripts:$PATH"
+kob --version
+kob doctor
+```
+
+Windows PowerShell:
+
+```powershell
+$SkillRoot = "$HOME\.agents\skills\kano-agent-backlog-skill"
+New-Item -ItemType Directory -Force -Path $SkillRoot | Out-Null
+tar -xzf .\KanoHorizonia.KanoBacklog-windows-x64-main-<version>-Release-cli.tar.gz -C $SkillRoot --strip-components 1
+$env:PATH = "$SkillRoot\scripts;$env:PATH"
+kob --version
+kob doctor
+```
+
+When a release publishes a Windows MSI, prefer the MSI because it installs the
+skill under `~/.agents/skills/kano-agent-backlog-skill` and configures the
+`scripts` directory on `PATH`. The portable archive remains the baseline
+install artifact for release validation.
+
+## Package managers
+
+Package-manager channels are release metadata channels, not substitutes for the
+GitHub Release asset gate.
+
+| Channel | Status for 0.0.4 | Intended install command |
+| --- | --- | --- |
+| winget | Prepared only until winget metadata is published | `winget install --id KanoHorizonia.KanoBacklog -e` |
+| Homebrew | Owned Kano tap path only; no `homebrew-core` PR | `brew tap kanohorizonia/kano && brew install kano-backlog` |
+| apt | Planned owned apt repository; no public apt repository is live yet | `sudo apt install kano-backlog` after repository setup |
+
+Jenkins `Release_Publish` may generate winget, Homebrew, and apt review
+payloads. Public package-manager publication is accepted only after the
+corresponding release flag publishes metadata to the configured owned target.
 
 ## Quick build (developer checkout)
 

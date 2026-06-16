@@ -31,12 +31,41 @@ The repo-local executable contract is the native C++ CLI. The `scripts/kob` and 
 
 ## Current release status
 
-- `0.0.2` is the latest tagged OSS release
-- `0.0.4` is the current native C++ release target
+- [GitHub Releases](https://github.com/kanohorizonia/kano-agent-backlog-skill/releases) is the source of truth for installable public artifacts
+- `0.0.4` is the current native C++ release target and is accepted only when `v0.0.4` exists with downloadable platform artifacts
+- `0.0.2` is the previous tagged OSS release
 - `0.0.3` was an untagged Python-public planning line and is superseded by `0.0.4`
 - repo-local CLI usage is native C++ only
 - Python package publishing is retired for this milestone
 - Pre-1.0, so schema, CLI details, and public docs can still change
+
+## Install from a release
+
+Download packages from the [latest GitHub Release](https://github.com/kanohorizonia/kano-agent-backlog-skill/releases/latest). For the 0.0.4 line, the expected release tag is [`v0.0.4`](https://github.com/kanohorizonia/kano-agent-backlog-skill/releases/tag/v0.0.4).
+
+Each release must publish platform artifacts and checksum/index metadata from the matching Jenkins `Build_CI` source version. If the release page or assets are missing, that version has not passed the release gate yet.
+
+Manual install baseline:
+
+```bash
+# Linux or macOS: choose the archive matching your platform and CPU.
+mkdir -p "$HOME/.agents/skills/kano-agent-backlog-skill"
+tar -xzf KanoHorizonia.KanoBacklog-<platform>-main-<version>-Release-cli.tar.gz \
+  -C "$HOME/.agents/skills/kano-agent-backlog-skill" --strip-components 1
+export PATH="$HOME/.agents/skills/kano-agent-backlog-skill/scripts:$PATH"
+kob --version
+kob doctor
+```
+
+On Windows, use the Windows archive from the same release and add the extracted `scripts` directory to `PATH`; when an MSI is published for a release, prefer the MSI because it performs the skill install and PATH setup.
+
+Package-manager channels:
+
+- winget: planned package ID `KanoHorizonia.KanoBacklog`; use only after the release publishes winget metadata.
+- Homebrew: planned formula `kano-backlog` in an owned Kano tap; `homebrew-core` is not used for the 0.0.4 validation path.
+- apt: planned owned apt repository; no public apt repository is live until release metadata and repository indexes are published.
+
+The GitHub Pages site also carries the same download and package-manager status in [Installation](https://agentskill-backlog.kanohorizonia.com/guides/installation/) and [Release Channels](https://agentskill-backlog.kanohorizonia.com/guides/release-channels/).
 
 ## Quick start
 

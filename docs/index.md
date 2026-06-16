@@ -19,6 +19,8 @@
 | Destination | Why open it |
 | --- | --- |
 | [Quick start](guides/quick-start.md) | Install and run the backlog CLI in a local repo. |
+| [Release downloads](https://github.com/kanohorizonia/kano-agent-backlog-skill/releases/latest) | Download installable platform artifacts from the latest GitHub Release. |
+| [Installation](guides/installation.md) | Manual archive install and package-manager channel status. |
 | [CLI reference](cli/commands.md) | Generated command surface for `kob`. |
 | [Release 0.0.4 notes](releases/0.0.4.md) | Native C++ release scope and channel notes. |
 | [Release channels](guides/release-channels.md) | How CI, GitHub Releases, Homebrew, winget, and apt publishing are intended to work. |
@@ -36,7 +38,7 @@
 | Test lane | Full native CTest lane with JUnit output |
 | Public test report | Feature-first HTML report plus BDD scenario pages |
 | Coverage report | Public source-level coverage is allowed for this open-source project |
-| Package artifacts | Native CLI payloads and installers are produced by Jenkins release jobs |
+| Package artifacts | Native CLI payloads must be downloadable from GitHub Releases before a version is accepted |
 
 ## Feature highlights
 

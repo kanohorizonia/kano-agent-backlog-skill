@@ -171,6 +171,21 @@ The repository workflow uses the official Pages artifact model:
 
 Custom domain handling should still be configured in repository Pages settings, but the current branch-based `gh-pages` publish flow also restores a `CNAME` file from `config/build.json` so the deployed branch keeps the expected hostname.
 
+## Public CI Report Slots
+
+The deploy step always reserves stable public report entrypoints under:
+
+- `reports/latest/test-report/index.html`
+- `reports/latest/coverage-report/index.html`
+- `reports/latest/public-report-slots.json`
+
+When Jenkins stages public-safe report HTML under `KANO_SITE_STAGING_ROOT/reports/latest`, that directory is copied into the `gh-pages` working tree. When no staged reports exist, the deploy step writes placeholders so public links do not 404.
+
+Coverage source visibility follows `KANO_PUBLIC_COVERAGE_SOURCE_POLICY`:
+
+- `source-included` is allowed for this open-source project.
+- `source-free` is the fail-closed default for private or unknown-source projects.
+
 ## Troubleshooting
 
 ### Workspace not found

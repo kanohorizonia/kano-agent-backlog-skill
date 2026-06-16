@@ -24,6 +24,8 @@
 | [Release channels](guides/release-channels.md) | How CI, GitHub Releases, Homebrew, winget, and apt publishing are intended to work. |
 | [Architecture decisions](adr/overview.md) | Backlog model, ID policy, indexing, and local-first decisions. |
 | [GitHub Actions](https://github.com/kanohorizonia/kano-agent-backlog-skill/actions) | Current cloud build, test, report, and Pages runs. |
+| [Latest test report](reports/latest/test-report/) | Stable public test report HTML slot. |
+| [Latest coverage report](reports/latest/coverage-report/) | Stable public coverage report HTML slot. |
 
 ## Release quality snapshot
 

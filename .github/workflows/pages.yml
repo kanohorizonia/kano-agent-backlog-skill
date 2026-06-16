@@ -29,6 +29,11 @@ on:
 permissions:
   contents: write
 
+env:
+  KANO_PUBLIC_REPORT_ROOT: reports/latest
+  KANO_PUBLIC_COVERAGE_SOURCE_POLICY: source-included
+  KANO_PUBLIC_COVERAGE_SOURCE_ALLOWED: "true"
+
 concurrency:
   group: pages
   cancel-in-progress: false

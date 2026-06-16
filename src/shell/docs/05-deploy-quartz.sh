@@ -68,6 +68,91 @@ find "$DEPLOY_DIR" -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
 # Copy built site to deployment target
 cp -r "$BUILD_DIR/staged"/* "$DEPLOY_DIR/"
 
+normalize_public_report_root() {
+  local value="${1:-reports/latest}"
+  value="${value//\\//}"
+  value="${value#/}"
+  value="${value%/}"
+  if [[ -z "$value" || "$value" == /* || "$value" == *".."* ]]; then
+    echo "reports/latest"
+    return 0
+  fi
+  echo "$value"
+}
+
+write_public_report_placeholder() {
+  local slot_dir="$1"
+  local title="$2"
+  local policy="$3"
+  mkdir -p "$slot_dir"
+  cat > "$slot_dir/index.html" <<HTML
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${title}</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, sans-serif; margin: 2rem; line-height: 1.5; color: #111827; background: #f8fafc; }
+    main { max-width: 760px; }
+    code { background: #e5e7eb; padding: 0.1rem 0.25rem; border-radius: 4px; }
+    .status { display: inline-block; border: 1px solid #cbd5e1; border-radius: 999px; padding: 0.2rem 0.7rem; background: #fff; font-weight: 600; }
+  </style>
+</head>
+<body>
+<main>
+  <p class="status">reserved</p>
+  <h1>${title}</h1>
+  <p>This stable public report slot is present, but no publishable report HTML was staged for this site build.</p>
+  <p>Policy: ${policy}.</p>
+  <p>Machine-readable slot metadata is available at <code>../public-report-slots.json</code>.</p>
+</main>
+</body>
+</html>
+HTML
+}
+
+stage_public_report_slots() {
+  local public_root
+  local source_root
+  local target_root
+  local policy
+  public_root="$(normalize_public_report_root "${KANO_PUBLIC_REPORT_ROOT:-reports/latest}")"
+  source_root="${KANO_SITE_STAGING_ROOT:-}"
+  target_root="$DEPLOY_DIR/$public_root"
+  policy="${KANO_PUBLIC_COVERAGE_SOURCE_POLICY:-source-free}"
+
+  if [[ -n "$source_root" && -d "$source_root/$public_root" ]]; then
+    echo "Copying public report slots from $source_root/$public_root"
+    rm -rf "$target_root"
+    mkdir -p "$(dirname "$target_root")"
+    cp -r "$source_root/$public_root" "$target_root"
+  else
+    echo "No staged public report slots found; writing placeholders under $public_root"
+    mkdir -p "$target_root"
+    write_public_report_placeholder "$target_root/test-report" "Latest Test Report" "public-safe test report HTML may be published here"
+    write_public_report_placeholder "$target_root/coverage-report" "Latest Coverage Report" "coverage publication uses ${policy}; private projects must publish source-free coverage"
+    cat > "$target_root/public-report-slots.json" <<JSON
+{
+  "schemaVersion": 1,
+  "kind": "kano-public-report-slots",
+  "publicRoot": "$public_root",
+  "policy": {
+    "coverageSourcePolicy": "$policy",
+    "coverageSourceAllowed": ${KANO_PUBLIC_COVERAGE_SOURCE_ALLOWED:-false},
+    "unknownPolicyFailsClosed": true
+  },
+  "slots": [
+    {"name": "test-report", "path": "$public_root/test-report", "status": "reserved"},
+    {"name": "coverage-report", "path": "$public_root/coverage-report", "status": "reserved"}
+  ]
+}
+JSON
+  fi
+}
+
+stage_public_report_slots
+
 # Restore CNAME for custom-domain GitHub Pages deployments.
 SITE_HOST="${SITE_URL#*://}"
 SITE_HOST="${SITE_HOST%%/*}"

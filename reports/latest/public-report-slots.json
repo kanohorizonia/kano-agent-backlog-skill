@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "kind": "kano-public-report-slots",
+  "publicRoot": "reports/latest",
+  "policy": {
+    "coverageSourcePolicy": "source-included",
+    "coverageSourceAllowed": true,
+    "unknownPolicyFailsClosed": true
+  },
+  "slots": [
+    {"name": "test-report", "path": "reports/latest/test-report", "status": "reserved"},
+    {"name": "coverage-report", "path": "reports/latest/coverage-report", "status": "reserved"}
+  ]
+}

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(kano_backlog VERSION 0.0.3 DESCRIPTION "Kano Agent Backlog — ticket-first AI agent collaboration" LANGUAGES C CXX)
+project(kano_backlog VERSION 0.0.4 DESCRIPTION "Kano Agent Backlog — ticket-first AI agent collaboration" LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)

@@ -6,16 +6,16 @@ This document records the current release policy for
 ## Current Policy
 
 - `0.0.2` is already released.
-- `0.0.3` remains the historical OSS-readiness release line.
-- The current native migration milestone is a new contract milestone, not an
-  extension of the old `0.0.3` Python-public package contract.
+- `0.0.3` was an untagged historical OSS-readiness planning line.
+- `0.0.4` is the current native C++ release target and supersedes the old
+  `0.0.3` Python-public package contract.
 
 ## Native Executable Contract
 
 - Repo-local execution is native C++ only through `scripts/kob`,
   `scripts/kano-backlog`, or the built `kano-backlog` binary.
 - Python package entrypoints, editable installs, pytest oracle tests, and PyPI
-  publishing are retired for this native milestone.
+  publishing are retired for the `0.0.4` native release line.
 - Data formats remain compatible: Markdown backlog files, TOML config, and
   derived SQLite caches continue to be the source-of-truth model.
 - Future exact tokenizer or embedding providers must be implemented as native
@@ -34,5 +34,5 @@ Native releases must prove:
 - CI and package artifacts do not expose Python package entrypoints.
 
 Historical release notes may still describe the retired Python path for the
-release where it was true. Current docs and automation should describe the
-native executable contract.
+release line where it was planned or true. Current docs and automation should
+describe the native executable contract.

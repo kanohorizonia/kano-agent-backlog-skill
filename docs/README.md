@@ -17,10 +17,12 @@ If you are reading the repository directly, start here instead of `docs/index.md
 - [Codex for OSS](codex-for-oss.md)
 - [Demo maintenance follow-up](demo-maintenance.md)
 - [Version policy](version-policy.md)
+- [Release channels](release-channels.md)
 - [Native CLI direction](design/native-cli-direction.md)
 
 ## Release notes
 
+- [0.0.4 release notes](releases/0.0.4.md)
 - [0.0.3 release notes](releases/0.0.3.md)
 - [CHANGELOG](../CHANGELOG.md)
 

@@ -1368,7 +1368,7 @@ int main(int argc, char** argv) {
 
         expect(run_command(binary, {
             "admin", "release", "check",
-            "--version", "0.0.3",
+            "--version", "0.0.4",
             "--topic", "native-release-smoke",
             "--agent", "tester",
             "--product", "kano-ai-3d-asset-skill",
@@ -1376,7 +1376,7 @@ int main(int argc, char** argv) {
             "--phase", "phase2",
             "--backlog-root", backlog_root.string()
         }) == 0, "admin release phase2 check failed");
-        expect(std::filesystem::exists(backlog_root / "topics" / "native-release-smoke" / "publish" / "release_check_0.0.3_phase2.md"), "admin release phase2 did not write report");
+        expect(std::filesystem::exists(backlog_root / "topics" / "native-release-smoke" / "publish" / "release_check_0.0.4_phase2.md"), "admin release phase2 did not write report");
 
         expect(run_command(binary, {
             "-P", "kano-ai-3d-asset-skill",

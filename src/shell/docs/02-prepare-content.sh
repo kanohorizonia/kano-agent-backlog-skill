@@ -41,6 +41,66 @@ rm -rf "$BUILD_DIR/content_quartz"/*
 rm -rf "$BUILD_DIR/content_mkdocs"/*
 rm -rf "$BUILD_DIR/staged"/*
 
+copy_doc() {
+  local source_path="$1"
+  local target_path="$2"
+  if [ ! -f "$source_path" ]; then
+    echo "WARNING: docs source missing: $source_path" >&2
+    return 0
+  fi
+  mkdir -p "$(dirname "$target_path")"
+  cp "$source_path" "$target_path"
+}
+
+copy_glob_docs() {
+  local source_dir="$1"
+  local target_dir="$2"
+  local file
+  [ -d "$source_dir" ] || return 0
+  mkdir -p "$target_dir"
+  shopt -s nullglob
+  for file in "$source_dir"/*.md "$source_dir"/*.json "$source_dir"/*.sql; do
+    [ -f "$file" ] || continue
+    cp "$file" "$target_dir/$(basename "$file")"
+  done
+  shopt -u nullglob
+}
+
+echo "Copying published documentation content..."
+copy_doc "$SKILL_DIR/docs/index.md" "$BUILD_DIR/content_quartz/index.md"
+copy_doc "$SKILL_DIR/README.md" "$BUILD_DIR/content_quartz/skill/readme.md"
+copy_doc "$SKILL_DIR/SKILL.md" "$BUILD_DIR/content_quartz/skill/guide.md"
+copy_doc "$SKILL_DIR/REFERENCE.md" "$BUILD_DIR/content_quartz/skill/reference.md"
+copy_doc "$SKILL_DIR/CHANGELOG.md" "$BUILD_DIR/content_quartz/skill/changelog.md"
+
+copy_doc "$SKILL_DIR/docs/quick-start.md" "$BUILD_DIR/content_quartz/guides/quick-start.md"
+copy_doc "$SKILL_DIR/docs/agent-quick-start.md" "$BUILD_DIR/content_quartz/guides/agent-quick-start.md"
+copy_doc "$SKILL_DIR/docs/installation.md" "$BUILD_DIR/content_quartz/guides/installation.md"
+copy_doc "$SKILL_DIR/docs/configuration.md" "$BUILD_DIR/content_quartz/guides/configuration.md"
+copy_doc "$SKILL_DIR/docs/usage-examples.md" "$BUILD_DIR/content_quartz/guides/usage-examples.md"
+copy_doc "$SKILL_DIR/docs/workset.md" "$BUILD_DIR/content_quartz/guides/workset.md"
+copy_doc "$SKILL_DIR/docs/topic.md" "$BUILD_DIR/content_quartz/guides/topic.md"
+copy_doc "$SKILL_DIR/docs/version-policy.md" "$BUILD_DIR/content_quartz/guides/version-policy.md"
+copy_doc "$SKILL_DIR/docs/release-channels.md" "$BUILD_DIR/content_quartz/guides/release-channels.md"
+copy_doc "$SKILL_DIR/docs/design/native-cli-direction.md" "$BUILD_DIR/content_quartz/guides/native-cli-direction.md"
+copy_doc "$SKILL_DIR/docs/demo-maintenance.md" "$BUILD_DIR/content_quartz/guides/demo-maintenance.md"
+copy_doc "$SKILL_DIR/docs/codex-for-oss.md" "$BUILD_DIR/content_quartz/guides/codex-for-oss.md"
+copy_doc "$SKILL_DIR/docs/experimental-features.md" "$BUILD_DIR/content_quartz/guides/experimental-features.md"
+copy_doc "$SKILL_DIR/docs/tokenizer-quickstart.md" "$BUILD_DIR/content_quartz/guides/tokenizer-quickstart.md"
+copy_doc "$SKILL_DIR/docs/tokenizer-adapters.md" "$BUILD_DIR/content_quartz/guides/tokenizer-adapters.md"
+copy_doc "$SKILL_DIR/docs/tokenizer-configuration.md" "$BUILD_DIR/content_quartz/guides/tokenizer-configuration.md"
+copy_doc "$SKILL_DIR/docs/tokenizer-cli-reference.md" "$BUILD_DIR/content_quartz/guides/tokenizer-cli-reference.md"
+copy_doc "$SKILL_DIR/docs/tokenizer-troubleshooting.md" "$BUILD_DIR/content_quartz/guides/tokenizer-troubleshooting.md"
+copy_doc "$SKILL_DIR/docs/tokenizer-performance.md" "$BUILD_DIR/content_quartz/guides/tokenizer-performance.md"
+
+copy_doc "$SKILL_DIR/docs/maintainer-automation.md" "$BUILD_DIR/content_quartz/automation/maintainer-automation.md"
+copy_doc "$SKILL_DIR/src/shell/docs/README.md" "$BUILD_DIR/content_quartz/automation/docs-pipeline.md"
+
+copy_glob_docs "$SKILL_DIR/docs/releases" "$BUILD_DIR/content_quartz/releases"
+copy_doc "$SKILL_DIR/CHANGELOG.md" "$BUILD_DIR/content_quartz/releases/changelog.md"
+
+copy_glob_docs "$SKILL_DIR/references" "$BUILD_DIR/content_quartz/references"
+
 # Generate CLI and API docs first
 echo "Generating CLI documentation..."
 mkdir -p "$BUILD_DIR/content_quartz/cli"

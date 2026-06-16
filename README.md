@@ -31,8 +31,9 @@ The repo-local executable contract is the native C++ CLI. The `scripts/kob` and 
 
 ## Current release status
 
-- `0.0.2` released
-- this native milestone is not part of the old `0.0.3` Python-public release contract
+- `0.0.2` is the latest tagged OSS release
+- `0.0.4` is the current native C++ release target
+- `0.0.3` was an untagged Python-public planning line and is superseded by `0.0.4`
 - repo-local CLI usage is native C++ only
 - Python package publishing is retired for this milestone
 - Pre-1.0, so schema, CLI details, and public docs can still change
@@ -77,6 +78,7 @@ pixi run webview-compose-up
 - [Installation](docs/installation.md)
 - [Configuration](docs/configuration.md)
 - [Version policy](docs/version-policy.md)
+- [Release channels](docs/release-channels.md)
 - [Native CLI direction](docs/design/native-cli-direction.md)
 - [Maintainer automation](docs/maintainer-automation.md)
 - [Codex for OSS](docs/codex-for-oss.md)

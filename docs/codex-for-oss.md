@@ -47,14 +47,15 @@ Based on the repo contents, the local backlog structure, release evidence flow, 
 - pre-1.0 interfaces can still change
 - demo alignment is a separate follow-up when the demo checkout is unavailable locally
 - optional search and embedding flows should be treated as experimental
-- native and shared-infra work should not be described as the stable public API surface
+- internal shared-infra APIs should not be described as stable public APIs
 
-## 0.0.3 public-readiness goals
+## 0.0.4 native release goals
 
-- align public release metadata on `0.0.3`
+- align public release metadata on `0.0.4`
 - refresh README and maintainer-facing docs
 - repair missing documentation links
 - clean up the GitHub Pages landing page and deployment path
+- describe the supported executable surface as native C++ only
 - document demo follow-up instead of inventing unavailable demo changes
 
 ## What reviewers can inspect

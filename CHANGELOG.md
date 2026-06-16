@@ -7,10 +7,53 @@ This project uses Git tags as releases: `vX.Y.Z`.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-Current OSS release target: `0.0.3`.
+Current OSS release target: `0.0.4`.
 Latest released OSS version: `0.0.2`.
 
+`0.0.3` was an untagged Python-public planning line and is retained only for
+historical release-readiness notes. The native C++ executable contract is
+targeted for `0.0.4`.
+
 `0.1.0` references below are future planning only unless called out elsewhere as internal or experimental.
+
+## [0.0.4] - Unreleased
+
+### Overview
+
+`0.0.4` is the native C++ executable release target. The supported executable
+surfaces are the built `kano-backlog` binary and the repo-local `scripts/kob`
+and `scripts/kano-backlog` launchers, with no Python fallback.
+
+### Changed
+
+- Version metadata is aligned on `0.0.4` across `VERSION`, CMake, vcpkg, and
+  native release smoke expectations.
+- Public documentation now describes the current supported contract as fully
+  native C++.
+- Release notes, GitHub Pages publishing metadata, and the release checklist are
+  prepared for the `0.0.4` native release line.
+- Release-channel guidance records the branch and repository model for Jenkins,
+  GitHub Releases, GitHub Pages, winget, Homebrew, and apt preparation.
+- Jenkins release configuration now enables package-manager review payload
+  generation while keeping package-manager publishing disabled by default.
+- Jenkins and GitHub Actions cloud-build defaults no longer request Python
+  tests for the native-only release line.
+
+### Removed from the Supported Surface
+
+- Python package entrypoints, editable Python installs, in-process Python
+  runtime adapters, and pytest oracle tests are not part of the `0.0.4`
+  executable contract.
+- PyPI/TestPyPI publishing remains retired for this native milestone.
+
+### Release Preparation
+
+- Jenkins and GitHub Actions release gates must build and test native binaries
+  from a pushed source revision or release tag.
+- GitHub Releases should attach native binary/archive artifacts and checksum
+  sidecars after the final `v0.0.4` tag is created.
+- Package-manager manifests should be produced only after final release artifact
+  URLs and SHA256 values are stable.
 
 ## [0.1.0] - Future / internal planning
 
@@ -89,7 +132,11 @@ This is an alpha release. Please report issues, suggest improvements, or share y
 
 ---
 
-## [0.0.3] - Unreleased
+## [0.0.3] - Superseded / not tagged
+
+This line was never tagged as a release. It is retained as historical
+OSS-readiness planning and was superseded by the `0.0.4` native C++ release
+target.
 
 ### Added
 - Effective config artifacts (stable vs runtime) written to deterministic paths under `.kano/cache/`.

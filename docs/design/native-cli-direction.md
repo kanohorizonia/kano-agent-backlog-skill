@@ -1,7 +1,7 @@
 # Native CLI Direction
 
-Status: accepted as the current executable contract for the native migration
-milestone.
+Status: accepted as the current executable contract for the `0.0.4` native C++
+release line.
 
 ## Context
 
@@ -28,10 +28,10 @@ The repo-local executable surface is now native C++:
 
 ## What This Means For Releases
 
-This native migration milestone is distinct from the old `0.0.3` Python-public
-release contract. Historical release notes may still describe the Python package
-path for releases where that was true, but current automation and repo-local
-usage target the native executable contract.
+The `0.0.4` native release line is distinct from the old `0.0.3`
+Python-public planning contract. Historical release notes may still describe the
+Python package path for releases where that was planned or true, but current
+automation and repo-local usage target the native executable contract.
 
 ## Verification
 

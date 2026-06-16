@@ -30,4 +30,14 @@ esac
 echo "=== kano-agent-backlog-skill quick test (native) ==="
 echo "  Skill root: $SKILL_ROOT"
 
-exec "$SCRIPT_DIR/native-test.sh" "$@"
+case $# in
+  0) exec "$SCRIPT_DIR/native-test.sh" "" "" quick ;;
+  1) exec "$SCRIPT_DIR/native-test.sh" "$1" "" quick ;;
+  2) exec "$SCRIPT_DIR/native-test.sh" "$1" "$2" quick ;;
+  *)
+    preset="$1"
+    config="$2"
+    shift 2
+    exec "$SCRIPT_DIR/native-test.sh" "$preset" "$config" quick "$@"
+    ;;
+esac

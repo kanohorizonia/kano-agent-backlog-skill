@@ -15,7 +15,7 @@ target_link_libraries(backlog_core_smoke_test PRIVATE kano::backlog_core)
 set(KB_TEST_BACKLOG_CORE "[bdd][featured][feature:backlog-core][scenario:KOB-BDD-CORE-001] Backlog core loads config, state, and frontmatter contracts")
 add_test(NAME "${KB_TEST_BACKLOG_CORE}" COMMAND backlog_core_smoke_test)
 set_tests_properties("${KB_TEST_BACKLOG_CORE}" PROPERTIES
-    TIMEOUT 120
+    TIMEOUT 30
     ENVIRONMENT "CI=true;KANO_BACKLOG_NONINTERACTIVE=1;KANO_TEST_NONINTERACTIVE=1;GIT_TERMINAL_PROMPT=0"
 )
 
@@ -27,7 +27,7 @@ target_link_libraries(workitem_ops_smoke_test PRIVATE kano::backlog_ops)
 set(KB_TEST_WORKITEM_OPS "[bdd][featured][feature:workitem-ops][scenario:KOB-BDD-WORKITEM-001] Workitem operations create canonical backlog items and templates")
 add_test(NAME "${KB_TEST_WORKITEM_OPS}" COMMAND workitem_ops_smoke_test)
 set_tests_properties("${KB_TEST_WORKITEM_OPS}" PROPERTIES
-    TIMEOUT 120
+    TIMEOUT 30
     ENVIRONMENT "CI=true;KANO_BACKLOG_NONINTERACTIVE=1;KANO_TEST_NONINTERACTIVE=1;GIT_TERMINAL_PROMPT=0"
 )
 
@@ -41,6 +41,20 @@ set(KB_TEST_CLI_REPO "[bdd][featured][feature:cli-workflow][scenario:KOB-BDD-CLI
 add_test(NAME "${KB_TEST_CLI_REPO}" COMMAND cli_repo_smoke_test)
 set_tests_properties("${KB_TEST_CLI_REPO}" PROPERTIES
     TIMEOUT 120
+    LABELS long
+    ENVIRONMENT "CI=true;KANO_BACKLOG_NONINTERACTIVE=1;KANO_TEST_NONINTERACTIVE=1;GIT_TERMINAL_PROMPT=0"
+)
+
+add_executable(cli_quick_smoke_test
+    cli_quick_smoke_test.cpp
+)
+target_compile_features(cli_quick_smoke_test PRIVATE cxx_std_23)
+target_compile_definitions(cli_quick_smoke_test PRIVATE KANO_REPO_ROOT="${KB_REPO_ROOT}")
+target_link_libraries(cli_quick_smoke_test PRIVATE kano::backlog_core)
+set(KB_TEST_CLI_QUICK "[bdd][featured][feature:cli-workflow][scenario:KOB-BDD-CLI-QUICK-001] KOB CLI quick smoke covers bounded core commands")
+add_test(NAME "${KB_TEST_CLI_QUICK}" COMMAND cli_quick_smoke_test)
+set_tests_properties("${KB_TEST_CLI_QUICK}" PROPERTIES
+    TIMEOUT 30
     ENVIRONMENT "CI=true;KANO_BACKLOG_NONINTERACTIVE=1;KANO_TEST_NONINTERACTIVE=1;GIT_TERMINAL_PROMPT=0"
 )
 

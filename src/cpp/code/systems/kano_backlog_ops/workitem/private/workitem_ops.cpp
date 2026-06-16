@@ -22,6 +22,89 @@ BacklogItem resolve_item_or_throw(const CanonicalStore& store, const std::string
     return resolver.resolve(item_ref);
 }
 
+std::filesystem::path normalize_path(const std::filesystem::path& path) {
+    std::error_code ec;
+    auto normalized = std::filesystem::weakly_canonical(path, ec);
+    if (!ec) {
+        return normalized.lexically_normal();
+    }
+
+    auto absolute = std::filesystem::absolute(path, ec);
+    if (!ec) {
+        return absolute.lexically_normal();
+    }
+
+    return path.lexically_normal();
+}
+
+bool is_inside_root(const std::filesystem::path& path, const std::filesystem::path& root) {
+    const auto normalized_path = normalize_path(path);
+    const auto normalized_root = normalize_path(root);
+    std::error_code ec;
+    auto relative = std::filesystem::relative(normalized_path, normalized_root, ec);
+    return !ec && !relative.empty() && !relative.is_absolute() && relative.generic_string().rfind("..", 0) != 0;
+}
+
+std::optional<BacklogItem> read_indexed_item_if_active(
+    const CanonicalStore& store,
+    const std::filesystem::path& product_root,
+    const std::optional<std::filesystem::path>& indexed_path,
+    const std::string& parent_ref
+) {
+    if (!indexed_path || !std::filesystem::exists(*indexed_path) || !is_inside_root(*indexed_path, product_root)) {
+        return std::nullopt;
+    }
+    auto item = store.read(*indexed_path);
+    if (item.id != parent_ref && item.uid != parent_ref) {
+        return std::nullopt;
+    }
+    return item;
+}
+
+BacklogItem resolve_parent_by_identity(const CanonicalStore& store, const std::string& parent_ref) {
+    std::vector<BacklogItem> matches;
+    for (const auto& path : store.list_items()) {
+        try {
+            auto item = store.read(path);
+            if (item.id == parent_ref || item.uid == parent_ref) {
+                matches.push_back(item);
+            }
+        } catch (...) {
+        }
+    }
+
+    if (matches.size() == 1) {
+        return matches.front();
+    }
+
+    if (matches.size() > 1) {
+        throw std::runtime_error("Ambiguous parent item reference: " + parent_ref);
+    }
+
+    throw std::runtime_error("Parent item not found in active product root: " + parent_ref);
+}
+
+BacklogItem resolve_parent_item(
+    BacklogIndex& index,
+    const CanonicalStore& store,
+    const std::filesystem::path& product_root,
+    const std::string& parent_ref
+) {
+    auto parent_path = index.get_path_by_id(parent_ref);
+    auto parent_item = read_indexed_item_if_active(store, product_root, parent_path, parent_ref);
+    if (parent_item) {
+        return *parent_item;
+    }
+
+    parent_path = index.get_path_by_uid(parent_ref);
+    parent_item = read_indexed_item_if_active(store, product_root, parent_path, parent_ref);
+    if (parent_item) {
+        return *parent_item;
+    }
+
+    return resolve_parent_by_identity(store, parent_ref);
+}
+
 } // namespace
 
 CreateItemResult WorkitemOps::create_item(
@@ -110,16 +193,12 @@ UpdateStateResult WorkitemOps::update_state(
 
         // Check parent
         if (item.parent) {
-            auto parent_path = index.get_path_by_id(*item.parent);
-            if (!parent_path) parent_path = index.get_path_by_uid(*item.parent);
-            if (parent_path) {
-                BacklogItem parent_item = store.read(*parent_path);
-                auto [p_ready, p_gaps] = Validator::is_ready(parent_item);
-                if (!p_ready) {
-                    std::string p_gap_msg;
-                    for (const auto& g : p_gaps) p_gap_msg += (p_gap_msg.empty() ? "" : ", ") + g;
-                    throw std::runtime_error("Parent item " + parent_item.id + " is not Ready. Missing fields: " + p_gap_msg);
-                }
+            BacklogItem parent_item = resolve_parent_item(index, store, backlog_root, *item.parent);
+            auto [p_ready, p_gaps] = Validator::is_ready(parent_item);
+            if (!p_ready) {
+                std::string p_gap_msg;
+                for (const auto& g : p_gaps) p_gap_msg += (p_gap_msg.empty() ? "" : ", ") + g;
+                throw std::runtime_error("Parent item " + parent_item.id + " is not Ready. Missing fields: " + p_gap_msg);
             }
         }
     }
@@ -156,31 +235,26 @@ UpdateStateResult WorkitemOps::update_state(
     // 7. Parent sync logic
     bool parent_synced = false;
     if (item.parent) {
-        auto parent_path = index.get_path_by_id(*item.parent);
-        if (!parent_path) parent_path = index.get_path_by_uid(*item.parent);
-        
-        if (parent_path) {
-            BacklogItem parent_item = store.read(*parent_path);
-            ItemState parent_next_state = parent_item.state;
+        BacklogItem parent_item = resolve_parent_item(index, store, backlog_root, *item.parent);
+        ItemState parent_next_state = parent_item.state;
 
-            if (new_state == ItemState::InProgress || new_state == ItemState::Review || new_state == ItemState::Blocked) {
-                // If child is active, parent should be InProgress (if it was less than that)
-                if (parent_item.state < ItemState::InProgress) {
-                    parent_next_state = ItemState::InProgress;
-                }
-            } else if (new_state == ItemState::Done) {
-                // Parent synchronization is forward-only. Child completion does not
-                // automatically complete the parent because sibling readiness and
-                // acceptance ownership require an explicit parent transition.
+        if (new_state == ItemState::InProgress || new_state == ItemState::Review || new_state == ItemState::Blocked) {
+            // If child is active, parent should be InProgress (if it was less than that)
+            if (parent_item.state < ItemState::InProgress) {
+                parent_next_state = ItemState::InProgress;
             }
+        } else if (new_state == ItemState::Done) {
+            // Parent synchronization is forward-only. Child completion does not
+            // automatically complete the parent because sibling readiness and
+            // acceptance ownership require an explicit parent transition.
+        }
 
-            if (parent_next_state != parent_item.state) {
-                StateMachine::transition(parent_item, StateAction::Start, agent, 
-                    "Auto parent sync: child " + item.id + " -> " + to_string(new_state) + "; parent -> InProgress");
-                store.write(parent_item);
-                index.index_item(parent_item);
-                parent_synced = true;
-            }
+        if (parent_next_state != parent_item.state) {
+            StateMachine::transition(parent_item, StateAction::Start, agent,
+                "Auto parent sync: child " + item.id + " -> " + to_string(new_state) + "; parent -> InProgress");
+            store.write(parent_item);
+            index.index_item(parent_item);
+            parent_synced = true;
         }
     }
 

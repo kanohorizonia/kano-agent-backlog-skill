@@ -1,0 +1,50 @@
+kano-backlog - Local-first backlog CLI
+Standalone: kano-backlog <command>
+Usage: kano-backlog [options] <command> [args]
+
+
+kano-backlog [OPTIONS] [SUBCOMMANDS]
+
+
+OPTIONS:
+  -h,     --help              Print this help message and exit
+  -V,     --version           Display program version information and exit
+[Option Group: Global Options]
+
+OPTIONS:
+  -p,     --path TEXT         Resource path (default: .)
+  -P,     --product TEXT      Explicit product name
+  -s,     --sandbox TEXT      Sandbox name
+
+SUBCOMMANDS:
+  workitem, item              Work item operations
+  config                      Configuration management
+  doctor                      Environment healthy check
+  admin                       Administrative operations
+  topic                       Topic context management
+  workset                     Workset management
+  state                       State transition commands
+  worklog                     Worklog operations
+  evidence                    Manage evidence records for workset metadata
+  assumptions                 Assumptions registry operations
+  view                        Dashboard and view management
+  index                       SQLite index operations
+  inspect                     Inspector operations
+  benchmark                   Deterministic benchmark harness
+  chunks                      Canonical chunks SQLite DB (FTS5)
+  tokenizer                   Tokenizer adapter configuration, testing, and diagnostics
+  embedding                   Embedding pipeline operations
+  search                      Native local FTS and hybrid search
+  webview                     Launch local webview server
+  schema                      Schema validation and fixing
+  validate                    Validation helpers
+  links                       Link maintenance helpers
+  adr                         ADR (Architecture Decision Record) operations
+  changelog                   Changelog generation from backlog
+  demo                        Demo data operations
+  orphan                      Check for commits without backlog item IDs
+  repo-hygiene                Detect and fix Git-index executable bits and CRLF/LF issues
+  export                      Create a native Git release archive
+  meta                        Meta file helpers
+  snapshot                    Snapshot and evidence collection
+  version                     Show version

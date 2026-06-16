@@ -363,8 +363,8 @@ jobs:
               test_preset=macos-ninja-clang-arm64
               ;;
           esac
-          export KANO_TEST_COMMAND="bash src/shell/test/native-test.sh $test_preset Release"
-          bash src/shell/test/native-test.sh "$test_preset" Release
+          export KANO_TEST_COMMAND="bash src/shell/test/native-test.sh $test_preset Release full"
+          bash src/shell/test/native-test.sh "$test_preset" Release full
           tool_suffix=""
           [[ "$KANO_PLATFORM" == windows-* ]] && tool_suffix=".exe"
           tool_path="src/cpp/out/bin/$test_preset/release/kano-cpp-infra-tool${tool_suffix}"

@@ -395,4 +395,4 @@ After setup, guide the user through:
 **Remember:** 
 - **Always provide explicit `--agent` flags** for auditability
 - **On Windows, if you encounter module or wrapper issues**, prefer the repo-local `kob` launcher after running the native build step
-- Use `pixi run build-dev` and `pixi run quick-test` for native development
+- Use `pixi run build-dev` and `pixi run quick-test` for native development. The quick lane is a bounded native smoke lane with explicit CTest timeout and stop-on-failure diagnostics; broader integration evidence belongs in `test`/`full-test` lanes through the shared infra manifest, plus `pixi run test-report` and coverage tasks.

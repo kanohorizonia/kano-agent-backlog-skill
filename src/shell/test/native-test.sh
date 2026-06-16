@@ -8,7 +8,6 @@ export CI="${CI:-true}"
 export KANO_BACKLOG_NONINTERACTIVE=1
 export KANO_TEST_NONINTERACTIVE=1
 export GIT_TERMINAL_PROMPT=0
-export KANO_NATIVE_TEST_TIMEOUT_SECONDS="${KANO_NATIVE_TEST_TIMEOUT_SECONDS:-120}"
 
 cleanup_subst_drive() {
   local drive="$1"
@@ -75,14 +74,28 @@ esac
 
 PRESET="${1:-$DEFAULT_PRESET}"
 CONFIG="${2:-$DEFAULT_CONFIG}"
+LANE="${3:-default}"
 shift $(( $# > 0 ? 1 : 0 )) || true
 shift $(( $# > 0 ? 1 : 0 )) || true
+shift $(( $# > 0 ? 1 : 0 )) || true
+
+case "$LANE" in
+  quick)
+    export KANO_NATIVE_TEST_TIMEOUT_SECONDS="${KANO_NATIVE_TEST_TIMEOUT_SECONDS:-30}"
+    ;;
+  *)
+    export KANO_NATIVE_TEST_TIMEOUT_SECONDS="${KANO_NATIVE_TEST_TIMEOUT_SECONDS:-120}"
+    ;;
+esac
 
 prepare_windows_ctest_drive
 
 run_ctest_with_junit() {
+  local lane="${1:-default}"
+  shift $(( $# > 0 ? 1 : 0 )) || true
   local build_dir="$SKILL_ROOT/src/cpp/out/obj/$PRESET"
   local test_count
+  local ctest_args=(--test-dir "$build_dir" -C "$CONFIG" --output-on-failure --timeout "$KANO_NATIVE_TEST_TIMEOUT_SECONDS")
 
   if [[ ! -d "$build_dir" ]]; then
     echo "Missing CTest build directory: $build_dir" >&2
@@ -98,13 +111,29 @@ run_ctest_with_junit() {
     return 1
   fi
 
+  if [[ "$lane" == "quick" ]]; then
+    ctest_args+=(--stop-on-failure -LE long)
+  fi
+
+  echo "[INFO] CTest lane: $lane"
+  echo "[INFO] CTest timeout seconds: $KANO_NATIVE_TEST_TIMEOUT_SECONDS"
+
   if [[ -n "${KANO_TEST_XML:-}" ]]; then
     case "$KANO_TEST_XML" in
       /*|[A-Za-z]:/*|[A-Za-z]:\\*) ;;
       *) KANO_TEST_XML="$SKILL_ROOT/$KANO_TEST_XML" ;;
     esac
     mkdir -p "$(dirname "$KANO_TEST_XML")"
-    ctest --test-dir "$build_dir" -C "$CONFIG" --output-on-failure --output-junit "$KANO_TEST_XML" "$@"
+    ctest_args+=(--output-junit "$KANO_TEST_XML")
+    set +e
+    ctest "${ctest_args[@]}" "$@"
+    local ctest_rc=$?
+    set -e
+    if [[ $ctest_rc -ne 0 ]]; then
+      echo "[ERROR] CTest failed with exit code $ctest_rc" >&2
+      echo "[ERROR] JUnit report path: $KANO_TEST_XML" >&2
+      return "$ctest_rc"
+    fi
     if [[ ! -f "$KANO_TEST_XML" ]]; then
       echo "CTest completed but did not write JUnit report: $KANO_TEST_XML" >&2
       return 1
@@ -113,7 +142,7 @@ run_ctest_with_junit() {
     return 0
   fi
 
-  ctest --test-dir "$build_dir" -C "$CONFIG" --output-on-failure "$@"
+  ctest "${ctest_args[@]}" "$@"
 }
 
-run_ctest_with_junit
+run_ctest_with_junit "$LANE" "$@"

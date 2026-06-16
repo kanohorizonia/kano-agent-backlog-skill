@@ -12,6 +12,39 @@
 
 namespace {
 
+int g_command_step = 0;
+
+std::string shell_command_for(const std::filesystem::path& binary, const std::vector<std::string>& args) {
+#ifdef _WIN32
+    std::string command = "cd /d \"" + std::filesystem::current_path().string() + "\" && \"" + binary.string() + "\"";
+#else
+    std::string command = "cd \"" + std::filesystem::current_path().string() + "\" && \"" + binary.string() + "\"";
+#endif
+    for (const auto& arg : args) {
+        command += " ";
+        command += "\"";
+        command += arg;
+        command += "\"";
+    }
+    return command;
+}
+
+void log_command_start(const std::vector<std::string>& args) {
+    std::cout << "[cli_repo_smoke_test step " << ++g_command_step << "]";
+    for (const auto& arg : args) {
+        std::cout << ' ' << arg;
+    }
+    std::cout << std::endl;
+}
+
+void log_command_result(int rc, const std::filesystem::path& output_path = {}) {
+    std::cout << "[cli_repo_smoke_test step " << g_command_step << "] exit=" << rc;
+    if (!output_path.empty()) {
+        std::cout << " output=" << output_path.string();
+    }
+    std::cout << std::endl;
+}
+
 void expect(bool condition, const std::string& message) {
     if (!condition) {
         throw std::runtime_error(message);
@@ -19,34 +52,19 @@ void expect(bool condition, const std::string& message) {
 }
 
 int run_command(const std::filesystem::path& binary, const std::vector<std::string>& args) {
-#ifdef _WIN32
-    std::string command = "cd /d \"" + std::filesystem::current_path().string() + "\" && \"" + binary.string() + "\"";
-#else
-    std::string command = "cd \"" + std::filesystem::current_path().string() + "\" && \"" + binary.string() + "\"";
-#endif
-    for (const auto& arg : args) {
-        command += " ";
-        command += "\"";
-        command += arg;
-        command += "\"";
-    }
-    return std::system(command.c_str());
+    log_command_start(args);
+    const int rc = std::system(shell_command_for(binary, args).c_str());
+    log_command_result(rc);
+    return rc;
 }
 
 int run_command_capture(const std::filesystem::path& binary, const std::vector<std::string>& args, const std::filesystem::path& output_path) {
-#ifdef _WIN32
-    std::string command = "cd /d \"" + std::filesystem::current_path().string() + "\" && \"" + binary.string() + "\"";
-#else
-    std::string command = "cd \"" + std::filesystem::current_path().string() + "\" && \"" + binary.string() + "\"";
-#endif
-    for (const auto& arg : args) {
-        command += " ";
-        command += "\"";
-        command += arg;
-        command += "\"";
-    }
+    log_command_start(args);
+    std::string command = shell_command_for(binary, args);
     command += " > \"" + output_path.string() + "\" 2>&1";
-    return std::system(command.c_str());
+    const int rc = std::system(command.c_str());
+    log_command_result(rc, output_path);
+    return rc;
 }
 
 std::string read_text(const std::filesystem::path& path) {

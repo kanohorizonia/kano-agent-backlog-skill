@@ -69,7 +69,7 @@ pixi run build-dev
 pixi run quick-test
 ```
 
-This is the supported path when working on the native executable. Python package metadata has been retired for this native milestone.
+This is the supported path when working on the native executable. `quick-test` is a bounded native smoke lane with explicit CTest timeout diagnostics; use the shared infra `test`/`full-test` lanes, report tasks, and coverage tasks for broader integration evidence. Python package metadata has been retired for this native milestone.
 
 ## Platform notes
 

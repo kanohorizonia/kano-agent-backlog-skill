@@ -9,12 +9,22 @@ export CI="${CI:-true}"
 export KANO_BACKLOG_NONINTERACTIVE=1
 export KANO_TEST_NONINTERACTIVE=1
 export GIT_TERMINAL_PROMPT=0
-export KANO_NATIVE_TEST_TIMEOUT_SECONDS="${KANO_NATIVE_TEST_TIMEOUT_SECONDS:-120}"
-
 PRESET="${1:-windows-ninja-msvc-release}"
 CONFIG="${2:-Debug}"
 LANE_MODE="${3:-default}"
 RUNNER_PRESET="$PRESET"
+shift $(( $# > 0 ? 1 : 0 )) || true
+shift $(( $# > 0 ? 1 : 0 )) || true
+shift $(( $# > 0 ? 1 : 0 )) || true
+
+case "$LANE_MODE" in
+  quick)
+    export KANO_NATIVE_TEST_TIMEOUT_SECONDS="${KANO_NATIVE_TEST_TIMEOUT_SECONDS:-30}"
+    ;;
+  *)
+    export KANO_NATIVE_TEST_TIMEOUT_SECONDS="${KANO_NATIVE_TEST_TIMEOUT_SECONDS:-120}"
+    ;;
+esac
 
 case "$RUNNER_PRESET" in
   *-debug|*-release|*-relwithdebinfo|*-minsizerel)
@@ -45,6 +55,7 @@ echo "  CPP_ROOT: $CPP_ROOT"
 echo "  PRESET: $PRESET"
 echo "  CONFIG: $CONFIG"
 echo "  LANE: $LANE_MODE"
+echo "  TIMEOUT_SECONDS: $KANO_NATIVE_TEST_TIMEOUT_SECONDS"
 
-bash "$CPP_ROOT/../shell/test/native-test.sh" "$RUNNER_PRESET" "$CONFIG"
+bash "$CPP_ROOT/../shell/test/native-test.sh" "$RUNNER_PRESET" "$CONFIG" "$LANE_MODE" "$@"
 write_placeholder_junit

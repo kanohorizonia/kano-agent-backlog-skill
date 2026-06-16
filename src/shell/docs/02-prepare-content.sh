@@ -66,6 +66,26 @@ copy_glob_docs() {
   shopt -u nullglob
 }
 
+write_kob_help() {
+  local output_path="$1"
+  local fallback_path="$SKILL_DIR/docs/cli/kob-help.txt"
+  local help_tmp="$BUILD_DIR/kob-help.tmp"
+
+  if [ -n "${KOB_CMD:-}" ] && "$KOB_CMD" --help > "$help_tmp" 2>/dev/null; then
+    cat "$help_tmp" >> "$output_path"
+    rm -f "$help_tmp"
+    return 0
+  fi
+  rm -f "$help_tmp"
+
+  if [ -f "$fallback_path" ]; then
+    cat "$fallback_path" >> "$output_path"
+    return 0
+  fi
+
+  echo "kob help snapshot not available. Build native with: bash scripts/kob self build" >> "$output_path"
+}
+
 echo "Copying published documentation content..."
 copy_doc "$SKILL_DIR/docs/index.md" "$BUILD_DIR/content_quartz/index.md"
 copy_doc "$SKILL_DIR/README.md" "$BUILD_DIR/content_quartz/skill/readme.md"
@@ -123,7 +143,7 @@ if [ -n "$KOB_CMD" ]; then
   echo "" >> "$BUILD_DIR/content_quartz/cli/commands.md"
   echo "## kob" >> "$BUILD_DIR/content_quartz/cli/commands.md"
   echo '```' >> "$BUILD_DIR/content_quartz/cli/commands.md"
-  "$KOB_CMD" >> "$BUILD_DIR/content_quartz/cli/commands.md" 2>/dev/null || echo "Command not available" >> "$BUILD_DIR/content_quartz/cli/commands.md"
+  write_kob_help "$BUILD_DIR/content_quartz/cli/commands.md"
   echo '```' >> "$BUILD_DIR/content_quartz/cli/commands.md"
 else
   echo "---" > "$BUILD_DIR/content_quartz/cli/commands.md"
@@ -132,7 +152,9 @@ else
   echo "" >> "$BUILD_DIR/content_quartz/cli/commands.md"
   echo "# CLI Commands" >> "$BUILD_DIR/content_quartz/cli/commands.md"
   echo "" >> "$BUILD_DIR/content_quartz/cli/commands.md"
-  echo "kob command not available" >> "$BUILD_DIR/content_quartz/cli/commands.md"
+  echo '```' >> "$BUILD_DIR/content_quartz/cli/commands.md"
+  write_kob_help "$BUILD_DIR/content_quartz/cli/commands.md"
+  echo '```' >> "$BUILD_DIR/content_quartz/cli/commands.md"
 fi
 
 # Generate API documentation with MkDocs

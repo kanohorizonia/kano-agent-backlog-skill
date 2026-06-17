@@ -1,42 +1,14 @@
 {
-    "schemaVersion": 1,
-    "kind": "kano-public-report-slots",
-    "generatedAtUtc": "2026-06-17T10:43:31Z",
-    "project": "kano-agent-backlog-skill",
-    "publicRoot": "reports/latest",
-    "policy": {
-        "projectOpenSource": true,
-        "coverageSourcePolicy": "source-included",
-        "coverageSourceAllowed": true,
-        "unknownPolicyFailsClosed": true
-    },
-    "source": {
-        "reason": "no report-site source directory or archive found",
-        "status": "missing"
-    },
-    "slots": [
-        {
-            "name": "test-report",
-            "title": "Test Report",
-            "path": "reports/latest/test-report",
-            "status": "reserved",
-            "description": "Stable public test report HTML entrypoint.",
-            "coverage": false,
-            "visibility": "public-safe",
-            "index": "reports/latest/test-report/index.html"
-        },
-        {
-            "name": "coverage-report",
-            "title": "Coverage Report",
-            "path": "reports/latest/coverage-report",
-            "status": "reserved",
-            "description": "Stable public coverage report HTML entrypoint.",
-            "coverage": true,
-            "visibility": "public-safe",
-            "coverageSourcePolicy": "source-included",
-            "sourceBrowsingAllowed": true,
-            "publicationRule": "source-browsing coverage may be published because the project explicitly allows public source coverage",
-            "index": "reports/latest/coverage-report/index.html"
-        }
-    ]
+  "schemaVersion": 1,
+  "kind": "kano-public-report-slots",
+  "publicRoot": "reports/latest",
+  "policy": {
+    "coverageSourcePolicy": "source-included",
+    "coverageSourceAllowed": true,
+    "unknownPolicyFailsClosed": true
+  },
+  "slots": [
+    {"name": "test-report", "path": "reports/latest/test-report", "status": "reserved"},
+    {"name": "coverage-report", "path": "reports/latest/coverage-report", "status": "reserved"}
+  ]
 }

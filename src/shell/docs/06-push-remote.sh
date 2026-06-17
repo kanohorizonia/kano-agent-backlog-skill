@@ -36,10 +36,14 @@ cd "$DEPLOY_DIR"
 TARGET_BRANCH="${KANO_GITHUB_PAGES_BRANCH:-gh-pages}"
 REMOTE_URL="${KANO_GITHUB_PAGES_REPO_URL:-}"
 GIT_ASKPASS_FILE=""
+SNAPSHOT_DIR=""
 
 cleanup_git_askpass() {
   if [[ -n "$GIT_ASKPASS_FILE" && -f "$GIT_ASKPASS_FILE" ]]; then
     rm -f "$GIT_ASKPASS_FILE"
+  fi
+  if [[ -n "$SNAPSHOT_DIR" && -d "$SNAPSHOT_DIR" ]]; then
+    rm -rf "$SNAPSHOT_DIR"
   fi
 }
 trap cleanup_git_askpass EXIT
@@ -75,6 +79,33 @@ fi
 # Configure git
 git config user.name "${KANO_GITHUB_PAGES_GIT_USER_NAME:-docs-bot}"
 git config user.email "${KANO_GITHUB_PAGES_GIT_USER_EMAIL:-docs-bot@users.noreply.github.com}"
+git config core.autocrlf false
+
+refresh_deploy_tree_on_latest_remote() {
+  if [[ "${KANO_GITHUB_PAGES_REFRESH_BEFORE_PUSH:-true}" == "false" ]]; then
+    echo "Skipping pre-push refresh because KANO_GITHUB_PAGES_REFRESH_BEFORE_PUSH=false."
+    return 0
+  fi
+
+  if ! git ls-remote --exit-code --heads origin "$TARGET_BRANCH" >/dev/null 2>&1; then
+    echo "Remote branch $TARGET_BRANCH does not exist yet; pushing from current local branch."
+    return 0
+  fi
+
+  echo "Refreshing deployment tree on latest origin/$TARGET_BRANCH before commit..."
+  SNAPSHOT_DIR="$(mktemp -d)"
+  find . -mindepth 1 -maxdepth 1 ! -name ".git" -exec cp -R {} "$SNAPSHOT_DIR/" \;
+
+  git fetch origin "$TARGET_BRANCH"
+  git reset --hard >/dev/null
+  git clean -fdx >/dev/null
+  git checkout -B "$TARGET_BRANCH" "origin/$TARGET_BRANCH"
+
+  find . -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
+  cp -R "$SNAPSHOT_DIR"/. .
+}
+
+refresh_deploy_tree_on_latest_remote
 
 # Stage all changes
 git add -A

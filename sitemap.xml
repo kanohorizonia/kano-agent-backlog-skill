@@ -1,145 +1,145 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml"><url>
     <loc>https://agentskill-backlog.kanohorizonia.com/api/native</loc>
-    <lastmod>2026-06-17T10:03:26.255Z</lastmod>
+    <lastmod>2026-06-17T10:59:06.577Z</lastmod>
   </url><url>
     <loc>https://agentskill-backlog.kanohorizonia.com/api/overview</loc>
-    <lastmod>2026-06-17T10:03:26.255Z</lastmod>
+    <lastmod>2026-06-17T10:59:06.140Z</lastmod>
   </url><url>
     <loc>https://agentskill-backlog.kanohorizonia.com/automation/docs-pipeline</loc>
-    <lastmod>2026-06-17T10:03:26.165Z</lastmod>
+    <lastmod>2026-06-17T10:59:03.827Z</lastmod>
   </url><url>
     <loc>https://agentskill-backlog.kanohorizonia.com/automation/maintainer-automation</loc>
-    <lastmod>2026-06-17T10:03:26.161Z</lastmod>
+    <lastmod>2026-06-17T10:59:03.743Z</lastmod>
   </url><url>
     <loc>https://agentskill-backlog.kanohorizonia.com/cli/commands</loc>
-    <lastmod>2026-06-17T10:03:26.226Z</lastmod>
+    <lastmod>2026-06-17T10:59:05.167Z</lastmod>
   </url><url>
     <loc>https://agentskill-backlog.kanohorizonia.com/guides/agent-quick-start</loc>
-    <lastmod>2026-06-17T10:03:26.092Z</lastmod>
+    <lastmod>2026-06-17T10:59:02.217Z</lastmod>
   </url><url>
     <loc>https://agentskill-backlog.kanohorizonia.com/guides/codex-for-oss</loc>
-    <lastmod>2026-06-17T10:03:26.130Z</lastmod>
+    <lastmod>2026-06-17T10:59:03.025Z</lastmod>
   </url><url>
     <loc>https://agentskill-backlog.kanohorizonia.com/guides/configuration</loc>
-    <lastmod>2026-06-17T10:03:26.100Z</lastmod>
+    <lastmod>2026-06-17T10:59:02.386Z</lastmod>
   </url><url>
     <loc>https://agentskill-backlog.kanohorizonia.com/guides/demo-maintenance</loc>
-    <lastmod>2026-06-17T10:03:26.126Z</lastmod>
+    <lastmod>2026-06-17T10:59:02.946Z</lastmod>
   </url><url>
     <loc>https://agentskill-backlog.kanohorizonia.com/guides/experimental-features</loc>
-    <lastmod>2026-06-17T10:03:26.134Z</lastmod>
+    <lastmod>2026-06-17T10:59:03.096Z</lastmod>
   </url><url>
     <loc>https://agentskill-backlog.kanohorizonia.com/guides/installation</loc>
-    <lastmod>2026-06-17T10:03:26.096Z</lastmod>
+    <lastmod>2026-06-17T10:59:02.296Z</lastmod>
   </url><url>
     <loc>https://agentskill-backlog.kanohorizonia.com/guides/native-cli-direction</loc>
-    <lastmod>2026-06-17T10:03:26.123Z</lastmod>
+    <lastmod>2026-06-17T10:59:02.878Z</lastmod>
   </url><url>
     <loc>https://agentskill-backlog.kanohorizonia.com/guides/quick-start</loc>
-    <lastmod>2026-06-17T10:03:26.088Z</lastmod>
+    <lastmod>2026-06-17T10:59:02.139Z</lastmod>
   </url><url>
     <loc>https://agentskill-backlog.kanohorizonia.com/guides/release-channels</loc>
-    <lastmod>2026-06-17T10:03:26.119Z</lastmod>
+    <lastmod>2026-06-17T10:59:02.786Z</lastmod>
   </url><url>
     <loc>https://agentskill-backlog.kanohorizonia.com/guides/tokenizer-adapters</loc>
-    <lastmod>2026-06-17T10:03:26.142Z</lastmod>
+    <lastmod>2026-06-17T10:59:03.288Z</lastmod>
   </url><url>
     <loc>https://agentskill-backlog.kanohorizonia.com/guides/tokenizer-cli-reference</loc>
-    <lastmod>2026-06-17T10:03:26.150Z</lastmod>
+    <lastmod>2026-06-17T10:59:03.464Z</lastmod>
   </url><url>
     <loc>https://agentskill-backlog.kanohorizonia.com/guides/tokenizer-configuration</loc>
-    <lastmod>2026-06-17T10:03:26.146Z</lastmod>
+    <lastmod>2026-06-17T10:59:03.387Z</lastmod>
   </url><url>
     <loc>https://agentskill-backlog.kanohorizonia.com/guides/tokenizer-performance</loc>
-    <lastmod>2026-06-17T10:03:26.157Z</lastmod>
+    <lastmod>2026-06-17T10:59:03.648Z</lastmod>
   </url><url>
     <loc>https://agentskill-backlog.kanohorizonia.com/guides/tokenizer-quickstart</loc>
-    <lastmod>2026-06-17T10:03:26.138Z</lastmod>
+    <lastmod>2026-06-17T10:59:03.176Z</lastmod>
   </url><url>
     <loc>https://agentskill-backlog.kanohorizonia.com/guides/tokenizer-troubleshooting</loc>
-    <lastmod>2026-06-17T10:03:26.153Z</lastmod>
+    <lastmod>2026-06-17T10:59:03.541Z</lastmod>
   </url><url>
     <loc>https://agentskill-backlog.kanohorizonia.com/guides/topic</loc>
-    <lastmod>2026-06-17T10:03:26.111Z</lastmod>
+    <lastmod>2026-06-17T10:59:02.631Z</lastmod>
   </url><url>
     <loc>https://agentskill-backlog.kanohorizonia.com/guides/usage-examples</loc>
-    <lastmod>2026-06-17T10:03:26.103Z</lastmod>
+    <lastmod>2026-06-17T10:59:02.477Z</lastmod>
   </url><url>
     <loc>https://agentskill-backlog.kanohorizonia.com/guides/version-policy</loc>
-    <lastmod>2026-06-17T10:03:26.115Z</lastmod>
+    <lastmod>2026-06-17T10:59:02.703Z</lastmod>
   </url><url>
     <loc>https://agentskill-backlog.kanohorizonia.com/guides/workset</loc>
-    <lastmod>2026-06-17T10:03:26.107Z</lastmod>
+    <lastmod>2026-06-17T10:59:02.553Z</lastmod>
   </url><url>
     <loc>https://agentskill-backlog.kanohorizonia.com/</loc>
-    <lastmod>2026-06-17T10:03:26.069Z</lastmod>
+    <lastmod>2026-06-17T10:59:01.739Z</lastmod>
   </url><url>
     <loc>https://agentskill-backlog.kanohorizonia.com/references/bases</loc>
-    <lastmod>2026-06-17T10:03:26.185Z</lastmod>
+    <lastmod>2026-06-17T10:59:04.269Z</lastmod>
   </url><url>
     <loc>https://agentskill-backlog.kanohorizonia.com/references/config-simplification</loc>
-    <lastmod>2026-06-17T10:03:26.188Z</lastmod>
+    <lastmod>2026-06-17T10:59:04.338Z</lastmod>
   </url><url>
     <loc>https://agentskill-backlog.kanohorizonia.com/references/context_graph</loc>
-    <lastmod>2026-06-17T10:03:26.190Z</lastmod>
+    <lastmod>2026-06-17T10:59:04.386Z</lastmod>
   </url><url>
     <loc>https://agentskill-backlog.kanohorizonia.com/references/embedding_pipeline</loc>
-    <lastmod>2026-06-17T10:03:26.193Z</lastmod>
+    <lastmod>2026-06-17T10:59:04.443Z</lastmod>
   </url><url>
     <loc>https://agentskill-backlog.kanohorizonia.com/references/gitignore</loc>
-    <lastmod>2026-06-17T10:03:26.195Z</lastmod>
+    <lastmod>2026-06-17T10:59:04.502Z</lastmod>
   </url><url>
     <loc>https://agentskill-backlog.kanohorizonia.com/references/indexing</loc>
-    <lastmod>2026-06-17T10:03:26.198Z</lastmod>
+    <lastmod>2026-06-17T10:59:04.560Z</lastmod>
   </url><url>
     <loc>https://agentskill-backlog.kanohorizonia.com/references/logging</loc>
-    <lastmod>2026-06-17T10:03:26.201Z</lastmod>
+    <lastmod>2026-06-17T10:59:04.622Z</lastmod>
   </url><url>
     <loc>https://agentskill-backlog.kanohorizonia.com/references/processes</loc>
-    <lastmod>2026-06-17T10:03:26.203Z</lastmod>
+    <lastmod>2026-06-17T10:59:04.693Z</lastmod>
   </url><url>
     <loc>https://agentskill-backlog.kanohorizonia.com/references/project-config-implementation</loc>
-    <lastmod>2026-06-17T10:03:26.206Z</lastmod>
+    <lastmod>2026-06-17T10:59:04.751Z</lastmod>
   </url><url>
     <loc>https://agentskill-backlog.kanohorizonia.com/references/schema</loc>
-    <lastmod>2026-06-17T10:03:26.208Z</lastmod>
+    <lastmod>2026-06-17T10:59:04.807Z</lastmod>
   </url><url>
     <loc>https://agentskill-backlog.kanohorizonia.com/references/skill-developer-checklist</loc>
-    <lastmod>2026-06-17T10:03:26.211Z</lastmod>
+    <lastmod>2026-06-17T10:59:04.865Z</lastmod>
   </url><url>
     <loc>https://agentskill-backlog.kanohorizonia.com/references/templates</loc>
-    <lastmod>2026-06-17T10:03:26.214Z</lastmod>
+    <lastmod>2026-06-17T10:59:04.919Z</lastmod>
   </url><url>
     <loc>https://agentskill-backlog.kanohorizonia.com/references/views</loc>
-    <lastmod>2026-06-17T10:03:26.216Z</lastmod>
+    <lastmod>2026-06-17T10:59:04.965Z</lastmod>
   </url><url>
     <loc>https://agentskill-backlog.kanohorizonia.com/references/workflow</loc>
-    <lastmod>2026-06-17T10:03:26.219Z</lastmod>
+    <lastmod>2026-06-17T10:59:05.022Z</lastmod>
   </url><url>
     <loc>https://agentskill-backlog.kanohorizonia.com/releases/0.0.1</loc>
-    <lastmod>2026-06-17T10:03:26.169Z</lastmod>
+    <lastmod>2026-06-17T10:59:03.912Z</lastmod>
   </url><url>
     <loc>https://agentskill-backlog.kanohorizonia.com/releases/0.0.2</loc>
-    <lastmod>2026-06-17T10:03:26.172Z</lastmod>
+    <lastmod>2026-06-17T10:59:03.975Z</lastmod>
   </url><url>
     <loc>https://agentskill-backlog.kanohorizonia.com/releases/0.0.3</loc>
-    <lastmod>2026-06-17T10:03:26.174Z</lastmod>
+    <lastmod>2026-06-17T10:59:04.045Z</lastmod>
   </url><url>
     <loc>https://agentskill-backlog.kanohorizonia.com/releases/0.0.4</loc>
-    <lastmod>2026-06-17T10:03:26.177Z</lastmod>
+    <lastmod>2026-06-17T10:59:04.104Z</lastmod>
   </url><url>
     <loc>https://agentskill-backlog.kanohorizonia.com/releases/changelog</loc>
-    <lastmod>2026-06-17T10:03:26.181Z</lastmod>
+    <lastmod>2026-06-17T10:59:04.178Z</lastmod>
   </url><url>
     <loc>https://agentskill-backlog.kanohorizonia.com/skill/changelog</loc>
-    <lastmod>2026-06-17T10:03:26.084Z</lastmod>
+    <lastmod>2026-06-17T10:59:02.067Z</lastmod>
   </url><url>
     <loc>https://agentskill-backlog.kanohorizonia.com/skill/guide</loc>
-    <lastmod>2026-06-17T10:03:26.077Z</lastmod>
+    <lastmod>2026-06-17T10:59:01.905Z</lastmod>
   </url><url>
     <loc>https://agentskill-backlog.kanohorizonia.com/skill/readme</loc>
-    <lastmod>2026-06-17T10:03:26.073Z</lastmod>
+    <lastmod>2026-06-17T10:59:01.826Z</lastmod>
   </url><url>
     <loc>https://agentskill-backlog.kanohorizonia.com/skill/reference</loc>
-    <lastmod>2026-06-17T10:03:26.080Z</lastmod>
+    <lastmod>2026-06-17T10:59:01.976Z</lastmod>
   </url></urlset>

@@ -10,61 +10,61 @@
     <link>https://agentskill-backlog.kanohorizonia.com/api/native</link>
     <guid>https://agentskill-backlog.kanohorizonia.com/api/native</guid>
     <description>Native Executable API Run scripts/kob --help for the authoritative command surface.</description>
-    <pubDate>Wed, 17 Jun 2026 03:15:40 GMT</pubDate>
+    <pubDate>Wed, 17 Jun 2026 05:40:58 GMT</pubDate>
   </item><item>
     <title>API Overview</title>
     <link>https://agentskill-backlog.kanohorizonia.com/api/overview</link>
     <guid>https://agentskill-backlog.kanohorizonia.com/api/overview</guid>
     <description>API Overview Native executable API reference for Kano Agent Backlog Skill. Public Contract scripts/kob - Repo-local launcher for the native CLI scripts/kano-backlog - Compatibility launcher for the native CLI kano-backlog native binary - C++ executable command surface Python import APIs are not a supported public runtime contract for this native milestone.</description>
-    <pubDate>Wed, 17 Jun 2026 03:15:40 GMT</pubDate>
+    <pubDate>Wed, 17 Jun 2026 05:40:58 GMT</pubDate>
   </item><item>
     <title>CLI Commands</title>
     <link>https://agentskill-backlog.kanohorizonia.com/cli/commands</link>
     <guid>https://agentskill-backlog.kanohorizonia.com/cli/commands</guid>
     <description>CLI Commands Complete command-line interface documentation for the kob tool. kob kano-backlog - Local-first backlog CLI Standalone: kano-backlog &lt;command&gt; Usage: kano-backlog [options] &lt;command&gt; [args] kano-backlog [OPTIONS] [SUBCOMMANDS] OPTIONS: -h, --help Print this help message and exit -V, --version Display program version information and exit [Option Group: Global Options] OPTIONS: -p, --path TEXT Resource path (default: .) -P, --product TEXT Explicit product name -s, --sandbox TEXT Sandbox name SUBCOMMANDS: workitem, item Work item operations config Configuration management doctor Environment healthy check admin Administrative operations topic Topic context management workset Workset management state State transition commands worklog Worklog operations evidence Manage evidence records for workset metadata assumptions Assumptions registry operations view Dashboard and view management index SQLite index operations inspect Inspector operations benchmark Deterministic benchmark harness chunks Canonical chunks SQLite DB (FTS5) tokenizer Tokenizer adapter configuration, testing, and diagnostics embedding Embedding pipeline operations search Native local FTS and hybrid search webview Launch local webview server schema Schema validation and fixing validate Validation helpers links Link maintenance helpers adr ADR (Architecture Decision Record) operations changelog Changelog generation from backlog demo Demo data operations orphan Check for commits without backlog item IDs repo-hygiene Detect and fix Git-index executable bits and CRLF/LF issues export Create a native Git release archive meta Meta file helpers snapshot Snapshot and evidence collection version Show version .</description>
-    <pubDate>Wed, 17 Jun 2026 03:15:40 GMT</pubDate>
+    <pubDate>Wed, 17 Jun 2026 05:40:58 GMT</pubDate>
   </item><item>
     <title>workflow</title>
     <link>https://agentskill-backlog.kanohorizonia.com/references/workflow</link>
     <guid>https://agentskill-backlog.kanohorizonia.com/references/workflow</guid>
     <description>Workflow SOP A) Planning (discussion → tickets) Pre-planning: Sync DB sequences Before creating any work items, ensure the DB sequence is synchronized: # Sync sequences from filesystem ...</description>
-    <pubDate>Wed, 17 Jun 2026 03:15:40 GMT</pubDate>
+    <pubDate>Wed, 17 Jun 2026 05:40:58 GMT</pubDate>
   </item><item>
     <title>views</title>
     <link>https://agentskill-backlog.kanohorizonia.com/references/views</link>
     <guid>https://agentskill-backlog.kanohorizonia.com/references/views</guid>
     <description>Views (Obsidian Dataview) If you want fewer plugin dependencies, consider Obsidian Bases as a plugin-free alternative for table-style dashboards. See references/bases.md.</description>
-    <pubDate>Wed, 17 Jun 2026 03:15:40 GMT</pubDate>
+    <pubDate>Wed, 17 Jun 2026 05:40:58 GMT</pubDate>
   </item><item>
     <title>templates</title>
     <link>https://agentskill-backlog.kanohorizonia.com/references/templates</link>
     <guid>https://agentskill-backlog.kanohorizonia.com/references/templates</guid>
     <description>Templates Work item template Place the file under _kano/backlog/items/&lt;type&gt;/. Use the ID prefix derived from config/profile.env → PROJECT_NAME (example: kano-agent-backlog-skill-demo → KABSD).</description>
-    <pubDate>Wed, 17 Jun 2026 03:15:40 GMT</pubDate>
+    <pubDate>Wed, 17 Jun 2026 05:40:58 GMT</pubDate>
   </item><item>
     <title>skill-developer-checklist</title>
     <link>https://agentskill-backlog.kanohorizonia.com/references/skill-developer-checklist</link>
     <guid>https://agentskill-backlog.kanohorizonia.com/references/skill-developer-checklist</guid>
     <description>Skill Developer Maintenance Checklist This document lists files and patterns that skill developers (with skill_developer = true) should maintain when making changes to the kano-backlog ...</description>
-    <pubDate>Wed, 17 Jun 2026 03:15:40 GMT</pubDate>
+    <pubDate>Wed, 17 Jun 2026 05:40:58 GMT</pubDate>
   </item><item>
     <title>schema</title>
     <link>https://agentskill-backlog.kanohorizonia.com/references/schema</link>
     <guid>https://agentskill-backlog.kanohorizonia.com/references/schema</guid>
     <description>Backlog Schema Directory structure _kano/backlog/products/&lt;product&gt;/ ├── _config/ # Product configuration (config.toml, profile.env) ├── _meta/ # Schema, conventions, ...</description>
-    <pubDate>Wed, 17 Jun 2026 03:15:40 GMT</pubDate>
+    <pubDate>Wed, 17 Jun 2026 05:40:58 GMT</pubDate>
   </item><item>
     <title>project-config-implementation</title>
     <link>https://agentskill-backlog.kanohorizonia.com/references/project-config-implementation</link>
     <guid>https://agentskill-backlog.kanohorizonia.com/references/project-config-implementation</guid>
     <description>Project-Level Configuration Implementation Overview Successfully implemented project-level configuration support for the kano-agent-backlog-skill, enabling management ...</description>
-    <pubDate>Wed, 17 Jun 2026 03:15:40 GMT</pubDate>
+    <pubDate>Wed, 17 Jun 2026 05:40:58 GMT</pubDate>
   </item><item>
     <title>processes</title>
     <link>https://agentskill-backlog.kanohorizonia.com/references/processes</link>
     <guid>https://agentskill-backlog.kanohorizonia.com/references/processes</guid>
     <description>Process Profiles Process profiles define work item types, states, and transitions for the local backlog. They are intended to be human-readable and easy to adjust for agent workflows.</description>
-    <pubDate>Wed, 17 Jun 2026 03:15:40 GMT</pubDate>
+    <pubDate>Wed, 17 Jun 2026 05:40:58 GMT</pubDate>
   </item>
     </channel>
   </rss>

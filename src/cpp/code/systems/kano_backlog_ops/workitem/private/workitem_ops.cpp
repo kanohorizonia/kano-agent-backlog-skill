@@ -5,6 +5,7 @@
 #include "kano/backlog_core/validation/validator.hpp"
 #include "kano/backlog_ops/view/view_ops.hpp"
 #include "kano/backlog_ops/templates/template_ops.hpp"
+#include <algorithm>
 #include <fstream>
 #include <iomanip>
 #include <chrono>
@@ -42,34 +43,71 @@ bool is_inside_root(const std::filesystem::path& path, const std::filesystem::pa
     const auto normalized_root = normalize_path(root);
     std::error_code ec;
     auto relative = std::filesystem::relative(normalized_path, normalized_root, ec);
-    return !ec && !relative.empty() && !relative.is_absolute() && relative.generic_string().rfind("..", 0) != 0;
+    if (ec || relative.empty() || relative.is_absolute()) {
+        return false;
+    }
+    for (const auto& component : relative) {
+        if (component == "..") {
+            return false;
+        }
+    }
+    return true;
 }
 
-std::optional<BacklogItem> read_indexed_item_if_active(
+struct ParentIndexedRead {
+    std::optional<BacklogItem> item;
+    bool stale_indexed_path = false;
+    std::string stale_reason;
+};
+
+ParentIndexedRead read_indexed_item_if_active(
     const CanonicalStore& store,
     const std::filesystem::path& product_root,
     const std::optional<std::filesystem::path>& indexed_path,
     const std::string& parent_ref
 ) {
-    if (!indexed_path || !std::filesystem::exists(*indexed_path) || !is_inside_root(*indexed_path, product_root)) {
-        return std::nullopt;
+    ParentIndexedRead outcome;
+    if (!indexed_path) {
+        return outcome;
+    }
+    if (!is_inside_root(*indexed_path, product_root)) {
+        outcome.stale_indexed_path = true;
+        outcome.stale_reason = "indexed path is outside active product root: " + indexed_path->string();
+        return outcome;
+    }
+    if (!std::filesystem::exists(*indexed_path)) {
+        outcome.stale_indexed_path = true;
+        outcome.stale_reason = "indexed path no longer exists on disk: " + indexed_path->string();
+        return outcome;
     }
     auto item = store.read(*indexed_path);
     if (item.id != parent_ref && item.uid != parent_ref) {
-        return std::nullopt;
+        outcome.stale_indexed_path = true;
+        outcome.stale_reason = "indexed file no longer matches parent ref id/uid: " + indexed_path->string();
+        return outcome;
     }
-    return item;
+    outcome.item = item;
+    return outcome;
 }
 
-BacklogItem resolve_parent_by_identity(const CanonicalStore& store, const std::string& parent_ref) {
+BacklogItem resolve_parent_by_identity(
+    const CanonicalStore& store,
+    const std::string& parent_ref,
+    bool saw_stale_indexed_path,
+    const std::string& stale_indexed_path_reason
+) {
     std::vector<BacklogItem> matches;
+    std::vector<std::string> read_failures;
     for (const auto& path : store.list_items()) {
         try {
             auto item = store.read(path);
             if (item.id == parent_ref || item.uid == parent_ref) {
                 matches.push_back(item);
             }
+        } catch (const std::exception& ex) {
+            read_failures.push_back(path.string() + ": " + ex.what());
         } catch (...) {
+            read_failures.push_back(path.string() + ": unknown read failure");
         }
     }
 
@@ -81,7 +119,24 @@ BacklogItem resolve_parent_by_identity(const CanonicalStore& store, const std::s
         throw std::runtime_error("Ambiguous parent item reference: " + parent_ref);
     }
 
-    throw std::runtime_error("Parent item not found in active product root: " + parent_ref);
+    std::string message = "Parent item not found in active product root: " + parent_ref;
+    if (saw_stale_indexed_path) {
+        message += " (stale index/path cache: " + stale_indexed_path_reason + ")";
+    }
+    if (!read_failures.empty()) {
+        const std::size_t max_failures = 3;
+        message += " (read errors while scanning active items: ";
+        const std::size_t shown = std::min(read_failures.size(), max_failures);
+        for (std::size_t i = 0; i < shown; ++i) {
+            if (i > 0) message += "; ";
+            message += read_failures[i];
+        }
+        if (read_failures.size() > max_failures) {
+            message += "; ... and " + std::to_string(read_failures.size() - max_failures) + " more";
+        }
+        message += ")";
+    }
+    throw std::runtime_error(message);
 }
 
 BacklogItem resolve_parent_item(
@@ -90,19 +145,35 @@ BacklogItem resolve_parent_item(
     const std::filesystem::path& product_root,
     const std::string& parent_ref
 ) {
-    auto parent_path = index.get_path_by_id(parent_ref);
-    auto parent_item = read_indexed_item_if_active(store, product_root, parent_path, parent_ref);
-    if (parent_item) {
-        return *parent_item;
+    bool saw_stale_indexed_path = false;
+    std::string stale_indexed_path_reason;
+
+    auto id_path = index.get_path_by_id(parent_ref);
+    auto id_attempt = read_indexed_item_if_active(store, product_root, id_path, parent_ref);
+    if (id_attempt.item) {
+        return *id_attempt.item;
+    }
+    if (id_attempt.stale_indexed_path) {
+        saw_stale_indexed_path = true;
+        stale_indexed_path_reason = id_attempt.stale_reason;
     }
 
-    parent_path = index.get_path_by_uid(parent_ref);
-    parent_item = read_indexed_item_if_active(store, product_root, parent_path, parent_ref);
-    if (parent_item) {
-        return *parent_item;
+    auto uid_path = index.get_path_by_uid(parent_ref);
+    auto uid_attempt = read_indexed_item_if_active(store, product_root, uid_path, parent_ref);
+    if (uid_attempt.item) {
+        return *uid_attempt.item;
+    }
+    if (uid_attempt.stale_indexed_path && !saw_stale_indexed_path) {
+        saw_stale_indexed_path = true;
+        stale_indexed_path_reason = uid_attempt.stale_reason;
     }
 
-    return resolve_parent_by_identity(store, parent_ref);
+    return resolve_parent_by_identity(
+        store,
+        parent_ref,
+        saw_stale_indexed_path,
+        stale_indexed_path_reason
+    );
 }
 
 } // namespace

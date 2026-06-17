@@ -137,6 +137,55 @@ int main() {
             external_store.write(external_parent);
             external_index.index_item(external_parent);
 
+            auto outside_index_parent_created = WorkitemOps::create_item(
+                index,
+                root,
+                "TST",
+                ItemType::Feature,
+                "Existing outside indexed path parent",
+                "opencode");
+            auto outside_index_parent = store.read(outside_index_parent_created.path);
+            set_ready_fields(outside_index_parent);
+            store.write(outside_index_parent);
+            index.index_item(outside_index_parent);
+
+            auto stale_existing_external_path = outside_index_parent;
+            stale_existing_external_path.file_path = external_created.path;
+            index.index_item(stale_existing_external_path);
+
+            auto outside_index_child_created = WorkitemOps::create_item(
+                index,
+                root,
+                "TST",
+                ItemType::Task,
+                "Existing outside indexed path child",
+                "opencode",
+                outside_index_parent_created.id);
+            auto outside_index_child = store.read(outside_index_child_created.path);
+            set_ready_fields(outside_index_child);
+            store.write(outside_index_child);
+            index.index_item(outside_index_child);
+
+            auto outside_index_update = WorkitemOps::update_state(
+                index,
+                root,
+                outside_index_child_created.id,
+                ItemState::InProgress,
+                "opencode");
+            expect(
+                outside_index_update.parent_synced,
+                "parent should sync when stale indexed path points to an existing outside-root file");
+
+            auto outside_index_parent_synced = store.read(outside_index_parent_created.path);
+            expect(
+                outside_index_parent_synced.state == ItemState::InProgress,
+                "active parent should sync despite an existing outside-root indexed path");
+
+            auto external_parent_after_stale_index = external_store.read(external_created.path);
+            expect(
+                external_parent_after_stale_index.state == ItemState::Proposed,
+                "existing outside-root indexed file should not be read or mutated");
+
             auto path_parent_child_created = WorkitemOps::create_item(
                 index,
                 root,
@@ -150,6 +199,7 @@ int main() {
             store.write(path_parent_child);
             index.index_item(path_parent_child);
 
+            std::string path_parent_diagnostic;
             bool rejected_external_parent_path = false;
             try {
                 (void)WorkitemOps::update_state(
@@ -158,16 +208,121 @@ int main() {
                     path_parent_child_created.id,
                     ItemState::InProgress,
                     "opencode");
-            } catch (const std::exception&) {
+            } catch (const std::exception& ex) {
                 rejected_external_parent_path = true;
+                path_parent_diagnostic = ex.what();
             }
             expect(rejected_external_parent_path, "path-like parent refs outside product root should be rejected");
+            expect(
+                path_parent_diagnostic.find("Parent item not found") != std::string::npos,
+                "path-like parent rejection should emit an explicit missing-parent diagnostic");
 
             auto unchanged_external_parent = external_store.read(external_created.path);
             expect(unchanged_external_parent.state == ItemState::Proposed, "external parent should not be mutated");
 
             auto rejected_child = store.read(path_parent_child_created.path);
             expect(rejected_child.state == ItemState::Proposed, "child with rejected path parent should not be updated");
+
+            // 3. Renamed/moved parent slug under active root: the index still points at
+            //    the original slug path, but the file is reachable under a new slug. The
+            //    identity-scan fallback must resolve the parent without trusting the
+            //    stale indexed path.
+            auto renamed_parent_created = WorkitemOps::create_item(
+                index,
+                root,
+                "TST",
+                ItemType::Feature,
+                "Original renamed slug parent",
+                "opencode");
+            auto renamed_parent = store.read(renamed_parent_created.path);
+            set_ready_fields(renamed_parent);
+            store.write(renamed_parent);
+            index.index_item(renamed_parent);
+
+            std::filesystem::path renamed_parent_path = renamed_parent_created.path;
+            std::filesystem::path renamed_parent_target = renamed_parent_path.parent_path() /
+                (renamed_parent_created.id + "_renamed-slug-parent.md");
+            std::filesystem::rename(renamed_parent_path, renamed_parent_target);
+
+            // Re-index the renamed parent under its new path so the active store is
+            // self-consistent even though the lookup path goes through the stale row.
+            auto renamed_parent_after = store.read(renamed_parent_target);
+            index.index_item(renamed_parent_after);
+
+            // Plant the stale indexed row pointing at the original (now-gone) slug
+            // path under the active product root. This mirrors the production
+            // scenario where the cache still references the pre-rename file.
+            auto stale_renamed_item = renamed_parent_after;
+            stale_renamed_item.file_path = renamed_parent_path;
+            index.index_item(stale_renamed_item);
+
+            auto renamed_child_created = WorkitemOps::create_item(
+                index,
+                root,
+                "TST",
+                ItemType::Task,
+                "Renamed slug child state smoke",
+                "opencode",
+                renamed_parent_created.id);
+            auto renamed_child = store.read(renamed_child_created.path);
+            set_ready_fields(renamed_child);
+            store.write(renamed_child);
+            index.index_item(renamed_child);
+
+            auto renamed_update = WorkitemOps::update_state(
+                index,
+                root,
+                renamed_child_created.id,
+                ItemState::InProgress,
+                "opencode");
+            expect(renamed_update.parent_synced, "parent should sync after slug rename via identity scan");
+
+            auto renamed_parent_synced = store.read(renamed_parent_target);
+            expect(
+                renamed_parent_synced.state == ItemState::InProgress,
+                "renamed-slug parent should be synced to InProgress at its new path");
+
+            // 4. Truly missing parent: no indexed path, no identity match. The
+            //    diagnostic must explicitly identify the parent as missing.
+            auto missing_parent_ref = std::string("TST-FTR-9999");
+            auto missing_parent_child_created = WorkitemOps::create_item(
+                index,
+                root,
+                "TST",
+                ItemType::Task,
+                "Missing parent child smoke",
+                "opencode",
+                missing_parent_ref);
+            auto missing_parent_child = store.read(missing_parent_child_created.path);
+            set_ready_fields(missing_parent_child);
+            store.write(missing_parent_child);
+            index.index_item(missing_parent_child);
+
+            std::string missing_parent_diagnostic;
+            bool rejected_missing_parent = false;
+            try {
+                (void)WorkitemOps::update_state(
+                    index,
+                    root,
+                    missing_parent_child_created.id,
+                    ItemState::InProgress,
+                    "opencode");
+            } catch (const std::exception& ex) {
+                rejected_missing_parent = true;
+                missing_parent_diagnostic = ex.what();
+            }
+            expect(rejected_missing_parent, "truly missing parent should be rejected");
+            expect(
+                missing_parent_diagnostic.find("Parent item not found in active product root") != std::string::npos,
+                "missing-parent diagnostic should explicitly identify the missing active parent");
+            expect(
+                missing_parent_diagnostic.find(missing_parent_ref) != std::string::npos,
+                "missing-parent diagnostic should reference the unresolved parent ref");
+
+            auto unchanged_missing_parent_child = store.read(missing_parent_child_created.path);
+            expect(
+                unchanged_missing_parent_child.state == ItemState::Proposed,
+                "child with truly missing parent should not be updated");
         }
 
         std::filesystem::remove_all(external_root);

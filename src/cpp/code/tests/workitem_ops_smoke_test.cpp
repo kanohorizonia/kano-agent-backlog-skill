@@ -118,6 +118,69 @@ int main() {
             auto synced_child = store.read(child_created.path);
             expect(synced_child.state == ItemState::InProgress, "child should be updated to InProgress");
 
+            // Shared-layout regression: CLI state updates use a global backlog
+            // index under _kano/backlog while mutations target a product root.
+            // Parent sync must not trust a stale host-only path from that index.
+            const auto shared_backlog_root = root / "_kano" / "backlog";
+            const auto shared_product_root = shared_backlog_root / "products" / "kano-agent-ark-skill";
+            std::filesystem::create_directories(shared_product_root / "items");
+            std::filesystem::create_directories(shared_product_root / "views");
+            std::filesystem::create_directories(shared_product_root / "_meta");
+
+            BacklogIndex shared_index(shared_backlog_root / ".cache" / "index" / "backlog.db");
+            shared_index.initialize();
+            CanonicalStore shared_store(shared_product_root);
+
+            auto shared_parent_created = WorkitemOps::create_item(
+                shared_index,
+                shared_product_root,
+                "KOA",
+                ItemType::Feature,
+                "KOA shared parent sync smoke",
+                "opencode");
+            auto shared_parent = shared_store.read(shared_parent_created.path);
+            set_ready_fields(shared_parent);
+            shared_store.write(shared_parent);
+            shared_index.index_item(shared_parent);
+
+            auto shared_child_created = WorkitemOps::create_item(
+                shared_index,
+                shared_product_root,
+                "KOA",
+                ItemType::Task,
+                "KOA shared child state smoke",
+                "opencode",
+                shared_parent_created.id);
+            auto shared_child = shared_store.read(shared_child_created.path);
+            set_ready_fields(shared_child);
+            shared_store.write(shared_child);
+            shared_index.index_item(shared_child);
+
+            auto host_only_parent = shared_parent;
+            const auto host_only_parent_path = std::filesystem::temp_directory_path() /
+                "koa-host-only-backlog" /
+                "products" /
+                "kano-agent-ark-skill" /
+                "items" /
+                "feature" /
+                "0000" /
+                (shared_parent_created.id + "_host-only.md");
+            host_only_parent.file_path = host_only_parent_path;
+            shared_index.index_item(host_only_parent);
+
+            auto shared_update = WorkitemOps::update_state(
+                shared_index,
+                shared_product_root,
+                shared_child_created.id,
+                ItemState::InProgress,
+                "opencode");
+            expect(shared_update.parent_synced, "shared-layout parent should sync despite stale host-only index path");
+
+            auto shared_parent_synced = shared_store.read(shared_parent_created.path);
+            expect(
+                shared_parent_synced.state == ItemState::InProgress,
+                "shared-layout real parent should be synced under the active product root");
+
             external_root = root.parent_path() / (root.filename().string() + "-external");
             std::filesystem::create_directories(external_root / "items");
             std::filesystem::create_directories(external_root / "views");
@@ -216,12 +279,62 @@ int main() {
             expect(
                 path_parent_diagnostic.find("Parent item not found") != std::string::npos,
                 "path-like parent rejection should emit an explicit missing-parent diagnostic");
+            expect(
+                path_parent_diagnostic.find("path-like parent ref redacted") != std::string::npos,
+                "path-like parent rejection should redact the raw parent path");
+            expect(
+                path_parent_diagnostic.find(external_created.path.string()) == std::string::npos,
+                "path-like parent rejection should not echo the external parent path");
 
             auto unchanged_external_parent = external_store.read(external_created.path);
             expect(unchanged_external_parent.state == ItemState::Proposed, "external parent should not be mutated");
 
             auto rejected_child = store.read(path_parent_child_created.path);
             expect(rejected_child.state == ItemState::Proposed, "child with rejected path parent should not be updated");
+
+            auto stale_missing_parent_ref = std::string("TST-FTR-9998");
+            auto stale_missing_parent_index = outside_index_parent;
+            stale_missing_parent_index.id = stale_missing_parent_ref;
+            stale_missing_parent_index.uid = stale_missing_parent_ref + "-uid";
+            stale_missing_parent_index.file_path = external_created.path;
+            index.index_item(stale_missing_parent_index);
+
+            auto stale_missing_child_created = WorkitemOps::create_item(
+                index,
+                root,
+                "TST",
+                ItemType::Task,
+                "Stale indexed missing parent child smoke",
+                "opencode",
+                stale_missing_parent_ref);
+            auto stale_missing_child = store.read(stale_missing_child_created.path);
+            set_ready_fields(stale_missing_child);
+            store.write(stale_missing_child);
+            index.index_item(stale_missing_child);
+
+            std::string stale_missing_parent_diagnostic;
+            bool rejected_stale_missing_parent = false;
+            try {
+                (void)WorkitemOps::update_state(
+                    index,
+                    root,
+                    stale_missing_child_created.id,
+                    ItemState::InProgress,
+                    "opencode");
+            } catch (const std::exception& ex) {
+                rejected_stale_missing_parent = true;
+                stale_missing_parent_diagnostic = ex.what();
+            }
+            expect(rejected_stale_missing_parent, "stale indexed missing parent should be rejected");
+            expect(
+                stale_missing_parent_diagnostic.find("stale index/path cache") != std::string::npos,
+                "stale indexed missing parent diagnostic should mention stale index/path cache");
+            expect(
+                stale_missing_parent_diagnostic.find("outside-active-root") != std::string::npos,
+                "stale indexed missing parent diagnostic should classify outside-root index paths");
+            expect(
+                stale_missing_parent_diagnostic.find(external_created.path.string()) == std::string::npos,
+                "stale indexed missing parent diagnostic should not echo outside-root paths");
 
             // 3. Renamed/moved parent slug under active root: the index still points at
             //    the original slug path, but the file is reachable under a new slug. The

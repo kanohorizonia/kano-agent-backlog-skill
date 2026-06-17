@@ -54,6 +54,47 @@ bool is_inside_root(const std::filesystem::path& path, const std::filesystem::pa
     return true;
 }
 
+bool looks_like_path_ref(const std::string& ref) {
+    return ref.find('/') != std::string::npos ||
+           ref.find('\\') != std::string::npos ||
+           ref.find(':') != std::string::npos;
+}
+
+std::string parent_ref_for_diagnostic(const std::string& ref) {
+    if (looks_like_path_ref(ref)) {
+        return "<path-like parent ref redacted>";
+    }
+    return ref;
+}
+
+std::string path_for_diagnostic(
+    const std::filesystem::path& path,
+    const std::filesystem::path& product_root
+) {
+    const auto normalized_path = normalize_path(path);
+    const auto normalized_root = normalize_path(product_root);
+    std::error_code ec;
+    auto relative = std::filesystem::relative(normalized_path, normalized_root, ec);
+    if (!ec && !relative.empty() && !relative.is_absolute()) {
+        bool escapes_root = false;
+        for (const auto& component : relative) {
+            if (component == "..") {
+                escapes_root = true;
+                break;
+            }
+        }
+        if (!escapes_root) {
+            return "active-root/" + relative.generic_string();
+        }
+    }
+
+    const auto filename = normalized_path.filename().generic_string();
+    if (!filename.empty()) {
+        return "outside-active-root/" + filename;
+    }
+    return "outside-active-root/<redacted>";
+}
+
 struct ParentIndexedRead {
     std::optional<BacklogItem> item;
     bool stale_indexed_path = false;
@@ -72,18 +113,24 @@ ParentIndexedRead read_indexed_item_if_active(
     }
     if (!is_inside_root(*indexed_path, product_root)) {
         outcome.stale_indexed_path = true;
-        outcome.stale_reason = "indexed path is outside active product root: " + indexed_path->string();
+        outcome.stale_reason =
+            "indexed path is outside active product root: " +
+            path_for_diagnostic(*indexed_path, product_root);
         return outcome;
     }
     if (!std::filesystem::exists(*indexed_path)) {
         outcome.stale_indexed_path = true;
-        outcome.stale_reason = "indexed path no longer exists on disk: " + indexed_path->string();
+        outcome.stale_reason =
+            "indexed path no longer exists on disk: " +
+            path_for_diagnostic(*indexed_path, product_root);
         return outcome;
     }
     auto item = store.read(*indexed_path);
     if (item.id != parent_ref && item.uid != parent_ref) {
         outcome.stale_indexed_path = true;
-        outcome.stale_reason = "indexed file no longer matches parent ref id/uid: " + indexed_path->string();
+        outcome.stale_reason =
+            "indexed file no longer matches parent ref id/uid: " +
+            path_for_diagnostic(*indexed_path, product_root);
         return outcome;
     }
     outcome.item = item;
@@ -92,6 +139,7 @@ ParentIndexedRead read_indexed_item_if_active(
 
 BacklogItem resolve_parent_by_identity(
     const CanonicalStore& store,
+    const std::filesystem::path& product_root,
     const std::string& parent_ref,
     bool saw_stale_indexed_path,
     const std::string& stale_indexed_path_reason
@@ -104,10 +152,10 @@ BacklogItem resolve_parent_by_identity(
             if (item.id == parent_ref || item.uid == parent_ref) {
                 matches.push_back(item);
             }
-        } catch (const std::exception& ex) {
-            read_failures.push_back(path.string() + ": " + ex.what());
+        } catch (const std::exception&) {
+            read_failures.push_back(path_for_diagnostic(path, product_root) + ": read failure");
         } catch (...) {
-            read_failures.push_back(path.string() + ": unknown read failure");
+            read_failures.push_back(path_for_diagnostic(path, product_root) + ": unknown read failure");
         }
     }
 
@@ -116,10 +164,12 @@ BacklogItem resolve_parent_by_identity(
     }
 
     if (matches.size() > 1) {
-        throw std::runtime_error("Ambiguous parent item reference: " + parent_ref);
+        throw std::runtime_error(
+            "Ambiguous parent item reference: " + parent_ref_for_diagnostic(parent_ref));
     }
 
-    std::string message = "Parent item not found in active product root: " + parent_ref;
+    std::string message =
+        "Parent item not found in active product root: " + parent_ref_for_diagnostic(parent_ref);
     if (saw_stale_indexed_path) {
         message += " (stale index/path cache: " + stale_indexed_path_reason + ")";
     }
@@ -170,6 +220,7 @@ BacklogItem resolve_parent_item(
 
     return resolve_parent_by_identity(
         store,
+        product_root,
         parent_ref,
         saw_stale_indexed_path,
         stale_indexed_path_reason

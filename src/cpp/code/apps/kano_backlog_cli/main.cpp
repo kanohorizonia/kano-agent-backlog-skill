@@ -4140,6 +4140,55 @@ std::string render_native_release_report_markdown(const NativeReleaseReport& rep
     return out.str();
 }
 
+Json::Value path_vector_to_json(const std::vector<std::filesystem::path>& paths) {
+    Json::Value values(Json::arrayValue);
+    for (const auto& path : paths) {
+        values.append(path.string());
+    }
+    return values;
+}
+
+Json::Value admin_init_result_to_json(const OrchestrationOps::InitResult& result) {
+    Json::Value payload(Json::objectValue);
+    payload["status"] = result.status;
+    payload["dry_run"] = result.dry_run;
+    payload["product"] = result.product;
+    payload["product_name"] = result.product_name;
+    payload["prefix"] = result.prefix;
+    payload["project_root"] = result.project_root.string();
+    payload["backlog_root"] = result.backlog_root.string();
+    payload["product_root"] = result.product_root.string();
+    payload["config_path"] = result.config_path.string();
+    payload["planned_directories"] = path_vector_to_json(result.planned_directories);
+    payload["planned_files"] = path_vector_to_json(result.planned_files);
+    Json::Value planned_paths(Json::arrayValue);
+    for (const auto& path : result.planned_directories) {
+        planned_paths.append(path.string());
+    }
+    for (const auto& path : result.planned_files) {
+        planned_paths.append(path.string());
+    }
+    payload["planned_paths"] = planned_paths;
+    payload["created_paths"] = path_vector_to_json(result.created_paths);
+    payload["views_refreshed"] = path_vector_to_json(result.views_refreshed);
+    return payload;
+}
+
+void print_admin_init_result(const OrchestrationOps::InitResult& result) {
+    if (result.dry_run) {
+        std::cout << json_to_string(admin_init_result_to_json(result), true) << "\n";
+        return;
+    }
+
+    std::cout << "Initialized backlog product: " << result.product << "\n";
+    std::cout << "Project root: " << result.project_root.string() << "\n";
+    std::cout << "Backlog root: " << result.backlog_root.string() << "\n";
+    std::cout << "Product root: " << result.product_root.string() << "\n";
+    std::cout << "Config: " << result.config_path.string() << "\n";
+    std::cout << "Created paths: " << result.created_paths.size() << "\n";
+    std::cout << "Refreshed dashboards: " << result.views_refreshed.size() << "\n";
+}
+
 std::optional<int> try_run_admin_init_fast_path(int argc, char** argv) {
     if (argc < 3 || argv == nullptr) {
         return std::nullopt;
@@ -4164,6 +4213,7 @@ std::optional<int> try_run_admin_init_fast_path(int argc, char** argv) {
     std::string init_product_name;
     std::string init_prefix;
     bool init_force = false;
+    bool init_dry_run = false;
     bool init_skip_refresh_views = false;
 
     const auto option_value = [&](int& index, const std::string& option) -> std::optional<std::string> {
@@ -4210,6 +4260,8 @@ std::optional<int> try_run_admin_init_fast_path(int argc, char** argv) {
             init_prefix = *value;
         } else if (arg == "--force") {
             init_force = true;
+        } else if (arg == "--dry-run") {
+            init_dry_run = true;
         } else if (arg == "--skip-refresh-views") {
             init_skip_refresh_views = true;
         } else {
@@ -4230,6 +4282,7 @@ std::optional<int> try_run_admin_init_fast_path(int argc, char** argv) {
     options.product = effective_product;
     options.agent = init_agent;
     options.force = init_force;
+    options.dry_run = init_dry_run;
     options.refresh_views = !init_skip_refresh_views;
     if (!init_backlog_root.empty()) {
         options.backlog_root = std::filesystem::path(init_backlog_root);
@@ -4242,13 +4295,7 @@ std::optional<int> try_run_admin_init_fast_path(int argc, char** argv) {
     }
 
     auto result = OrchestrationOps::initialize_backlog(options);
-    std::cout << "Initialized backlog product: " << effective_product << "\n";
-    std::cout << "Project root: " << result.project_root.string() << "\n";
-    std::cout << "Backlog root: " << result.backlog_root.string() << "\n";
-    std::cout << "Product root: " << result.product_root.string() << "\n";
-    std::cout << "Config: " << result.config_path.string() << "\n";
-    std::cout << "Created paths: " << result.created_paths.size() << "\n";
-    std::cout << "Refreshed dashboards: " << result.views_refreshed.size() << "\n";
+    print_admin_init_result(result);
     return 0;
 }
 
@@ -8016,6 +8063,7 @@ int main(int InArgc, char* InArgv[]) {
             std::string init_product_name;
             std::string init_prefix;
             bool init_force = false;
+            bool init_dry_run = false;
             bool init_skip_refresh_views = false;
             initCmd->add_option("--agent", init_agent, "Agent ID")->required();
             initCmd->add_option("--product", init_product, "Product name");
@@ -8023,6 +8071,7 @@ int main(int InArgc, char* InArgv[]) {
             initCmd->add_option("--product-name", init_product_name, "Display product name");
             initCmd->add_option("--prefix", init_prefix, "Display ID prefix");
             initCmd->add_flag("--force", init_force, "Update an existing product scaffold/config block");
+            initCmd->add_flag("--dry-run", init_dry_run, "Plan backlog initialization without writing files");
             initCmd->add_flag("--skip-refresh-views", init_skip_refresh_views, "Skip initial dashboard refresh");
             initCmd->callback([&]() {
                 const std::string effective_product = !init_product.empty() ? init_product : product_name_opt;
@@ -8035,6 +8084,7 @@ int main(int InArgc, char* InArgv[]) {
                 options.product = effective_product;
                 options.agent = init_agent;
                 options.force = init_force;
+                options.dry_run = init_dry_run;
                 options.refresh_views = !init_skip_refresh_views;
                 if (!init_backlog_root.empty()) {
                     options.backlog_root = std::filesystem::path(init_backlog_root);
@@ -8047,13 +8097,7 @@ int main(int InArgc, char* InArgv[]) {
                 }
 
                 auto result = OrchestrationOps::initialize_backlog(options);
-                std::cout << "Initialized backlog product: " << effective_product << "\n";
-                std::cout << "Project root: " << result.project_root.string() << "\n";
-                std::cout << "Backlog root: " << result.backlog_root.string() << "\n";
-                std::cout << "Product root: " << result.product_root.string() << "\n";
-                std::cout << "Config: " << result.config_path.string() << "\n";
-                std::cout << "Created paths: " << result.created_paths.size() << "\n";
-                std::cout << "Refreshed dashboards: " << result.views_refreshed.size() << "\n";
+                print_admin_init_result(result);
             });
 
             // admin sync-sequences

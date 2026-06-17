@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cctype>
 #include <fstream>
 #include <optional>
 #include <regex>
@@ -132,6 +133,248 @@ size_t ParseSizeOrDefault(const std::string& value, const size_t fallback,
   } catch (...) {
     return fallback;
   }
+}
+
+struct SavedViewDefinition {
+  std::string id;
+  std::string title;
+  std::string description;
+  std::string kobql;
+};
+
+const std::vector<SavedViewDefinition>& SavedViews() {
+  static const std::vector<SavedViewDefinition> views = {
+      {"ready-approval", "Ready Approval",
+       "Items that are ready for a human to approve or dispatch.",
+       "state:Ready type:Feature type:UserStory type:Task type:Bug"},
+      {"result-review", "Result Review",
+       "Items waiting for a human to review delivered results.",
+       "state:Review"},
+      {"blocked", "Blocked Work",
+       "Items that cannot move forward without an explicit blocker decision.",
+       "state:Blocked"},
+      {"stale-inprogress", "Stale InProgress",
+       "Active items that need an execution freshness check.",
+       "state:InProgress"},
+      {"missing-evidence", "Missing Evidence",
+       "Reviewable items whose worklog or detail text lacks concrete evidence markers.",
+       "state:Ready state:Review state:Done"}};
+  return views;
+}
+
+Json::Value SavedViewToJson(const SavedViewDefinition& view) {
+  Json::Value value(Json::objectValue);
+  value["id"] = view.id;
+  value["title"] = view.title;
+  value["description"] = view.description;
+  value["kobql"] = view.kobql;
+  value["read_only"] = true;
+  return value;
+}
+
+std::vector<std::string> TokenizeQuery(const std::string& query) {
+  std::vector<std::string> tokens;
+  std::string current;
+  bool quoted = false;
+  char quote = '\0';
+  for (const char ch : query) {
+    if (quoted) {
+      if (ch == quote) {
+        quoted = false;
+      } else {
+        current.push_back(ch);
+      }
+      continue;
+    }
+    if (ch == '"' || ch == '\'') {
+      quoted = true;
+      quote = ch;
+      continue;
+    }
+    if (std::isspace(static_cast<unsigned char>(ch))) {
+      if (!current.empty()) {
+        tokens.push_back(current);
+        current.clear();
+      }
+      continue;
+    }
+    current.push_back(ch);
+  }
+  if (!current.empty()) {
+    tokens.push_back(current);
+  }
+  return tokens;
+}
+
+bool JsonStringContains(const Json::Value& value, const std::string& needle) {
+  if (needle.empty()) {
+    return true;
+  }
+  return text::ContainsCaseInsensitive(value.asString(), needle);
+}
+
+bool ContentContainsAny(const std::string& content,
+                        const std::vector<std::string>& needles) {
+  for (const auto& needle : needles) {
+    if (text::ContainsCaseInsensitive(content, needle)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+std::vector<std::string> ExtractWorklogLines(const std::string& content) {
+  std::vector<std::string> lines;
+  bool inWorklog = false;
+  for (const auto& line : SplitLines(content)) {
+    const auto trimmed = Trim(line);
+    if (trimmed == "## Worklog") {
+      inWorklog = true;
+      continue;
+    }
+    if (inWorklog && StartsWith(trimmed, "## ")) {
+      break;
+    }
+    if (inWorklog && !trimmed.empty()) {
+      lines.push_back(trimmed);
+    }
+  }
+  return lines;
+}
+
+std::string ExtractAgent(const std::string& line) {
+  static const std::regex agentPattern(R"(\[agent=([^\]]+)\])");
+  std::smatch match;
+  if (std::regex_search(line, match, agentPattern) && match.size() > 1) {
+    return match[1].str();
+  }
+  return "unknown";
+}
+
+std::string ExtractTimestamp(const std::string& line) {
+  static const std::regex timestampPattern(R"(^([0-9]{4}-[0-9]{2}-[0-9]{2}(?: [0-9]{2}:[0-9]{2})?))");
+  std::smatch match;
+  if (std::regex_search(line, match, timestampPattern) && match.size() > 1) {
+    return match[1].str();
+  }
+  return "";
+}
+
+std::string InferEventKind(const std::string& line) {
+  if (text::ContainsCaseInsensitive(line, "State:")) {
+    return "state-transition";
+  }
+  if (text::ContainsCaseInsensitive(line, "Artifact attached")) {
+    return "artifact";
+  }
+  if (ContentContainsAny(line, {"test", "validation", "PASS", "FAIL", "quick-test", "build"})) {
+    return "validation";
+  }
+  if (ContentContainsAny(line, {"blocked", "blocker"})) {
+    return "blocked";
+  }
+  if (ContentContainsAny(line, {"work order", "handoff", "dispatch"})) {
+    return "work-order";
+  }
+  return "worklog";
+}
+
+std::string InferRunState(const Json::Value& item, const std::string& lastEventKind) {
+  const auto state = text::ToLower(item["state"].asString());
+  if (state == "inprogress" || state == "active") {
+    return lastEventKind == "blocked" ? "blocked" : "active";
+  }
+  if (state == "blocked") {
+    return "blocked";
+  }
+  if (state == "review") {
+    return "review";
+  }
+  if (state == "done" || state == "dropped" || state == "closed") {
+    return "complete";
+  }
+  if (state == "ready") {
+    return "queued";
+  }
+  return "unknown";
+}
+
+Json::Value MakeValidationCheck(const std::string& name,
+                                const std::string& status,
+                                const std::string& evidence) {
+  Json::Value check(Json::objectValue);
+  check["name"] = name;
+  check["status"] = status;
+  check["evidence"] = evidence;
+  return check;
+}
+
+Json::Value BuildEvidenceSummary(const Json::Value& item) {
+  const auto content = item.get("content", "").asString();
+  const auto combined = item["id"].asString() + "\n" + item["title"].asString() + "\n" + content;
+
+  const bool hasArtifact = ContentContainsAny(combined, {"Artifact attached", "artifacts/", "artifact"});
+  const bool hasValidation = ContentContainsAny(combined, {"validation", "test", "quick-test", "build-dev", "build-release", "PASS", "FAIL"});
+  const bool hasCommit = ContentContainsAny(combined, {"commit", "git hash", "revision"});
+  const bool hasDeploy = ContentContainsAny(combined, {"deploy", "deployment", "Jenkins", "GitHub Release", "release asset", "Pages"});
+  const bool hasWorkOrder = ContentContainsAny(combined, {"work order", "handoff", "agent run", "dispatch"});
+
+  Json::Value summary(Json::objectValue);
+  summary["score"] = static_cast<Json::UInt64>(
+      (hasArtifact ? 1 : 0) + (hasValidation ? 1 : 0) + (hasCommit ? 1 : 0) +
+      (hasDeploy ? 1 : 0) + (hasWorkOrder ? 1 : 0));
+  summary["complete"] = summary["score"].asUInt64() >= 2;
+  summary["signals"]["artifact"] = hasArtifact;
+  summary["signals"]["validation"] = hasValidation;
+  summary["signals"]["commit"] = hasCommit;
+  summary["signals"]["deployment"] = hasDeploy;
+  summary["signals"]["work_order"] = hasWorkOrder;
+
+  summary["missing"] = Json::arrayValue;
+  if (!hasArtifact) summary["missing"].append("artifact");
+  if (!hasValidation) summary["missing"].append("validation");
+  if (!hasCommit) summary["missing"].append("commit");
+  if (!hasWorkOrder) summary["missing"].append("work_order");
+
+  Json::Value matrix(Json::arrayValue);
+  matrix.append(MakeValidationCheck(
+      "build",
+      ContentContainsAny(combined, {"build failed", "build: FAIL"}) ? "failed" :
+          (ContentContainsAny(combined, {"build", "build-dev", "build-release"}) ? "passed" : "not-run"),
+      "Matched build terms in item body/worklog"));
+  matrix.append(MakeValidationCheck(
+      "test",
+      ContentContainsAny(combined, {"test failed", "quick-test failed", "FAIL"}) ? "failed" :
+          (ContentContainsAny(combined, {"test", "quick-test", "PASS"}) ? "passed" : "not-run"),
+      "Matched test terms in item body/worklog"));
+  matrix.append(MakeValidationCheck(
+      "deployment",
+      ContentContainsAny(combined, {"deploy failed", "deployment failed"}) ? "failed" :
+          (hasDeploy ? "passed" : "not-run"),
+      "Matched deployment/release terms in item body/worklog"));
+  summary["validation_matrix"] = matrix;
+
+  return summary;
+}
+
+Json::Value MakeReviewBundle(const Json::Value& item, const Json::Value& evidence) {
+  Json::Value bundle(Json::objectValue);
+  bundle["item"] = item;
+  bundle["decision"] = "review";
+  bundle["evidence"] = evidence;
+  bundle["missing_evidence"] = evidence["missing"];
+  bundle["recommended_action"] =
+      evidence["complete"].asBool() ? "review_result" : "request_evidence";
+  return bundle;
+}
+
+bool ItemMatchesTopic(const Json::Value& item, const std::string& topic) {
+  if (topic.empty()) {
+    return true;
+  }
+  return JsonStringContains(item["topic"], topic) ||
+         JsonStringContains(item["id"], topic) ||
+         JsonStringContains(item["title"], topic);
 }
 
 }  // namespace
@@ -1170,6 +1413,470 @@ Json::Value BacklogWebviewService::BuildKanban(const ItemQueryOptions& options) 
   return response;
 }
 
+Json::Value BacklogWebviewService::ListSavedViews() {
+  Json::Value response(Json::objectValue);
+  response["views"] = Json::arrayValue;
+  for (const auto& view : SavedViews()) {
+    response["views"].append(SavedViewToJson(view));
+  }
+  response["read_only"] = true;
+  return response;
+}
+
+Json::Value BacklogWebviewService::RunKobql(const std::string& query,
+                                            const ItemQueryOptions& options) {
+  Json::Value response(Json::objectValue);
+  response["kobql"] = Trim(query);
+  response["read_only"] = true;
+  response["unsupported_tokens"] = Json::arrayValue;
+
+  ItemQueryOptions parsed = options;
+  if (parsed.limit == 0) {
+    parsed.limit = 200;
+  }
+  std::vector<std::string> topicFilters;
+  std::vector<std::string> textFilters;
+
+  for (const auto& token : TokenizeQuery(query)) {
+    const auto separator = token.find(':');
+    if (separator == std::string::npos) {
+      response["unsupported_tokens"].append(token);
+      continue;
+    }
+    const auto key = text::ToLower(Trim(token.substr(0, separator)));
+    const auto value = Trim(token.substr(separator + 1));
+    if (value.empty()) {
+      response["unsupported_tokens"].append(token);
+      continue;
+    }
+    if (key == "product") {
+      parsed.products.push_back(value);
+    } else if (key == "state") {
+      parsed.states.push_back(value);
+    } else if (key == "type") {
+      parsed.types.push_back(value);
+    } else if (key == "text" || key == "q") {
+      textFilters.push_back(value);
+    } else if (key == "topic") {
+      topicFilters.push_back(value);
+    } else {
+      response["unsupported_tokens"].append(token);
+    }
+  }
+
+  if (!response["unsupported_tokens"].empty()) {
+    response["error"] = "Unsupported KOBQL token";
+    return response;
+  }
+
+  if (!textFilters.empty()) {
+    parsed.text = JoinStrings(textFilters, " ");
+  }
+
+  auto items = QueryItems(parsed);
+  if (items.isMember("error")) {
+    return items;
+  }
+
+  if (!topicFilters.empty()) {
+    Json::Value filtered(Json::arrayValue);
+    for (const auto& item : items["items"]) {
+      bool matches = true;
+      for (const auto& topic : topicFilters) {
+        if (!ItemMatchesTopic(item, topic)) {
+          matches = false;
+          break;
+        }
+      }
+      if (matches) {
+        filtered.append(item);
+      }
+    }
+    items["items"] = filtered;
+    items["total"] = static_cast<Json::UInt64>(filtered.size());
+  }
+
+  response["query"] = items;
+  response["total"] = items["total"];
+  response["items"] = items["items"];
+  return response;
+}
+
+Json::Value BacklogWebviewService::RunSavedView(const std::string& viewId,
+                                                const ItemQueryOptions& options) {
+  Json::Value response(Json::objectValue);
+  const auto normalized = text::ToLower(Trim(viewId));
+  const auto* selected = static_cast<const SavedViewDefinition*>(nullptr);
+  for (const auto& view : SavedViews()) {
+    if (view.id == normalized) {
+      selected = &view;
+      break;
+    }
+  }
+  if (selected == nullptr) {
+    response["error"] = "Saved view not found";
+    return response;
+  }
+
+  response["view"] = SavedViewToJson(*selected);
+  auto result = RunKobql(selected->kobql, options);
+  if (selected->id == "missing-evidence" && !result.isMember("error")) {
+    Json::Value filtered(Json::arrayValue);
+    for (const auto& item : result["items"]) {
+      auto detail = GetEvidenceDetail(item["product"].asString(), item["id"].asString());
+      if (!detail["evidence"]["complete"].asBool()) {
+        filtered.append(item);
+      }
+    }
+    result["items"] = filtered;
+    result["total"] = static_cast<Json::UInt64>(filtered.size());
+  }
+  response["result"] = result;
+  return response;
+}
+
+Json::Value BacklogWebviewService::PreviewCommand(const std::string& phrase,
+                                                  const ItemQueryOptions& options) {
+  Json::Value response(Json::objectValue);
+  const auto input = Trim(phrase);
+  const auto lowered = text::ToLower(input);
+  response["phrase"] = input;
+  response["read_only"] = true;
+  response["mutation_allowed"] = false;
+
+  if (input.empty()) {
+    response["error"] = "Missing command phrase";
+    return response;
+  }
+
+  std::string kobql;
+  if (ContentContainsAny(lowered, {"ready"})) {
+    kobql += "state:Ready ";
+  }
+  if (ContentContainsAny(lowered, {"review"})) {
+    kobql += "state:Review ";
+  }
+  if (ContentContainsAny(lowered, {"blocked", "blocker"})) {
+    kobql += "state:Blocked ";
+  }
+  if (ContentContainsAny(lowered, {"in progress", "active", "running"})) {
+    kobql += "state:InProgress ";
+  }
+  if (ContentContainsAny(lowered, {"done", "closed", "complete"})) {
+    kobql += "state:Done ";
+  }
+  if (ContentContainsAny(lowered, {"task", "tasks"})) {
+    kobql += "type:Task ";
+  }
+  if (ContentContainsAny(lowered, {"bug", "bugs"})) {
+    kobql += "type:Bug ";
+  }
+  if (ContentContainsAny(lowered, {"feature", "features"})) {
+    kobql += "type:Feature ";
+  }
+  if (ContentContainsAny(lowered, {"topic", "topics"})) {
+    kobql += "type:Topic ";
+  }
+
+  if (kobql.empty()) {
+    response["error"] = "Unsupported command phrase";
+    return response;
+  }
+
+  response["generated_kobql"] = Trim(kobql);
+  response["preview"] = RunKobql(kobql, options);
+  return response;
+}
+
+Json::Value BacklogWebviewService::BuildReviewInbox(const ItemQueryOptions& options) {
+  Json::Value response(Json::objectValue);
+  response["lanes"] = Json::objectValue;
+  const std::vector<std::string> lanes = {
+      "Ready Approval", "Result Review", "Done Candidate", "Blocked by Human",
+      "Missing Evidence", "Rejected Needs Fix"};
+  for (const auto& lane : lanes) {
+    response["lanes"][lane] = Json::arrayValue;
+  }
+  response["read_only"] = true;
+
+  auto items = QueryItems(options);
+  if (items.isMember("error")) {
+    return items;
+  }
+
+  for (const auto& item : items["items"]) {
+    const auto detail = GetEvidenceDetail(item["product"].asString(), item["id"].asString());
+    const auto evidence = detail["evidence"];
+    const auto state = text::ToLower(item["state"].asString());
+    auto bundle = MakeReviewBundle(item, evidence);
+
+    if (state == "ready") {
+      response["lanes"]["Ready Approval"].append(bundle);
+    }
+    if (state == "review") {
+      response["lanes"]["Result Review"].append(bundle);
+    }
+    if (state == "inprogress" && evidence["signals"]["validation"].asBool()) {
+      response["lanes"]["Done Candidate"].append(bundle);
+    }
+    if (state == "blocked") {
+      response["lanes"]["Blocked by Human"].append(bundle);
+    }
+    if (!evidence["complete"].asBool() &&
+        (state == "ready" || state == "review" || state == "done")) {
+      response["lanes"]["Missing Evidence"].append(bundle);
+    }
+    if (ContentContainsAny(item["title"].asString() + "\n" + item["id"].asString(),
+                           {"rejected", "needs fix"})) {
+      response["lanes"]["Rejected Needs Fix"].append(bundle);
+    }
+  }
+
+  response["counts"] = Json::objectValue;
+  for (const auto& lane : lanes) {
+    response["counts"][lane] =
+        static_cast<Json::UInt64>(response["lanes"][lane].size());
+  }
+  return response;
+}
+
+Json::Value BacklogWebviewService::GetEvidenceDetail(const std::string& product,
+                                                     const std::string& id,
+                                                     bool forceRefresh) {
+  Json::Value response(Json::objectValue);
+  auto detail = GetItem(product, id, forceRefresh);
+  if (detail.isMember("error")) {
+    return detail;
+  }
+  const auto item = detail["item"];
+  response["item"] = item;
+  response["evidence"] = BuildEvidenceSummary(item);
+  response["worklog_events"] = Json::arrayValue;
+  for (const auto& line : ExtractWorklogLines(item.get("content", "").asString())) {
+    Json::Value event(Json::objectValue);
+    event["timestamp"] = ExtractTimestamp(line);
+    event["agent"] = ExtractAgent(line);
+    event["kind"] = InferEventKind(line);
+    event["text"] = line;
+    response["worklog_events"].append(event);
+  }
+  return response;
+}
+
+Json::Value BacklogWebviewService::BuildTopicHome(const std::string& topic,
+                                                  const ItemQueryOptions& options) {
+  Json::Value response(Json::objectValue);
+  response["topic"] = Trim(topic);
+  response["topics"] = Json::arrayValue;
+  response["items"] = Json::arrayValue;
+  response["counts_by_state"] = Json::objectValue;
+  response["read_only"] = true;
+
+  auto items = QueryItems(options);
+  if (items.isMember("error")) {
+    return items;
+  }
+  const auto selectedTopic = Trim(topic);
+  for (const auto& item : items["items"]) {
+    if (item["type"].asString() == "Topic") {
+      if (selectedTopic.empty() || ItemMatchesTopic(item, selectedTopic)) {
+        response["topics"].append(item);
+      }
+      continue;
+    }
+    if (!selectedTopic.empty() && !ItemMatchesTopic(item, selectedTopic)) {
+      continue;
+    }
+    response["items"].append(item);
+    const auto state = item["state"].asString().empty() ? "Unknown" : item["state"].asString();
+    response["counts_by_state"][state] =
+        response["counts_by_state"].get(state, 0).asUInt64() + 1U;
+  }
+  response["missing_topic_metadata"] =
+      !selectedTopic.empty() && response["topics"].empty();
+  return response;
+}
+
+Json::Value BacklogWebviewService::BuildDependencyGraph(const ItemQueryOptions& options,
+                                                        const std::string& itemId,
+                                                        const std::string& topic) {
+  Json::Value response(Json::objectValue);
+  response["nodes"] = Json::arrayValue;
+  response["edges"] = Json::arrayValue;
+  response["missing_nodes"] = Json::arrayValue;
+  response["read_only"] = true;
+
+  auto items = QueryItems(options);
+  if (items.isMember("error")) {
+    return items;
+  }
+
+  std::set<std::string> knownIds;
+  for (const auto& item : items["items"]) {
+    if (!itemId.empty() && item["id"].asString() != itemId &&
+        item["parent"].asString() != itemId) {
+      continue;
+    }
+    if (!topic.empty() && !ItemMatchesTopic(item, topic)) {
+      continue;
+    }
+    const auto key = item["product"].asString() + ":" + item["id"].asString();
+    knownIds.insert(item["id"].asString());
+    Json::Value node(Json::objectValue);
+    node["id"] = key;
+    node["item_id"] = item["id"].asString();
+    node["product"] = item["product"].asString();
+    node["label"] = item["title"].asString();
+    node["kind"] = item["type"].asString();
+    node["state"] = item["state"].asString();
+    response["nodes"].append(node);
+
+    const auto itemTopic = item["topic"].asString();
+    if (!itemTopic.empty()) {
+      Json::Value topicNode(Json::objectValue);
+      topicNode["id"] = "topic:" + itemTopic;
+      topicNode["label"] = itemTopic;
+      topicNode["kind"] = "Topic";
+      topicNode["state"] = "open";
+      response["nodes"].append(topicNode);
+
+      Json::Value edge(Json::objectValue);
+      edge["from"] = "topic:" + itemTopic;
+      edge["to"] = key;
+      edge["kind"] = "topic-membership";
+      response["edges"].append(edge);
+    }
+  }
+
+  for (const auto& item : items["items"]) {
+    if (!itemId.empty() && item["id"].asString() != itemId &&
+        item["parent"].asString() != itemId) {
+      continue;
+    }
+    if (!topic.empty() && !ItemMatchesTopic(item, topic)) {
+      continue;
+    }
+    const auto parent = item["parent"].asString();
+    if (parent.empty()) {
+      continue;
+    }
+    Json::Value edge(Json::objectValue);
+    edge["from"] = item["product"].asString() + ":" + parent;
+    edge["to"] = item["product"].asString() + ":" + item["id"].asString();
+    edge["kind"] = "parent";
+    response["edges"].append(edge);
+    if (!knownIds.count(parent)) {
+      response["missing_nodes"].append(parent);
+    }
+  }
+
+  return response;
+}
+
+Json::Value BacklogWebviewService::BuildWorkOrderTimeline(const ItemQueryOptions& options,
+                                                          const std::string& itemId,
+                                                          const std::string& topic) {
+  Json::Value response(Json::objectValue);
+  response["events"] = Json::arrayValue;
+  response["read_only"] = true;
+
+  auto items = QueryItems(options);
+  if (items.isMember("error")) {
+    return items;
+  }
+
+  for (const auto& item : items["items"]) {
+    if (!itemId.empty() && item["id"].asString() != itemId) {
+      continue;
+    }
+    if (!topic.empty() && !ItemMatchesTopic(item, topic)) {
+      continue;
+    }
+    auto detail = GetItem(item["product"].asString(), item["id"].asString());
+    if (detail.isMember("error")) {
+      continue;
+    }
+    const auto fullItem = detail["item"];
+    auto lines = ExtractWorklogLines(fullItem.get("content", "").asString());
+    if (lines.empty()) {
+      Json::Value event(Json::objectValue);
+      event["timestamp"] = item["updated"].asString();
+      event["agent"] = "unknown";
+      event["kind"] = "item-snapshot";
+      event["item_id"] = item["id"].asString();
+      event["product"] = item["product"].asString();
+      event["state"] = item["state"].asString();
+      event["text"] = "No worklog events recorded";
+      response["events"].append(event);
+      continue;
+    }
+    for (const auto& line : lines) {
+      Json::Value event(Json::objectValue);
+      event["timestamp"] = ExtractTimestamp(line);
+      event["agent"] = ExtractAgent(line);
+      event["kind"] = InferEventKind(line);
+      event["item_id"] = item["id"].asString();
+      event["product"] = item["product"].asString();
+      event["state"] = item["state"].asString();
+      event["text"] = line;
+      response["events"].append(event);
+    }
+  }
+  return response;
+}
+
+Json::Value BacklogWebviewService::BuildAgentRunBoard(const ItemQueryOptions& options,
+                                                      const std::string& agent,
+                                                      const std::string& runState,
+                                                      size_t staleDays) {
+  Json::Value response(Json::objectValue);
+  response["runs"] = Json::arrayValue;
+  response["groups"] = Json::objectValue;
+  response["read_only"] = true;
+  response["stale_days"] = static_cast<Json::UInt64>(staleDays);
+
+  auto timeline = BuildWorkOrderTimeline(options);
+  if (timeline.isMember("error")) {
+    return timeline;
+  }
+
+  std::unordered_map<std::string, Json::Value> latestByRun;
+  for (const auto& event : timeline["events"]) {
+    const auto eventAgent = event["agent"].asString();
+    if (!agent.empty() && !JsonStringContains(event["agent"], agent)) {
+      continue;
+    }
+    const auto key = event["product"].asString() + ":" + event["item_id"].asString() + ":" + eventAgent;
+    latestByRun[key] = event;
+  }
+
+  for (const auto& [key, event] : latestByRun) {
+    Json::Value run(Json::objectValue);
+    run["run_id"] = key;
+    run["product"] = event["product"].asString();
+    run["item_id"] = event["item_id"].asString();
+    run["agent"] = event["agent"].asString();
+    run["latest_event"] = event;
+
+    Json::Value item(Json::objectValue);
+    item["state"] = event["state"].asString();
+    const auto inferred = InferRunState(item, event["kind"].asString());
+    if (!runState.empty() && !JsonStringContains(Json::Value(inferred), runState)) {
+      continue;
+    }
+    run["state"] = inferred;
+    run["evidence_links"] = Json::arrayValue;
+    if (event["kind"].asString() == "artifact") {
+      run["evidence_links"].append(event["text"].asString());
+    }
+    response["runs"].append(run);
+    response["groups"][inferred].append(run);
+  }
+
+  response["total"] = static_cast<Json::UInt64>(response["runs"].size());
+  return response;
+}
+
 Json::Value BacklogWebviewService::Refresh(const std::string& product) {
   Json::Value response(Json::objectValue);
   if (product.empty() || text::ToLower(product) == "all") {
@@ -1390,6 +2097,188 @@ void RegisterBacklogWebviewRoutes(
         body["data"] = data;
         metaAppender(request, body);
 
+        auto response = HttpResponse::newHttpJsonResponse(body);
+        if (!body["ok"].asBool()) {
+          response->setStatusCode(k400BadRequest);
+        }
+        callback(response);
+      },
+      {Get});
+
+  app().registerHandler(
+      "/api/review/saved-views",
+      [metaAppender, &service](const HttpRequestPtr& request,
+          std::function<void(const HttpResponsePtr&)>&& callback) {
+        Json::Value body(Json::objectValue);
+        body["ok"] = true;
+        body["data"] = service.ListSavedViews();
+        metaAppender(request, body);
+        callback(HttpResponse::newHttpJsonResponse(body));
+      },
+      {Get});
+
+  app().registerHandler(
+      "/api/review/saved-views/{1}",
+      [metaAppender, &service, queryOptionsFromRequest](const HttpRequestPtr& request,
+          std::function<void(const HttpResponsePtr&)>&& callback,
+          const std::string& viewId) {
+        auto data = service.RunSavedView(viewId, queryOptionsFromRequest(request));
+        Json::Value body(Json::objectValue);
+        body["ok"] = !data.isMember("error");
+        body["data"] = data;
+        metaAppender(request, body);
+        auto response = HttpResponse::newHttpJsonResponse(body);
+        if (!body["ok"].asBool()) {
+          response->setStatusCode(k404NotFound);
+        }
+        callback(response);
+      },
+      {Get});
+
+  app().registerHandler(
+      "/api/review/kobql",
+      [metaAppender, &service, queryOptionsFromRequest](const HttpRequestPtr& request,
+          std::function<void(const HttpResponsePtr&)>&& callback) {
+        auto data = service.RunKobql(request->getParameter("q"),
+                                     queryOptionsFromRequest(request));
+        Json::Value body(Json::objectValue);
+        body["ok"] = !data.isMember("error");
+        body["data"] = data;
+        metaAppender(request, body);
+        auto response = HttpResponse::newHttpJsonResponse(body);
+        if (!body["ok"].asBool()) {
+          response->setStatusCode(k400BadRequest);
+        }
+        callback(response);
+      },
+      {Get});
+
+  app().registerHandler(
+      "/api/review/command-preview",
+      [metaAppender, &service, queryOptionsFromRequest](const HttpRequestPtr& request,
+          std::function<void(const HttpResponsePtr&)>&& callback) {
+        auto data = service.PreviewCommand(request->getParameter("q"),
+                                           queryOptionsFromRequest(request));
+        Json::Value body(Json::objectValue);
+        body["ok"] = !data.isMember("error");
+        body["data"] = data;
+        metaAppender(request, body);
+        auto response = HttpResponse::newHttpJsonResponse(body);
+        if (!body["ok"].asBool()) {
+          response->setStatusCode(k400BadRequest);
+        }
+        callback(response);
+      },
+      {Get});
+
+  app().registerHandler(
+      "/api/review/inbox",
+      [metaAppender, &service, queryOptionsFromRequest](const HttpRequestPtr& request,
+          std::function<void(const HttpResponsePtr&)>&& callback) {
+        auto data = service.BuildReviewInbox(queryOptionsFromRequest(request));
+        Json::Value body(Json::objectValue);
+        body["ok"] = !data.isMember("error");
+        body["data"] = data;
+        metaAppender(request, body);
+        auto response = HttpResponse::newHttpJsonResponse(body);
+        if (!body["ok"].asBool()) {
+          response->setStatusCode(k400BadRequest);
+        }
+        callback(response);
+      },
+      {Get});
+
+  app().registerHandler(
+      "/api/review/evidence/{1}",
+      [metaAppender, &service](const HttpRequestPtr& request,
+          std::function<void(const HttpResponsePtr&)>&& callback,
+          const std::string& itemId) {
+        auto product = request->getParameter("product");
+        if (product.empty()) {
+          product = "all";
+        }
+        auto data = service.GetEvidenceDetail(product, itemId);
+        Json::Value body(Json::objectValue);
+        body["ok"] = !data.isMember("error");
+        body["data"] = data;
+        metaAppender(request, body);
+        auto response = HttpResponse::newHttpJsonResponse(body);
+        if (!body["ok"].asBool()) {
+          response->setStatusCode(k404NotFound);
+        }
+        callback(response);
+      },
+      {Get});
+
+  app().registerHandler(
+      "/api/review/topics",
+      [metaAppender, &service, queryOptionsFromRequest](const HttpRequestPtr& request,
+          std::function<void(const HttpResponsePtr&)>&& callback) {
+        auto data = service.BuildTopicHome(request->getParameter("topic"),
+                                           queryOptionsFromRequest(request));
+        Json::Value body(Json::objectValue);
+        body["ok"] = !data.isMember("error");
+        body["data"] = data;
+        metaAppender(request, body);
+        auto response = HttpResponse::newHttpJsonResponse(body);
+        if (!body["ok"].asBool()) {
+          response->setStatusCode(k400BadRequest);
+        }
+        callback(response);
+      },
+      {Get});
+
+  app().registerHandler(
+      "/api/review/graph",
+      [metaAppender, &service, queryOptionsFromRequest](const HttpRequestPtr& request,
+          std::function<void(const HttpResponsePtr&)>&& callback) {
+        auto data = service.BuildDependencyGraph(
+            queryOptionsFromRequest(request), request->getParameter("item"),
+            request->getParameter("topic"));
+        Json::Value body(Json::objectValue);
+        body["ok"] = !data.isMember("error");
+        body["data"] = data;
+        metaAppender(request, body);
+        auto response = HttpResponse::newHttpJsonResponse(body);
+        if (!body["ok"].asBool()) {
+          response->setStatusCode(k400BadRequest);
+        }
+        callback(response);
+      },
+      {Get});
+
+  app().registerHandler(
+      "/api/review/timeline",
+      [metaAppender, &service, queryOptionsFromRequest](const HttpRequestPtr& request,
+          std::function<void(const HttpResponsePtr&)>&& callback) {
+        auto data = service.BuildWorkOrderTimeline(
+            queryOptionsFromRequest(request), request->getParameter("item"),
+            request->getParameter("topic"));
+        Json::Value body(Json::objectValue);
+        body["ok"] = !data.isMember("error");
+        body["data"] = data;
+        metaAppender(request, body);
+        auto response = HttpResponse::newHttpJsonResponse(body);
+        if (!body["ok"].asBool()) {
+          response->setStatusCode(k400BadRequest);
+        }
+        callback(response);
+      },
+      {Get});
+
+  app().registerHandler(
+      "/api/review/runs",
+      [metaAppender, &service, queryOptionsFromRequest](const HttpRequestPtr& request,
+          std::function<void(const HttpResponsePtr&)>&& callback) {
+        const auto staleDays =
+            ParseSizeOrDefault(request->getParameter("stale_days"), 3, 365);
+        auto data = service.BuildAgentRunBoard(
+            queryOptionsFromRequest(request), request->getParameter("agent"),
+            request->getParameter("run_state"), staleDays);
+        Json::Value body(Json::objectValue);
+        body["ok"] = !data.isMember("error");
+        body["data"] = data;
+        metaAppender(request, body);
         auto response = HttpResponse::newHttpJsonResponse(body);
         if (!body["ok"].asBool()) {
           response->setStatusCode(k400BadRequest);

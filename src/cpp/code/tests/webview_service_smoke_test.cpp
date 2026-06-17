@@ -104,7 +104,11 @@ int main() {
                      "Alpha native task",
                      "Ready",
                      "PRA-EPIC-0001",
-                     "Native migration evidence lives here."));
+                     "Native migration evidence lives here.\n\n"
+                     "## Worklog\n\n"
+                     "2026-06-14 10:00 [agent=codex] Work order dispatched for native migration review.\n"
+                     "2026-06-14 10:10 [agent=codex] Artifact attached: [report](../artifacts/PRA-TSK-0001/report.md).\n"
+                     "2026-06-14 10:20 [agent=codex] Validation: pixi run quick-test PASS.\n"));
         write_text(
             products / "product-beta" / "items" / "bug" / "0001" / "PRB-BUG-0001.md",
             item_doc("PRB-BUG-0001",
@@ -172,6 +176,45 @@ int main() {
         expect(detail["item"]["product"].asString() == "product-alpha", "detail lookup product mismatch");
         expect(detail["item"]["content"].asString().find("Native migration evidence") != std::string::npos,
                "detail lookup should include content");
+
+        auto savedViews = service.ListSavedViews();
+        expect(savedViews["views"].size() >= 4, "saved views should expose review lanes");
+
+        auto readyView = service.RunSavedView("ready-approval", allOptions);
+        expect(!readyView.isMember("error"), "ready saved view should run");
+        expect(readyView["result"]["total"].asUInt64() >= 1, "ready saved view should include ready work");
+
+        auto kobql = service.RunKobql("state:Ready type:Task topic:\"Native Migration\"", allOptions);
+        expect(!kobql.isMember("error"), "KOBQL query should run");
+        expect(kobql["total"].asUInt64() == 1, "KOBQL query should filter by state, type, and topic");
+
+        auto preview = service.PreviewCommand("show ready tasks", allOptions);
+        expect(!preview.isMember("error"), "command preview should parse supported phrase");
+        expect(preview["generated_kobql"].asString().find("state:Ready") != std::string::npos,
+               "command preview should expose generated KOBQL");
+        expect(preview["mutation_allowed"].asBool() == false, "command preview must stay read-only");
+
+        auto inbox = service.BuildReviewInbox(allOptions);
+        expect(inbox["lanes"]["Ready Approval"].size() >= 1, "review inbox should classify ready work");
+
+        auto evidence = service.GetEvidenceDetail("product-alpha", "PRA-TSK-0001");
+        expect(evidence["evidence"]["signals"]["artifact"].asBool(), "evidence detail should detect artifact signal");
+        expect(evidence["evidence"]["signals"]["validation"].asBool(), "evidence detail should detect validation signal");
+        expect(evidence["worklog_events"].size() >= 3, "evidence detail should expose worklog events");
+
+        auto topicHome = service.BuildTopicHome("Native Migration", allOptions);
+        expect(topicHome["items"].size() >= 1, "topic home should include seeded topic item");
+        expect(topicHome["missing_topic_metadata"].asBool() == false, "topic home should find manifest metadata");
+
+        auto graph = service.BuildDependencyGraph(allOptions, "PRA-TSK-0001");
+        expect(graph["nodes"].size() >= 1, "dependency graph should include selected item node");
+        expect(graph["edges"].size() >= 1, "dependency graph should include parent or topic edges");
+
+        auto timeline = service.BuildWorkOrderTimeline(allOptions, "PRA-TSK-0001");
+        expect(timeline["events"].size() >= 3, "timeline should expose worklog-backed events");
+
+        auto runs = service.BuildAgentRunBoard(allOptions, "codex");
+        expect(runs["runs"].size() >= 1, "agent run board should include codex run evidence");
 
         std::cout << "webview_service_smoke_test: PASS\n";
         std::filesystem::remove_all(root);

@@ -1,4 +1,5 @@
 #include "kano/backlog_ops/orchestration/orchestration_ops.hpp"
+#include "kano/backlog_core/config/config.hpp"
 #include "kano/backlog_core/frontmatter/canonical_store.hpp"
 #include "kano/backlog_ops/view/view_ops.hpp"
 
@@ -114,6 +115,21 @@ std::string derive_prefix(std::string product_name) {
     return prefix;
 }
 
+std::string normalize_prefix(std::string prefix) {
+    prefix = trim(prefix);
+    if (prefix.empty()) {
+        throw std::runtime_error("Product prefix cannot be empty");
+    }
+    std::transform(prefix.begin(), prefix.end(), prefix.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::toupper(ch));
+    });
+    if (prefix.size() < 2 || prefix.size() > 16 || !std::isalpha(static_cast<unsigned char>(prefix.front())) ||
+        !std::all_of(prefix.begin(), prefix.end(), [](unsigned char ch) { return std::isalnum(ch); })) {
+        throw std::runtime_error("Product prefix must be 2-16 ASCII letters or digits, start with a letter, and contain no separators");
+    }
+    return prefix;
+}
+
 bool ensure_dir(const std::filesystem::path& path) {
     if (std::filesystem::exists(path)) {
         return false;
@@ -166,6 +182,64 @@ std::filesystem::path resolve_project_root(const std::filesystem::path& backlog_
         return backlog_root.parent_path().parent_path();
     }
     return backlog_root.parent_path();
+}
+
+std::vector<std::filesystem::path> planned_scaffold_directories(
+    const std::filesystem::path& backlog_root,
+    const std::filesystem::path& products_root,
+    const std::filesystem::path& product_root
+) {
+    std::vector<std::filesystem::path> directories = {
+        backlog_root,
+        products_root,
+        product_root,
+        product_root / "decisions",
+        product_root / "views",
+        product_root / "items",
+        product_root / "_meta",
+        product_root / "artifacts",
+        backlog_root / ".cache" / "index",
+    };
+    for (const char* item_type : kItemTypes) {
+        const std::filesystem::path type_dir = product_root / "items" / item_type;
+        directories.push_back(type_dir);
+        directories.push_back(type_dir / "0000");
+    }
+    return directories;
+}
+
+std::vector<std::filesystem::path> planned_scaffold_files(const std::filesystem::path& project_root) {
+    return {
+        project_root / ".kano" / "backlog_config.toml",
+        project_root / ".gitignore",
+    };
+}
+
+void validate_prefix_collision(
+    const std::filesystem::path& config_path,
+    const std::string& product,
+    const std::string& prefix
+) {
+    if (!std::filesystem::exists(config_path)) {
+        return;
+    }
+
+    const auto config = kano::backlog_core::ProjectConfig::load_from_toml(config_path);
+    if (!config) {
+        return;
+    }
+
+    for (const auto& [configured_product, definition] : config->products) {
+        const std::string configured_prefix = trim(definition.prefix);
+        if (configured_product == product || configured_prefix.empty()) {
+            continue;
+        }
+        if (normalize_prefix(configured_prefix) == prefix) {
+            throw std::runtime_error(
+                "Product prefix collision: " + prefix + " is already configured for product " + configured_product
+            );
+        }
+    }
 }
 
 std::string to_posix(const std::filesystem::path& path) {
@@ -353,49 +427,44 @@ OrchestrationOps::InitResult OrchestrationOps::initialize_backlog(const InitOpti
     const std::filesystem::path project_root = resolve_project_root(backlog_root);
     const std::filesystem::path products_root = backlog_root / "products";
     const std::filesystem::path product_root = products_root / product;
+    const std::filesystem::path config_path = project_root / ".kano" / "backlog_config.toml";
 
     if (std::filesystem::exists(product_root) && !options.force) {
         throw std::runtime_error("Product backlog already exists: " + product_root.string() + " (use --force to update config/scaffold)");
-    }
-
-    InitResult result;
-    result.project_root = project_root;
-    result.backlog_root = backlog_root;
-    result.product_root = product_root;
-
-    if (ensure_dir(backlog_root)) result.created_paths.push_back(backlog_root);
-    if (ensure_dir(products_root)) result.created_paths.push_back(products_root);
-    if (ensure_dir(product_root)) result.created_paths.push_back(product_root);
-
-    const std::vector<std::filesystem::path> scaffold_dirs = {
-        product_root / "decisions",
-        product_root / "views",
-        product_root / "items",
-        product_root / "_meta",
-        product_root / "artifacts",
-        backlog_root / ".cache" / "index",
-    };
-    for (const auto& dir : scaffold_dirs) {
-        if (ensure_dir(dir)) result.created_paths.push_back(dir);
-    }
-    for (const char* item_type : kItemTypes) {
-        const std::filesystem::path type_dir = product_root / "items" / item_type;
-        const std::filesystem::path bucket_dir = type_dir / "0000";
-        if (ensure_dir(type_dir)) result.created_paths.push_back(type_dir);
-        if (ensure_dir(bucket_dir)) result.created_paths.push_back(bucket_dir);
     }
 
     std::string actual_product_name = options.product_name ? trim(*options.product_name) : product;
     if (actual_product_name.empty()) {
         throw std::runtime_error("Product name cannot be empty");
     }
-    std::string actual_prefix = options.prefix ? trim(*options.prefix) : derive_prefix(actual_product_name);
-    if (actual_prefix.empty()) {
-        throw std::runtime_error("Product prefix cannot be empty");
+    const std::string actual_prefix = normalize_prefix(options.prefix ? *options.prefix : derive_prefix(actual_product_name));
+
+    validate_prefix_collision(config_path, product, actual_prefix);
+
+    InitResult result;
+    result.status = options.dry_run ? "dry-run" : "initialized";
+    result.product = product;
+    result.product_name = actual_product_name;
+    result.prefix = actual_prefix;
+    result.dry_run = options.dry_run;
+    result.project_root = project_root;
+    result.backlog_root = backlog_root;
+    result.product_root = product_root;
+    result.config_path = config_path;
+    result.planned_directories = planned_scaffold_directories(backlog_root, products_root, product_root);
+    result.planned_files = planned_scaffold_files(project_root);
+
+    if (options.dry_run) {
+        return result;
     }
-    std::transform(actual_prefix.begin(), actual_prefix.end(), actual_prefix.begin(), [](unsigned char ch) {
-        return static_cast<char>(std::toupper(ch));
-    });
+
+    if (ensure_dir(backlog_root)) result.created_paths.push_back(backlog_root);
+    if (ensure_dir(products_root)) result.created_paths.push_back(products_root);
+    if (ensure_dir(product_root)) result.created_paths.push_back(product_root);
+
+    for (const auto& dir : result.planned_directories) {
+        if (ensure_dir(dir)) result.created_paths.push_back(dir);
+    }
 
     bool config_created = false;
     result.config_path = upsert_project_config(

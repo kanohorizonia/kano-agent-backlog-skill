@@ -246,6 +246,76 @@ int main(int argc, char** argv) {
         const auto original_cwd = std::filesystem::current_path();
         std::filesystem::current_path(temp_root);
 
+        const auto kfg_dry_run_output = temp_root / "admin-init-kfg-dry-run.json";
+        expect_command_capture_success(
+            run_command_capture(binary, {
+                "admin", "init",
+                "--product", "kano-forge-skill",
+                "--agent", "tester",
+                "--product-name", "Kano Forge Skill",
+                "--prefix", " kfg ",
+                "--dry-run",
+                "--skip-refresh-views"
+            }, kfg_dry_run_output),
+            kfg_dry_run_output,
+            "admin init dry-run failed"
+        );
+        const auto kfg_dry_run_text = read_text(kfg_dry_run_output);
+        expect(kfg_dry_run_text.find("\"status\" : \"dry-run\"") != std::string::npos, "admin init dry-run did not report dry-run status");
+        expect(kfg_dry_run_text.find("\"dry_run\" : true") != std::string::npos, "admin init dry-run did not report dry_run=true");
+        expect(kfg_dry_run_text.find("kano-forge-skill") != std::string::npos, "admin init dry-run did not plan kano-forge-skill paths");
+        expect(kfg_dry_run_text.find("KFG") != std::string::npos, "admin init dry-run did not normalize KFG prefix");
+        expect(kfg_dry_run_text.find("planned_paths") != std::string::npos, "admin init dry-run did not emit planned paths");
+        expect(!std::filesystem::exists(temp_root / "_kano"), "admin init dry-run created _kano");
+        expect(!std::filesystem::exists(temp_root / ".kano"), "admin init dry-run created .kano");
+        expect(!std::filesystem::exists(temp_root / ".gitignore"), "admin init dry-run created .gitignore");
+
+        expect(run_command(binary, {
+            "admin", "init",
+            "--product", "kano-forge-skill",
+            "--agent", "tester",
+            "--product-name", "Kano Forge Skill",
+            "--prefix", "KFG",
+            "--skip-refresh-views"
+        }) == 0, "admin init KFG registration failed");
+        const auto kfg_product_root = temp_root / "_kano" / "backlog" / "products" / "kano-forge-skill";
+        expect(std::filesystem::exists(kfg_product_root / "decisions"), "admin init KFG did not create decisions directory");
+        expect(read_text(temp_root / ".kano" / "backlog_config.toml").find("prefix = \"KFG\"") != std::string::npos, "admin init KFG did not register normalized prefix");
+
+        const auto kfg_collision_output = temp_root / "admin-init-kfg-collision.txt";
+        expect_command_capture_failure(
+            run_command_capture(binary, {
+                "admin", "init",
+                "--product", "another-forge-skill",
+                "--agent", "tester",
+                "--product-name", "Another Forge Skill",
+                "--prefix", "KFG",
+                "--skip-refresh-views"
+            }, kfg_collision_output),
+            kfg_collision_output,
+            "admin init should reject colliding product prefix",
+            "Product prefix collision"
+        );
+        expect(!std::filesystem::exists(temp_root / "_kano" / "backlog" / "products" / "another-forge-skill"), "prefix collision created the other product directory");
+        expect(read_text(temp_root / ".kano" / "backlog_config.toml").find("[products.another-forge-skill]") == std::string::npos, "prefix collision registered the other product");
+
+        for (const auto& bad_prefix : std::vector<std::string>{"K/FG", "K\\FG", "..", "K.FG", "K FG", "1FG", "KFGKFGKFGKFGKFGKFG"}) {
+            const auto invalid_prefix_output = temp_root / ("admin-init-invalid-prefix-" + std::to_string(std::hash<std::string>{}(bad_prefix)) + ".txt");
+            expect_command_capture_failure(
+                run_command_capture(binary, {
+                    "admin", "init",
+                    "--product", "invalid-prefix-product",
+                    "--agent", "tester",
+                    "--prefix", bad_prefix,
+                    "--skip-refresh-views"
+                }, invalid_prefix_output),
+                invalid_prefix_output,
+                "admin init should reject unsafe product prefix",
+                "Product prefix must be 2-16 ASCII letters or digits"
+            );
+            expect(!std::filesystem::exists(temp_root / "_kano" / "backlog" / "products" / "invalid-prefix-product"), "invalid prefix created product directory");
+        }
+
         expect(run_command(binary, {"admin", "init", "--product", "kano-ai-3d-asset-skill", "--agent", "tester", "--skip-refresh-views"}) == 0, "admin init command failed");
         const auto duplicate_admin_init_output = temp_root / "admin-init-duplicate.txt";
         expect_command_capture_failure(

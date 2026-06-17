@@ -93,6 +93,15 @@ const char* kIndexHtml = R"HTML(
     .kanban { display: grid; grid-template-columns: repeat(5, minmax(180px, 1fr)); gap: 10px; }
     .lane { background: #fff; border: 1px solid #dde3f0; border-radius: 10px; padding: 8px; min-height: 140px; }
     .card { border: 1px solid #cfd9ea; border-radius: 8px; padding: 8px; margin-bottom: 8px; background: #fcfdff; }
+    .review-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+    .review-lane { border: 1px solid #d8e1f0; border-radius: 8px; padding: 8px; background: #fff; min-height: 120px; }
+    .evidence-row { display: grid; grid-template-columns: 130px 90px minmax(0, 1fr); gap: 8px; padding: 4px 0; border-bottom: 1px solid #edf1f7; }
+    .pill { display: inline-block; border: 1px solid #cfd9ea; border-radius: 999px; padding: 2px 7px; font-size: 12px; background: #f8fbff; }
+    .pill.passed { border-color: #86c48b; background: #f1fbf2; color: #245c2a; }
+    .pill.failed { border-color: #db8a8a; background: #fff4f4; color: #8a2525; }
+    .pill.blocked { border-color: #d5b15d; background: #fff9e8; color: #7a5610; }
+    .pill.missing { border-color: #c5ccd9; background: #f4f6fa; color: #4f5a6e; }
+    .text-input-wide { width: min(760px, 100%); }
     .tree ul { list-style: none; padding-left: 18px; margin: 0; }
     .tree li { margin: 2px 0; }
     .tree details { margin: 2px 0; }
@@ -177,6 +186,10 @@ const char* kIndexHtml = R"HTML(
       <button id="tab-tree" class="tab-btn active" data-tab="tree">Tree</button>
       <button id="tab-kanban" class="tab-btn" data-tab="kanban">Kanban</button>
       <button id="tab-context" class="tab-btn" data-tab="context">Context</button>
+      <button id="tab-review" class="tab-btn" data-tab="review">Review</button>
+      <button id="tab-graph" class="tab-btn" data-tab="graph">Graph</button>
+      <button id="tab-runs" class="tab-btn" data-tab="runs">Runs</button>
+      <button id="tab-command" class="tab-btn" data-tab="command">Command</button>
     </div>
   </div>
 
@@ -198,6 +211,33 @@ const char* kIndexHtml = R"HTML(
     <h3>Context (ADR / Topic / Workset)</h3>
     <div id="context-summary" class="muted" style="margin-bottom:8px;"></div>
     <div id="context-list"></div>
+  </div>
+
+  <div id="page-review" class="panel page">
+    <h3>Human Review Inbox</h3>
+    <div id="saved-views" class="row" style="align-items:flex-start; flex-wrap:wrap;"></div>
+    <div id="review-inbox" class="review-grid"></div>
+  </div>
+
+  <div id="page-graph" class="panel page">
+    <h3>Dependency Graph</h3>
+    <div id="graph-summary" class="muted" style="margin-bottom:8px;"></div>
+    <div id="graph-list"></div>
+  </div>
+
+  <div id="page-runs" class="panel page">
+    <h3>Agent Run Board</h3>
+    <div id="runs-summary" class="muted" style="margin-bottom:8px;"></div>
+    <div id="runs-list"></div>
+  </div>
+
+  <div id="page-command" class="panel page">
+    <h3>Command Palette Preview</h3>
+    <div class="row">
+      <input id="command-input" class="text-input-wide" placeholder="Example: show ready tasks" />
+      <button id="command-preview" class="btn">Preview</button>
+    </div>
+    <div id="command-result"></div>
   </div>
     </main>
   </div>
@@ -567,6 +607,47 @@ R"HTML(    function typeIcon(type) {
       return map[type] || '•';
     }
 
+    function pill(status) {
+      const value = String(status || 'unknown');
+      const cls = value === 'passed' ? 'passed' :
+        value === 'failed' ? 'failed' :
+        value === 'blocked' ? 'blocked' :
+        (value === 'not-run' || value === 'unknown' ? 'missing' : '');
+      return `<span class="pill ${cls}">${esc(value)}</span>`;
+    }
+
+    function renderItemCard(item) {
+      return `<div class="card"><div><code>${esc(item.id || '')}</code></div><div><a href="#" class="item-link" data-item-id="${escAttr(item.id || '')}" data-item-product="${escAttr(item.product || '')}">${esc(item.title || item.id || '')}</a></div><div class="muted">${esc(renderMeta(item))}</div></div>`;
+    }
+
+    function bindItemLinks(selector) {
+      document.querySelectorAll(`${selector} .item-link[data-item-id]`).forEach((link) => {
+        link.addEventListener('click', async (event) => {
+          event.preventDefault();
+          const id = link.getAttribute('data-item-id');
+          const product = link.getAttribute('data-item-product') || '';
+          if (!id) return;
+          await openItemModal(id, product);
+        });
+      });
+    }
+
+    function renderEvidenceMatrix(evidence) {
+      const matrix = evidence?.validation_matrix || [];
+      const rows = matrix.map((check) =>
+        `<div class="evidence-row"><strong>${esc(check.name || '')}</strong><span>${pill(check.status)}</span><span class="muted">${esc(check.evidence || '')}</span></div>`
+      ).join('');
+      const missing = (evidence?.missing || []).map((x) => `<span class="pill missing">${esc(x)}</span>`).join(' ');
+      return `<div class="panel" style="margin:0 0 12px 0;"><h4>Evidence</h4><div class="muted">Score: ${esc(String(evidence?.score || 0))} ${missing ? `| Missing: ${missing}` : ''}</div>${rows || '<div class="muted">No validation matrix</div>'}</div>`;
+    }
+
+    function renderTimeline(events) {
+      const rows = (events || []).slice(0, 12).map((event) =>
+        `<div class="card"><div><code>${esc(event.timestamp || '')}</code> ${pill(event.kind || 'worklog')}</div><div>${esc(event.text || '')}</div><div class="muted">${esc(event.agent || 'unknown')}</div></div>`
+      ).join('');
+      return `<div class="panel" style="margin:0 0 12px 0;"><h4>Timeline</h4>${rows || '<div class="muted">No work-order timeline events</div>'}</div>`;
+    }
+
     function renderTreeNode(node, depth = 0) {
       const children = node.children || [];
       const nodeKey = treeNodeKey(node);
@@ -622,8 +703,12 @@ R"HTML(    function typeIcon(type) {
         openModal(itemId, '<div class="muted">Item not found.</div>');
         return;
       }
+      const evidenceResult = await getJson(`/api/review/evidence/${encodeURIComponent(itemId)}?product=${encodeURIComponent(item.product || productScope)}`);
+      const timelineResult = await getJson(`/api/review/timeline?item=${encodeURIComponent(itemId)}&product=${encodeURIComponent(item.product || productScope)}&limit=200`);
+      const evidence = evidenceResult?.data?.evidence || {};
+      const timeline = timelineResult?.data?.events || [];
       const contentHtml = renderMarkdownWithObsidian(item.content || '(no content)');
-      const body = `<div class="row"><code>${esc(item.id)}</code><span class="muted">${esc(renderMeta(item))}</span></div><div class="muted" style="margin-bottom:8px;">${esc(item.path || '')}</div><div class="md-view">${contentHtml}</div>`;
+      const body = `<div class="row"><code>${esc(item.id)}</code><span class="muted">${esc(renderMeta(item))}</span></div><div class="muted" style="margin-bottom:8px;">${esc(item.path || '')}</div>${renderEvidenceMatrix(evidence)}${renderTimeline(timeline)}<div class="md-view">${contentHtml}</div>`;
       openModal(item.title || item.id, body);
 
       document.querySelectorAll('#item-modal-body .obs-wikilink[data-item-id]').forEach((link) => {
@@ -789,17 +874,104 @@ R"HTML(
       });
     }
 
+    async function loadReview() {
+      const viewsResult = await getJson('/api/review/saved-views');
+      const views = viewsResult?.data?.views || [];
+      document.getElementById('saved-views').innerHTML = views.map((view) =>
+        `<button class="btn" data-saved-view="${escAttr(view.id)}">${esc(view.title)}</button>`
+      ).join('');
+
+      const inboxResult = await getJson(`/api/review/inbox?${queryString()}`);
+      const lanesData = inboxResult?.data?.lanes || {};
+      const laneNames = Object.keys(lanesData);
+      document.getElementById('review-inbox').innerHTML = laneNames.map((lane) => {
+        const bundles = lanesData[lane] || [];
+        const cards = bundles.map((bundle) => renderItemCard(bundle.item || {})).join('');
+        return `<div class="review-lane"><strong>${esc(lane)}</strong><div class="muted">${bundles.length} item(s)</div>${cards || '<div class="muted">No items</div>'}</div>`;
+      }).join('');
+      bindItemLinks('#review-inbox');
+
+      document.querySelectorAll('#saved-views [data-saved-view]').forEach((button) => {
+        button.addEventListener('click', async () => {
+          const viewId = button.getAttribute('data-saved-view');
+          const result = await getJson(`/api/review/saved-views/${encodeURIComponent(viewId)}?${queryString()}`);
+          const items = result?.data?.result?.items || [];
+          document.getElementById('review-inbox').innerHTML =
+            `<div class="review-lane"><strong>${esc(result?.data?.view?.title || viewId)}</strong><div class="muted">${items.length} item(s)</div>${items.map(renderItemCard).join('') || '<div class="muted">No items</div>'}</div>`;
+          bindItemLinks('#review-inbox');
+        });
+      });
+    }
+
+    async function loadGraph() {
+      const result = await getJson(`/api/review/graph?${queryString()}`);
+      const data = result?.data || {};
+      const nodes = data.nodes || [];
+      const edges = data.edges || [];
+      document.getElementById('graph-summary').textContent =
+        `${nodes.length} node(s), ${edges.length} edge(s), ${(data.missing_nodes || []).length} missing node(s)`;
+      document.getElementById('graph-list').innerHTML = [
+        `<h4>Edges</h4>`,
+        ...(edges.slice(0, 80).map((edge) =>
+          `<div class="card"><code>${esc(edge.from || '')}</code> -> <code>${esc(edge.to || '')}</code><div class="muted">${esc(edge.kind || '')}</div></div>`
+        )),
+        `<h4>Nodes</h4>`,
+        ...(nodes.slice(0, 80).map((node) =>
+          `<div class="card"><code>${esc(node.id || '')}</code><div>${esc(node.label || '')}</div><div class="muted">${esc(node.kind || '')} ${esc(node.state || '')}</div></div>`
+        )),
+      ].join('');
+    }
+
+    async function loadRuns() {
+      const result = await getJson(`/api/review/runs?${queryString()}`);
+      const runs = result?.data?.runs || [];
+      document.getElementById('runs-summary').textContent = `${runs.length} run(s)`;
+      document.getElementById('runs-list').innerHTML = runs.map((run) =>
+        `<div class="card"><div><code>${esc(run.item_id || '')}</code> ${pill(run.state)}</div><div>${esc(run.agent || '')}</div><div class="muted">${esc(run.latest_event?.text || '')}</div></div>`
+      ).join('') || '<div class="muted">No run records</div>';
+    }
+
+    async function loadCommandPreview() {
+      const input = document.getElementById('command-input').value.trim();
+      if (!input) {
+        document.getElementById('command-result').innerHTML = '<div class="muted">Enter a supported read-only command.</div>';
+        return;
+      }
+      const result = await getJson(`/api/review/command-preview?q=${encodeURIComponent(input)}&${queryString()}`);
+      if (!result.ok) {
+        document.getElementById('command-result').innerHTML = `<div class="muted">${esc(result?.data?.error || 'Unsupported command')}</div>`;
+        return;
+      }
+      const data = result.data || {};
+      const items = data.preview?.items || [];
+      document.getElementById('command-result').innerHTML =
+        `<div class="card"><strong>KOBQL</strong><div><code>${esc(data.generated_kobql || '')}</code></div><div class="muted">Read-only preview, ${items.length} visible item(s)</div></div>${items.map(renderItemCard).join('')}`;
+      bindItemLinks('#command-result');
+    }
+
     function setActiveTab(tab) {
       state.activeTab = tab;
       const isTree = tab === 'tree';
       const isKanban = tab === 'kanban';
       const isContext = tab === 'context';
+      const isReview = tab === 'review';
+      const isGraph = tab === 'graph';
+      const isRuns = tab === 'runs';
+      const isCommand = tab === 'command';
       document.getElementById('tab-tree').classList.toggle('active', isTree);
       document.getElementById('tab-kanban').classList.toggle('active', isKanban);
       document.getElementById('tab-context').classList.toggle('active', isContext);
+      document.getElementById('tab-review').classList.toggle('active', isReview);
+      document.getElementById('tab-graph').classList.toggle('active', isGraph);
+      document.getElementById('tab-runs').classList.toggle('active', isRuns);
+      document.getElementById('tab-command').classList.toggle('active', isCommand);
       document.getElementById('page-tree').classList.toggle('active', isTree);
       document.getElementById('page-kanban').classList.toggle('active', isKanban);
       document.getElementById('page-context').classList.toggle('active', isContext);
+      document.getElementById('page-review').classList.toggle('active', isReview);
+      document.getElementById('page-graph').classList.toggle('active', isGraph);
+      document.getElementById('page-runs').classList.toggle('active', isRuns);
+      document.getElementById('page-command').classList.toggle('active', isCommand);
     }
 
 )HTML"
@@ -810,7 +982,7 @@ R"HTML(
         return;
       }
       document.getElementById('status').textContent = 'Loading...';
-      await Promise.all([loadTree(), loadKanban(), loadContext()]);
+      await Promise.all([loadTree(), loadKanban(), loadContext(), loadReview(), loadGraph(), loadRuns()]);
       document.getElementById('status').textContent = `Loaded ${productScopeLabel()}`;
     }
 
@@ -934,6 +1106,14 @@ R"HTML(
       const refreshScope = products.length === 1 ? products[0] : 'all';
       await getJson(`/api/refresh?product=${encodeURIComponent(refreshScope)}`);
       await refreshAll();
+    });
+
+    document.getElementById('command-preview').addEventListener('click', loadCommandPreview);
+    document.getElementById('command-input').addEventListener('keydown', async (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        await loadCommandPreview();
+      }
     });
 
     document.getElementById('expand-all').addEventListener('click', () => {

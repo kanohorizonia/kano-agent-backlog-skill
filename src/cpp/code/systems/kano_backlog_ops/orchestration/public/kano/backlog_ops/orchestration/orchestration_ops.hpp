@@ -22,14 +22,22 @@ public:
         std::optional<std::string> product_name;
         std::optional<std::string> prefix;
         bool force = false;
+        bool dry_run = false;
         bool refresh_views = true;
     };
 
     struct InitResult {
+        std::string status;
+        std::string product;
+        std::string product_name;
+        std::string prefix;
+        bool dry_run = false;
         std::filesystem::path project_root;
         std::filesystem::path backlog_root;
         std::filesystem::path product_root;
         std::filesystem::path config_path;
+        std::vector<std::filesystem::path> planned_directories;
+        std::vector<std::filesystem::path> planned_files;
         std::vector<std::filesystem::path> created_paths;
         std::vector<std::filesystem::path> views_refreshed;
     };

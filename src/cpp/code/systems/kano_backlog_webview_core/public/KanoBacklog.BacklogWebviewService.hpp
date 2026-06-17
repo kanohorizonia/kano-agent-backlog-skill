@@ -53,6 +53,29 @@ class BacklogWebviewService {
   Json::Value BuildKanban(const std::string& product,
                           bool forceRefresh = false);
   Json::Value BuildKanban(const ItemQueryOptions& options);
+  Json::Value ListSavedViews();
+  Json::Value RunSavedView(const std::string& viewId,
+                           const ItemQueryOptions& options);
+  Json::Value RunKobql(const std::string& query,
+                       const ItemQueryOptions& options);
+  Json::Value PreviewCommand(const std::string& phrase,
+                             const ItemQueryOptions& options);
+  Json::Value BuildReviewInbox(const ItemQueryOptions& options);
+  Json::Value GetEvidenceDetail(const std::string& product,
+                                const std::string& id,
+                                bool forceRefresh = false);
+  Json::Value BuildTopicHome(const std::string& topic,
+                             const ItemQueryOptions& options);
+  Json::Value BuildDependencyGraph(const ItemQueryOptions& options,
+                                   const std::string& itemId = "",
+                                   const std::string& topic = "");
+  Json::Value BuildWorkOrderTimeline(const ItemQueryOptions& options,
+                                     const std::string& itemId = "",
+                                     const std::string& topic = "");
+  Json::Value BuildAgentRunBoard(const ItemQueryOptions& options,
+                                 const std::string& agent = "",
+                                 const std::string& runState = "",
+                                 size_t staleDays = 3);
   Json::Value Refresh(const std::string& product);
   Json::Value GetWorkspaceInfo() const;
   Json::Value SwitchWorkspace(const std::string& inputPath);

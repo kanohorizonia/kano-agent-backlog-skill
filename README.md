@@ -39,6 +39,15 @@ The repo-local executable contract is the native C++ CLI. The `scripts/kob` and 
 - Python package publishing is retired for this milestone
 - Pre-1.0, so schema, CLI details, and public docs can still change
 
+## Agent-skill release acceptance gate
+
+These gates are shared by Kano agent-skill releases, not just this repository:
+
+1. A version is not accepted as released until a non-draft GitHub Release exists for the version tag with downloadable, installable platform artifacts, integrity metadata, and an artifact index from the matching Jenkins `Build_CI` source/version.
+2. The repository README and public GitHub Pages site must both link the release downloads and describe manual installation plus winget, Homebrew, and apt channel status for each supported platform.
+
+Internal CI archives, dry-run `Release_Publish` runs, or staged payloads are review evidence, but they do not close the public release gate without those two public surfaces.
+
 ## Install from a release
 
 Download packages from the [latest GitHub Release](https://github.com/kanohorizonia/kano-agent-backlog-skill/releases/latest). For the 0.0.4 line, the expected release tag is [`v0.0.4`](https://github.com/kanohorizonia/kano-agent-backlog-skill/releases/tag/v0.0.4).

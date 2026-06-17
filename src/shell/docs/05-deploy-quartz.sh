@@ -12,6 +12,38 @@ SCRIPT_DIR_FOR_CONFIG="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_FILE="$SCRIPT_DIR_FOR_CONFIG/config/build.json"
 SKILL_REPO=$(grep -A6 '"repositories"' "$CONFIG_FILE" | grep -o '"skill"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d'"' -f4)
 SITE_URL=$(grep -A6 '"deployment"' "$CONFIG_FILE" | grep -o '"site_url"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d'"' -f4)
+SKILL_REPO="${KANO_GITHUB_PAGES_REPO_URL:-$SKILL_REPO}"
+PAGES_BRANCH="${KANO_GITHUB_PAGES_BRANCH:-gh-pages}"
+
+GIT_ASKPASS_FILE=""
+cleanup_git_askpass() {
+  if [[ -n "$GIT_ASKPASS_FILE" && -f "$GIT_ASKPASS_FILE" ]]; then
+    rm -f "$GIT_ASKPASS_FILE"
+  fi
+}
+trap cleanup_git_askpass EXIT
+
+setup_git_noninteractive_auth() {
+  export GIT_TERMINAL_PROMPT=0
+  export GCM_INTERACTIVE=never
+  if [[ -n "${KANO_GITHUB_PAGES_REPO_TOKEN:-}" ]]; then
+    GIT_ASKPASS_FILE="$(mktemp)"
+    cat > "$GIT_ASKPASS_FILE" <<'SH'
+#!/bin/sh
+case "$1" in
+  *Username*|*username*)
+    printf '%s\n' "${KANO_GITHUB_PAGES_REPO_USER:-x-access-token}"
+    ;;
+  *)
+    printf '%s\n' "$KANO_GITHUB_PAGES_REPO_TOKEN"
+    ;;
+esac
+SH
+    chmod 700 "$GIT_ASKPASS_FILE"
+    export GIT_ASKPASS="$GIT_ASKPASS_FILE"
+    export SSH_ASKPASS="$GIT_ASKPASS_FILE"
+  fi
+}
 
 # Parse arguments or auto-detect paths
 if [ $# -ge 2 ]; then
@@ -40,16 +72,17 @@ fi
 if [ ! -d "$DEPLOY_DIR" ]; then
   echo "Setting up gh-pages branch..."
   mkdir -p "$(dirname "$DEPLOY_DIR")"
+  setup_git_noninteractive_auth
   
   # Try to clone existing gh-pages branch, if it doesn't exist, create it
-   if git ls-remote --heads "$SKILL_REPO" gh-pages | grep -q gh-pages; then
-     echo "Cloning existing gh-pages branch..."
-    git clone --branch gh-pages "$SKILL_REPO" "$DEPLOY_DIR"
+   if git ls-remote --heads "$SKILL_REPO" "$PAGES_BRANCH" | grep -q "$PAGES_BRANCH"; then
+     echo "Cloning existing $PAGES_BRANCH branch..."
+    git clone --branch "$PAGES_BRANCH" "$SKILL_REPO" "$DEPLOY_DIR"
    else
-     echo "Creating new gh-pages branch..."
+     echo "Creating new $PAGES_BRANCH branch..."
     git clone "$SKILL_REPO" "$DEPLOY_DIR"
     cd "$DEPLOY_DIR"
-    git checkout --orphan gh-pages
+    git checkout --orphan "$PAGES_BRANCH"
     git rm -rf .
     echo "# Documentation Site" > README.md
     git add README.md

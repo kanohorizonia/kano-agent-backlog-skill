@@ -2,6 +2,7 @@
   "projectName": "kano-agent-backlog-skill",
   "skillName": "kano-agent-backlog-skill",
   "bootstrapAgentLabel": "lightweight",
+  "releaseAgentLabel": "pc-dorgonchang-rtx3090.local",
   "githubActionsDispatchAgentLabel": "macbuilder.local || PC-TiffanyHo",
   "windowsAgentLabel": "windows && lightweight",
   "linuxAgentLabel": "linux && lightweight",

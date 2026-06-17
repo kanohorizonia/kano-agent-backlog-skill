@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?ifndef UpgradeCode ?>
+<?define UpgradeCode = "FE2FB0F2-0844-4A7F-A98C-F10E6710D29D" ?>
+<?endif?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+  <?include "Fragments/Directories.wxs" ?>
+  <?include "Fragments/Components.wxs" ?>
+  <?include "Fragments/Features.wxs" ?>
+  <?include "Fragments/Prerequisites.wxs" ?>
+
+  <Package
+    Name="Kano Agent Backlog Skill"
+    Manufacturer="Kano Horizonia"
+    Version="$(var.ProductVersion)"
+    UpgradeCode="$(var.UpgradeCode)"
+    Scope="perUser"
+    Language="1033"
+    InstallerVersion="500"
+    Compressed="yes">
+    <SummaryInformation
+      Description="Per-user MSI for kano-agent-backlog-skill under %USERPROFILE%\.agents\skills\kano-agent-backlog-skill."
+      Manufacturer="Kano Horizonia" />
+
+    <util:QueryWindowsDirectories />
+
+    <MajorUpgrade
+      DowngradeErrorMessage="A newer version of Kano Agent Backlog Skill is already installed."
+      Schedule="afterInstallInitialize" />
+
+    <Launch
+      Condition="Installed OR (NOT KANO_INSTALLROOT_GITDIR_HEAD AND NOT KANO_INSTALLROOT_GITFILE)"
+      Message="Kano Agent Backlog Skill detected an existing git/manual checkout at %USERPROFILE%\.agents\skills\kano-agent-backlog-skill. Remove or relocate that checkout before installing the MSI-managed copy." />
+
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <FeatureRef Id="CoreFiles" />
+    <FeatureRef Id="ShellIntegration" />
+  </Package>
+</Wix>

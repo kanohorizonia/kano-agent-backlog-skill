@@ -14,6 +14,7 @@ ARTIFACT_DIR="${4:-${KANO_PACKAGE_ROOT:-artifacts/packages}}"
 OUTPUT_DIR="${5:-${KANO_PACKAGE_MANAGER_RECIPE_ROOT:-Release/package-managers}/homebrew}"
 FORMULA_NAME="${KANO_HOMEBREW_FORMULA_NAME:-kano-backlog}"
 ASSET_BASE_URL="${KANO_RELEASE_ASSET_BASE_URL:-https://github.com/${REPO_SLUG}/releases/download/${TAG_NAME}}"
+PUBLIC_STRIP_PREFIXES="${KANO_PUBLIC_RELEASE_ASSET_STRIP_PREFIXES:-}"
 
 calc_sha256() {
   local path="$1"
@@ -60,6 +61,26 @@ formula_class_name() {
   printf '%s\n' "${result:-KanoBacklog}"
 }
 
+public_asset_name() {
+  local name="$1"
+  local prefix
+  IFS=',' read -r -a prefixes <<< "$PUBLIC_STRIP_PREFIXES"
+  for prefix in "${prefixes[@]}"; do
+    prefix="${prefix#"${prefix%%[![:space:]]*}"}"
+    prefix="${prefix%"${prefix##*[![:space:]]}"}"
+    [ -n "$prefix" ] || continue
+    case "${name,,}" in
+      "${prefix,,}"*)
+        name="${name:${#prefix}}"
+        while [[ "$name" == [-_.]* ]]; do
+          name="${name:1}"
+        done
+        ;;
+    esac
+  done
+  printf '%s\n' "$name"
+}
+
 mkdir -p "$OUTPUT_DIR"
 ARM64_PATH="$(find_first '*macos-arm64*.tar.gz' '*mac-arm64*.tar.gz' '*darwin-arm64*.tar.gz' || true)"
 X64_PATH="$(find_first '*macos-x64*.tar.gz' '*macos-amd64*.tar.gz' '*mac-x64*.tar.gz' '*darwin-x64*.tar.gz' || true)"
@@ -104,7 +125,7 @@ EOF
 write_url_block() {
   local path="$1"
   local file sha
-  file="$(basename "$path")"
+  file="$(public_asset_name "$(basename "$path")")"
   sha="$(calc_sha256 "$path")"
   cat >> "$FORMULA_FILE" <<EOF
   url "${ASSET_BASE_URL%/}/${file}"
@@ -114,8 +135,8 @@ EOF
 
 write_arch_url_block() {
   local arm_file x64_file arm_sha x64_sha
-  arm_file="$(basename "$ARM64_PATH")"
-  x64_file="$(basename "$X64_PATH")"
+  arm_file="$(public_asset_name "$(basename "$ARM64_PATH")")"
+  x64_file="$(public_asset_name "$(basename "$X64_PATH")")"
   arm_sha="$(calc_sha256 "$ARM64_PATH")"
   x64_sha="$(calc_sha256 "$X64_PATH")"
   cat >> "$FORMULA_FILE" <<EOF

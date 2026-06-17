@@ -1,0 +1,28 @@
+<Include xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Fragment>
+    <StandardDirectory Id="TARGETDIR">
+      <Directory Id="KanoUserProfile" Name=".">
+        <Directory Id="KanoAgentsDir" Name=".agents">
+          <Directory Id="KanoSkillsDir" Name="skills">
+            <Directory Id="KanoSkillRoot" Name="kano-agent-backlog-skill" ComponentGuidGenerationSeed="EDF88ADF-5006-4ECF-8797-97BBD33B2CCA">
+              <Directory Id="KanoAssetsDir" Name="assets" />
+              <Directory Id="KanoBinDir" Name="bin" />
+              <Directory Id="KanoDocsDir" Name="docs" />
+              <Directory Id="KanoExamplesDir" Name="examples" />
+              <Directory Id="KanoProfilesDir" Name="profiles" />
+              <Directory Id="KanoReferencesDir" Name="references" />
+              <Directory Id="KanoScriptsDir" Name="scripts" />
+              <Directory Id="KanoSrcDir" Name="src">
+                <Directory Id="KanoSrcShellDir" Name="shell" />
+              </Directory>
+              <Directory Id="KanoTemplatesDir" Name="templates" />
+              <Directory Id="KanoTypingsDir" Name="typings" />
+            </Directory>
+          </Directory>
+        </Directory>
+      </Directory>
+    </StandardDirectory>
+
+    <SetDirectory Id="KanoUserProfile" Value="[WIX_DIR_PROFILE]" />
+  </Fragment>
+</Include>

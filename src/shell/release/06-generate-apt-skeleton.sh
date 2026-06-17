@@ -15,6 +15,7 @@ REPO_SLUG="${KANO_GITHUB_REPOSITORY:-kanohorizonia/kano-agent-backlog-skill}"
 ASSET_BASE_URL="${KANO_RELEASE_ASSET_BASE_URL:-https://github.com/${REPO_SLUG}/releases/download/${TAG_NAME}}"
 OUTPUT_DIR="${OUTPUT_ROOT%/}/apt"
 PACKAGE_NAME="${KANO_APT_PACKAGE_NAME:-kano-backlog}"
+PUBLIC_STRIP_PREFIXES="${KANO_PUBLIC_RELEASE_ASSET_STRIP_PREFIXES:-}"
 
 calc_sha256() {
   local path="$1"
@@ -50,6 +51,26 @@ find_linux_archive() {
   done
 }
 
+public_asset_name() {
+  local name="$1"
+  local prefix
+  IFS=',' read -r -a prefixes <<< "$PUBLIC_STRIP_PREFIXES"
+  for prefix in "${prefixes[@]}"; do
+    prefix="${prefix#"${prefix%%[![:space:]]*}"}"
+    prefix="${prefix%"${prefix##*[![:space:]]}"}"
+    [ -n "$prefix" ] || continue
+    case "${name,,}" in
+      "${prefix,,}"*)
+        name="${name:${#prefix}}"
+        while [[ "$name" == [-_.]* ]]; do
+          name="${name:1}"
+        done
+        ;;
+    esac
+  done
+  printf '%s\n' "$name"
+}
+
 mkdir -p "$OUTPUT_DIR"
 LINUX_ARCHIVE="$(find_linux_archive || true)"
 
@@ -79,7 +100,7 @@ EOF
   exit 0
 fi
 
-ARCHIVE_FILE="$(basename "$LINUX_ARCHIVE")"
+ARCHIVE_FILE="$(public_asset_name "$(basename "$LINUX_ARCHIVE")")"
 ARCHIVE_SHA256="$(calc_sha256 "$LINUX_ARCHIVE")"
 ARCHIVE_URL="${ASSET_BASE_URL%/}/${ARCHIVE_FILE}"
 

@@ -1,0 +1,15 @@
+<Include xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Fragment>
+    <Property Id="KANO_INSTALLROOT_GITDIR_HEAD" Secure="yes">
+      <DirectorySearch Id="KanoBacklogInstallRootGitDirSearch" Path="[WIX_DIR_PROFILE]\.agents\skills\kano-agent-backlog-skill\.git" Depth="0">
+        <FileSearch Id="KanoBacklogInstallRootGitDirHeadSearch" Name="HEAD" />
+      </DirectorySearch>
+    </Property>
+
+    <Property Id="KANO_INSTALLROOT_GITFILE" Secure="yes">
+      <DirectorySearch Id="KanoBacklogInstallRootSearch" Path="[WIX_DIR_PROFILE]\.agents\skills\kano-agent-backlog-skill" Depth="0">
+        <FileSearch Id="KanoBacklogInstallRootGitFileSearch" Name=".git" />
+      </DirectorySearch>
+    </Property>
+  </Fragment>
+</Include>

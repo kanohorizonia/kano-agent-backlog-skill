@@ -15,6 +15,7 @@ OUTPUT_DIR="${5:-${KANO_PACKAGE_MANAGER_RECIPE_ROOT:-Release/package-managers}/w
 PACKAGE_ID="${KANO_WINGET_PACKAGE_ID:-KanoHorizonia.KanoBacklog}"
 PACKAGE_IDENTIFIER="${KANO_WINGET_PACKAGE_IDENTIFIER:-$PACKAGE_ID}"
 ASSET_BASE_URL="${KANO_RELEASE_ASSET_BASE_URL:-https://github.com/${REPO_SLUG}/releases/download/${TAG_NAME}}"
+PUBLIC_STRIP_PREFIXES="${KANO_PUBLIC_RELEASE_ASSET_STRIP_PREFIXES:-}"
 
 calc_sha256() {
   local path="$1"
@@ -50,6 +51,26 @@ find_windows_artifact() {
   done
 }
 
+public_asset_name() {
+  local name="$1"
+  local prefix
+  IFS=',' read -r -a prefixes <<< "$PUBLIC_STRIP_PREFIXES"
+  for prefix in "${prefixes[@]}"; do
+    prefix="${prefix#"${prefix%%[![:space:]]*}"}"
+    prefix="${prefix%"${prefix##*[![:space:]]}"}"
+    [ -n "$prefix" ] || continue
+    case "${name,,}" in
+      "${prefix,,}"*)
+        name="${name:${#prefix}}"
+        while [[ "$name" == [-_.]* ]]; do
+          name="${name:1}"
+        done
+        ;;
+    esac
+  done
+  printf '%s\n' "$name"
+}
+
 mkdir -p "$OUTPUT_DIR"
 ARTIFACT_PATH="$(find_windows_artifact || true)"
 
@@ -80,7 +101,7 @@ EOF
   exit 0
 fi
 
-ARTIFACT_FILE="$(basename "$ARTIFACT_PATH")"
+ARTIFACT_FILE="$(public_asset_name "$(basename "$ARTIFACT_PATH")")"
 ARTIFACT_SHA256="$(calc_sha256 "$ARTIFACT_PATH")"
 ARTIFACT_URL="${ASSET_BASE_URL%/}/${ARTIFACT_FILE}"
 

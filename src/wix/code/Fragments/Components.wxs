@@ -1,0 +1,128 @@
+<Include xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <?ifndef HasAssets ?>
+  <?define HasAssets = 0 ?>
+  <?endif?>
+  <?ifndef HasDocs ?>
+  <?define HasDocs = 0 ?>
+  <?endif?>
+  <?ifndef HasExamples ?>
+  <?define HasExamples = 0 ?>
+  <?endif?>
+  <?ifndef HasProfiles ?>
+  <?define HasProfiles = 0 ?>
+  <?endif?>
+  <?ifndef HasReferences ?>
+  <?define HasReferences = 0 ?>
+  <?endif?>
+  <?ifndef HasSrcShell ?>
+  <?define HasSrcShell = 0 ?>
+  <?endif?>
+  <?ifndef HasTemplates ?>
+  <?define HasTemplates = 0 ?>
+  <?endif?>
+  <?ifndef HasTypings ?>
+  <?define HasTypings = 0 ?>
+  <?endif?>
+
+  <Fragment>
+    <ComponentGroup Id="CoreRootComponents" Directory="KanoSkillRoot" Source="$(var.PayloadRoot)">
+      <Component Id="CreateKanoSkillRootComponent" Guid="*">
+        <CreateFolder />
+        <RemoveFolder Id="RemoveKanoSkillRootOnUninstall" Directory="KanoSkillRoot" On="uninstall" />
+        <RegistryValue
+          Root="HKCU"
+          Key="Software\Kano\AgentBacklogSkillInstaller"
+          Name="InstallRoot"
+          Type="string"
+          Value="[KanoSkillRoot]"
+          KeyPath="yes" />
+      </Component>
+
+      <Files Include="CHANGELOG.md" />
+      <Files Include="CONTRIBUTING.md" />
+      <Files Include="LICENSE" />
+      <Files Include="README.md" />
+      <Files Include="REFERENCE.md" />
+      <Files Include="SKILL.md" />
+      <Files Include="TESTING.md" />
+      <Files Include="VERSION" />
+      <Files Include="VERSIONING.md" />
+    </ComponentGroup>
+
+    <?if $(var.HasAssets) = 1 ?>
+    <ComponentGroup Id="CoreAssetsComponents" Directory="KanoAssetsDir" Source="$(var.PayloadRoot)\assets">
+      <Files Include="**" />
+    </ComponentGroup>
+    <?endif?>
+
+    <ComponentGroup Id="CoreBinComponents" Directory="KanoBinDir" Source="$(var.PayloadRoot)\bin">
+      <Files Include="**" />
+    </ComponentGroup>
+
+    <?if $(var.HasDocs) = 1 ?>
+    <ComponentGroup Id="CoreDocsComponents" Directory="KanoDocsDir" Source="$(var.PayloadRoot)\docs">
+      <Files Include="**" />
+    </ComponentGroup>
+    <?endif?>
+
+    <?if $(var.HasExamples) = 1 ?>
+    <ComponentGroup Id="CoreExamplesComponents" Directory="KanoExamplesDir" Source="$(var.PayloadRoot)\examples">
+      <Files Include="**" />
+    </ComponentGroup>
+    <?endif?>
+
+    <?if $(var.HasProfiles) = 1 ?>
+    <ComponentGroup Id="CoreProfilesComponents" Directory="KanoProfilesDir" Source="$(var.PayloadRoot)\profiles">
+      <Files Include="**" />
+    </ComponentGroup>
+    <?endif?>
+
+    <?if $(var.HasReferences) = 1 ?>
+    <ComponentGroup Id="CoreReferencesComponents" Directory="KanoReferencesDir" Source="$(var.PayloadRoot)\references">
+      <Files Include="**" />
+    </ComponentGroup>
+    <?endif?>
+
+    <ComponentGroup Id="CoreScriptsComponents" Directory="KanoScriptsDir" Source="$(var.PayloadRoot)\scripts">
+      <Files Include="**" />
+    </ComponentGroup>
+
+    <?if $(var.HasSrcShell) = 1 ?>
+    <ComponentGroup Id="CoreSrcShellComponents" Directory="KanoSrcShellDir" Source="$(var.PayloadRoot)\src\shell">
+      <Files Include="**" />
+    </ComponentGroup>
+    <?endif?>
+
+    <?if $(var.HasTemplates) = 1 ?>
+    <ComponentGroup Id="CoreTemplatesComponents" Directory="KanoTemplatesDir" Source="$(var.PayloadRoot)\templates">
+      <Files Include="**" />
+    </ComponentGroup>
+    <?endif?>
+
+    <?if $(var.HasTypings) = 1 ?>
+    <ComponentGroup Id="CoreTypingsComponents" Directory="KanoTypingsDir" Source="$(var.PayloadRoot)\typings">
+      <Files Include="**" />
+    </ComponentGroup>
+    <?endif?>
+
+    <ComponentGroup Id="ShellIntegrationComponents" Directory="KanoScriptsDir">
+      <Component Id="KanoBacklogScriptsPathComponent" Guid="*">
+        <RegistryValue
+          Root="HKCU"
+          Key="Software\Kano\AgentBacklogSkillInstaller"
+          Name="ShellIntegrationPath"
+          Type="integer"
+          Value="1"
+          KeyPath="yes" />
+        <Environment
+          Id="KanoBacklogScriptsPathEnvironment"
+          Name="PATH"
+          Value="[KanoScriptsDir]"
+          Permanent="no"
+          Part="last"
+          Action="set"
+          System="no" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+</Include>

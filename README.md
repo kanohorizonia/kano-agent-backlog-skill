@@ -74,7 +74,7 @@ Package-manager channels:
 - Homebrew: planned formula `kano-backlog` in an owned Kano tap; `homebrew-core` is not used for the 0.0.4 validation path.
 - apt: planned owned apt repository; no public apt repository is live until release metadata and repository indexes are published.
 
-The GitHub Pages site also carries the same download and package-manager status in [Installation](https://agentskill-backlog.kanohorizonia.com/guides/installation/) and [Release Channels](https://agentskill-backlog.kanohorizonia.com/guides/release-channels/).
+The GitHub Pages site also carries the same download and package-manager status in [Installation](https://agentskill-backlog.kanohorizonia.com/guides/installation) and [Release Channels](https://agentskill-backlog.kanohorizonia.com/guides/release-channels).
 
 ## Quick start
 

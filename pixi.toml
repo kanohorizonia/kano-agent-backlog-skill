@@ -61,8 +61,10 @@ webview-compose-logs = "docker compose -f docker-compose.webview.yml logs -f web
 # Windows-specific (win-64)
 # =============================================================================
 [target.win-64.tasks]
-# Development build (Debug preset - fast iteration)
-build = "KOB_CPP_ROOT=src/cpp KABSD_BUILD_PREFIX=KOB KABSD_CMAKE_VAR_PREFIX=KB bash src/cpp/shared/infra/scripts/platform/win64/ninja-msvc-debug.sh"
+# Default build is Release. Use build-debug for a Debug preset.
+build = "KOB_CPP_ROOT=src/cpp KABSD_BUILD_PREFIX=KOB KABSD_CMAKE_VAR_PREFIX=KB INF_CMAKE_CACHE_ARGS_JSON='{\"KB_BUILD_TESTS\":\"ON\"}' bash src/cpp/shared/infra/scripts/platform/win64/ninja-msvc-release.sh"
+build-release = "KOB_CPP_ROOT=src/cpp KABSD_BUILD_PREFIX=KOB KABSD_CMAKE_VAR_PREFIX=KB INF_CMAKE_CACHE_ARGS_JSON='{\"KB_BUILD_TESTS\":\"ON\"}' bash src/cpp/shared/infra/scripts/platform/win64/ninja-msvc-release.sh"
+build-debug = "KOB_CPP_ROOT=src/cpp KABSD_BUILD_PREFIX=KOB KABSD_CMAKE_VAR_PREFIX=KB bash src/cpp/shared/infra/scripts/platform/win64/ninja-msvc-debug.sh"
 build-dev = "KOB_CPP_ROOT=src/cpp KABSD_BUILD_PREFIX=KOB KABSD_CMAKE_VAR_PREFIX=KB bash src/cpp/shared/infra/scripts/platform/win64/ninja-msvc-debug.sh"
 build-dev-win = "KOB_CPP_ROOT=src/cpp KABSD_BUILD_PREFIX=KOB KABSD_CMAKE_VAR_PREFIX=KB bash src/cpp/shared/infra/scripts/platform/win64/ninja-msvc-debug.sh"
 build-webview = "KOB_CPP_ROOT=src/cpp KABSD_BUILD_PREFIX=KOB KABSD_CMAKE_VAR_PREFIX=KB INF_CMAKE_CACHE_ARGS_JSON='{\"KB_BUILD_WEBVIEW\":\"ON\"}' bash src/cpp/shared/infra/scripts/platform/win64/ninja-msvc-debug.sh"

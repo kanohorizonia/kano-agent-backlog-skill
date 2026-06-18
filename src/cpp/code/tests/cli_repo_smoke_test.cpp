@@ -8,6 +8,10 @@
 #include <sstream>
 #include <vector>
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 #include "kano/backlog_core/process/noninteractive_errors.hpp"
 
 namespace {
@@ -122,6 +126,26 @@ void write_text(const std::filesystem::path& path, const std::string& text) {
         throw std::runtime_error("failed to write " + path.string());
     }
     out << text;
+}
+
+std::filesystem::path short_path_for_test(const std::filesystem::path& path) {
+#ifdef _WIN32
+    const std::wstring wide_path = path.wstring();
+    const DWORD required = GetShortPathNameW(wide_path.c_str(), nullptr, 0);
+    if (required == 0) {
+        return path;
+    }
+
+    std::wstring buffer(required, L'\0');
+    const DWORD written = GetShortPathNameW(wide_path.c_str(), buffer.data(), required);
+    if (written == 0 || written >= required) {
+        return path;
+    }
+    buffer.resize(written);
+    return std::filesystem::path(buffer);
+#else
+    return path;
+#endif
 }
 
 std::string extract_json_array_string(const std::string& text, const std::string& key, std::size_t index) {
@@ -377,6 +401,27 @@ int main(int argc, char** argv) {
             standalone_config_show_output,
             "independent backlog config should resolve through actual KOB create path"
         );
+
+        const auto short_path_backlog_root = temp_root / "standalone-short-path-backlog";
+        std::filesystem::create_directories(short_path_backlog_root / ".git");
+        const auto short_path_arg = short_path_for_test(short_path_backlog_root);
+        if (short_path_arg != short_path_backlog_root) {
+            std::filesystem::current_path(short_path_backlog_root);
+            expect(run_command(binary, {
+                "admin", "init",
+                "--backlog-root", short_path_arg.string(),
+                "--product", "short-path-config-smoke",
+                "--agent", "tester",
+                "--product-name", "Short Path Config Smoke",
+                "--prefix", "SPC",
+                "--skip-refresh-views"
+            }) == 0, "admin init should treat Windows short and long paths as the same independent backlog repo");
+            std::filesystem::current_path(temp_root);
+            const auto short_path_config = short_path_backlog_root / ".kano" / "backlog_config.toml";
+            expect(std::filesystem::exists(short_path_config), "short-path independent backlog repo did not get local project config");
+            expect(read_text(short_path_config).find("backlog_root = \"products/short-path-config-smoke\"") != std::string::npos, "short-path independent backlog config registered unexpected backlog root");
+            expect(read_text(config_path).find("[products.short-path-config-smoke]") == std::string::npos, "short-path independent backlog registration leaked into outer project config");
+        }
 
         const auto config_show_output = temp_root / "config-show.txt";
         expect_command_capture_success(

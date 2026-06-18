@@ -152,19 +152,28 @@ std::filesystem::path find_repo_root(const std::filesystem::path& start_path) {
     return start_path;
 }
 
+std::filesystem::path normalize_path_for_bounds(const std::filesystem::path& path) {
+    std::error_code ec;
+    std::filesystem::path normalized = std::filesystem::weakly_canonical(path, ec);
+    if (!ec) {
+        return normalized.lexically_normal();
+    }
+    return std::filesystem::absolute(path).lexically_normal();
+}
+
 bool is_within(const std::filesystem::path& child, const std::filesystem::path& parent) {
     const std::filesystem::path rel = child.lexically_relative(parent);
     return !rel.empty() && rel.generic_string().find("..") != 0 && !rel.is_absolute();
 }
 
 std::filesystem::path resolve_backlog_root(const kano::backlog_ops::OrchestrationOps::InitOptions& options) {
-    const std::filesystem::path start = std::filesystem::absolute(options.start_path).lexically_normal();
-    const std::filesystem::path project_root = find_repo_root(start).lexically_normal();
+    const std::filesystem::path start = normalize_path_for_bounds(options.start_path);
+    const std::filesystem::path project_root = normalize_path_for_bounds(find_repo_root(start));
     if (options.backlog_root) {
         std::filesystem::path root = options.backlog_root->is_absolute()
             ? *options.backlog_root
             : project_root / *options.backlog_root;
-        root = root.lexically_normal();
+        root = normalize_path_for_bounds(root);
         if (root.filename() == "products") {
             root = root.parent_path();
         }

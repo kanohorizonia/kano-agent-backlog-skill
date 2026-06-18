@@ -178,6 +178,9 @@ std::filesystem::path resolve_backlog_root(const kano::backlog_ops::Orchestratio
 }
 
 std::filesystem::path resolve_project_root(const std::filesystem::path& backlog_root) {
+    if (std::filesystem::exists(backlog_root / ".git")) {
+        return backlog_root;
+    }
     if (backlog_root.parent_path().filename() == "_kano") {
         return backlog_root.parent_path().parent_path();
     }

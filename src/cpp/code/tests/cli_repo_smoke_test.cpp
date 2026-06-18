@@ -349,6 +349,35 @@ int main(int argc, char** argv) {
         expect(gitignore_text.find(".kano/cache/") != std::string::npos, "admin init did not add .kano/cache to .gitignore");
         expect(gitignore_text.find("_kano/backlog/_shared/logs/") != std::string::npos, "admin init did not add shared logs to .gitignore");
 
+        const auto standalone_backlog_root = temp_root / "standalone-backlog";
+        std::filesystem::create_directories(standalone_backlog_root / ".git");
+        expect(run_command(binary, {
+            "admin", "init",
+            "--backlog-root", standalone_backlog_root.string(),
+            "--product", "horizon-unreal-pipeline",
+            "--agent", "tester",
+            "--product-name", "Horizon Unreal Pipeline",
+            "--prefix", "HUP",
+            "--skip-refresh-views"
+        }) == 0, "admin init should register products inside an independent backlog repo");
+        const auto standalone_config_path = standalone_backlog_root / ".kano" / "backlog_config.toml";
+        expect(std::filesystem::exists(standalone_config_path), "independent backlog repo did not get local project config");
+        const std::string standalone_config_text = read_text(standalone_config_path);
+        expect(standalone_config_text.find("[products.horizon-unreal-pipeline]") != std::string::npos, "independent backlog config missing HUP product");
+        expect(standalone_config_text.find("prefix = \"HUP\"") != std::string::npos, "independent backlog config missing HUP prefix");
+        expect(standalone_config_text.find("backlog_root = \"products/horizon-unreal-pipeline\"") != std::string::npos, "independent backlog config registered unexpected backlog root");
+        expect(read_text(config_path).find("[products.horizon-unreal-pipeline]") == std::string::npos, "independent backlog registration leaked into outer project config");
+        const auto standalone_config_show_output = temp_root / "standalone-config-show.txt";
+        expect_command_capture_success(
+            run_command_capture(binary, {
+                "-p", standalone_backlog_root.string(),
+                "-P", "horizon-unreal-pipeline",
+                "config", "show"
+            }, standalone_config_show_output),
+            standalone_config_show_output,
+            "independent backlog config should resolve through actual KOB create path"
+        );
+
         const auto config_show_output = temp_root / "config-show.txt";
         expect_command_capture_success(
             run_command_capture(binary, {

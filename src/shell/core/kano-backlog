@@ -7,14 +7,19 @@ EXPECTED_VERSION="$(tr -d '\r\n' < "$SKILL_ROOT/VERSION")"
 
 resolve_workspace_root() {
   local start_dir="${PWD}"
-  while [[ "$start_dir" != "/" && ! -f "$start_dir/.kano/backlog_config.toml" ]]; do
+  while [[ "$start_dir" != "/" ]]; do
+    if [[ -f "$start_dir/.kano/backlog_config.toml" ]]; then
+      printf '%s\n' "$start_dir"
+      return 0
+    fi
+
+    if [[ -f "$start_dir/_kano/backlog/.kano/backlog_config.toml" ]]; then
+      printf '%s\n' "$start_dir/_kano/backlog"
+      return 0
+    fi
+
     start_dir="$(dirname "$start_dir")"
   done
-
-  if [[ -f "$start_dir/.kano/backlog_config.toml" ]]; then
-    printf '%s\n' "$start_dir"
-    return 0
-  fi
 
   printf '%s\n' "$PWD"
 }

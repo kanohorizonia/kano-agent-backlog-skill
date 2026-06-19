@@ -1,33 +1,54 @@
 #include "kano/backlog_core/frontmatter/frontmatter.hpp"
 #include <iostream>
 #include <sstream>
-#include <regex>
 
 namespace kano::backlog_core {
 
 FrontmatterContext Frontmatter::parse(const std::string& content) {
     FrontmatterContext ctx;
-    
-    // Pattern for frontmatter: starts with ---, ends with ---
-    // Using a simple state-based parser or regex
-    static const std::regex fm_regex(R"(^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$)");
-    std::smatch match;
-    
-    if (std::regex_match(content, match, fm_regex)) {
-        std::string yaml_str = match[1].str();
-        ctx.body = match[2].str();
-        try {
-            ctx.metadata = YAML::Load(yaml_str);
-        } catch (const YAML::Exception& e) {
-            // If YAML parsing fails, metadata will be Null node
-            ctx.metadata = YAML::Node(YAML::NodeType::Null);
-        }
-    } else {
-        // No frontmatter found, whole content is body
+
+    std::size_t yaml_start = std::string::npos;
+    if (content.rfind("---\n", 0) == 0) {
+        yaml_start = 4;
+    } else if (content.rfind("---\r\n", 0) == 0) {
+        yaml_start = 5;
+    }
+
+    if (yaml_start == std::string::npos) {
         ctx.body = content;
         ctx.metadata = YAML::Node(YAML::NodeType::Null);
+        return ctx;
     }
-    
+
+    std::size_t line_start = yaml_start;
+    while (line_start <= content.size()) {
+        const std::size_t line_end = content.find('\n', line_start);
+        const std::size_t raw_line_end = line_end == std::string::npos ? content.size() : line_end;
+        std::size_t marker_end = raw_line_end;
+        if (marker_end > line_start && content[marker_end - 1] == '\r') {
+            --marker_end;
+        }
+
+        if (content.compare(line_start, marker_end - line_start, "---") == 0) {
+            const std::string yaml_str = content.substr(yaml_start, line_start - yaml_start);
+            const std::size_t body_start = line_end == std::string::npos ? content.size() : line_end + 1;
+            ctx.body = content.substr(body_start);
+            try {
+                ctx.metadata = YAML::Load(yaml_str);
+            } catch (const YAML::Exception&) {
+                ctx.metadata = YAML::Node(YAML::NodeType::Null);
+            }
+            return ctx;
+        }
+
+        if (line_end == std::string::npos) {
+            break;
+        }
+        line_start = line_end + 1;
+    }
+
+    ctx.body = content;
+    ctx.metadata = YAML::Node(YAML::NodeType::Null);
     return ctx;
 }
 

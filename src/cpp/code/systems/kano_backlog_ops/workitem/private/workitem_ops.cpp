@@ -252,6 +252,7 @@ CreateItemResult WorkitemOps::create_item(
         case ItemType::UserStory: type_code = "USR"; break;
         case ItemType::Task: type_code = "TSK"; break;
         case ItemType::Bug: type_code = "BUG"; break;
+        case ItemType::Issue: type_code = "ISS"; break;
     }
     
     int number = index.get_next_number(prefix, type_code);

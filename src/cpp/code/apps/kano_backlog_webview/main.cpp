@@ -261,7 +261,7 @@ R"HTML(  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></scrip
       products: [],
       selectedProducts: new Set(['all']),
       selectedStates: new Set(['Proposed', 'Ready', 'InProgress', 'Blocked', 'Review', 'Done', 'Dropped']),
-      selectedTypes: new Set(['Theme', 'Epic', 'Feature', 'UserStory', 'Task', 'Bug', 'ADR', 'Topic', 'Workset']),
+      selectedTypes: new Set(['Theme', 'Epic', 'Feature', 'UserStory', 'Task', 'Bug', 'Issue', 'ADR', 'Topic', 'Workset']),
       q: '',
       limit: 200,
       workspace: '',
@@ -273,7 +273,7 @@ R"HTML(  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></scrip
     };
     const lanes = ['Backlog', 'Doing', 'Blocked', 'Review', 'Done'];
     const itemStates = ['Proposed', 'Ready', 'InProgress', 'Blocked', 'Review', 'Done', 'Dropped'];
-    const itemTypes = ['Theme', 'Epic', 'Feature', 'UserStory', 'Task', 'Bug', 'ADR', 'Topic', 'Workset'];
+    const itemTypes = ['Theme', 'Epic', 'Feature', 'UserStory', 'Task', 'Bug', 'Issue', 'ADR', 'Topic', 'Workset'];
     const workspaceStorageKey = 'kano_webview_workspaces_v2';
 
     async function getJson(url) {
@@ -602,7 +602,8 @@ R"HTML(    function typeIcon(type) {
         Feature: '🔷',
         UserStory: '📖',
         Task: '✅',
-        Bug: '🐞'
+        Bug: '🐞',
+        Issue: '!'
       };
       return map[type] || '•';
     }

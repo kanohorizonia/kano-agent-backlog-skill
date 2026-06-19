@@ -55,9 +55,11 @@ bash scripts/kob item create --type task --title "Add authentication" --product 
 
 This workflow is tickets first. Before implementation, create the work item that explains the change.
 
+Use `--type issue` instead of `task` when the report is still pre-triage: an unclear problem, runtime gap, risk, or blocker that needs evidence before it can be split into a Task or Bug. Research, Decisions, and Spikes remain worklog, ADR, topic, tag, or artifact metadata rather than separate formal item types.
+
 ## 4. Satisfy the Ready Gate
 
-Tasks and bugs are expected to carry enough context before active execution. Fill:
+Tasks, bugs, and issues are expected to carry enough context before active execution. Fill:
 
 - Context
 - Goal

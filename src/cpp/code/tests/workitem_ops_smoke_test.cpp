@@ -73,6 +73,42 @@ int main() {
 
             CanonicalStore store(root);
 
+            auto issue_created = WorkitemOps::create_item(
+                index,
+                root,
+                "TST",
+                ItemType::Issue,
+                "Unclear runtime gap smoke",
+                "opencode");
+            expect(issue_created.id.rfind("TST-ISS-", 0) == 0, "created id should use issue prefix");
+            expect(
+                issue_created.path.parent_path().parent_path().filename().string() == "issue",
+                "created issue should be stored under items/issue");
+
+            auto issue_queried = index.query_items(ItemType::Issue, std::nullopt);
+            expect(!issue_queried.empty(), "issue item should appear in index query");
+
+            auto issue_item = store.read(issue_created.path);
+            expect(issue_item.type == ItemType::Issue, "created issue should round-trip with Issue type");
+            set_ready_fields(issue_item);
+            issue_item.context = "Need pre-triage capture for an unclear runtime gap.";
+            issue_item.goal = "Preserve blocker and risk context before choosing task or bug remediation.";
+            issue_item.risks = "Incorrect type selection could hide unresolved blocker evidence.";
+            store.write(issue_item);
+            index.index_item(issue_item);
+
+            auto issue_update = WorkitemOps::update_state(
+                index,
+                root,
+                issue_created.id,
+                ItemState::InProgress,
+                "opencode",
+                std::string("Issue triage started"));
+            expect(issue_update.worklog_appended, "issue state update should append worklog");
+            auto issue_after_update = store.read(issue_created.path);
+            expect(issue_after_update.state == ItemState::InProgress, "issue should transition to InProgress");
+            expect(issue_after_update.worklog.back().find("Issue triage started") != std::string::npos, "issue worklog should preserve update message");
+
             auto parent_created = WorkitemOps::create_item(
                 index,
                 root,

@@ -252,6 +252,7 @@ BacklogItem CanonicalStore::create(const std::string& prefix, ItemType type, con
         case ItemType::UserStory: abbrev = "USR"; type_dir = "userstory"; break;
         case ItemType::Task: abbrev = "TSK"; type_dir = "task"; break;
         case ItemType::Bug: abbrev = "BUG"; type_dir = "bug"; break;
+        case ItemType::Issue: abbrev = "ISS"; type_dir = "issue"; break;
     }
 
     // ID format: PREFIX-ABBREV-0001
@@ -307,6 +308,7 @@ std::vector<std::filesystem::path> CanonicalStore::list_items(std::optional<Item
             case ItemType::UserStory: type_dir = "userstory"; break;
             case ItemType::Task: type_dir = "task"; break;
             case ItemType::Bug: type_dir = "bug"; break;
+            case ItemType::Issue: type_dir = "issue"; break;
         }
         scan_dir(items_root_ / type_dir);
     } else {

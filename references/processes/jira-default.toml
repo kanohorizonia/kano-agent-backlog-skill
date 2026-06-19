@@ -32,6 +32,10 @@ type = "Bug"
 slug = "bug"
 
 [[work_item_types]]
+type = "Issue"
+slug = "issue"
+
+[[work_item_types]]
 type = "SubTask"
 slug = "subtask"
 

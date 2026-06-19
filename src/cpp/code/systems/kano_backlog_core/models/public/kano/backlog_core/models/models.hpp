@@ -14,7 +14,8 @@ enum class ItemType {
     Feature,
     UserStory,
     Task,
-    Bug
+    Bug,
+    Issue
 };
 
 enum class ItemState {

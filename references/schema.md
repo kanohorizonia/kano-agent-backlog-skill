@@ -16,7 +16,8 @@ _kano/backlog/products/<product>/
 │   ├── feature/
 │   ├── userstory/
 │   ├── task/
-│   └── bug/
+│   ├── bug/
+│   └── issue/
 └── views/            # Generated dashboards and reports
 ```
 
@@ -29,6 +30,17 @@ Item types and states come from the active process profile. See
 When scripts or docs need workflow details, they should load the profile
 specified in config (built-in or custom) instead of hardcoding the list.
 
+## Formal item types
+
+- Epic: milestone-scale container.
+- Feature: capability container under an Epic.
+- UserStory: user-facing outcome under a Feature.
+- Task: focused implementation, docs, test, or maintenance work.
+- Bug: confirmed defect or regression against existing intent.
+- Issue: pre-triage container for an unclear problem, risk, blocker, or runtime gap before it is clear whether follow-up work is a Task, Bug, Feature, or no change.
+
+Research, Decision, Spike, and Investigation are not formal item types. Treat them as activity metadata in worklogs, ADRs, topics, tags, artifacts, or follow-up Tasks/Bugs/Issues.
+
 ## Parent rules (default)
 
 - Epic -> Feature
@@ -36,6 +48,7 @@ specified in config (built-in or custom) instead of hardcoding the list.
 - UserStory -> Task or Bug
 - Feature -> Bug (allowed)
 - Task -> Task (optional sub-task)
+- Issue may be standalone, linked through `links.*`, or parented under a Feature/UserStory when the scope is already known; split actionable remediation into Task/Bug follow-ups once triage is clear.
 - Epic has no parent
 
 These defaults align with built-in profiles; custom processes may define
@@ -52,12 +65,14 @@ When a child item state changes, parents can auto-advance forward-only:
 
 ## Ready gate (required, non-empty)
 
-To move to Ready, each item must include:
+To move Tasks, Bugs, or Issues into active execution, each item must include:
 - Context
 - Goal
 - Approach
 - Acceptance Criteria
 - Risks / Dependencies
+
+Epics and Features use the lighter profile-specific gates in validation, but should still carry enough context for review.
 
 ## File naming
 
@@ -69,6 +84,7 @@ To move to Ready, each item must include:
   - `KABSD-USR-`
   - `KABSD-TSK-`
   - `KABSD-BUG-`
+  - `KABSD-ISS-`
 - Prefix derivation:
   - Source: `config/profile.env` -> `PROJECT_NAME`.
   - Split on non-alphanumeric separators and camel-case boundaries, take first letters.

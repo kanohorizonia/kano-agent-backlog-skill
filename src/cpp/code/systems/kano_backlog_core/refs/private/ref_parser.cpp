@@ -52,7 +52,7 @@ std::optional<PathRef> RefParser::parse_path(const std::string& ref) {
 }
 
 std::optional<DisplayIdRef> RefParser::parse_display_id(const std::string& ref) {
-    static const std::regex pattern(R"(^([A-Z][A-Z0-9]{1,15})-(EPIC|FTR|USR|TSK|BUG)-(\d{4})$)");
+    static const std::regex pattern(R"(^([A-Z][A-Z0-9]{1,15})-(EPIC|FTR|USR|TSK|BUG|ISS)-(\d{4})$)");
     std::string s = trim(ref);
     std::smatch match;
     if (std::regex_match(s, match, pattern)) {

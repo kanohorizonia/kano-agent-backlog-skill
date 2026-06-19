@@ -35,6 +35,10 @@ slug = "task"
 type = "Bug"
 slug = "bug"
 
+[[work_item_types]]
+type = "Issue"
+slug = "issue"
+
 [transitions]
 Proposed = ["Planned", "Dropped"]
 Planned = ["Ready", "Dropped"]

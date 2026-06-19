@@ -158,6 +158,36 @@ int main(int argc, char** argv) {
             "--agent", "tester"
         }) == 0, "set-ready failed");
 
+        expect(run_command(binary, {"-P", "quick-smoke-product", "workitem", "create", "-t", "issue", "--title", "Quick smoke issue", "--agent", "tester"}) == 0,
+            "workitem create issue failed");
+        const auto issue_path = temp_root / "_kano" / "backlog" / "products" / "quick-smoke-product" / "items" / "issue" / "0000" / "QS-ISS-0001_quick-smoke-issue.md";
+        expect(std::filesystem::exists(issue_path), "workitem create did not create expected issue file");
+        expect(run_command(binary, {
+            "-P", "quick-smoke-product", "workitem", "set-ready", "QS-ISS-0001",
+            "--context", "Quick smoke issue context.",
+            "--goal", "Quick smoke issue goal.",
+            "--approach", "Quick smoke issue approach.",
+            "--acceptance-criteria", "Quick smoke issue acceptance.",
+            "--risks", "Quick smoke issue risks.",
+            "--agent", "tester"
+        }) == 0, "issue set-ready failed");
+        expect(run_command(binary, {"-P", "quick-smoke-product", "workitem", "check-ready", "QS-ISS-0001"}) == 0,
+            "issue check-ready failed");
+        expect(run_command(binary, {"-P", "quick-smoke-product", "worklog", "append", "QS-ISS-0001", "Issue worklog smoke", "--agent", "tester"}) == 0,
+            "issue worklog append failed");
+        expect(run_command(binary, {"-P", "quick-smoke-product", "workitem", "update-state", "QS-ISS-0001", "--state", "InProgress", "--agent", "tester"}) == 0,
+            "issue update-state failed");
+        const auto issue_list_output = temp_root / "issue-list.txt";
+        expect(run_command_capture(binary, {
+            "-P", "quick-smoke-product", "workitem", "list", "--type", "issue"
+        }, issue_list_output) == 0, "issue list failed");
+        expect(read_text(issue_list_output).find("QS-ISS-0001") != std::string::npos,
+            "issue list did not include created issue");
+        const auto issue_text = read_text(issue_path);
+        expect(issue_text.find("type: Issue") != std::string::npos, "issue file did not round-trip Issue type");
+        expect(issue_text.find("state: InProgress") != std::string::npos, "issue file did not record InProgress state");
+        expect(issue_text.find("Issue worklog smoke") != std::string::npos, "issue file did not record worklog");
+
         const auto topic_output = temp_root / "topic-list-templates.json";
         expect(run_command_capture(binary, {
             "-P", "quick-smoke-product", "topic", "create", "quick-topic-template-list-placeholder",

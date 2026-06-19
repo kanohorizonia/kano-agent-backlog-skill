@@ -71,5 +71,5 @@ build-webview = "KOB_CPP_ROOT=src/cpp KABSD_BUILD_PREFIX=KOB KABSD_CMAKE_VAR_PRE
 build-webview-release = "KOB_CPP_ROOT=src/cpp KABSD_BUILD_PREFIX=KOB KABSD_CMAKE_VAR_PREFIX=KB INF_CMAKE_CACHE_ARGS_JSON='{\"KB_BUILD_WEBVIEW\":\"ON\"}' bash src/cpp/shared/infra/scripts/platform/win64/ninja-msvc-release.sh"
 webview-serve = "bash scripts/kob webview serve --backlog-root ../_kano/backlog --port 8799"
 webview-open = "powershell -NoProfile -Command Start-Process http://127.0.0.1:8799"
-webview = "pixi run build-webview && pixi run webview-serve"
-webview-release = "pixi run build-webview-release && pixi run webview-serve"
+webview = "pixi run build-webview && KANO_BACKLOG_BINARY=\"$PWD/src/cpp/out/bin/windows-ninja-msvc/debug/kano-backlog.exe\" pixi run webview-serve"
+webview-release = "pixi run build-webview-release && KANO_BACKLOG_BINARY=\"$PWD/src/cpp/out/bin/windows-ninja-msvc/release/kano-backlog.exe\" pixi run webview-serve"

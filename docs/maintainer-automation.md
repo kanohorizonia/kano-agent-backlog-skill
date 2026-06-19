@@ -12,7 +12,7 @@ Based on the repo docs, maintainers can automate or standardize these workflows:
 
 - backlog initialization for a product
 - work item creation and state transitions
-- Ready Gate enforcement for tasks and bugs
+- Ready Gate enforcement for tasks, bugs, and issues
 - append only worklog entries
 - ADR creation and linkage
 - workset setup, refresh, promotion, and cleanup
@@ -47,7 +47,7 @@ Worksets, cache directories, logs, and some topic materials are derived data and
 
 ## Ready Gate for maintainers
 
-The Ready Gate is one of the main controls that keeps agent heavy workflows understandable in review. Before execution, the task or bug should state:
+The Ready Gate is one of the main controls that keeps agent heavy workflows understandable in review. Before execution, the task, bug, or issue should state:
 
 - why the work exists
 - what success looks like
@@ -56,6 +56,8 @@ The Ready Gate is one of the main controls that keeps agent heavy workflows unde
 - what risks or dependencies remain
 
 Schema details belong in [../references/schema.md](../references/schema.md).
+
+Use the formal `Issue` type only for pre-triage unclear problems, risks, blockers, or runtime gaps. Once triage produces actionable work, link or split it into Task/Bug follow-ups instead of inventing Research, Decision, Spike, or Investigation item types.
 
 ## Topics and worksets serve different roles
 

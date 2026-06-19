@@ -41,7 +41,7 @@ Soft triggers (ask the human once before creating):
   follow-ups).
 
 Anti-triggers (prefer Workset or no Topic):
-- Single-item execution where a clear Task/Bug exists and you are ready to implement
+- Single-item execution where a clear Task/Bug/Issue exists and you are ready to implement
   (use a Workset).
 - Small, single-file change with low risk of handoff or revisiting.
 - Pure Q&A / explanation with no need to preserve artifacts or evidence.
@@ -428,7 +428,7 @@ kob topic export-context auth-refactor --format json
 Topics and worksets work together:
 
 1. **Topic**: Groups related items/docs/snippets and provides a deterministic brief
-2. **Workset**: Per-item execution cache (plan/notes/deliverables) while implementing a specific Task/Bug
+2. **Workset**: Per-item execution cache (plan/notes/deliverables) while implementing a specific Task/Bug/Issue
 
 Typical flow:
 ```bash

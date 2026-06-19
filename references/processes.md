@@ -44,6 +44,10 @@ slug = "task"
 type = "Bug"
 slug = "bug"
 
+[[work_item_types]]
+type = "Issue"
+slug = "issue"
+
 [transitions]
 Proposed = ["Planned", "Dropped"]
 Planned = ["Ready", "Dropped"]
@@ -67,7 +71,7 @@ These semantics apply to built-ins that use the default KABSD state set:
 
 - Proposed: not ready to start; needs more discovery/confirmation.
 - Planned: approved for the plan; detail refinement can proceed, but not started.
-- Ready: Ready gate passed (typically for Task/Bug before start).
+- Ready: Ready gate passed (typically for Task/Bug/Issue before start).
 - InProgress: work started.
 - Blocked: work started but blocked.
 - Review: work complete pending review/verification.

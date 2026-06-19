@@ -23,14 +23,15 @@ kano-backlog admin sync-sequences --product <product>
 2. Split into Features (capabilities).
 3. Split into UserStories (user perspective).
 4. Split into Tasks/Bugs (single focused coding sessions).
-5. Fill Ready gate sections for each Task/Bug.
-6. Append Worklog entry: "Created from discussion: ..." (scripts require `--agent`).
+5. Use Issues only for pre-triage unclear problems, risks, blockers, or runtime gaps where the remediation type is not yet known.
+6. Fill Ready gate sections for each Task/Bug/Issue before active work.
+7. Append Worklog entry: "Created from discussion: ..." (scripts require `--agent`).
 
 ## B) Ready gate
 
 The Ready gate ensures planning is complete before execution begins.
 
-**Required Fields** (Task/Bug):
+**Required Fields** (Task/Bug/Issue):
 - **Context**: Why are we doing this? What is the background?
 - **Goal**: What is the specific objective?
 - **Approach**: How will we solve it? (Steps, design choices)
@@ -50,9 +51,11 @@ The Ready gate ensures planning is complete before execution begins.
 3. **Manual Check**: `item check-ready <ID>` validates item and parent.
 
 **Best Practices**:
-- **Parent: null**: Allowed for standalone tasks, top-level Epics, or hotfixes where hierarchy is overkill.
+- **Parent: null**: Allowed for standalone tasks, issues, top-level Epics, or hotfixes where hierarchy is overkill.
 - **--force**: Use sparingly for hotfixes or when requirements are truly emergent.
 - **Validation**: Always run `check-ready` before starting work.
+
+Issues should not stay as a vague holding pen after triage. Once the problem is clear, split or link actionable remediation into Task/Bug items and record the relationship in `links.relates`, `links.blocks`, or the Worklog.
 
 ## C) Execution
 

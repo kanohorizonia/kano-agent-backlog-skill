@@ -11,7 +11,7 @@ Keep the public demo aligned with the OSS facing documentation and current pre-1
 - confirm the demo repository still installs the current published package or local development build
 - confirm the demo README describes the project as pre-1.0 or experimental
 - confirm the demo uses local first markdown artifacts under `_kano/backlog/`
-- confirm the demo shows a task or bug passing the Ready Gate with Context, Goal, Approach, Acceptance Criteria, and Risks / Dependencies
+- confirm the demo shows a task, bug, or issue passing the Ready Gate with Context, Goal, Approach, Acceptance Criteria, and Risks / Dependencies
 - confirm the demo includes at least one ADR and one worklog example
 - confirm the demo shows when to use a workset for focused execution
 - confirm the demo shows when to use a topic for multi item or cross session context

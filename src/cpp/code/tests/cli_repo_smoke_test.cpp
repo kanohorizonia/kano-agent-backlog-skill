@@ -358,7 +358,7 @@ int main(int argc, char** argv) {
         expect(std::filesystem::exists(product_root / "views"), "admin init did not create views directory");
         expect(std::filesystem::exists(product_root / "_meta"), "admin init did not create _meta directory");
         expect(std::filesystem::exists(product_root / "artifacts"), "admin init did not create artifacts directory");
-        for (const std::string type : {"epic", "feature", "userstory", "task", "bug"}) {
+        for (const std::string type : {"epic", "feature", "userstory", "task", "bug", "issue"}) {
             expect(std::filesystem::exists(product_root / "items" / type / "0000"), "admin init did not create item bucket for " + type);
         }
         expect(!std::filesystem::exists(temp_root / "items"), "admin init created stray root-level items directory");
@@ -659,6 +659,48 @@ int main(int argc, char** argv) {
         expect(!std::filesystem::exists(worklog_file), "worklog append did not consume message file");
         long_text_item = read_text(long_text_item_path);
         expect(long_text_item.find("Worklog line two") != std::string::npos, "worklog append did not write message file text");
+
+        expect(run_command(binary, {"-P", "kano-ai-3d-asset-skill", "workitem", "create", "-t", "issue", "--title", "Pre triage runtime gap", "--agent", "tester"}) == 0, "workitem create issue failed");
+        const auto issue_item_path = product_root / "items" / "issue" / "0000" / "KA-ISS-0001_pre-triage-runtime-gap.md";
+        expect(std::filesystem::exists(issue_item_path), "workitem create did not create expected issue file");
+        expect(run_command(binary, {
+            "-P", "kano-ai-3d-asset-skill",
+            "workitem", "set-ready", "KA-ISS-0001",
+            "--context", "Pre-triage issue context for an unclear runtime gap.",
+            "--goal", "Capture blocker and risk evidence before deciding task or bug remediation.",
+            "--approach", "Triage the report, then split follow-up implementation work once clear.",
+            "--acceptance-criteria", "Issue can be created, listed, searched, moved through state, and logged.",
+            "--risks", "Premature classification could hide the blocker.",
+            "--agent", "tester"
+        }) == 0, "issue set-ready failed");
+        expect(run_command(binary, {"-P", "kano-ai-3d-asset-skill", "workitem", "check-ready", "KA-ISS-0001"}) == 0, "issue check-ready failed");
+        expect(run_command(binary, {"-P", "kano-ai-3d-asset-skill", "worklog", "append", "KA-ISS-0001", "Issue worklog evidence", "--agent", "tester"}) == 0, "issue worklog append failed");
+        expect(run_command(binary, {
+            "-P", "kano-ai-3d-asset-skill",
+            "workitem", "update-state", "KA-ISS-0001",
+            "--state", "InProgress",
+            "--agent", "tester",
+            "--message", "Issue triage started"
+        }) == 0, "issue update-state failed");
+        const auto issue_list_output = temp_root / "issue-list.txt";
+        expect(run_command_capture(binary, {
+            "-P", "kano-ai-3d-asset-skill",
+            "workitem", "list",
+            "--type", "issue"
+        }, issue_list_output) == 0, "issue list failed");
+        expect(read_text(issue_list_output).find("KA-ISS-0001") != std::string::npos, "issue list did not include created issue");
+        const auto issue_text = read_text(issue_item_path);
+        expect(issue_text.find("type: Issue") != std::string::npos, "issue file did not preserve Issue type");
+        expect(issue_text.find("state: InProgress") != std::string::npos, "issue state update did not persist");
+        expect(issue_text.find("Issue worklog evidence") != std::string::npos, "issue worklog append did not persist");
+        const auto issue_view_refresh_output = temp_root / "issue-view-refresh.txt";
+        expect(run_command_capture(binary, {
+            "view", "refresh",
+            "--product", "kano-ai-3d-asset-skill",
+            "--backlog-root", backlog_root.string(),
+            "--agent", "tester"
+        }, issue_view_refresh_output) == 0, "view refresh after issue update failed");
+        expect(read_text(issue_view_refresh_output).find("Refreshed") != std::string::npos, "view refresh did not report refreshed dashboards");
 
         const auto artifact_source = temp_root / "artifact-note.md";
         write_text(artifact_source, "# Artifact\n\nNative attach artifact smoke.\n");
@@ -1315,6 +1357,15 @@ int main(int argc, char** argv) {
             "--format", "json"
         }, search_output) == 0, "search query failed");
         expect(read_text(search_output).find("\"corpus\"") != std::string::npos, "search query did not emit json payload");
+
+        const auto issue_search_output = temp_root / "issue-search.json";
+        expect(run_command_capture(binary, {
+            "search", "query", "pre-triage",
+            "--product", "kano-ai-3d-asset-skill",
+            "--backlog-root", backlog_root.string(),
+            "--format", "json"
+        }, issue_search_output) == 0, "issue search query failed");
+        expect(read_text(issue_search_output).find("KA-ISS-0001") != std::string::npos, "issue search did not find created issue");
 
         const auto embedding_status_output = temp_root / "embedding-status.json";
         expect(run_command_capture(binary, {

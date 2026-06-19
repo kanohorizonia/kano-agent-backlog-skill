@@ -77,10 +77,10 @@ Use this skill to:
 - Backlog volume control:
   - Only create items for work that changes code or design decisions.
   - Avoid new items for exploratory discussion; record in existing Worklog instead.
-  - Keep Tasks/Bugs sized for a single focused session.
+  - Keep Tasks/Bugs/Issues sized for a single focused session.
   - Avoid ADRs unless a real architectural trade-off is made.
 - Ticketing threshold (agent-decided):
-  - Open a new Task/Bug when you will change code/docs/views/scripts.
+  - Open a new Task/Bug/Issue when you will change code/docs/views/scripts or when an unclear runtime gap needs pre-triage evidence.
   - Open an ADR (and link it) when a real trade-off or direction change is decided.
   - Otherwise, record the discussion in an existing Worklog; ask if unsure.
 - Ticket type selection (keep it lightweight):
@@ -88,6 +88,7 @@ Use this skill to:
   - Feature: a new capability that delivers multiple UserStories.
   - UserStory: a single user-facing outcome that requires multiple Tasks.
   - Task: a single focused implementation or doc change (typically one session).
+  - Issue: a pre-triage unclear problem, risk, blocker, or runtime gap; split into Task/Bug follow-ups once actionable.
   - Example: "End-to-end embedding pipeline" = Epic; "Pluggable vector backend" = Feature; "MVP chunking pipeline" = UserStory; "Implement tokenizer adapter" = Task.
 - Bug vs Task triage (when fixing behavior):
   - If you are correcting a behavior that was previously marked `Done` and the behavior violates the original intent/acceptance (defect or regression), open a **Bug** and link it to the original item.
@@ -114,7 +115,7 @@ Use this skill to:
 For any work that changes code, docs, scripts, views, configs, schemas, tests, build logic, or persistent design decisions:
 
 **Before implementation:**
-1. Reuse an existing Task/Bug if it already covers the work; otherwise create one.
+1. Reuse an existing Task/Bug/Issue if it already covers the work; otherwise create one.
 2. Fill the Ready gate: Context, Goal, Approach, Acceptance Criteria, Risks.
 3. Move the item to `InProgress` **before** editing implementation files.
 4. Append a Worklog entry that implementation is starting.
@@ -661,7 +662,7 @@ Soft triggers (ask the human once before creating):
   follow-ups).
 
 Anti-triggers (prefer Workset or no Topic):
-- Single-item execution where a clear Task/Bug exists and you are ready to implement
+- Single-item execution where a clear Task/Bug/Issue exists and you are ready to implement
   (use a Workset).
 - Small, single-file change with low risk of handoff or revisiting.
 - Pure Q&A / explanation with no need to preserve artifacts or evidence.
@@ -732,7 +733,7 @@ _kano/backlog/topics/<topic>/
 **Worksets** are per-item working directories (cached, derived data) for a single backlog item.
 
 Use Worksets when:
-- Starting work on a specific Task/Bug/UserStory
+- Starting work on a specific Task/Bug/Issue/UserStory
 - Need scratch space for deliverables (patches, test artifacts, etc.)
 - Want item-specific config overrides (rare)
 

@@ -36,7 +36,7 @@ kob admin init --product my-app --agent kiro
 ```
 ✓ Created backlog root: _kano/backlog/
 ✓ Created product directory: _kano/backlog/products/my-app/
-✓ Created item type directories (epic, feature, user_story, task, bug)
+✓ Created item type directories (epic, feature, user_story, task, bug, issue)
 ✓ Created decisions directory
 ✓ Created _meta directory with indexes
 ✓ Initialized product config

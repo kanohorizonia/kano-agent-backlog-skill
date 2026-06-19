@@ -40,6 +40,10 @@
 #include <cmath>
 #include <cstdio>
 
+#ifdef _WIN32
+#include <process.h>
+#endif
+
 #ifndef _WIN32
 #define _popen popen
 #define _pclose pclose
@@ -472,7 +476,7 @@ std::vector<std::filesystem::path> list_item_markdown_paths(const std::filesyste
 }
 
 std::optional<std::string> item_id_from_path(const std::filesystem::path& path) {
-    static const std::regex id_pattern(R"(([A-Z][A-Z0-9]{1,15}-(?:EPIC|FTR|USR|TSK|BUG)-\d{4}))");
+    static const std::regex id_pattern(R"(([A-Z][A-Z0-9]{1,15}-(?:EPIC|FTR|USR|TSK|BUG|ISS)-\d{4}))");
     std::smatch match;
     const std::string stem = path.stem().string();
     if (std::regex_search(stem, match, id_pattern)) {
@@ -967,6 +971,58 @@ std::vector<NativeChunk> native_chunk_text(
         start_token = overlap > 0 ? end_token - overlap : end_token;
     }
     return chunks;
+}
+
+std::string native_fts_quote_token(const std::string& token) {
+    std::string quoted = "\"";
+    for (const char ch : token) {
+        if (ch == '"') {
+            quoted += "\"\"";
+        } else {
+            quoted.push_back(ch);
+        }
+    }
+    quoted += "\"";
+    return quoted;
+}
+
+std::vector<std::string> native_fts_query_candidates(const std::string& query) {
+    std::vector<std::string> candidates;
+    const auto raw = trim_copy(query);
+    if (raw.empty()) {
+        return candidates;
+    }
+    candidates.push_back(raw);
+
+    std::vector<std::string> tokens;
+    for (const auto& span : native_token_spans(raw)) {
+        auto token = trim_copy(raw.substr(span.start, span.end - span.start));
+        bool has_word_char = false;
+        for (const unsigned char ch : token) {
+            if (ch >= 0x80 || std::isalnum(ch) || ch == '_') {
+                has_word_char = true;
+                break;
+            }
+        }
+        if (has_word_char) {
+            tokens.push_back(token);
+        }
+    }
+
+    if (!tokens.empty()) {
+        std::ostringstream safe;
+        for (std::size_t i = 0; i < tokens.size(); ++i) {
+            if (i > 0) {
+                safe << " AND ";
+            }
+            safe << native_fts_quote_token(tokens[i]);
+        }
+        const auto safe_query = safe.str();
+        if (safe_query != raw) {
+            candidates.push_back(safe_query);
+        }
+    }
+    return candidates;
 }
 
 std::filesystem::path native_chunks_cache_root(const BacklogContext& ctx, const std::string& cache_root_override = "") {
@@ -1797,6 +1853,51 @@ std::string shell_null_redirect() {
     return " 2>NUL";
 #else
     return " 2>/dev/null";
+#endif
+}
+
+std::filesystem::path resolve_webview_binary(const std::filesystem::path& cli_dir) {
+#ifdef _WIN32
+    const std::string webview_name = "kano_backlog_webview.exe";
+#else
+    const std::string webview_name = "kano_backlog_webview";
+#endif
+    const std::filesystem::path config_root = cli_dir.parent_path();
+    const std::vector<std::filesystem::path> candidates = {
+        cli_dir / webview_name,
+        config_root / "debug" / webview_name,
+        config_root / "release" / webview_name,
+        config_root / "relwithdebinfo" / webview_name,
+        config_root / "minsizerel" / webview_name,
+        (cli_dir / ".." / ".." / ".." / webview_name).lexically_normal(),
+    };
+    for (const auto& candidate : candidates) {
+        if (std::filesystem::exists(candidate)) {
+            return candidate.lexically_normal();
+        }
+    }
+    return {};
+}
+
+int launch_webview_process(const std::filesystem::path& webview_exe, const std::vector<std::string>& args) {
+#ifdef _WIN32
+    std::vector<std::string> argv_storage;
+    argv_storage.reserve(args.size() + 1);
+    argv_storage.push_back(webview_exe.string());
+    argv_storage.insert(argv_storage.end(), args.begin(), args.end());
+    std::vector<const char*> argv;
+    argv.reserve(argv_storage.size() + 1);
+    for (const auto& arg : argv_storage) {
+        argv.push_back(arg.c_str());
+    }
+    argv.push_back(nullptr);
+    return static_cast<int>(_spawnv(_P_WAIT, webview_exe.string().c_str(), argv.data()));
+#else
+    std::string command = shell_quote_arg(webview_exe.string());
+    for (const auto& arg : args) {
+        command += " " + shell_quote_arg(arg);
+    }
+    return std::system(command.c_str());
 #endif
 }
 
@@ -3139,30 +3240,36 @@ std::vector<NativeChunkSearchRow> query_native_backlog_chunks(
         "SELECT i.id, i.title, i.path, c.chunk_id, c.parent_uid, c.section, c.content, bm25(chunks_fts) AS bm25_score "
         "FROM chunks_fts JOIN chunks c ON c.rowid = chunks_fts.rowid JOIN items i ON i.uid = c.parent_uid "
         "WHERE chunks_fts MATCH ? ORDER BY bm25_score ASC LIMIT ?";
-    sqlite3_stmt* stmt = nullptr;
-    if (sqlite3_prepare_v2(handle.db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
-        throw std::runtime_error("SQLite prepare chunk query failed: " + std::string(sqlite3_errmsg(handle.db)));
+    for (const auto& candidate : native_fts_query_candidates(query)) {
+        sqlite3_stmt* stmt = nullptr;
+        if (sqlite3_prepare_v2(handle.db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+            throw std::runtime_error("SQLite prepare chunk query failed: " + std::string(sqlite3_errmsg(handle.db)));
+        }
+        sqlite_bind_text_checked(stmt, 1, candidate);
+        sqlite3_bind_int(stmt, 2, std::max(1, k));
+        int rc = SQLITE_ROW;
+        while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+            auto text_col = [&](int i) -> std::string {
+                const auto* ptr = reinterpret_cast<const char*>(sqlite3_column_text(stmt, i));
+                return ptr ? std::string(ptr) : std::string();
+            };
+            const double bm25 = sqlite3_column_type(stmt, 7) == SQLITE_NULL ? 0.0 : sqlite3_column_double(stmt, 7);
+            results.push_back(NativeChunkSearchRow{
+                text_col(0),
+                text_col(1),
+                text_col(2),
+                text_col(3),
+                text_col(4),
+                text_col(5),
+                text_col(6),
+                -bm25
+            });
+        }
+        sqlite3_finalize(stmt);
+        if (!results.empty()) {
+            return results;
+        }
     }
-    sqlite_bind_text_checked(stmt, 1, query);
-    sqlite3_bind_int(stmt, 2, std::max(1, k));
-    while (sqlite3_step(stmt) == SQLITE_ROW) {
-        auto text_col = [&](int i) -> std::string {
-            const auto* ptr = reinterpret_cast<const char*>(sqlite3_column_text(stmt, i));
-            return ptr ? std::string(ptr) : std::string();
-        };
-        const double bm25 = sqlite3_column_type(stmt, 7) == SQLITE_NULL ? 0.0 : sqlite3_column_double(stmt, 7);
-        results.push_back(NativeChunkSearchRow{
-            text_col(0),
-            text_col(1),
-            text_col(2),
-            text_col(3),
-            text_col(4),
-            text_col(5),
-            text_col(6),
-            -bm25
-        });
-    }
-    sqlite3_finalize(stmt);
     return results;
 }
 
@@ -3346,29 +3453,35 @@ std::vector<NativeRepoChunkSearchRow> query_native_repo_chunks(
         "SELECT i.id, i.path, c.chunk_id, c.parent_uid, c.section, c.content, bm25(chunks_fts) AS bm25_score "
         "FROM chunks_fts JOIN chunks c ON c.rowid = chunks_fts.rowid JOIN items i ON i.uid = c.parent_uid "
         "WHERE chunks_fts MATCH ? ORDER BY bm25_score ASC LIMIT ?";
-    sqlite3_stmt* stmt = nullptr;
-    if (sqlite3_prepare_v2(handle.db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
-        throw std::runtime_error("SQLite prepare repo chunk query failed: " + std::string(sqlite3_errmsg(handle.db)));
+    for (const auto& candidate : native_fts_query_candidates(query)) {
+        sqlite3_stmt* stmt = nullptr;
+        if (sqlite3_prepare_v2(handle.db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+            throw std::runtime_error("SQLite prepare repo chunk query failed: " + std::string(sqlite3_errmsg(handle.db)));
+        }
+        sqlite_bind_text_checked(stmt, 1, candidate);
+        sqlite3_bind_int(stmt, 2, std::max(1, k));
+        int rc = SQLITE_ROW;
+        while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+            auto text_col = [&](int i) -> std::string {
+                const auto* ptr = reinterpret_cast<const char*>(sqlite3_column_text(stmt, i));
+                return ptr ? std::string(ptr) : std::string();
+            };
+            const double bm25 = sqlite3_column_type(stmt, 6) == SQLITE_NULL ? 0.0 : sqlite3_column_double(stmt, 6);
+            results.push_back(NativeRepoChunkSearchRow{
+                text_col(1),
+                text_col(0),
+                text_col(2),
+                text_col(3),
+                text_col(4),
+                text_col(5),
+                -bm25
+            });
+        }
+        sqlite3_finalize(stmt);
+        if (!results.empty()) {
+            return results;
+        }
     }
-    sqlite_bind_text_checked(stmt, 1, query);
-    sqlite3_bind_int(stmt, 2, std::max(1, k));
-    while (sqlite3_step(stmt) == SQLITE_ROW) {
-        auto text_col = [&](int i) -> std::string {
-            const auto* ptr = reinterpret_cast<const char*>(sqlite3_column_text(stmt, i));
-            return ptr ? std::string(ptr) : std::string();
-        };
-        const double bm25 = sqlite3_column_type(stmt, 6) == SQLITE_NULL ? 0.0 : sqlite3_column_double(stmt, 6);
-        results.push_back(NativeRepoChunkSearchRow{
-            text_col(1),
-            text_col(0),
-            text_col(2),
-            text_col(3),
-            text_col(4),
-            text_col(5),
-            -bm25
-        });
-    }
-    sqlite3_finalize(stmt);
     return results;
 }
 
@@ -3904,7 +4017,7 @@ SandboxInitNativeResult init_native_sandbox(
     for (const auto& dir : {"decisions", "views", "items", "_config", "_meta", ".cache", "artifacts", "topics"}) {
         ensure_dir(sandbox_root / dir);
     }
-    for (const auto& type : {"epic", "feature", "userstory", "task", "bug"}) {
+    for (const auto& type : {"epic", "feature", "userstory", "task", "bug", "issue"}) {
         ensure_dir(sandbox_root / "items" / type);
         ensure_dir(sandbox_root / "items" / type / "0000");
     }
@@ -6449,6 +6562,7 @@ std::optional<int> try_run_meta_ticketing_fast_path(int argc, char** argv) {
             "- Feature: a new capability that delivers multiple UserStories.\n"
             "- UserStory: a single user-facing outcome that requires multiple Tasks.\n"
             "- Task: a single focused implementation or doc change (typically one session).\n"
+            "- Issue: a pre-triage unclear problem, blocker risk, or cross-cutting concern before classification.\n"
             "- Example: \"End-to-end embedding pipeline\" = Epic; \"Pluggable vector backend\" = Feature; \"MVP chunking pipeline\" = UserStory; \"Implement tokenizer adapter\" = Task.\n";
 
         std::string updated = content;
@@ -7201,7 +7315,7 @@ int main(int InArgc, char* InArgv[]) {
         {
             auto* createCmd = workitemCmd->add_subcommand("create", "Create a new work item");
             std::string type_str, title, agent, parent;
-            createCmd->add_option("-t,--type", type_str, "Item type (epic, feature, userstory, task, bug)")->required();
+            createCmd->add_option("-t,--type", type_str, "Item type (epic, feature, userstory, task, bug, issue)")->required();
             createCmd->add_option("--title", title, "Item title")->required();
             createCmd->add_option("--agent", agent, "Agent ID")->required();
             createCmd->add_option("--parent", parent, "Parent item ID");
@@ -7590,7 +7704,7 @@ int main(int InArgc, char* InArgv[]) {
         {
             auto* listCmd = workitemCmd->add_subcommand("list", "List work items");
             std::string filter_type_str, filter_state_str;
-            listCmd->add_option("--type", filter_type_str, "Filter by type (epic, feature, userstory, task, bug)");
+            listCmd->add_option("--type", filter_type_str, "Filter by type (epic, feature, userstory, task, bug, issue)");
             listCmd->add_option("--state", filter_state_str, "Filter by state");
             listCmd->callback([&]() {
                 auto ctx = resolve_ctx();
@@ -17848,32 +17962,25 @@ int main(int InArgc, char* InArgv[]) {
                 // Find the webview binary relative to the CLI binary location
                 std::filesystem::path cli_exe(InArgv[0]);
                 std::filesystem::path cli_dir = cli_exe.parent_path();
+                std::filesystem::path webview_exe = resolve_webview_binary(cli_dir);
 
-                // Try same directory first, then parent build dir
-                std::filesystem::path webview_exe = cli_dir / "kano_backlog_webview.exe";
-                if (!std::filesystem::exists(webview_exe)) {
-                    webview_exe = cli_dir / ".." / ".." / ".." / "kano_backlog_webview.exe";
-                    webview_exe = webview_exe.lexically_normal();
-                }
-
-                if (!std::filesystem::exists(webview_exe)) {
-                    std::cerr << "Error: kano_backlog_webview.exe not found.\n";
+                if (webview_exe.empty()) {
+                    std::cerr << "Error: kano_backlog_webview executable not found.\n";
                     std::cerr << "Build with: cmake --build --preset <preset> --target kano_backlog_webview\n";
                     std::cerr << "Or set KB_BUILD_WEBVIEW=ON in CMake.\n";
                     throw std::runtime_error("webview binary not found");
                 }
 
-                // Forward to webview executable
-                std::string cmd = "\"" + webview_exe.string() + "\"";
+                std::vector<std::string> forwarded_args;
                 for (int i = 1; i < InArgc; ++i) {
                     std::string arg(InArgv[i]);
                     if (arg == "serve" || arg == "webview") continue; // skip our own subcommand
-                    cmd += " \"" + arg + "\"";
+                    forwarded_args.push_back(std::move(arg));
                 }
                 std::cout << "Starting webview server...\n";
                 std::cout << "Launching: " << webview_exe << "\n";
                 std::cout << "Press Ctrl+C to stop.\n";
-                int rc = std::system(cmd.c_str());
+                int rc = launch_webview_process(webview_exe, forwarded_args);
                 if (rc != 0) throw std::runtime_error("webview server exited with error");
             });
         }
@@ -18972,8 +19079,8 @@ int main(int InArgc, char* InArgv[]) {
                         for (auto& item : done_items) {
                             by_type[item.type].push_back(&item);
                         }
-                        const char* type_names[] = {"Epic", "Feature", "UserStory", "Task", "Bug"};
-                        for (int t = 0; t < 5; ++t) {
+                        const char* type_names[] = {"Epic", "Feature", "UserStory", "Task", "Bug", "Issue"};
+                        for (int t = 0; t < 6; ++t) {
                             ItemType type = static_cast<ItemType>(t);
                             auto it = by_type.find(type);
                             if (it == by_type.end()) continue;
@@ -19228,7 +19335,7 @@ int main(int InArgc, char* InArgv[]) {
                     std::vector<std::tuple<std::string, std::string, std::string>> trivial;
                     std::vector<std::tuple<std::string, std::string, std::string, std::string>> with_tickets;
 
-                    std::regex ticket_pattern("KABSD-(FTR|TSK|BUG|USR|EPC)-\\d+", std::regex_constants::icase);
+                    std::regex ticket_pattern("KABSD-(FTR|TSK|BUG|ISS|USR|EPC)-\\d+", std::regex_constants::icase);
                     std::regex trivial_patterns[] = {
                         std::regex("^(docs|chore|style|typo|format):", std::regex_constants::icase),
                         std::regex("^Merge ", std::regex_constants::icase),
@@ -19366,7 +19473,7 @@ int main(int InArgc, char* InArgv[]) {
                         _pclose(files_pipe);
                     }
 
-                    std::regex ticket_pattern("KABSD-(FTR|TSK|BUG|USR|EPC)-\\d+", std::regex_constants::icase);
+                    std::regex ticket_pattern("KABSD-(FTR|TSK|BUG|ISS|USR|EPC)-\\d+", std::regex_constants::icase);
                     std::smatch m;
                     if (std::regex_search(message, m, ticket_pattern)) {
                         std::cout << "Commit already has ticket: " << m.str(0) << "\n";

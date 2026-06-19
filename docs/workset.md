@@ -1,6 +1,6 @@
 # Workset (Execution Cache)
 
-Workset is a **derived, ephemeral execution cache** used while an agent is working on a Task/Bug.
+Workset is a **derived, ephemeral execution cache** used while an agent is working on a Task/Bug/Issue.
 It is not the source of truth: canonical work items and ADRs remain the SSOT.
 
 ## Goals

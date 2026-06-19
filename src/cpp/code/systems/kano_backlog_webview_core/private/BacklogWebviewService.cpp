@@ -589,6 +589,9 @@ std::string BacklogWebviewService::NormalizeTypeFromPath(
   if (parent == "bug") {
     return "Bug";
   }
+  if (parent == "issue") {
+    return "Issue";
+  }
   return "Unknown";
 }
 
@@ -1271,7 +1274,7 @@ Json::Value BacklogWebviewService::BuildTree(const ItemQueryOptions& options) {
   for (const auto& item : itemsResponse["items"]) {
     const auto type = item["type"].asString();
     if (type != "Epic" && type != "Feature" && type != "UserStory" &&
-        type != "Task" && type != "Bug" && type != "Theme") {
+        type != "Task" && type != "Bug" && type != "Issue" && type != "Theme") {
       continue;
     }
     const auto id = item["id"].asString();
@@ -1295,7 +1298,7 @@ Json::Value BacklogWebviewService::BuildTree(const ItemQueryOptions& options) {
   for (const auto& item : itemsResponse["items"]) {
     const auto type = item["type"].asString();
     if (type != "Epic" && type != "Feature" && type != "UserStory" &&
-        type != "Task" && type != "Bug" && type != "Theme") {
+        type != "Task" && type != "Bug" && type != "Issue" && type != "Theme") {
       continue;
     }
     const auto id = item["id"].asString();
@@ -1338,7 +1341,7 @@ Json::Value BacklogWebviewService::BuildTree(const ItemQueryOptions& options) {
   for (const auto& item : itemsResponse["items"]) {
     const auto type = item["type"].asString();
     if (type != "Epic" && type != "Feature" && type != "UserStory" &&
-        type != "Task" && type != "Bug" && type != "Theme") {
+        type != "Task" && type != "Bug" && type != "Issue" && type != "Theme") {
       continue;
     }
     const auto id = item["id"].asString();
@@ -1570,6 +1573,9 @@ Json::Value BacklogWebviewService::PreviewCommand(const std::string& phrase,
   }
   if (ContentContainsAny(lowered, {"bug", "bugs"})) {
     kobql += "type:Bug ";
+  }
+  if (ContentContainsAny(lowered, {"issue", "issues", "triage"})) {
+    kobql += "type:Issue ";
   }
   if (ContentContainsAny(lowered, {"feature", "features"})) {
     kobql += "type:Feature ";

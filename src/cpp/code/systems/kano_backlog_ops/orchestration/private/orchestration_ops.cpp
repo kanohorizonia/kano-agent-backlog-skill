@@ -18,7 +18,7 @@
 
 namespace {
 
-constexpr const char* kItemTypes[] = {"epic", "feature", "userstory", "task", "bug"};
+constexpr const char* kItemTypes[] = {"epic", "feature", "userstory", "task", "bug", "issue"};
 
 std::string trim(std::string value) {
     auto not_space = [](unsigned char ch) { return !std::isspace(ch); };

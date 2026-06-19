@@ -28,6 +28,7 @@ int main() {
     using kano::backlog_core::StateAction;
     using kano::backlog_core::StateMachine;
     using kano::backlog_core::Validator;
+    using kano::backlog_core::parse_item_type;
 
     try {
         BacklogItem item;
@@ -96,6 +97,25 @@ int main() {
         auto [invalid_ready, invalid_ready_gaps] = Validator::is_ready(invalid);
         expect(!invalid_ready, "missing ready-gate field should fail validation");
         expect(!invalid_ready_gaps.empty(), "missing ready-gate field should fail validation");
+
+        BacklogItem issue = item;
+        issue.id = "GT-ISS-0001";
+        issue.uid = "019cdf6a-0000-7000-8000-000000000002";
+        issue.type = ItemType::Issue;
+        issue.title = "Pre-triage runtime gap";
+        issue.context = "A runtime gap is reported before the exact fix path is known.";
+        issue.goal = "Capture the unclear problem, risk, and blocker evidence without forcing a Task or Bug classification.";
+        issue.approach = "Triage the evidence, then split follow-up Tasks or Bugs once the remediation path is clear.";
+        issue.acceptance_criteria = "Issue validates with ISS prefix and full Ready gate fields.";
+        issue.risks = "Issue items must not imply new Research, Decision, or Spike item types.";
+        auto issue_schema_errors = Validator::validate_schema(issue);
+        expect(issue_schema_errors.empty(), "issue item should satisfy schema validation");
+        auto [issue_ready_ok, issue_ready_gaps] = Validator::is_ready(issue);
+        expect(issue_ready_ok, "issue item should satisfy ready gate");
+        expect(issue_ready_gaps.empty(), "issue item should not have ready gate gaps");
+        expect(to_string(ItemType::Issue) == "Issue", "issue type should stringify");
+        expect(parse_item_type("issue").value_or(ItemType::Task) == ItemType::Issue, "issue type should parse");
+        expect(parse_item_type("Issue").value_or(ItemType::Task) == ItemType::Issue, "Issue type should parse case-insensitively");
 
         std::cout << "backlog_core_smoke_test: PASS\n";
         return 0;

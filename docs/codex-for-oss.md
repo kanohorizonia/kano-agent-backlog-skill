@@ -26,7 +26,7 @@ Open source maintenance often suffers when implementation moves faster than rati
 ## Suggested operating model for Codex style agents
 
 1. create or update the relevant work item before code changes
-2. complete the Ready Gate for tasks and bugs
+2. complete the Ready Gate for tasks, bugs, and issues
 3. use a workset when implementation spans multiple steps
 4. append worklog entries when the plan changes or a decision lands
 5. create an ADR if the decision has lasting architectural impact

@@ -14,6 +14,33 @@
 | Source repository | [kanohorizonia/kano-agent-backlog-skill](https://github.com/kanohorizonia/kano-agent-backlog-skill) |
 | CI workflow | [KanoAgentSkills / Cloud Build](https://github.com/kanohorizonia/kano-agent-backlog-skill/actions/workflows/agent-skill-cloud-build.yml) |
 
+## CI evidence to review first
+
+Release review starts from generated evidence. The public site keeps stable report slots so reviewers, users, and agents can inspect what was tested without opening Jenkins internals first.
+
+| Evidence | Public entry point | What to verify |
+| --- | --- | --- |
+| Feature-first test report | [Latest test report](reports/latest/test-report/) | Overall result, platform lanes, feature suites, and detailed BDD scenario pages. |
+| Source-level coverage report | [Latest coverage report](reports/latest/coverage-report/) | Native coverage by file and function. Source is publishable because this project is open source. |
+| BDD capability tour | [BDD scenarios inside the latest test report](reports/latest/test-report/) | User-facing behavior coverage: repo discovery, work item creation, state transitions, topics, worksets, and release/report contracts. |
+| GitHub cloud evidence | [GitHub Actions runs](https://github.com/kanohorizonia/kano-agent-backlog-skill/actions) | Cloud platform build and report artifact history. |
+| Jenkins release evidence | [KanoAgentSkills latest Build_CI](https://jenkins.kanohorizonia.com/job/KanoAgentSkills/job/kano-agent-backlog-skill/job/Build_CI/lastSuccessfulBuild/) | Internal orchestration, artifact collection, report publication, and release gates. |
+
+The test and coverage links must not be placeholder-only pages for an accepted release. If either slot says that no publishable report HTML is available, treat it as a release evidence blocker.
+
+## BDD as product documentation
+
+The test report is also the product tour. Feature suites should read like externally useful capability documentation, while the individual BDD scenarios provide the exact behaviors that were exercised by CI.
+
+| Feature suite | What a reader should learn |
+| --- | --- |
+| CLI core | How `kob` discovers a backlog, parses commands, exits noninteractively, and reports user-facing failures. |
+| Repo discovery | How the tool locates the nearest backlog root and keeps local-first operation stable across nested workspaces. |
+| Work item operations | How items are created, assigned stable IDs, written to ordinary files, and transitioned through the Ready gate. |
+| Topics and worksets | How agents gather bounded context, assemble focused work orders, and avoid broad workspace assumptions. |
+| Report publication | How Jenkins and GitHub Actions publish JUnit, feature-first HTML, coverage HTML, and public site report slots. |
+| Release channels | How GitHub Releases, Homebrew, winget, apt intent payloads, and post-release install checks fit together. |
+
 ## Start here
 
 | Destination | Why open it |
@@ -26,8 +53,6 @@
 | [Release channels](guides/release-channels.md) | How CI, GitHub Releases, Homebrew, winget, and apt publishing are intended to work. |
 | [Architecture decisions](adr/overview.md) | Backlog model, ID policy, indexing, and local-first decisions. |
 | [GitHub Actions](https://github.com/kanohorizonia/kano-agent-backlog-skill/actions) | Current cloud build, test, report, and Pages runs. |
-| [Latest test report](reports/latest/test-report/) | Stable public test report HTML slot. |
-| [Latest coverage report](reports/latest/coverage-report/) | Stable public coverage report HTML slot. |
 
 ## Release quality snapshot
 
@@ -52,6 +77,87 @@
 ## What this site covers
 
 This site brings together release-facing documentation, generated CLI docs, architecture decisions, release notes, and the CI report contract used by Jenkins and GitHub Actions. CI report pages are expected to expose both test detail and coverage detail because the project is open source.
+
+## Architecture overview
+
+```mermaid
+flowchart LR
+  reviewer["Human reviewer or agent"] --> site["Public docs site"]
+  site --> reports["Stable report slots"]
+  reports --> tests["Feature-first test report"]
+  reports --> coverage["Source-level coverage report"]
+  tests --> bdd["BDD scenario pages"]
+  coverage --> source["Open-source code coverage views"]
+  jenkins["Jenkins Build_CI"] --> reports
+  actions["GitHub Actions cloud build"] --> reports
+  jenkins --> release["GitHub Release artifacts"]
+  actions --> release
+```
+
+```mermaid
+sequenceDiagram
+  actor Reviewer
+  participant Jenkins as Jenkins Build_CI
+  participant CTest as Native CTest lane
+  participant Reporter as Kano report tooling
+  participant Pages as GitHub Pages
+  Reviewer->>Pages: Open public project site
+  Jenkins->>CTest: Build and run platform test lanes
+  CTest-->>Reporter: JUnit XML and coverage inputs
+  Reporter-->>Reporter: Map tests into feature suites and BDD scenarios
+  Reporter-->>Pages: Publish test-report and coverage-report slots
+  Pages-->>Reviewer: Show BDD capabilities and source-level coverage
+```
+
+```mermaid
+stateDiagram-v2
+  [*] --> Proposed
+  Proposed --> InProgress: Ready gate passes
+  Proposed --> Blocked: missing context, goal, approach, acceptance, or risks
+  InProgress --> Review: implementation and evidence ready
+  Review --> Done: accepted
+  Review --> InProgress: follow-up required
+  InProgress --> Blocked: external dependency
+  Blocked --> InProgress: blocker resolved
+  Proposed --> Dropped: no longer needed
+  Review --> Dropped: superseded
+```
+
+```mermaid
+classDiagram
+  class Backlog {
+    +products
+    +config
+    +views
+  }
+  class WorkItem {
+    +id
+    +type
+    +state
+    +readyFields
+    +worklog
+  }
+  class Topic {
+    +scope
+    +materials
+    +notes
+  }
+  class Workset {
+    +goal
+    +boundedContext
+    +evidence
+  }
+  class ReportSite {
+    +testReport
+    +coverageReport
+    +publicSlots
+  }
+  Backlog "1" --> "*" WorkItem
+  Backlog "1" --> "*" Topic
+  Topic "1" --> "*" Workset
+  WorkItem "*" --> "*" Workset
+  ReportSite --> WorkItem : release evidence
+```
 
 ## Core guides
 

@@ -83,6 +83,8 @@ The repo-local executable contract is the native C++ CLI. The `scripts/kob` and 
 ## Current release status
 
 - [GitHub Releases](https://github.com/kanohorizonia/kano-agent-backlog-skill/releases) is the source of truth for installable public artifacts
+- [Latest public CI test report](https://agentskill-backlog.kanohorizonia.com/reports/latest/test-report/) is the source of truth for reviewable test and BDD evidence
+- [Latest public coverage report](https://agentskill-backlog.kanohorizonia.com/reports/latest/coverage-report/) publishes source-level coverage for this open-source project
 - `0.0.4` is the current native C++ release target and is accepted only when `v0.0.4` exists with downloadable platform artifacts
 - `0.0.2` is the previous tagged OSS release
 - `0.0.3` was an untagged Python-public planning line and is superseded by `0.0.4`
@@ -163,6 +165,8 @@ pixi run webview-compose-up
 ## Documentation
 
 - [GitHub Pages documentation site](https://agentskill-backlog.kanohorizonia.com/)
+- [Latest public CI test report](https://agentskill-backlog.kanohorizonia.com/reports/latest/test-report/)
+- [Latest public coverage report](https://agentskill-backlog.kanohorizonia.com/reports/latest/coverage-report/)
 - [Quick start](docs/quick-start.md)
 - [Installation](docs/installation.md)
 - [Configuration](docs/configuration.md)

@@ -151,7 +151,7 @@ stage_public_report_slots() {
   local target_root
   local policy
   public_root="$(normalize_public_report_root "${KANO_PUBLIC_REPORT_ROOT:-reports/latest}")"
-  source_root="${KANO_SITE_STAGING_ROOT:-}"
+  source_root="${KANO_SITE_STAGING_ROOT:-$BUILD_DIR/staged}"
   target_root="$DEPLOY_DIR/$public_root"
   policy="${KANO_PUBLIC_COVERAGE_SOURCE_POLICY:-source-free}"
 

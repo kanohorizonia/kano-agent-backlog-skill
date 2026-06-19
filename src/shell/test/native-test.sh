@@ -90,12 +90,22 @@ esac
 
 prepare_windows_ctest_drive
 
+KANO_CTEST_OUTPUT_SIZE_PASSED="${KANO_CTEST_OUTPUT_SIZE_PASSED:-262144}"
+KANO_CTEST_OUTPUT_SIZE_FAILED="${KANO_CTEST_OUTPUT_SIZE_FAILED:-1048576}"
+
 run_ctest_with_junit() {
   local lane="${1:-default}"
   shift $(( $# > 0 ? 1 : 0 )) || true
   local build_dir="$SKILL_ROOT/src/cpp/out/obj/$PRESET"
   local test_count
-  local ctest_args=(--test-dir "$build_dir" -C "$CONFIG" --output-on-failure --timeout "$KANO_NATIVE_TEST_TIMEOUT_SECONDS")
+  local ctest_args=(
+    --test-dir "$build_dir"
+    -C "$CONFIG"
+    --output-on-failure
+    --timeout "$KANO_NATIVE_TEST_TIMEOUT_SECONDS"
+    --test-output-size-passed "$KANO_CTEST_OUTPUT_SIZE_PASSED"
+    --test-output-size-failed "$KANO_CTEST_OUTPUT_SIZE_FAILED"
+  )
 
   if [[ ! -d "$build_dir" ]]; then
     echo "Missing CTest build directory: $build_dir" >&2
@@ -117,6 +127,8 @@ run_ctest_with_junit() {
 
   echo "[INFO] CTest lane: $lane"
   echo "[INFO] CTest timeout seconds: $KANO_NATIVE_TEST_TIMEOUT_SECONDS"
+  echo "[INFO] CTest output size passed: $KANO_CTEST_OUTPUT_SIZE_PASSED"
+  echo "[INFO] CTest output size failed: $KANO_CTEST_OUTPUT_SIZE_FAILED"
 
   if [[ -n "${KANO_TEST_XML:-}" ]]; then
     case "$KANO_TEST_XML" in

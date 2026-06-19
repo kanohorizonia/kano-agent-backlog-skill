@@ -20,13 +20,13 @@ Release review starts from generated evidence. The public site keeps stable repo
 
 | Evidence | Public entry point | What to verify |
 | --- | --- | --- |
-| Feature-first test report | [Latest test report](reports/latest/test-report/) | Overall result, platform lanes, feature suites, and detailed BDD scenario pages. |
-| Source-level coverage report | [Latest coverage report](reports/latest/coverage-report/) | Native coverage by file and function. Source is publishable because this project is open source. |
+| Feature-first test report | [Latest public test report](https://agentskill-backlog.kanohorizonia.com/reports/latest/test-report/) | Overall result, platform lanes, feature suites, and detailed BDD scenario pages. |
+| Source-level coverage report | [Latest public coverage report](https://agentskill-backlog.kanohorizonia.com/reports/latest/coverage-report/) | Native coverage by file and function. Source is publishable because this project is open source. |
 | BDD capability tour | [BDD scenarios inside the latest test report](reports/latest/test-report/) | User-facing behavior coverage: repo discovery, work item creation, state transitions, topics, worksets, and release/report contracts. |
 | GitHub cloud evidence | [GitHub Actions runs](https://github.com/kanohorizonia/kano-agent-backlog-skill/actions) | Cloud platform build and report artifact history. |
 | Jenkins release evidence | [KanoAgentSkills latest Build_CI](https://jenkins.kanohorizonia.com/job/KanoAgentSkills/job/kano-agent-backlog-skill/job/Build_CI/lastSuccessfulBuild/) | Internal orchestration, artifact collection, report publication, and release gates. |
 
-The test and coverage links must not be placeholder-only pages for an accepted release. If either slot says that no publishable report HTML is available, treat it as a release evidence blocker.
+The test and coverage links must not be placeholder-only pages for an accepted release. Do not send external users to local Jenkins URLs; Jenkins report pages are internal producer evidence, and GitHub Pages report slots are the public consumer contract. If either public slot says that no publishable report HTML is available, treat it as a release evidence blocker.
 
 ## BDD as product documentation
 

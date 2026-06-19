@@ -84,8 +84,16 @@ bash "$REPO_ROOT/src/shell/docs/04-deploy-mkdocs.sh" \
   "$REPO_ROOT/src/shell/docs/config/mkdocs.yml"
 echo ""
 
+if [[ -n "${KANO_PUBLIC_REPORT_SOURCE_DIR:-}" || -n "${KANO_PUBLIC_REPORT_SOURCE_URL:-}" ]]; then
+  echo "Step 4b: Staging public report slots..."
+  bash "$REPO_ROOT/src/shell/docs/stage-public-report-slots.sh" \
+    "$REPO_ROOT/_ws/build"
+  echo ""
+fi
+
 if [ "$PREP_DEPLOY" = true ]; then
   echo "Step 5: Preparing local gh-pages working tree..."
+  export KANO_SITE_STAGING_ROOT="${KANO_SITE_STAGING_ROOT:-$REPO_ROOT/_ws/build/staged}"
   bash "$REPO_ROOT/src/shell/docs/05-deploy-quartz.sh" \
     "$REPO_ROOT/_ws/build" \
     "$REPO_ROOT/_ws/deploy/gh-pages" \

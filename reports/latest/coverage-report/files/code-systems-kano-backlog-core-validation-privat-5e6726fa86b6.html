@@ -1,0 +1,729 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>validator.cpp Coverage</title>
+  <style>
+:root {
+  color-scheme: light dark;
+  --bg: #0b1020;
+  --panel: color-mix(in srgb, canvas 92%, #5b7fff 8%);
+  --panel-strong: color-mix(in srgb, canvas 84%, #5b7fff 16%);
+  --text: canvastext;
+  --muted: color-mix(in srgb, canvastext 68%, transparent);
+  --border: color-mix(in srgb, canvastext 12%, transparent);
+  --accent: #6a8cff;
+  --accent-soft: color-mix(in srgb, #6a8cff 20%, transparent);
+  --good: #1f8f4e;
+  --warn: #b98500;
+  --bad: #c13232;
+  --shadow: 0 18px 44px rgba(8, 12, 24, 0.14);
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: Inter, Segoe UI, Arial, sans-serif;
+  line-height: 1.5;
+  color: var(--text);
+  background:
+    radial-gradient(circle at top, rgba(106, 140, 255, 0.12), transparent 32%),
+    linear-gradient(180deg, color-mix(in srgb, canvas 97%, #0b1020 3%), canvas 20%);
+}
+
+a { color: var(--accent); }
+code, pre { font-family: Consolas, SFMono-Regular, monospace; }
+code {
+  font-size: 0.95em;
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+
+.page {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 32px 24px 48px;
+}
+
+.hero {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.eyebrow {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.hero h1 {
+  margin: 0;
+  font-size: clamp(28px, 4vw, 40px);
+  line-height: 1.08;
+}
+
+.hero p {
+  margin: 12px 0 0;
+  max-width: 74ch;
+  color: var(--muted);
+}
+
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, canvas 90%, #6a8cff 10%);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.section {
+  margin-top: 24px;
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  overflow-x: auto;
+}
+
+.section h2 {
+  margin: 0 0 14px;
+  font-size: 20px;
+}
+
+.muted { color: var(--muted); }
+
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 14px;
+}
+
+.card {
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: color-mix(in srgb, canvas 92%, #6a8cff 8%);
+}
+
+.card .label {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.card .value {
+  font-size: clamp(22px, 3vw, 30px);
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.card .value.compact {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.card .detail {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.link-list {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.link-card {
+  display: block;
+  padding: 16px;
+  border-radius: 16px;
+  text-decoration: none;
+  color: inherit;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, canvas 88%, #6a8cff 12%);
+  transition: transform 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+
+.link-card:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  background: color-mix(in srgb, canvas 84%, #6a8cff 16%);
+}
+
+.link-card strong {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 16px;
+}
+
+.link-card span {
+  display: block;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  overflow: hidden;
+  border-radius: 16px;
+}
+
+.coverage-report-table {
+  table-layout: fixed;
+}
+
+.coverage-report-table col.file-col { width: 62%; }
+.coverage-report-table col.name-col { width: 26%; }
+.coverage-report-table col.line-col { width: 6%; }
+.coverage-report-table col.branch-col { width: 6%; }
+
+.coverage-report-table td code {
+  display: block;
+  max-width: 100%;
+}
+
+th, td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+thead th {
+  background: color-mix(in srgb, canvas 82%, #6a8cff 18%);
+  font-size: 13px;
+}
+
+tbody tr:hover td {
+  background: color-mix(in srgb, canvas 92%, #6a8cff 8%);
+}
+
+.metric-good { color: var(--good); }
+.metric-warn { color: var(--warn); }
+.metric-bad { color: var(--bad); }
+.metric-na { color: var(--muted); }
+
+.report-card-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+.report-card {
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: color-mix(in srgb, canvas 92%, #6a8cff 8%);
+}
+
+.report-card h2 {
+  margin: 0 0 8px;
+  font-size: 18px;
+}
+
+.report-card ul {
+  margin: 12px 0 0;
+  padding-left: 18px;
+}
+
+.footer {
+  margin-top: 24px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.breadcrumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.breadcrumbs a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.breadcrumbs a:hover {
+  text-decoration: underline;
+}
+
+.breadcrumbs .sep {
+  opacity: 0.65;
+}
+
+@media (max-width: 720px) {
+  .page { padding: 24px 16px 36px; }
+  .section { padding: 16px; }
+  th, td { padding: 9px 10px; }
+}
+.source-table td pre { margin: 0; white-space: pre-wrap; word-break: break-word; }
+               .source-covered td { background: rgba(31, 143, 78, 0.20); }
+               .source-uncovered td { background: rgba(193, 50, 50, 0.18); }
+               .source-covered td:nth-child(2) { color: #1f8f4e; font-weight: 700; }
+               .source-uncovered td:nth-child(2) { color: #c13232; font-weight: 700; }
+               .last-mod { font-size: 12px; color: var(--muted); margin: 0 0 12px; }
+               .last-mod-summary { color: var(--accent); }
+               
+    .blame-toggle { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+    .blame-toggle label { font-size: 13px; cursor: pointer; user-select: none; }
+    .source-table .blame { display: none; }
+    .source-table.blame-on .blame { display: table-cell; }
+    .source-table.blame-on .no-blame { display: none; }
+    .blame-cell { font-size: 11px; color: var(--muted); min-width: 140px; max-width: 200px; }
+    .blame-cell span { display: block; }
+    .blame-summary { color: var(--accent); font-size: 11px; }
+    </style>
+</head>
+<body>
+  <main class="page">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Kano C++ Test Reports</p>
+        <h1>validator.cpp</h1>
+        <p>code/systems/kano_backlog_core/validation/private/validator.cpp · Per-file coverage drilldown with source embedded at report generation time when resolvable.</p>
+      </div>
+      <div class="chip-row"><span class="chip">Line: 70.73%</span></div>
+    </header>
+    
+<nav class="breadcrumbs"><a href="../index.html">Coverage</a><span class="sep">/</span><a href="../modules/code-systems-3a64881890e6.html">code/systems</a><span class="sep">/</span><span>validator.cpp</span></nav>
+<div class="last-mod"><span>Last modified by <strong>dorgon.chang</strong> on 2026-06-19 · <a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/ac4e2d1" target="_blank" rel="noopener">ac4e2d1</a></span><span class="last-mod-summary"> — test(kano-agent-backlog-skill): update 35 files</span></div>
+<section class="section">
+  <h2>File overview</h2>
+  <div class="card-grid">
+    <div class="card"><span class="label">Module</span><div class="value compact">code/systems</div></div>
+    <div class="card"><span class="label">Line coverage</span><div class="value metric-warn">70.73%</div></div>
+    
+  </div>
+</section>
+<section class="section">
+  <h2>Line hits</h2>
+  <div class="blame-toggle"><input type="checkbox" id="blame-toggle"><label for="blame-toggle">Show git blame</label></div>
+  <table class="source-table" id="source-table">
+    <thead><tr><th>Line</th><th class="no-blame">Hits</th><th class="blame">Blame</th><th>Code</th></tr></thead>
+    <tbody><tr class="source-neutral">
+  <td>1</td>
+  <td class="blame-cell no-blame"></td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>#include &quot;kano/backlog_core/validation/validator.hpp&quot;</pre></td>
+</tr><tr class="source-neutral">
+  <td>2</td>
+  <td class="blame-cell no-blame"></td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>#include &lt;regex&gt;</pre></td>
+</tr><tr class="source-neutral">
+  <td>3</td>
+  <td class="blame-cell no-blame"></td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre></pre></td>
+</tr><tr class="source-neutral">
+  <td>4</td>
+  <td class="blame-cell no-blame"></td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>namespace kano::backlog_core {</pre></td>
+</tr><tr class="source-neutral">
+  <td>5</td>
+  <td class="blame-cell no-blame"></td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre></pre></td>
+</tr><tr class="source-covered">
+  <td>6</td>
+  <td class="blame-cell no-blame">1</td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>std::pair&lt;bool, std::vector&lt;std::string&gt;&gt; Validator::is_ready(const BacklogItem&amp; item) {</pre></td>
+</tr><tr class="source-covered">
+  <td>7</td>
+  <td class="blame-cell no-blame">1</td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>    std::vector&lt;std::string&gt; missing;</pre></td>
+</tr><tr class="source-neutral">
+  <td>8</td>
+  <td class="blame-cell no-blame"></td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre></pre></td>
+</tr><tr class="source-covered">
+  <td>9</td>
+  <td class="blame-cell no-blame">1</td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>    auto check_field = [&amp;](const std::optional&lt;std::string&gt;&amp; field, const std::string&amp; name) {</pre></td>
+</tr><tr class="source-covered">
+  <td>10</td>
+  <td class="blame-cell no-blame">1</td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>        if (!field || field-&gt;empty() || field-&gt;find_first_not_of(&quot; \n\r\t&quot;) == std::string::npos) {</pre></td>
+</tr><tr class="source-uncovered">
+  <td>11</td>
+  <td class="blame-cell no-blame">0</td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>            missing.push_back(name);</pre></td>
+</tr><tr class="source-neutral">
+  <td>12</td>
+  <td class="blame-cell no-blame"></td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>        }</pre></td>
+</tr><tr class="source-covered">
+  <td>13</td>
+  <td class="blame-cell no-blame">1</td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>    };</pre></td>
+</tr><tr class="source-neutral">
+  <td>14</td>
+  <td class="blame-cell no-blame"></td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre></pre></td>
+</tr><tr class="source-covered">
+  <td>15</td>
+  <td class="blame-cell no-blame">1</td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>    switch (item.type) {</pre></td>
+</tr><tr class="source-neutral">
+  <td>16</td>
+  <td class="blame-cell no-blame"></td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>        case ItemType::Epic:</pre></td>
+</tr><tr class="source-uncovered">
+  <td>17</td>
+  <td class="blame-cell no-blame">0</td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>            check_field(item.context, &quot;Context&quot;);</pre></td>
+</tr><tr class="source-uncovered">
+  <td>18</td>
+  <td class="blame-cell no-blame">0</td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>            check_field(item.goal, &quot;Goal&quot;);</pre></td>
+</tr><tr class="source-uncovered">
+  <td>19</td>
+  <td class="blame-cell no-blame">0</td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>            break;</pre></td>
+</tr><tr class="source-neutral">
+  <td>20</td>
+  <td class="blame-cell no-blame"></td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>        case ItemType::Feature:</pre></td>
+</tr><tr class="source-neutral">
+  <td>21</td>
+  <td class="blame-cell no-blame"></td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>        case ItemType::UserStory:</pre></td>
+</tr><tr class="source-uncovered">
+  <td>22</td>
+  <td class="blame-cell no-blame">0</td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>            check_field(item.context, &quot;Context&quot;);</pre></td>
+</tr><tr class="source-uncovered">
+  <td>23</td>
+  <td class="blame-cell no-blame">0</td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>            check_field(item.goal, &quot;Goal&quot;);</pre></td>
+</tr><tr class="source-uncovered">
+  <td>24</td>
+  <td class="blame-cell no-blame">0</td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>            check_field(item.acceptance_criteria, &quot;Acceptance Criteria&quot;);</pre></td>
+</tr><tr class="source-uncovered">
+  <td>25</td>
+  <td class="blame-cell no-blame">0</td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>            break;</pre></td>
+</tr><tr class="source-neutral">
+  <td>26</td>
+  <td class="blame-cell no-blame"></td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>        case ItemType::Task:</pre></td>
+</tr><tr class="source-neutral">
+  <td>27</td>
+  <td class="blame-cell no-blame"></td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>        case ItemType::Bug:</pre></td>
+</tr><tr class="source-neutral">
+  <td>28</td>
+  <td class="blame-cell no-blame"></td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-06-19</span><span class="blame-summary">test(kano-agent-backlog-skill): update 3</span></td>
+  <td><pre>        case ItemType::Issue:</pre></td>
+</tr><tr class="source-covered">
+  <td>29</td>
+  <td class="blame-cell no-blame">1</td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>            check_field(item.context, &quot;Context&quot;);</pre></td>
+</tr><tr class="source-covered">
+  <td>30</td>
+  <td class="blame-cell no-blame">1</td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>            check_field(item.goal, &quot;Goal&quot;);</pre></td>
+</tr><tr class="source-covered">
+  <td>31</td>
+  <td class="blame-cell no-blame">1</td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>            check_field(item.approach, &quot;Approach&quot;);</pre></td>
+</tr><tr class="source-covered">
+  <td>32</td>
+  <td class="blame-cell no-blame">1</td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>            check_field(item.acceptance_criteria, &quot;Acceptance Criteria&quot;);</pre></td>
+</tr><tr class="source-covered">
+  <td>33</td>
+  <td class="blame-cell no-blame">1</td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>            check_field(item.risks, &quot;Risks / Dependencies&quot;);</pre></td>
+</tr><tr class="source-neutral">
+  <td>34</td>
+  <td class="blame-cell no-blame"></td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>            break;</pre></td>
+</tr><tr class="source-neutral">
+  <td>35</td>
+  <td class="blame-cell no-blame"></td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>    }</pre></td>
+</tr><tr class="source-neutral">
+  <td>36</td>
+  <td class="blame-cell no-blame"></td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre></pre></td>
+</tr><tr class="source-covered">
+  <td>37</td>
+  <td class="blame-cell no-blame">1</td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>    return {missing.empty(), missing};</pre></td>
+</tr><tr class="source-covered">
+  <td>38</td>
+  <td class="blame-cell no-blame">1</td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>}</pre></td>
+</tr><tr class="source-neutral">
+  <td>39</td>
+  <td class="blame-cell no-blame"></td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre></pre></td>
+</tr><tr class="source-covered">
+  <td>40</td>
+  <td class="blame-cell no-blame">1</td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>std::vector&lt;std::string&gt; Validator::validate_schema(const BacklogItem&amp; item) {</pre></td>
+</tr><tr class="source-covered">
+  <td>41</td>
+  <td class="blame-cell no-blame">1</td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>    std::vector&lt;std::string&gt; errors;</pre></td>
+</tr><tr class="source-neutral">
+  <td>42</td>
+  <td class="blame-cell no-blame"></td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre></pre></td>
+</tr><tr class="source-neutral">
+  <td>43</td>
+  <td class="blame-cell no-blame"></td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>    // 1. Required fields</pre></td>
+</tr><tr class="source-covered">
+  <td>44</td>
+  <td class="blame-cell no-blame">1</td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>    if (item.id.empty()) errors.push_back(&quot;Missing required field: id&quot;);</pre></td>
+</tr><tr class="source-covered">
+  <td>45</td>
+  <td class="blame-cell no-blame">1</td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>    if (item.uid.empty()) errors.push_back(&quot;Missing required field: uid&quot;);</pre></td>
+</tr><tr class="source-covered">
+  <td>46</td>
+  <td class="blame-cell no-blame">1</td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>    if (item.title.empty()) errors.push_back(&quot;Missing required field: title&quot;);</pre></td>
+</tr><tr class="source-covered">
+  <td>47</td>
+  <td class="blame-cell no-blame">1</td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>    if (item.created.empty()) errors.push_back(&quot;Missing required field: created&quot;);</pre></td>
+</tr><tr class="source-covered">
+  <td>48</td>
+  <td class="blame-cell no-blame">1</td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>    if (item.updated.empty()) errors.push_back(&quot;Missing required field: updated&quot;);</pre></td>
+</tr><tr class="source-neutral">
+  <td>49</td>
+  <td class="blame-cell no-blame"></td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre></pre></td>
+</tr><tr class="source-neutral">
+  <td>50</td>
+  <td class="blame-cell no-blame"></td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>    // 2. Validate ID format</pre></td>
+</tr><tr class="source-neutral">
+  <td>51</td>
+  <td class="blame-cell no-blame"></td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-06-19</span><span class="blame-summary">test(kano-agent-backlog-skill): update 3</span></td>
+  <td><pre>    // Pattern: ^[A-Z][A-Z0-9]{1,15}-(EPIC|FTR|USR|TSK|BUG|ISS)-\d{4}$</pre></td>
+</tr><tr class="source-covered">
+  <td>52</td>
+  <td class="blame-cell no-blame">1</td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-06-19</span><span class="blame-summary">test(kano-agent-backlog-skill): update 3</span></td>
+  <td><pre>    static const std::regex id_regex(R&quot;(^[A-Z][A-Z0-9]{1,15}-(EPIC|FTR|USR|TSK|BUG|ISS)-\d{4}$)&quot;);</pre></td>
+</tr><tr class="source-covered">
+  <td>53</td>
+  <td class="blame-cell no-blame">1</td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>    if (!item.id.empty() &amp;&amp; !std::regex_match(item.id, id_regex)) {</pre></td>
+</tr><tr class="source-uncovered">
+  <td>54</td>
+  <td class="blame-cell no-blame">0</td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-06-19</span><span class="blame-summary">test(kano-agent-backlog-skill): update 3</span></td>
+  <td><pre>        errors.push_back(&quot;Invalid id format: &quot; + item.id + &quot; (expected &lt;PREFIX&gt;-(EPIC|FTR|USR|TSK|BUG|ISS)-&lt;NNNN&gt;)&quot;);</pre></td>
+</tr><tr class="source-neutral">
+  <td>55</td>
+  <td class="blame-cell no-blame"></td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>    }</pre></td>
+</tr><tr class="source-neutral">
+  <td>56</td>
+  <td class="blame-cell no-blame"></td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre></pre></td>
+</tr><tr class="source-neutral">
+  <td>57</td>
+  <td class="blame-cell no-blame"></td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>    // 3. Validate UID format (strict UUIDv7)</pre></td>
+</tr><tr class="source-neutral">
+  <td>58</td>
+  <td class="blame-cell no-blame"></td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>    // Pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$</pre></td>
+</tr><tr class="source-covered">
+  <td>59</td>
+  <td class="blame-cell no-blame">1</td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>    static const std::regex uuid_v7_regex(R&quot;(^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$)&quot;);</pre></td>
+</tr><tr class="source-covered">
+  <td>60</td>
+  <td class="blame-cell no-blame">1</td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>    if (!item.uid.empty() &amp;&amp; !std::regex_match(item.uid, uuid_v7_regex)) {</pre></td>
+</tr><tr class="source-uncovered">
+  <td>61</td>
+  <td class="blame-cell no-blame">0</td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>        errors.push_back(&quot;Invalid uid format: &quot; + item.uid + &quot; (expected UUIDv7)&quot;);</pre></td>
+</tr><tr class="source-neutral">
+  <td>62</td>
+  <td class="blame-cell no-blame"></td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>    }</pre></td>
+</tr><tr class="source-neutral">
+  <td>63</td>
+  <td class="blame-cell no-blame"></td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre></pre></td>
+</tr><tr class="source-neutral">
+  <td>64</td>
+  <td class="blame-cell no-blame"></td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>    // 4. Validate dates (ISO format YYYY-MM-DD)</pre></td>
+</tr><tr class="source-covered">
+  <td>65</td>
+  <td class="blame-cell no-blame">1</td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>    static const std::regex date_regex(R&quot;(^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$)&quot;);</pre></td>
+</tr><tr class="source-covered">
+  <td>66</td>
+  <td class="blame-cell no-blame">1</td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>    if (!item.created.empty() &amp;&amp; !std::regex_match(item.created, date_regex)) {</pre></td>
+</tr><tr class="source-uncovered">
+  <td>67</td>
+  <td class="blame-cell no-blame">0</td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>        errors.push_back(&quot;Invalid created date format: &quot; + item.created + &quot; (expected YYYY-MM-DD)&quot;);</pre></td>
+</tr><tr class="source-neutral">
+  <td>68</td>
+  <td class="blame-cell no-blame"></td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>    }</pre></td>
+</tr><tr class="source-covered">
+  <td>69</td>
+  <td class="blame-cell no-blame">1</td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>    if (!item.updated.empty() &amp;&amp; !std::regex_match(item.updated, date_regex)) {</pre></td>
+</tr><tr class="source-uncovered">
+  <td>70</td>
+  <td class="blame-cell no-blame">0</td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>        errors.push_back(&quot;Invalid updated date format: &quot; + item.updated + &quot; (expected YYYY-MM-DD)&quot;);</pre></td>
+</tr><tr class="source-neutral">
+  <td>71</td>
+  <td class="blame-cell no-blame"></td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>    }</pre></td>
+</tr><tr class="source-neutral">
+  <td>72</td>
+  <td class="blame-cell no-blame"></td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre></pre></td>
+</tr><tr class="source-covered">
+  <td>73</td>
+  <td class="blame-cell no-blame">1</td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>    return errors;</pre></td>
+</tr><tr class="source-covered">
+  <td>74</td>
+  <td class="blame-cell no-blame">1</td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>}</pre></td>
+</tr><tr class="source-neutral">
+  <td>75</td>
+  <td class="blame-cell no-blame"></td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre></pre></td>
+</tr><tr class="source-neutral">
+  <td>76</td>
+  <td class="blame-cell no-blame"></td>
+  <td class="blame-cell blame"><span><a href="https://github.com/kanohorizonia/kano-agent-backlog-skill/commit/" target="_blank" rel="noopener"></a></span><span>dorgon.chang</span><span>2026-03-10</span><span class="blame-summary">[WIP] Refactor from python to cpp</span></td>
+  <td><pre>} // namespace kano::backlog_core</pre></td>
+</tr></tbody>
+  </table>
+</section>
+
+<section class="section">
+  <h2>Source lookup</h2>
+  <p>Status: <strong>embedded</strong></p>
+  <p>Resolved path hint: <code>D:\a\kano-agent-backlog-skill\kano-agent-backlog-skill\src\cpp\code\systems\kano_backlog_core\validation\private\validator.cpp</code></p>
+  <details><summary>Tried paths</summary><ul><li><code>D:\a\kano-agent-backlog-skill\kano-agent-backlog-skill\src\cpp\src\cpp\code\systems\kano_backlog_core\validation\private\validator.cpp</code></li><li><code>D:\a\kano-agent-backlog-skill\kano-agent-backlog-skill\src\cpp\code\systems\kano_backlog_core\validation\private\validator.cpp</code></li></ul></details>
+</section>
+<p class="footer"><a href="../index.html">Back to coverage index</a> · <a href="../modules/code-systems-3a64881890e6.html">Back to module</a></p>
+
+  </main>
+  <script>const t=document.getElementById("source-table"),b=document.getElementById("blame-toggle");b&&b.addEventListener("change",()=>t.classList.toggle("blame-on",b.checked));</script>
+</body>
+</html>

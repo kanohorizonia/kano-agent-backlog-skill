@@ -65,13 +65,13 @@
 <ul>
 <li>Only create items for work that changes code or design decisions.</li>
 <li>Avoid new items for exploratory discussion; record in existing Worklog instead.</li>
-<li>Keep Tasks/Bugs sized for a single focused session.</li>
+<li>Keep Tasks/Bugs/Issues sized for a single focused session.</li>
 <li>Avoid ADRs unless a real architectural trade-off is made.</li>
 </ul>
 </li>
 <li>Ticketing threshold (agent-decided):
 <ul>
-<li>Open a new Task/Bug when you will change code/docs/views/scripts.</li>
+<li>Open a new Task/Bug/Issue when you will change code/docs/views/scripts or when an unclear runtime gap needs pre-triage evidence.</li>
 <li>Open an ADR (and link it) when a real trade-off or direction change is decided.</li>
 <li>Otherwise, record the discussion in an existing Worklog; ask if unsure.</li>
 </ul>
@@ -82,6 +82,7 @@
 <li>Feature: a new capability that delivers multiple UserStories.</li>
 <li>UserStory: a single user-facing outcome that requires multiple Tasks.</li>
 <li>Task: a single focused implementation or doc change (typically one session).</li>
+<li>Issue: a pre-triage unclear problem, risk, blocker, or runtime gap; split into Task/Bug follow-ups once actionable.</li>
 <li>Example: “End-to-end embedding pipeline” = Epic; “Pluggable vector backend” = Feature; “MVP chunking pipeline” = UserStory; “Implement tokenizer adapter” = Task.</li>
 </ul>
 </li>
@@ -124,7 +125,7 @@
 <p>For any work that changes code, docs, scripts, views, configs, schemas, tests, build logic, or persistent design decisions:</p>
 <p><strong>Before implementation:</strong></p>
 <ol>
-<li>Reuse an existing Task/Bug if it already covers the work; otherwise create one.</li>
+<li>Reuse an existing Task/Bug/Issue if it already covers the work; otherwise create one.</li>
 <li>Fill the Ready gate: Context, Goal, Approach, Acceptance Criteria, Risks.</li>
 <li>Move the item to <code>InProgress</code> <strong>before</strong> editing implementation files.</li>
 <li>Append a Worklog entry that implementation is starting.</li>
@@ -726,7 +727,7 @@ follow-ups).</li>
 </ul>
 <p>Anti-triggers (prefer Workset or no Topic):</p>
 <ul>
-<li>Single-item execution where a clear Task/Bug exists and you are ready to implement
+<li>Single-item execution where a clear Task/Bug/Issue exists and you are ready to implement
 (use a Workset).</li>
 <li>Small, single-file change with low risk of handoff or revisiting.</li>
 <li>Pure Q&amp;A / explanation with no need to preserve artifacts or evidence.</li>
@@ -829,7 +830,7 @@ follow-ups).</li>
 <p><strong>Worksets</strong> are per-item working directories (cached, derived data) for a single backlog item.</p>
 <p>Use Worksets when:</p>
 <ul>
-<li>Starting work on a specific Task/Bug/UserStory</li>
+<li>Starting work on a specific Task/Bug/Issue/UserStory</li>
 <li>Need scratch space for deliverables (patches, test artifacts, etc.)</li>
 <li>Want item-specific config overrides (rare)</li>
 </ul>

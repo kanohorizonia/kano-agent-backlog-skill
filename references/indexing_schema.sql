@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS schema_meta (
 -- Initialize schema version to 0 (baseline; migrations will upgrade)
 INSERT OR IGNORE INTO schema_meta(key, value) VALUES('schema_version', '0');
 
--- Backlog items (Epic/Feature/UserStory/Task/Bug, plus any process-defined types).
+-- Backlog items (Epic/Feature/UserStory/Task/Bug/Issue, plus any process-defined types).
 -- Schema aligned with canonical_schema.sql per ADR-0012
 CREATE TABLE IF NOT EXISTS items (
   uid TEXT PRIMARY KEY,

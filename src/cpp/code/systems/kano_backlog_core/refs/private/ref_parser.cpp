@@ -1,5 +1,5 @@
 #include "kano/backlog_core/refs/ref_parser.hpp"
-#include <regex>
+#include <algorithm>
 #include <cctype>
 
 namespace kano::backlog_core {
@@ -52,46 +52,116 @@ std::optional<PathRef> RefParser::parse_path(const std::string& ref) {
 }
 
 std::optional<DisplayIdRef> RefParser::parse_display_id(const std::string& ref) {
-    static const std::regex pattern(R"(^([A-Z][A-Z0-9]{1,15})-(EPIC|FTR|USR|TSK|BUG|ISS)-(\d{4})$)");
     std::string s = trim(ref);
-    std::smatch match;
-    if (std::regex_match(s, match, pattern)) {
-        DisplayIdRef res;
-        res.product = match[1].str();
-        res.type_abbrev = match[2].str();
-        res.number = std::stoi(match[3].str());
-        res.raw = s;
-        return res;
+    const size_t number_dash = s.rfind('-');
+    if (number_dash == std::string::npos || number_dash + 5 != s.size()) {
+        return std::nullopt;
     }
-    return std::nullopt;
+
+    const std::string number_part = s.substr(number_dash + 1);
+    if (!std::all_of(number_part.begin(), number_part.end(), [](unsigned char ch) { return std::isdigit(ch); })) {
+        return std::nullopt;
+    }
+
+    const std::string product_and_type = s.substr(0, number_dash);
+    const size_t type_dash = product_and_type.rfind('-');
+    if (type_dash == std::string::npos) {
+        return std::nullopt;
+    }
+
+    const std::string product = product_and_type.substr(0, type_dash);
+    const std::string type_abbrev = product_and_type.substr(type_dash + 1);
+    const bool type_ok =
+        type_abbrev == "EPIC" || type_abbrev == "FTR" || type_abbrev == "USR" ||
+        type_abbrev == "TSK" || type_abbrev == "BUG" || type_abbrev == "ISS";
+    if (!type_ok) {
+        return std::nullopt;
+    }
+
+    if (product.size() < 2 || product.size() > 16 || !std::isupper(static_cast<unsigned char>(product.front()))) {
+        return std::nullopt;
+    }
+    if (!std::all_of(product.begin(), product.end(), [](unsigned char ch) {
+            return std::isupper(ch) || std::isdigit(ch);
+        })) {
+        return std::nullopt;
+    }
+
+    DisplayIdRef res;
+    res.product = product;
+    res.type_abbrev = type_abbrev;
+    res.number = std::stoi(number_part);
+    res.raw = s;
+    return res;
 }
 
 std::optional<AdrRef> RefParser::parse_adr(const std::string& ref) {
-    static const std::regex pattern(R"(^ADR-(\d{4})(?:-appendix_([a-z0-9_-]+))?$)");
     std::string s = trim(ref);
-    std::smatch match;
-    if (std::regex_match(s, match, pattern)) {
-        AdrRef res;
-        res.number = std::stoi(match[1].str());
-        if (match[2].matched) {
-            res.appendix = match[2].str();
-        }
-        res.raw = s;
+    constexpr const char* prefix = "ADR-";
+    if (s.rfind(prefix, 0) != 0 || s.size() < 8) {
+        return std::nullopt;
+    }
+
+    const std::string number_part = s.substr(4, 4);
+    if (!std::all_of(number_part.begin(), number_part.end(), [](unsigned char ch) { return std::isdigit(ch); })) {
+        return std::nullopt;
+    }
+
+    AdrRef res;
+    res.number = std::stoi(number_part);
+    res.raw = s;
+
+    if (s.size() == 8) {
         return res;
     }
-    return std::nullopt;
+
+    constexpr const char* appendix_prefix = "-appendix_";
+    const std::string suffix = s.substr(8);
+    if (suffix.rfind(appendix_prefix, 0) != 0) {
+        return std::nullopt;
+    }
+    const std::string appendix = suffix.substr(10);
+    if (appendix.empty()) {
+        return std::nullopt;
+    }
+    if (!std::all_of(appendix.begin(), appendix.end(), [](unsigned char ch) {
+            return (ch >= 'a' && ch <= 'z') || std::isdigit(ch) || ch == '_' || ch == '-';
+        })) {
+        return std::nullopt;
+    }
+    res.appendix = appendix;
+    return res;
 }
 
 std::optional<UuidRef> RefParser::parse_uuid(const std::string& ref) {
-    static const std::regex pattern(R"(^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$)");
     std::string s = trim(ref);
-    if (std::regex_match(s, pattern)) {
-        UuidRef res;
-        res.uuid = s;
-        res.raw = s;
-        return res;
+    if (s.size() != 36) {
+        return std::nullopt;
     }
-    return std::nullopt;
+
+    const auto is_lower_hex = [](char ch) {
+        return (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f');
+    };
+    for (size_t i = 0; i < s.size(); ++i) {
+        const bool hyphen_pos = i == 8 || i == 13 || i == 18 || i == 23;
+        if (hyphen_pos) {
+            if (s[i] != '-') {
+                return std::nullopt;
+            }
+            continue;
+        }
+        if (!is_lower_hex(s[i])) {
+            return std::nullopt;
+        }
+    }
+    if (s[14] != '7' || (s[19] != '8' && s[19] != '9' && s[19] != 'a' && s[19] != 'b')) {
+        return std::nullopt;
+    }
+
+    UuidRef res;
+    res.uuid = s;
+    res.raw = s;
+    return res;
 }
 
 } // namespace kano::backlog_core

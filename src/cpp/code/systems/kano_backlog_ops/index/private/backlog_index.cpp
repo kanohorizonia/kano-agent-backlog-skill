@@ -7,10 +7,104 @@
 #include <sstream>
 #include <chrono>
 #include <fstream>
+#include <limits>
+#include <utility>
 
 namespace kano::backlog_ops {
 
 using namespace kano::backlog_core;
+
+namespace {
+
+std::string sqlite_error(sqlite3* db) {
+    const char* message = sqlite3_errmsg(db);
+    return message ? std::string(message) : std::string("unknown SQLite error");
+}
+
+[[noreturn]] void throw_sqlite(sqlite3* db, const std::string& context, int rc) {
+    throw std::runtime_error(
+        context + " failed (sqlite rc=" + std::to_string(rc) + "): " + sqlite_error(db));
+}
+
+class Statement {
+public:
+    Statement(sqlite3* db, const char* sql, std::string context)
+        : db_(db), context_(std::move(context)) {
+        const int rc = sqlite3_prepare_v2(db_, sql, -1, &stmt_, nullptr);
+        if (rc != SQLITE_OK) {
+            throw_sqlite(db_, context_ + " prepare", rc);
+        }
+    }
+
+    ~Statement() {
+        if (stmt_) {
+            sqlite3_finalize(stmt_);
+        }
+    }
+
+    Statement(const Statement&) = delete;
+    Statement& operator=(const Statement&) = delete;
+
+    sqlite3_stmt* get() const {
+        return stmt_;
+    }
+
+    void bind_text(int index, const std::string& value) const {
+        if (value.size() > static_cast<size_t>(std::numeric_limits<int>::max())) {
+            throw std::runtime_error(context_ + " bind parameter " + std::to_string(index) + " is too large");
+        }
+        const int rc = sqlite3_bind_text(
+            stmt_,
+            index,
+            value.c_str(),
+            static_cast<int>(value.size()),
+            SQLITE_TRANSIENT);
+        if (rc != SQLITE_OK) {
+            throw_sqlite(db_, context_ + " bind parameter " + std::to_string(index), rc);
+        }
+    }
+
+    void bind_int(int index, int value) const {
+        const int rc = sqlite3_bind_int(stmt_, index, value);
+        if (rc != SQLITE_OK) {
+            throw_sqlite(db_, context_ + " bind parameter " + std::to_string(index), rc);
+        }
+    }
+
+    int step() const {
+        const int rc = sqlite3_step(stmt_);
+        if (rc != SQLITE_ROW && rc != SQLITE_DONE) {
+            throw_sqlite(db_, context_ + " step", rc);
+        }
+        return rc;
+    }
+
+    void step_done() const {
+        const int rc = step();
+        if (rc != SQLITE_DONE) {
+            throw std::runtime_error(context_ + " returned rows unexpectedly");
+        }
+    }
+
+private:
+    sqlite3* db_;
+    sqlite3_stmt* stmt_ = nullptr;
+    std::string context_;
+};
+
+std::string column_text(sqlite3_stmt* stmt, int column) {
+    const int bytes = sqlite3_column_bytes(stmt, column);
+    if (bytes <= 0) {
+        return {};
+    }
+    const unsigned char* text = sqlite3_column_text(stmt, column);
+    if (!text) {
+        return {};
+    }
+    return std::string(reinterpret_cast<const char*>(text), static_cast<size_t>(bytes));
+}
+
+} // namespace
 
 BuildIndexResult build_index(
     const std::filesystem::path& product_root,
@@ -137,63 +231,74 @@ void BacklogIndex::initialize() {
 }
 
 void BacklogIndex::index_item(const BacklogItem& item) {
+    initialize();
     const char* sql = "INSERT INTO items (id, uid, type, title, state, path, updated) "
                       "VALUES (?, ?, ?, ?, ?, ?, ?) "
                       "ON CONFLICT(id) DO UPDATE SET "
                       "uid=excluded.uid, type=excluded.type, title=excluded.title, "
                       "state=excluded.state, path=excluded.path, updated=excluded.updated";
-    
-    sqlite3_stmt* stmt;
-    sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr);
-    
-    sqlite3_bind_text(stmt, 1, item.id.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 2, item.uid.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 3, to_string(item.type).c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 4, item.title.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 5, to_string(item.state).c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 6, item.file_path ? item.file_path->string().c_str() : "", -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 7, item.updated.c_str(), -1, SQLITE_TRANSIENT);
 
-    sqlite3_step(stmt);
-    sqlite3_finalize(stmt);
+    const std::string type_name = to_string(item.type);
+    const std::string state_name = to_string(item.state);
+    const std::string path_string = item.file_path ? item.file_path->string() : std::string();
+
+    Statement stmt(db_, sql, "index item");
+    stmt.bind_text(1, item.id);
+    stmt.bind_text(2, item.uid);
+    stmt.bind_text(3, type_name);
+    stmt.bind_text(4, item.title);
+    stmt.bind_text(5, state_name);
+    stmt.bind_text(6, path_string);
+    stmt.bind_text(7, item.updated);
+    stmt.step_done();
 }
 
 void BacklogIndex::remove_item(const std::string& id) {
+    initialize();
     const char* sql = "DELETE FROM items WHERE id = ?";
-    sqlite3_stmt* stmt;
-    sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr);
-    sqlite3_bind_text(stmt, 1, id.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_step(stmt);
-    sqlite3_finalize(stmt);
+    Statement stmt(db_, sql, "remove index item");
+    stmt.bind_text(1, id);
+    stmt.step_done();
 }
 
 int BacklogIndex::get_next_number(const std::string& prefix, const std::string& type_code) {
+    initialize();
     execute("BEGIN IMMEDIATE");
-    
-    const char* insert_sql = "INSERT INTO id_sequences (prefix, type_code, next_number) "
-                             "VALUES (?, ?, 1) "
-                             "ON CONFLICT(prefix, type_code) DO UPDATE SET next_number = next_number + 1";
-    
-    sqlite3_stmt* stmt;
-    sqlite3_prepare_v2(db_, insert_sql, -1, &stmt, nullptr);
-    sqlite3_bind_text(stmt, 1, prefix.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 2, type_code.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_step(stmt);
-    sqlite3_finalize(stmt);
 
-    const char* select_sql = "SELECT next_number FROM id_sequences WHERE prefix = ? AND type_code = ?";
-    sqlite3_prepare_v2(db_, select_sql, -1, &stmt, nullptr);
-    sqlite3_bind_text(stmt, 1, prefix.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 2, type_code.c_str(), -1, SQLITE_TRANSIENT);
-    
-    int number = 0;
-    if (sqlite3_step(stmt) == SQLITE_ROW) {
-        number = sqlite3_column_int(stmt, 0);
+    try {
+        const char* insert_sql = "INSERT INTO id_sequences (prefix, type_code, next_number) "
+                                 "VALUES (?, ?, 1) "
+                                 "ON CONFLICT(prefix, type_code) DO UPDATE SET next_number = next_number + 1";
+
+        {
+            Statement insert_stmt(db_, insert_sql, "advance id sequence");
+            insert_stmt.bind_text(1, prefix);
+            insert_stmt.bind_text(2, type_code);
+            insert_stmt.step_done();
+        }
+
+        const char* select_sql = "SELECT next_number FROM id_sequences WHERE prefix = ? AND type_code = ?";
+        int number = 0;
+        {
+            Statement select_stmt(db_, select_sql, "read id sequence");
+            select_stmt.bind_text(1, prefix);
+            select_stmt.bind_text(2, type_code);
+
+            if (select_stmt.step() != SQLITE_ROW) {
+                throw std::runtime_error("read id sequence returned no row for " + prefix + "-" + type_code);
+            }
+            number = sqlite3_column_int(select_stmt.get(), 0);
+        }
+
+        execute("COMMIT");
+        return number;
+    } catch (...) {
+        try {
+            execute("ROLLBACK");
+        } catch (...) {
+        }
+        throw;
     }
-    sqlite3_finalize(stmt);
-    
-    execute("COMMIT");
-    return number;
 }
 
 BacklogIndex::SyncSequencesResult BacklogIndex::sync_sequences(const std::filesystem::path& product_root) {
@@ -256,30 +361,28 @@ BacklogIndex::SyncSequencesResult BacklogIndex::sync_sequences(const std::filesy
 }
 
 std::optional<std::filesystem::path> BacklogIndex::get_path_by_id(const std::string& id) {
+    initialize();
     const char* sql = "SELECT path FROM items WHERE id = ?";
-    sqlite3_stmt* stmt;
-    sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr);
-    sqlite3_bind_text(stmt, 1, id.c_str(), -1, SQLITE_TRANSIENT);
-    
+    Statement stmt(db_, sql, "lookup item path by id");
+    stmt.bind_text(1, id);
+
     std::optional<std::filesystem::path> res;
-    if (sqlite3_step(stmt) == SQLITE_ROW) {
-        res = std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0)));
+    if (stmt.step() == SQLITE_ROW) {
+        res = column_text(stmt.get(), 0);
     }
-    sqlite3_finalize(stmt);
     return res;
 }
 
 std::optional<std::filesystem::path> BacklogIndex::get_path_by_uid(const std::string& uid) {
+    initialize();
     const char* sql = "SELECT path FROM items WHERE uid = ?";
-    sqlite3_stmt* stmt;
-    sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr);
-    sqlite3_bind_text(stmt, 1, uid.c_str(), -1, SQLITE_TRANSIENT);
-    
+    Statement stmt(db_, sql, "lookup item path by uid");
+    stmt.bind_text(1, uid);
+
     std::optional<std::filesystem::path> res;
-    if (sqlite3_step(stmt) == SQLITE_ROW) {
-        res = std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0)));
+    if (stmt.step() == SQLITE_ROW) {
+        res = column_text(stmt.get(), 0);
     }
-    sqlite3_finalize(stmt);
     return res;
 }
 
@@ -294,58 +397,56 @@ void BacklogIndex::execute(const std::string& sql) {
 }
 
 std::vector<IndexItem> BacklogIndex::query_items(std::optional<ItemType> type, std::optional<ItemState> state) {
+    initialize();
     std::vector<IndexItem> results;
-    std::stringstream ss;
-    ss << "SELECT id, uid, type, title, state, path, updated FROM items";
-    
+    std::string sql = "SELECT id, uid, type, title, state, path, updated FROM items";
+    std::vector<std::string> params;
+
     bool has_where = false;
     if (type) {
-        ss << " WHERE type = '" << to_string(*type) << "'";
+        sql += " WHERE type = ?";
+        params.push_back(to_string(*type));
         has_where = true;
     }
     if (state) {
-        if (has_where) ss << " AND"; else ss << " WHERE";
-        ss << " state = '" << to_string(*state) << "'";
+        sql += has_where ? " AND state = ?" : " WHERE state = ?";
+        params.push_back(to_string(*state));
     }
-    ss << " ORDER BY updated DESC";
+    sql += " ORDER BY updated DESC";
 
-    sqlite3_stmt* stmt;
-    sqlite3_prepare_v2(db_, ss.str().c_str(), -1, &stmt, nullptr);
-    
-    while (sqlite3_step(stmt) == SQLITE_ROW) {
+    Statement stmt(db_, sql.c_str(), "query index items");
+    for (size_t i = 0; i < params.size(); ++i) {
+        stmt.bind_text(static_cast<int>(i + 1), params[i]);
+    }
+
+    while (stmt.step() == SQLITE_ROW) {
         IndexItem ii;
-        auto id_ptr = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
-        auto uid_ptr = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
-        auto type_ptr = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2));
-        auto title_ptr = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3));
-        auto state_ptr = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 4));
-        auto path_ptr = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 5));
-        auto updated_ptr = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 6));
+        ii.id = column_text(stmt.get(), 0);
+        ii.uid = column_text(stmt.get(), 1);
 
-        ii.id = id_ptr ? id_ptr : "";
-        ii.uid = uid_ptr ? uid_ptr : "";
-        
-        auto type_opt = parse_item_type(type_ptr ? type_ptr : "");
+        const std::string type_value = column_text(stmt.get(), 2);
+        const std::string state_value = column_text(stmt.get(), 4);
+
+        auto type_opt = parse_item_type(type_value);
         if (!type_opt) {
-            std::cerr << "Warning: Invalid item type '" << (type_ptr ? type_ptr : "NULL") << "' for item " << ii.id << "\n";
+            std::cerr << "Warning: Invalid item type '" << type_value << "' for item " << ii.id << "\n";
             continue;
         }
         ii.type = *type_opt;
 
-        ii.title = title_ptr ? title_ptr : "";
-        
-        auto state_opt = parse_item_state(state_ptr ? state_ptr : "");
+        ii.title = column_text(stmt.get(), 3);
+
+        auto state_opt = parse_item_state(state_value);
         if (!state_opt) {
-            std::cerr << "Warning: Invalid item state '" << (state_ptr ? state_ptr : "NULL") << "' for item " << ii.id << "\n";
+            std::cerr << "Warning: Invalid item state '" << state_value << "' for item " << ii.id << "\n";
             continue;
         }
         ii.state = *state_opt;
 
-        ii.path = path_ptr ? path_ptr : "";
-        ii.updated = updated_ptr ? updated_ptr : "";
+        ii.path = column_text(stmt.get(), 5);
+        ii.updated = column_text(stmt.get(), 6);
         results.push_back(ii);
     }
-    sqlite3_finalize(stmt);
     return results;
 }
 

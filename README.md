@@ -27,16 +27,23 @@ Related practices solve different parts of the agent workflow:
 ## The problem
 
 ```mermaid
-flowchart LR
-    subgraph Before["Chat-only agent workflow"]
+%%{init: {"themeVariables": {"fontSize": "18px", "fontFamily": "Inter, Segoe UI, Arial, sans-serif"}} }%%
+flowchart TB
+    subgraph Before["Before: chat-only agent workflow"]
+        direction TB
         A["Human intent<br/>messy, partial, evolving"] --> B["Chat thread"]
         B --> C["Coding agent"]
         C --> D["Code changes"]
-        B -. context reset .-> E["New thread / new agent"]
-        E -. re-explain everything .-> A
-        C -. weak handoff .-> F["Lost rationale<br/>unclear acceptance<br/>missing risks"]
+        B -. "context reset" .-> E["New thread / new agent"]
+        E -. "re-explain everything" .-> A
+        C -. "weak handoff" .-> F["Lost rationale<br/>unclear acceptance<br/>missing risks"]
     end
-    subgraph After["Intent Engineering workflow"]
+
+    F --> G["Intent evaporates<br/>between sessions"]
+    G --> I
+
+    subgraph After["After: Intent Engineering workflow"]
+        direction TB
         I["Human intent"] --> W["Durable work item"]
         W --> R["Ready fields<br/>context / goal / approach<br/>acceptance / risks"]
         R --> H["Review gate"]
@@ -44,7 +51,11 @@ flowchart LR
         X --> L["Worklog / ADR / evidence"]
         L --> W
     end
-    F --> I
+
+    classDef loss fill:#fff1f2,stroke:#be123c,color:#111827
+    classDef intent fill:#ecfeff,stroke:#0891b2,color:#111827
+    class F,G loss
+    class W,R,H,X,L intent
 ```
 
 Instead of sending agents directly from chat to code, `kano-agent-backlog-skill` inserts a durable intent layer between discussion and execution.

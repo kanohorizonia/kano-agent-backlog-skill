@@ -238,7 +238,11 @@ int main(int argc, char** argv) {
         expect(run_command(binary, {"--help"}) == 0, "help command failed");
         expect(run_command(binary, {"--version"}) == 0, "version command failed");
         const auto hygiene_output = std::filesystem::temp_directory_path() / "kano-backlog-repo-hygiene-smoke.txt";
-        expect(run_command_capture(binary, {"repo-hygiene", "check", "--archive-safe"}, hygiene_output) == 0, "repo-hygiene command failed");
+        expect_command_capture_success(
+            run_command_capture(binary, {"repo-hygiene", "check", "--archive-safe"}, hygiene_output),
+            hygiene_output,
+            "repo-hygiene command failed"
+        );
         const auto hygiene_text = read_text(hygiene_output);
         expect(hygiene_text.find("kano-backlog repo hygiene summary") != std::string::npos, "repo-hygiene did not run native summary");
         expect(hygiene_text.find("no-op") == std::string::npos, "repo-hygiene still reports no-op");

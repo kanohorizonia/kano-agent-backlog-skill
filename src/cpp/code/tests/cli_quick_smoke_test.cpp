@@ -74,6 +74,23 @@ std::string read_text(const std::filesystem::path& path) {
     return buffer.str();
 }
 
+void expect_command_capture_success(
+    int rc,
+    const std::filesystem::path& output_path,
+    const std::string& message
+) {
+    if (rc == 0) {
+        return;
+    }
+
+    std::ostringstream detail;
+    detail << message << " (exit code " << rc << ")";
+    if (std::filesystem::exists(output_path)) {
+        detail << "\n--- command output ---\n" << read_text(output_path);
+    }
+    throw std::runtime_error(detail.str());
+}
+
 void write_text(const std::filesystem::path& path, const std::string& text) {
     std::filesystem::create_directories(path.parent_path());
     std::ofstream out(path, std::ios::binary);
@@ -178,9 +195,13 @@ int main(int argc, char** argv) {
         expect(run_command(binary, {"-P", "quick-smoke-product", "workitem", "update-state", "QS-ISS-0001", "--state", "InProgress", "--agent", "tester"}) == 0,
             "issue update-state failed");
         const auto issue_list_output = temp_root / "issue-list.txt";
-        expect(run_command_capture(binary, {
-            "-P", "quick-smoke-product", "workitem", "list", "--type", "issue"
-        }, issue_list_output) == 0, "issue list failed");
+        expect_command_capture_success(
+            run_command_capture(binary, {
+                "-P", "quick-smoke-product", "workitem", "list", "--type", "issue"
+            }, issue_list_output),
+            issue_list_output,
+            "issue list failed"
+        );
         expect(read_text(issue_list_output).find("QS-ISS-0001") != std::string::npos,
             "issue list did not include created issue");
         const auto issue_text = read_text(issue_path);
@@ -189,10 +210,14 @@ int main(int argc, char** argv) {
         expect(issue_text.find("Issue worklog smoke") != std::string::npos, "issue file did not record worklog");
 
         const auto topic_output = temp_root / "topic-list-templates.json";
-        expect(run_command_capture(binary, {
-            "-P", "quick-smoke-product", "topic", "create", "quick-topic-template-list-placeholder",
-            "--agent", "tester", "--list-templates", "--format", "json"
-        }, topic_output) == 0, "topic create --list-templates failed");
+        expect_command_capture_success(
+            run_command_capture(binary, {
+                "-P", "quick-smoke-product", "topic", "create", "quick-topic-template-list-placeholder",
+                "--agent", "tester", "--list-templates", "--format", "json"
+            }, topic_output),
+            topic_output,
+            "topic create --list-templates failed"
+        );
         expect(read_text(topic_output).find("\"builtin_count\"") != std::string::npos,
             "topic create --list-templates did not emit builtin_count");
 

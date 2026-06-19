@@ -3,17 +3,57 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 [![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-2ea44f.svg)](https://agentskill-backlog.kanohorizonia.com/)
 
-Local-first backlog workflow for AI coding agents, with durable markdown work items, ADRs, worklogs, release evidence, and multi-agent handoff.
+Intent Engineering for AI coding agents: turn ambiguous human intent into durable, reviewable, executable work items that live with the repository.
 
-## Public thesis
+`kano-agent-backlog-skill` is a local-first backlog and work item layer for that practice. It stores the context, goal, approach, acceptance criteria, risks, decisions, worklogs, and handoff trail as plain markdown so humans and agents can review the same source of truth.
 
-AI coding sessions move fast, but the reasoning behind them disappears even faster. This project keeps the planning, decisions, verification targets, and handoff trail inside the repo as plain markdown so humans and agents can keep working from the same durable source.
+## Public thesis: Intent Engineering
+
+The problem is not that AI agent teams have no backlog. The problem is that human intent keeps evaporating between chat, coding agents, CI logs, review comments, and the next thread.
+
+This repo frames **Intent Engineering** as the discipline of turning ambiguous, partial, evolving human intent into durable work items that an AI agent can execute and a maintainer can review.
+
+Related practices solve different parts of the agent workflow:
+
+| Practice | Main question | Durable artifact |
+| --- | --- | --- |
+| Prompt Engineering | How do I ask the model clearly right now? | Prompt text |
+| Context Engineering | What information should the model see? | Curated context window |
+| Loop Engineering | How does the agent iterate, test, and recover? | Execution loop and feedback policy |
+| Intent Engineering | What should survive chat and guide work across agents? | Reviewable work item with acceptance and evidence |
+
+`kano-agent-backlog-skill` focuses on the intent layer. It is not a full AgentOS runtime: it does not schedule agents, host models, replace CI, or own the whole execution platform. A broader AgentOS-style maintainer workflow is a useful long-term direction, but it is secondary to the current OSS contract: local files plus a native CLI for durable work items and evidence.
+
+## The problem
+
+```mermaid
+flowchart LR
+    subgraph Before["Chat-only agent workflow"]
+        A["Human intent<br/>messy, partial, evolving"] --> B["Chat thread"]
+        B --> C["Coding agent"]
+        C --> D["Code changes"]
+        B -. context reset .-> E["New thread / new agent"]
+        E -. re-explain everything .-> A
+        C -. weak handoff .-> F["Lost rationale<br/>unclear acceptance<br/>missing risks"]
+    end
+    subgraph After["Intent Engineering workflow"]
+        I["Human intent"] --> W["Durable work item"]
+        W --> R["Ready fields<br/>context / goal / approach<br/>acceptance / risks"]
+        R --> H["Review gate"]
+        H --> X["Agent execution"]
+        X --> L["Worklog / ADR / evidence"]
+        L --> W
+    end
+    F --> I
+```
+
+Instead of sending agents directly from chat to code, `kano-agent-backlog-skill` inserts a durable intent layer between discussion and execution.
 
 ## Why this exists
 
 Most agent workflows still depend on fragile chat memory. That breaks down when you need to answer basic questions later, like why a task was split, what was accepted, which risk was known, or what the next agent should do.
 
-`kano-agent-backlog-skill` exists to make agent work local first, reviewable, and recoverable. Instead of treating planning as disposable chat, it turns backlog items, ADRs, worklogs, and release evidence into repo assets.
+`kano-agent-backlog-skill` exists to make agent work local first, reviewable, and recoverable. Instead of treating planning as disposable chat, it turns backlog items, ADRs, worklogs, and release evidence into repo assets that first-time users can inspect with normal Git and Markdown tools.
 
 ## Native implementation direction
 

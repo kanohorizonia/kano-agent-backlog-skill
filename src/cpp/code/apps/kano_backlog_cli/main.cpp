@@ -7472,16 +7472,19 @@ int main(int InArgc, char* InArgv[]) {
         // workitem check-ready
         {
             auto* checkReadyCmd = workitemCmd->add_subcommand("check-ready", "Check whether an item satisfies the Ready gate");
-            std::string ref;
-            bool no_check_parent = false;
-            checkReadyCmd->add_option("ref", ref, "Item ID or UID")->required();
-            checkReadyCmd->add_flag("--no-check-parent", no_check_parent, "Skip parent Ready validation");
+            struct CheckReadyCommandState {
+                std::string ref;
+                bool no_check_parent = false;
+            };
+            auto state = std::make_shared<CheckReadyCommandState>();
+            checkReadyCmd->add_option("ref", state->ref, "Item ID or UID")->required();
+            checkReadyCmd->add_flag("--no-check-parent", state->no_check_parent, "Skip parent Ready validation");
 
-            checkReadyCmd->callback([&]() {
+            checkReadyCmd->callback([&, state]() {
                 auto ctx = resolve_ctx();
                 CanonicalStore store(ctx.product_root);
                 RefResolver resolver(store);
-                auto item = resolver.resolve(ref);
+                auto item = resolver.resolve(state->ref);
 
                 auto [ready, missing] = Validator::is_ready(item);
                 std::vector<std::string> problems;
@@ -7489,7 +7492,7 @@ int main(int InArgc, char* InArgv[]) {
                     problems.push_back("Missing fields in " + item.id + ": " + join_strings(missing));
                 }
 
-                if (!no_check_parent && item.parent) {
+                if (!state->no_check_parent && item.parent) {
                     auto parent = resolver.resolve(*item.parent);
                     auto [parent_ready, parent_missing] = Validator::is_ready(parent);
                     if (!parent_ready) {
@@ -7703,20 +7706,24 @@ int main(int InArgc, char* InArgv[]) {
         // workitem list
         {
             auto* listCmd = workitemCmd->add_subcommand("list", "List work items");
-            std::string filter_type_str, filter_state_str;
-            listCmd->add_option("--type", filter_type_str, "Filter by type (epic, feature, userstory, task, bug, issue)");
-            listCmd->add_option("--state", filter_state_str, "Filter by state");
-            listCmd->callback([&]() {
+            struct ListCommandState {
+                std::string filter_type_str;
+                std::string filter_state_str;
+            };
+            auto state = std::make_shared<ListCommandState>();
+            listCmd->add_option("--type", state->filter_type_str, "Filter by type (epic, feature, userstory, task, bug, issue)");
+            listCmd->add_option("--state", state->filter_state_str, "Filter by state");
+            listCmd->callback([&, state]() {
                 auto ctx = resolve_ctx();
                 BacklogIndex index(ctx.backlog_root / ".cache" / "index" / "backlog.db");
 
                 ViewFilter filter;
-                if (!filter_type_str.empty()) {
-                    auto t = parse_item_type(filter_type_str);
+                if (!state->filter_type_str.empty()) {
+                    auto t = parse_item_type(state->filter_type_str);
                     if (t) filter.type = *t;
                 }
-                if (!filter_state_str.empty()) {
-                    auto s = parse_item_state(filter_state_str);
+                if (!state->filter_state_str.empty()) {
+                    auto s = parse_item_state(state->filter_state_str);
                     if (s) filter.state = *s;
                 }
 

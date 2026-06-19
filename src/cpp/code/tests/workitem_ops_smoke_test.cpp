@@ -108,6 +108,13 @@ int main() {
             auto issue_after_update = store.read(issue_created.path);
             expect(issue_after_update.state == ItemState::InProgress, "issue should transition to InProgress");
             expect(issue_after_update.worklog.back().find("Issue triage started") != std::string::npos, "issue worklog should preserve update message");
+            {
+                BacklogIndex reopened_index(root / ".cache" / "index" / "backlog.db");
+                auto issue_after_reopen = reopened_index.query_items(ItemType::Issue, std::nullopt);
+                expect(issue_after_reopen.size() == 1, "issue query should survive update-state and DB reopen");
+                expect(issue_after_reopen.front().id == issue_created.id, "issue query should return the updated issue");
+                expect(issue_after_reopen.front().state == ItemState::InProgress, "issue query should preserve updated state");
+            }
 
             auto parent_created = WorkitemOps::create_item(
                 index,

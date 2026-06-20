@@ -3,109 +3,211 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 [![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-2ea44f.svg)](https://agentskill-backlog.kanohorizonia.com/)
 
-Intent Engineering for AI coding agents: turn ambiguous human intent into durable, reviewable, executable work items that live with the repository.
+**Evidence-first, repo-native Intent Engineering for AI coding agents.**
 
-`kano-agent-backlog-skill` is a local-first backlog and work item layer for that practice. It stores the context, goal, approach, acceptance criteria, risks, decisions, worklogs, and handoff trail as plain markdown so humans and agents can review the same source of truth.
+Turn messy human requests into durable Markdown work items with Ready gates,
+worklogs, ADRs, and validation evidence so humans and agents can review the same
+source of truth.
 
-## Public thesis: Intent Engineering
+> Stop losing intent between chat requests, coding agents, CI logs, review
+> comments, and the next handoff.
 
-The problem is not that AI agent teams have no backlog. The problem is that human intent keeps evaporating between chat, coding agents, CI logs, review comments, and the next thread.
-
-This repo frames **Intent Engineering** as the discipline of turning ambiguous, partial, evolving human intent into durable work items that an AI agent can execute and a maintainer can review.
-
-Related practices solve different parts of the agent workflow:
-
-| Practice | Main question | Durable artifact |
-| --- | --- | --- |
-| Prompt Engineering | How do I ask the model clearly right now? | Prompt text |
-| Context Engineering | What information should the model see? | Curated context window |
-| Loop Engineering | How does the agent iterate, test, and recover? | Execution loop and feedback policy |
-| Intent Engineering | What should survive chat and guide work across agents? | Reviewable work item with acceptance and evidence |
-
-`kano-agent-backlog-skill` focuses on the intent layer. It is not a full AgentOS runtime: it does not schedule agents, host models, replace CI, or own the whole execution platform. A broader AgentOS-style maintainer workflow is a useful long-term direction, but it is secondary to the current OSS contract: local files plus a native CLI for durable work items and evidence.
-
-## The problem
-
-```mermaid
-%%{init: {"themeVariables": {"fontSize": "18px", "fontFamily": "Inter, Segoe UI, Arial, sans-serif"}} }%%
-flowchart TB
-    subgraph Before["Before: chat-only agent workflow"]
-        direction TB
-        A["Human intent<br/>messy, partial, evolving"] --> B["Chat thread"]
-        B --> C["Coding agent"]
-        C --> D["Code changes"]
-        B -. "context reset" .-> E["New thread / new agent"]
-        E -. "re-explain everything" .-> A
-        C -. "weak handoff" .-> F["Lost rationale<br/>unclear acceptance<br/>missing risks"]
-    end
-
-    F --> G["Intent evaporates<br/>between sessions"]
-    G --> I
-
-    subgraph After["After: Intent Engineering workflow"]
-        direction TB
-        I["Human intent"] --> W["Durable work item"]
-        W --> R["Ready fields<br/>context / goal / approach<br/>acceptance / risks"]
-        R --> H["Review gate"]
-        H --> X["Agent execution"]
-        X --> L["Worklog / ADR / evidence"]
-        L --> W
-    end
-
-    classDef loss fill:#fff1f2,stroke:#be123c,color:#111827
-    classDef intent fill:#ecfeff,stroke:#0891b2,color:#111827
-    class F,G loss
-    class W,R,H,X,L intent
-```
-
-Instead of sending agents directly from chat to code, `kano-agent-backlog-skill` inserts a durable intent layer between discussion and execution.
+![Intent Engineering before and after](docs/assets/intent-engineering-before-after.svg)
 
 ## Why this exists
 
-Most agent workflows still depend on fragile chat memory. That breaks down when you need to answer basic questions later, like why a task was split, what was accepted, which risk was known, or what the next agent should do.
+AI coding agents can produce convincing reports. That does not make the work
+true.
 
-`kano-agent-backlog-skill` exists to make agent work local first, reviewable, and recoverable. Instead of treating planning as disposable chat, it turns backlog items, ADRs, worklogs, and release evidence into repo assets that first-time users can inspect with normal Git and Markdown tools.
+KOB treats agent work as a falsifiable contract:
 
-## Native implementation direction
+```text
+human intent -> acceptance criteria -> bounded agent work -> validation artifact -> worklog evidence -> human review -> Done
+```
 
-The repo-local executable contract is the native C++ CLI. The `scripts/kob` and `scripts/kano-backlog` launchers require a locally built native binary and no longer fall back to Python. The old Python runtime and pytest oracle have been removed from this repo; native C++ smoke tests and release gates are the supported verification surface.
+The problem is not that agent teams lack task lists. The problem is that human
+intent, acceptance criteria, risks, and validation evidence often evaporate
+between conversations, tools, logs, and the next agent session. KOB keeps that
+trail in the repository as reviewable Markdown.
 
-## What it provides
+## What this is
 
-- Markdown backed work items with frontmatter and stable IDs
+`kano-agent-backlog-skill` is a repo-native intent and evidence layer for AI
+coding agents.
+
+It provides:
+
+- durable Markdown work items with stable IDs and frontmatter
 - Ready gate fields for context, goal, approach, acceptance criteria, and risks
-- Append only worklogs for execution history and handoff notes
-- ADR support for durable technical decisions
-- Worksets and topics for focused execution and multi-agent coordination
-- Release evidence, views, and validation surfaces that stay in the repository
-- Optional search and embedding flows, clearly marked as experimental
+- Done gate discipline through validation evidence and human review
+- append-only worklogs for execution history and handoff notes
+- ADR and decision links for durable technical rationale
+- worksets, topics, generated views, and release evidence that stay with the repo
+- a native C++ CLI exposed through repo-local launchers such as `scripts/kob`
 
-## Current release status
+## What this is not
 
-- [GitHub Releases](https://github.com/kanohorizonia/kano-agent-backlog-skill/releases) is the source of truth for installable public artifacts
-- [Latest public CI test report](https://agentskill-backlog.kanohorizonia.com/reports/latest/test-report/) is the source of truth for reviewable test and BDD evidence
-- [Latest public coverage report](https://agentskill-backlog.kanohorizonia.com/reports/latest/coverage-report/) publishes source-level coverage for this open-source project
-- `0.0.4` is the current native C++ release target and is accepted only when `v0.0.4` exists with downloadable platform artifacts
-- `0.0.2` is the previous tagged OSS release
-- `0.0.3` was an untagged Python-public planning line and is superseded by `0.0.4`
-- repo-local CLI usage is native C++ only
-- Python package publishing is retired for this milestone
-- Pre-1.0, so schema, CLI details, and public docs can still change
+KOB is intentionally narrow. It is not:
 
-## Agent-skill release acceptance gate
+- a general-purpose issue tracker
+- a project-management suite
+- a chat memory layer
+- a model runtime
+- an agent scheduler
+- a CI replacement
+- magic autonomous management
 
-These gates are shared by Kano agent-skill releases, not just this repository:
+KOB does not prove correctness by asking an agent to repeat itself. It preserves
+the contract and evidence chain that let humans review the work.
 
-1. A version is not accepted as released until a non-draft GitHub Release exists for the version tag with downloadable, installable platform artifacts, integrity metadata, and an artifact index from the matching Jenkins `Build_CI` source/version.
-2. The repository README and public GitHub Pages site must both link the release downloads and describe manual installation plus winget, Homebrew, and apt channel status for each supported platform.
+## Evidence-first Intent Engineering
 
-Internal CI archives, dry-run `Release_Publish` runs, or staged payloads are review evidence, but they do not close the public release gate without those two public surfaces.
+Intent Engineering is the practice of turning ambiguous, partial, evolving human
+intent into durable work items that an AI coding agent can execute and a
+maintainer can review.
+
+Core rule:
+
+> A claim that cannot be falsified is not evidence.
+
+An unfalsifiable claim may be a hypothesis, design intent, opinion, or future
+note, but it should not close a work item. Done claims need bounded evidence:
+acceptance criteria that could fail, commands or artifacts that can be inspected,
+worklog entries that say what changed, and human review that can reject the
+result.
+
+## 60-second demo
+
+From a cloned repository, build the native CLI and create one task:
+
+```bash
+pixi run build-dev
+bash scripts/kob admin init --product my-app --agent local-agent
+bash scripts/kob item create --type task --title "Add login" --product my-app --agent local-agent
+```
+
+Expected result:
+
+```text
+_kano/backlog/products/my-app/items/task/0000/<ID>_add-login.md
+```
+
+Open the generated Markdown file. You should see frontmatter plus human-readable
+sections for Context, Goal, Approach, Acceptance Criteria, Risks, and Worklog.
+Before implementation starts, fill the Ready fields so the agent has a
+falsifiable contract instead of a vague prompt.
+
+## Work item anatomy
+
+![Durable work item anatomy](docs/assets/work-item-anatomy.svg)
+
+A work item is not a disposable prompt. It is the durable artifact that carries
+intent, scope, acceptance, risk, decisions, and evidence across agent sessions.
+
+## Core workflow
+
+1. Capture human intent in a Markdown work item.
+2. Fill the Ready gate: context, goal, approach, acceptance criteria, and risks.
+3. Start bounded agent work against that item.
+4. Validate only the claims that need to be proven or falsified.
+5. Record commands, reports, artifacts, and limitations in the Worklog.
+6. Move to Review when evidence exists.
+7. Close only after human review accepts the evidence chain.
+
+![Agent handoff lifecycle](docs/assets/agent-handoff-lifecycle.svg)
+
+![Ready and Done state lifecycle](docs/assets/state-lifecycle-ready-done.svg)
+
+## Human review webview
+
+The repository includes local webview support for reading backlog state. When the
+host-native webview binary is missing or blocked, the Docker Compose path can run
+the read-only webview:
+
+```bash
+pixi run webview-compose-up-detached
+```
+
+Then open <http://localhost:8799/>. Stop it with:
+
+```bash
+pixi run webview-compose-down
+```
+
+The visual below is a concept mock for a future review-console style experience,
+not a current UI screenshot.
+
+![Conceptual human review console preview](docs/assets/webview-review-console-concept.svg)
+
+## Current status
+
+| Area | Current status |
+| --- | --- |
+| Runtime | Native C++ CLI through `scripts/kob` and `scripts/kano-backlog` after local build |
+| Latest release | [GitHub Releases](https://github.com/kanohorizonia/kano-agent-backlog-skill/releases) is the source of truth for public artifacts |
+| Development marker | `0.0.5` is the current development marker for the Intent Engineering feature wave |
+| Native release target | `0.0.4` is accepted only when `v0.0.4` has public downloadable artifacts and integrity metadata |
+| Previous tagged OSS release | `0.0.2` |
+| Webview | Local read-only webview support exists; review-console visual above is conceptual |
+| Package manager channels | winget, Homebrew, and apt are planned/status-tracked channels, not live unless release metadata says so |
+| Python runtime | Retired for this milestone; repo-local CLI usage is native C++ only |
+| Stability | Pre-1.0; schema, CLI details, and docs can still change |
+
+## Start here
+
+| I want to... | Go to |
+| --- | --- |
+| Understand the concept | [Public docs homepage](https://agentskill-backlog.kanohorizonia.com/) |
+| Try it locally | [Quick start](docs/quick-start.md) |
+| Use it with agents | [Agent quick start](docs/agent-quick-start.md) |
+| Learn commands | [CLI reference](https://agentskill-backlog.kanohorizonia.com/cli/commands) |
+| Review architecture | [Design references](docs/design/native-cli-direction.md) and [references](references/) |
+| Maintain releases | [Maintainer automation](docs/maintainer-automation.md) and [release channels](docs/release-channels.md) |
+
+## Documentation
+
+- [GitHub Pages documentation site](https://agentskill-backlog.kanohorizonia.com/)
+- [Quick start](docs/quick-start.md)
+- [Installation](docs/installation.md)
+- [Configuration](docs/configuration.md)
+- [Usage examples](docs/usage-examples.md)
+- [Worksets](docs/workset.md)
+- [Topics](docs/topic.md)
+- [Version policy](docs/version-policy.md)
+- [Release channels](docs/release-channels.md)
+- [Native CLI direction](docs/design/native-cli-direction.md)
+- [Maintainer automation](docs/maintainer-automation.md)
+- [Agent quick start](docs/agent-quick-start.md)
+- [Experimental features](docs/experimental-features.md)
+- [Workflow reference](references/workflow.md)
+- [Schema reference](references/schema.md)
+- [REFERENCE.md](REFERENCE.md)
+- [SKILL.md](SKILL.md)
+- [CHANGELOG.md](CHANGELOG.md)
+
+## Maintainer and release gates
+
+Release evidence remains important, but it should not be the first thing a new
+human sees.
+
+Shared release acceptance gates for this skill line:
+
+1. A version is not accepted as released until a non-draft GitHub Release exists
+   for the version tag with downloadable, installable platform artifacts,
+   integrity metadata, and an artifact index from the matching CI source/version.
+2. The README and public documentation site must both link release downloads and
+   describe manual installation plus package-channel status for each supported
+   platform.
+
+Internal CI archives, dry-run release runs, or staged payloads are review
+evidence, but they do not close the public release gate without those public
+surfaces.
 
 ## Install from a release
 
-Download packages from the [latest GitHub Release](https://github.com/kanohorizonia/kano-agent-backlog-skill/releases/latest). For the 0.0.4 line, the expected release tag is [`v0.0.4`](https://github.com/kanohorizonia/kano-agent-backlog-skill/releases/tag/v0.0.4).
-
-Each release must publish platform artifacts and checksum/index metadata from the matching Jenkins `Build_CI` source version. If the release page or assets are missing, that version has not passed the release gate yet.
+Download packages from the [latest GitHub Release](https://github.com/kanohorizonia/kano-agent-backlog-skill/releases/latest).
+For the 0.0.4 line, the expected release tag is
+[`v0.0.4`](https://github.com/kanohorizonia/kano-agent-backlog-skill/releases/tag/v0.0.4).
 
 Manual install baseline:
 
@@ -119,105 +221,32 @@ kob --version
 kob doctor
 ```
 
-On Windows, use the Windows archive from the same release and add the extracted `scripts` directory to `PATH`; when an MSI is published for a release, prefer the MSI because it performs the skill install and PATH setup.
+On Windows, use the Windows archive from the same release and add the extracted
+`scripts` directory to `PATH`. When an MSI is published for a release, prefer the
+MSI because it performs the skill install and PATH setup.
 
 Package-manager channels:
 
-- winget: planned package ID `KanoHorizonia.KanoBacklog`; use only after the release publishes winget metadata.
-- Homebrew: planned formula `kano-backlog` in an owned Kano tap; `homebrew-core` is not used for the 0.0.4 validation path.
-- apt: planned owned apt repository; no public apt repository is live until release metadata and repository indexes are published.
+- winget: planned package ID `KanoHorizonia.KanoBacklog`; use only after the
+  release publishes winget metadata.
+- Homebrew: planned formula `kano-backlog` in an owned Kano tap; `homebrew-core`
+  is not used for the 0.0.4 validation path.
+- apt: planned owned apt repository; no public apt repository is live until
+  release metadata and repository indexes are published.
 
-The GitHub Pages site also carries the same download and package-manager status in [Installation](https://agentskill-backlog.kanohorizonia.com/guides/installation) and [Release Channels](https://agentskill-backlog.kanohorizonia.com/guides/release-channels).
+The documentation site carries the same download and package-manager status in
+[Installation](https://agentskill-backlog.kanohorizonia.com/guides/installation)
+and [Release Channels](https://agentskill-backlog.kanohorizonia.com/guides/release-channels).
 
-## Quick start
+## Native implementation direction
 
-Build the native CLI from a cloned repository, then use the repo-local launcher:
+The repo-local executable contract is the native C++ CLI. The `scripts/kob` and
+`scripts/kano-backlog` launchers require a locally built native binary and no
+longer fall back to Python. The old Python runtime and pytest oracle have been
+removed from this repo; native C++ smoke tests and release gates are the
+supported verification surface.
 
-```bash
-pixi run build-dev
-bash scripts/kob admin init --product my-app --agent codex
-bash scripts/kob item create --type task --title "Add login" --product my-app --agent codex
-bash scripts/kob doctor
-```
-
-If you are working from a clone, start with [docs/agent-quick-start.md](docs/agent-quick-start.md). The repo-local launcher is `bash scripts/kob`; it routes to the native binary only.
-
-## Backlog webview with Docker Compose
-
-When the host-native webview binary is missing or blocked, start the read-only webview through Docker Compose:
-
-```bash
-pixi run webview-compose-up-detached
-```
-
-Then open <http://localhost:8799/>. The compose service mounts the shared backlog at `../_kano/backlog` and serves it from inside the container. Stop it with:
-
-```bash
-pixi run webview-compose-down
-```
-
-To run it in the foreground for logs:
-
-```bash
-pixi run webview-compose-up
-```
-
-## Documentation
-
-- [GitHub Pages documentation site](https://agentskill-backlog.kanohorizonia.com/)
-- [Latest public CI test report](https://agentskill-backlog.kanohorizonia.com/reports/latest/test-report/)
-- [Latest public coverage report](https://agentskill-backlog.kanohorizonia.com/reports/latest/coverage-report/)
-- [Quick start](docs/quick-start.md)
-- [Installation](docs/installation.md)
-- [Configuration](docs/configuration.md)
-- [Version policy](docs/version-policy.md)
-- [Release channels](docs/release-channels.md)
-- [Native CLI direction](docs/design/native-cli-direction.md)
-- [Maintainer automation](docs/maintainer-automation.md)
-- [Codex for OSS](docs/codex-for-oss.md)
-- [Agent quick start](docs/agent-quick-start.md)
-- [Usage examples](docs/usage-examples.md)
-- [Worksets](docs/workset.md)
-- [Topics](docs/topic.md)
-- [Experimental features](docs/experimental-features.md)
-- [Workflow reference](references/workflow.md)
-- [Schema reference](references/schema.md)
-- [REFERENCE.md](REFERENCE.md)
-- [SKILL.md](SKILL.md)
-- [CHANGELOG.md](CHANGELOG.md)
-
-## Demo
-
-A companion demo repo exists at [dorgonman/kano-agent-backlog-skill-demo](https://github.com/dorgonman/kano-agent-backlog-skill-demo).
-
-It demonstrates the multi-agent adapter layout and a sample backlog workspace. This repo does not bundle that demo, so treat it as a separate example workspace. See [docs/demo-maintenance.md](docs/demo-maintenance.md) for the follow-up checklist used when the demo checkout is unavailable locally.
-
-## GitHub Pages
-
-Published docs live at [agentskill-backlog.kanohorizonia.com](https://agentskill-backlog.kanohorizonia.com/).
-
-## Codex for OSS relevance
-
-This project is aimed at open source maintainers and agent heavy teams who need more than generated code. It helps Codex style and other coding agents work against durable repo state instead of fading conversation state.
-
-That matters for OSS review because maintainers need artifacts they can inspect in pull requests, not just claims from a previous chat. The backlog, ADR, worklog, and release evidence model is built around that review loop.
-
-- issue triage and task refinement survive beyond chat history
-- acceptance criteria and Ready Gate fields stay reviewable in markdown
-- ADRs and worklogs preserve technical decisions for maintainers and future agents
-- release notes, changelog inputs, and evidence snapshots stay attached to the repo
-- multi-agent handoff is grounded in shared backlog artifacts instead of prompt reconstruction
-
-## Validation
-
-Validation here means keeping execution tied to explicit acceptance and visible evidence.
-
-- Ready gate fields make tasks reviewable before coding starts
-- `kano-backlog doctor` checks environment and backlog health
-- Worklogs and release artifacts keep a visible trail of what changed and why
-- References and generated views keep human review and agent handoff aligned
-
-Recommended commands:
+Recommended validation commands:
 
 ```bash
 bash src/shell/test/quick-test.sh
@@ -229,16 +258,26 @@ bash scripts/kob --version
 bash scripts/kob doctor
 ```
 
+## Demo repository
+
+A companion demo repo exists at
+[dorgonman/kano-agent-backlog-skill-demo](https://github.com/dorgonman/kano-agent-backlog-skill-demo).
+It demonstrates a sample backlog workspace. This repo does not bundle that demo,
+so treat it as a separate example workspace. See
+[docs/demo-maintenance.md](docs/demo-maintenance.md) for the follow-up checklist
+used when the demo checkout is unavailable locally.
+
 ## Experimental areas
 
-Experimental work is present, but not sold as stable.
+Experimental work is present, but not sold as stable:
 
-- Search and embedding flows
-- Some advanced querying and tokenizer diagnostics
-- Other surfaces called out in [docs/experimental-features.md](docs/experimental-features.md)
+- search and embedding flows
+- advanced querying and tokenizer diagnostics
+- other surfaces called out in [docs/experimental-features.md](docs/experimental-features.md)
 
 ## License and contributing
 
 Licensed under [MIT](LICENSE).
 
-If you want to contribute, start with [CONTRIBUTING.md](CONTRIBUTING.md). For issues and feature requests, use the [GitHub issue tracker](https://github.com/kanohorizonia/kano-agent-backlog-skill/issues).
+If you want to contribute, start with [CONTRIBUTING.md](CONTRIBUTING.md). For
+issues and feature requests, use the repository issue tracker.

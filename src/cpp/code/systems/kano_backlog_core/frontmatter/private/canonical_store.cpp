@@ -62,12 +62,44 @@ std::vector<std::string> parse_string_list(const YAML::Node& node) {
     return values;
 }
 
+std::filesystem::path normalized_absolute_path(const std::filesystem::path& path) {
+    std::error_code ec;
+    auto absolute = std::filesystem::absolute(path, ec);
+    if (ec) {
+        absolute = path;
+    }
+    auto normalized = std::filesystem::weakly_canonical(absolute, ec);
+    if (ec) {
+        normalized = absolute.lexically_normal();
+    }
+    return normalized;
+}
+
+bool is_inside_path(const std::filesystem::path& child_path, const std::filesystem::path& parent_path) {
+    const auto child = normalized_absolute_path(child_path);
+    const auto parent = normalized_absolute_path(parent_path);
+    std::error_code ec;
+    auto rel = std::filesystem::relative(child, parent, ec);
+    if (ec || rel.empty() || rel.is_absolute()) {
+        return false;
+    }
+    for (const auto& part : rel) {
+        if (part == "..") {
+            return false;
+        }
+    }
+    return true;
+}
+
 }  // namespace
 
 CanonicalStore::CanonicalStore(const std::filesystem::path& product_root) 
     : product_root_(product_root), items_root_(product_root / "items") {}
 
 BacklogItem CanonicalStore::read(const std::filesystem::path& item_path) const {
+    if (!is_inside_path(item_path, product_root_)) {
+        throw ParseError(item_path, "Item path is outside active product root");
+    }
     if (!std::filesystem::exists(item_path)) {
         throw ItemNotFoundError(item_path.string());
     }
@@ -127,6 +159,7 @@ BacklogItem CanonicalStore::read(const std::filesystem::path& item_path) const {
         if (sections.count("context")) item.context = sections["context"];
         if (sections.count("goal")) item.goal = sections["goal"];
         if (sections.count("non_goals")) item.non_goals = sections["non_goals"];
+        if (sections.count("intent_amendments")) item.intent_amendments = sections["intent_amendments"];
         if (sections.count("approach")) item.approach = sections["approach"];
         if (sections.count("alternatives")) item.alternatives = sections["alternatives"];
         if (sections.count("acceptance_criteria")) item.acceptance_criteria = sections["acceptance_criteria"];
@@ -156,6 +189,9 @@ void CanonicalStore::write(BacklogItem& item) const {
 
     if (!item.file_path) {
         throw WriteError("Item file_path is not set");
+    }
+    if (!is_inside_path(*item.file_path, product_root_)) {
+        throw WriteError("Item file_path is outside active product root: " + item.file_path->string());
     }
 
     // Update timestamp
@@ -216,6 +252,7 @@ void CanonicalStore::write(BacklogItem& item) const {
     if (item.context) sections["context"] = *item.context;
     if (item.goal) sections["goal"] = *item.goal;
     if (item.non_goals) sections["non_goals"] = *item.non_goals;
+    if (item.intent_amendments) sections["intent_amendments"] = *item.intent_amendments;
     if (item.approach) sections["approach"] = *item.approach;
     if (item.alternatives) sections["alternatives"] = *item.alternatives;
     if (item.acceptance_criteria) sections["acceptance_criteria"] = *item.acceptance_criteria;

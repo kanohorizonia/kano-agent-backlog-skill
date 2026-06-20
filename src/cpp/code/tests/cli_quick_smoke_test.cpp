@@ -162,18 +162,84 @@ int main(int argc, char** argv) {
         const auto text_root = temp_root / "ready-fields";
         write_text(text_root / "context.md", "Quick smoke context.\n");
         write_text(text_root / "goal.md", "Quick smoke goal.\n");
+        write_text(text_root / "non-goals.md", "Quick smoke non-goal.\n");
         write_text(text_root / "approach.md", "Quick smoke approach.\n");
+        write_text(text_root / "intent-amendments.md", "2026-06-20: Quick smoke amendment.\n");
         write_text(text_root / "acceptance.md", "Quick smoke acceptance.\n");
         write_text(text_root / "risks.md", "Quick smoke risks.\n");
         expect(run_command(binary, {
             "-P", "quick-smoke-product", "workitem", "set-ready", "QS-TSK-0001",
             "--context-file", (text_root / "context.md").string(),
             "--goal-file", (text_root / "goal.md").string(),
+            "--non-goals-file", (text_root / "non-goals.md").string(),
             "--approach-file", (text_root / "approach.md").string(),
+            "--intent-amendments-file", (text_root / "intent-amendments.md").string(),
             "--acceptance-criteria-file", (text_root / "acceptance.md").string(),
             "--risks-file", (text_root / "risks.md").string(),
             "--agent", "tester"
         }) == 0, "set-ready failed");
+        const auto task_path = temp_root / "_kano" / "backlog" / "products" / "quick-smoke-product" / "items" / "task" / "0000" / "QS-TSK-0001_quick-smoke-task.md";
+        const auto task_text = read_text(task_path);
+        expect(task_text.find("# Non-Goals / Do Not") != std::string::npos, "set-ready task should render Non-Goals / Do Not heading");
+        expect(task_text.find("Quick smoke non-goal.") != std::string::npos, "set-ready task should persist non-goals text");
+        expect(task_text.find("# Intent Amendments") != std::string::npos, "set-ready task should render Intent Amendments heading");
+        expect(task_text.find("2026-06-20: Quick smoke amendment.") != std::string::npos, "set-ready task should persist intent amendments text");
+
+        const auto ready_transition_output = temp_root / "transition-ready.txt";
+        expect_command_capture_success(
+            run_command_capture(binary, {
+                "-P", "quick-smoke-product", "workitem", "update-state", "QS-TSK-0001", "--state", "Ready", "--agent", "tester"
+            }, ready_transition_output),
+            ready_transition_output,
+            "ready transition diagnostics failed"
+        );
+        const auto ready_transition_text = read_text(ready_transition_output);
+        expect(ready_transition_text.find("Updated QS-TSK-0001: Proposed -> Ready") != std::string::npos, "ready transition should preserve update line");
+        expect(ready_transition_text.find("Intent warning: Proposed->Ready intent readiness: missing parent intent") != std::string::npos,
+            "ready transition should warn about missing parent intent");
+
+        const auto inprogress_transition_output = temp_root / "transition-inprogress.txt";
+        expect_command_capture_success(
+            run_command_capture(binary, {
+                "-P", "quick-smoke-product", "workitem", "update-state", "QS-TSK-0001", "--state", "InProgress", "--agent", "tester"
+            }, inprogress_transition_output),
+            inprogress_transition_output,
+            "inprogress transition diagnostics failed"
+        );
+        const auto inprogress_transition_text = read_text(inprogress_transition_output);
+        expect(inprogress_transition_text.find("Intent warning: Ready->InProgress intent preflight") != std::string::npos,
+            "inprogress transition should warn about intent preflight");
+        expect(inprogress_transition_text.find("no parent intent resolved") != std::string::npos,
+            "inprogress transition should warn about unresolved parent intent");
+
+        const auto review_transition_output = temp_root / "transition-review.txt";
+        expect_command_capture_success(
+            run_command_capture(binary, {
+                "-P", "quick-smoke-product", "workitem", "update-state", "QS-TSK-0001", "--state", "Review", "--agent", "tester"
+            }, review_transition_output),
+            review_transition_output,
+            "review transition diagnostics failed"
+        );
+        expect(read_text(review_transition_output).find("Intent warning: InProgress->Review intent compliance") != std::string::npos,
+            "review transition should warn about missing compliance evidence");
+
+        expect(run_command(binary, {
+            "-P", "quick-smoke-product", "workitem", "intent-amend", "QS-TSK-0001",
+            "--correction", "Unresolved violation blocks Done.",
+            "--reason", "Drift finding remains unresolved.",
+            "--applies-to", "Do Not Compliance",
+            "--agent", "tester"
+        }) == 0, "review drift amendment failed");
+        const auto done_transition_output = temp_root / "transition-done.txt";
+        expect_command_capture_success(
+            run_command_capture(binary, {
+                "-P", "quick-smoke-product", "workitem", "update-state", "QS-TSK-0001", "--state", "Done", "--agent", "tester"
+            }, done_transition_output),
+            done_transition_output,
+            "done transition diagnostics failed"
+        );
+        expect(read_text(done_transition_output).find("Intent warning: Review->Done intent alignment") != std::string::npos,
+            "done transition should warn about unresolved drift evidence");
 
         expect(run_command(binary, {"-P", "quick-smoke-product", "workitem", "create", "-t", "issue", "--title", "Quick smoke issue", "--agent", "tester"}) == 0,
             "workitem create issue failed");
@@ -183,7 +249,9 @@ int main(int argc, char** argv) {
             "-P", "quick-smoke-product", "workitem", "set-ready", "QS-ISS-0001",
             "--context", "Quick smoke issue context.",
             "--goal", "Quick smoke issue goal.",
+            "--do-not", "Quick smoke issue non-goal.",
             "--approach", "Quick smoke issue approach.",
+            "--intent-amendments", "2026-06-20: Quick smoke issue amendment.",
             "--acceptance-criteria", "Quick smoke issue acceptance.",
             "--risks", "Quick smoke issue risks.",
             "--agent", "tester"
@@ -206,8 +274,297 @@ int main(int argc, char** argv) {
             "issue list did not include created issue");
         const auto issue_text = read_text(issue_path);
         expect(issue_text.find("type: Issue") != std::string::npos, "issue file did not round-trip Issue type");
+        expect(issue_text.find("Quick smoke issue non-goal.") != std::string::npos, "issue file did not record non-goals alias text");
+        expect(issue_text.find("2026-06-20: Quick smoke issue amendment.") != std::string::npos, "issue file did not record intent amendments text");
         expect(issue_text.find("state: InProgress") != std::string::npos, "issue file did not record InProgress state");
         expect(issue_text.find("Issue worklog smoke") != std::string::npos, "issue file did not record worklog");
+
+        expect(run_command(binary, {"-P", "quick-smoke-product", "workitem", "create", "-t", "feature", "--title", "Quick smoke parent feature", "--agent", "tester"}) == 0,
+            "workitem create parent feature failed");
+        expect(run_command(binary, {"-P", "quick-smoke-product", "workitem", "set-ready", "QS-FTR-0001",
+            "--context", "Parent feature context.",
+            "--goal", "Parent feature goal.",
+            "--non-goals", "Parent feature non-goal.",
+            "--acceptance-criteria", "Parent feature acceptance.",
+            "--intent-amendments", "2026-06-20: Parent feature amendment.",
+            "--agent", "tester"}) == 0,
+            "parent feature set-ready failed");
+        expect(run_command(binary, {"-P", "quick-smoke-product", "workitem", "create", "-t", "task", "--title", "Quick smoke child task", "--parent", "QS-FTR-0001", "--agent", "tester"}) == 0,
+            "workitem create child task failed");
+
+        const auto intent_stack_json_output = temp_root / "intent-stack.json";
+        expect_command_capture_success(
+            run_command_capture(binary, {
+                "-P", "quick-smoke-product", "workitem", "intent-stack", "QS-TSK-0002", "--format", "json"
+            }, intent_stack_json_output),
+            intent_stack_json_output,
+            "intent-stack json failed"
+        );
+        const auto intent_stack_json_text = read_text(intent_stack_json_output);
+        expect(intent_stack_json_text.find("\"status\" : \"complete\"") != std::string::npos, "intent-stack json should be complete");
+        expect(intent_stack_json_text.find("QS-TSK-0002") != std::string::npos, "intent-stack json should include current task");
+        expect(intent_stack_json_text.find("QS-FTR-0001") != std::string::npos, "intent-stack json should include parent feature");
+        expect(intent_stack_json_text.find("Parent feature non-goal.") != std::string::npos, "intent-stack json should include parent non-goals");
+        expect(intent_stack_json_text.find("Parent feature amendment.") != std::string::npos, "intent-stack json should include parent amendments");
+
+        const auto intent_stack_text_output = temp_root / "intent-stack.txt";
+        expect_command_capture_success(
+            run_command_capture(binary, {
+                "-P", "quick-smoke-product", "workitem", "intent-stack", "QS-TSK-0002", "--format", "text", "--max-depth", "1"
+            }, intent_stack_text_output),
+            intent_stack_text_output,
+            "intent-stack text failed"
+        );
+        const auto intent_stack_text = read_text(intent_stack_text_output);
+        expect(intent_stack_text.find("# Intent Stack") != std::string::npos, "intent-stack text should include heading");
+        expect(intent_stack_text.find("Parent-chain depth limit reached") != std::string::npos, "intent-stack text should warn at depth limit");
+
+        const auto intent_template_text_output = temp_root / "intent-template.txt";
+        expect_command_capture_success(
+            run_command_capture(binary, {
+                "-P", "quick-smoke-product", "workitem", "intent-template", "QS-TSK-0002", "--kind", "both", "--format", "text"
+            }, intent_template_text_output),
+            intent_template_text_output,
+            "intent-template text failed"
+        );
+        const auto intent_template_text = read_text(intent_template_text_output);
+        expect(intent_template_text.find("# Intent Preflight") != std::string::npos, "intent-template text should include preflight heading");
+        expect(intent_template_text.find("## Intent Trace") != std::string::npos, "intent-template text should include intent trace");
+        expect(intent_template_text.find("## Inherited Do Not") != std::string::npos, "intent-template text should include inherited Do Not");
+        expect(intent_template_text.find("Parent feature non-goal.") != std::string::npos, "intent-template text should include parent non-goals");
+        expect(intent_template_text.find("Parent feature amendment.") != std::string::npos, "intent-template text should include intent amendments");
+        expect(intent_template_text.find("# Do Not Compliance Report") != std::string::npos, "intent-template text should include compliance heading");
+        expect(intent_template_text.find("OK/WARN/VIOLATION") != std::string::npos, "intent-template text should include compliance status prompts");
+
+        const auto intent_template_json_output = temp_root / "intent-template.json";
+        expect_command_capture_success(
+            run_command_capture(binary, {
+                "-P", "quick-smoke-product", "workitem", "intent-template", "QS-TSK-0002", "--kind", "preflight", "--format", "json"
+            }, intent_template_json_output),
+            intent_template_json_output,
+            "intent-template json failed"
+        );
+        const auto intent_template_json = read_text(intent_template_json_output);
+        expect(intent_template_json.find("\"kind\" : \"preflight\"") != std::string::npos, "intent-template json should identify preflight kind");
+        expect(intent_template_json.find("\"preflight\"") != std::string::npos, "intent-template json should include preflight object");
+        expect(intent_template_json.find("\"inherited_do_not\"") != std::string::npos, "intent-template json should include inherited_do_not");
+        expect(intent_template_json.find("\"intent_amendments\"") != std::string::npos, "intent-template json should include intent amendments");
+
+        const auto intent_handoff_output = temp_root / "intent-handoff.txt";
+        expect_command_capture_success(
+            run_command_capture(binary, {
+                "-P", "quick-smoke-product", "workitem", "intent-template", "QS-TSK-0002", "--kind", "handoff", "--format", "text"
+            }, intent_handoff_output),
+            intent_handoff_output,
+            "intent-template handoff failed"
+        );
+        const auto intent_handoff_text = read_text(intent_handoff_output);
+        expect(intent_handoff_text.find("# Coding Agent Intent Prompt") != std::string::npos, "handoff template should include coding-agent heading");
+        expect(intent_handoff_text.find("Do not infer final intent from raw backlog evidence") != std::string::npos, "handoff template should include execution boundary");
+
+        const auto intent_handoff_json_output = temp_root / "intent-handoff.json";
+        expect_command_capture_success(
+            run_command_capture(binary, {
+                "-P", "quick-smoke-product", "workitem", "intent-template", "QS-TSK-0002", "--kind", "handoff", "--format", "json"
+            }, intent_handoff_json_output),
+            intent_handoff_json_output,
+            "intent-template handoff json failed"
+        );
+        const auto intent_handoff_json = read_text(intent_handoff_json_output);
+        expect(intent_handoff_json.find("\"do_not_non_goals\"") != std::string::npos, "handoff json should include do_not_non_goals");
+        expect(intent_handoff_json.find("Parent feature non-goal.") != std::string::npos, "handoff json should include inherited Do Not text");
+
+        const auto drift_resolution_output = temp_root / "drift-resolution-template.txt";
+        expect_command_capture_success(
+            run_command_capture(binary, {
+                "-P", "quick-smoke-product", "workitem", "drift-resolution-template", "QS-TSK-0002",
+                "--drift-type", "stale proposed fix",
+                "--detection-stage", "Review",
+                "--detected-by", "ChatGPT"
+            }, drift_resolution_output),
+            drift_resolution_output,
+            "drift-resolution-template failed"
+        );
+        const auto drift_resolution_text = read_text(drift_resolution_output);
+        expect(drift_resolution_text.find("Detected drift is not execution permission") != std::string::npos, "drift resolution template should state execution boundary");
+        expect(drift_resolution_text.find("- relates: QS-TSK-0002") != std::string::npos, "drift resolution template should link source item");
+
+        const auto create_drift_dry_run_output = temp_root / "create-drift-resolution-dry-run.txt";
+        expect_command_capture_success(
+            run_command_capture(binary, {
+                "-P", "quick-smoke-product", "workitem", "create-drift-resolution", "QS-TSK-0002",
+                "--drift-type", "semantic evidence conflict",
+                "--agent", "tester"
+            }, create_drift_dry_run_output),
+            create_drift_dry_run_output,
+            "create-drift-resolution dry run failed"
+        );
+        expect(read_text(create_drift_dry_run_output).find("DRY RUN: would create") != std::string::npos, "create-drift-resolution should default to dry-run");
+
+        const auto outside_item_path = temp_root / "outside-drift-source.md";
+        write_text(outside_item_path, "outside product root should not be read or mutated\n");
+        const auto outside_template_output = temp_root / "outside-intent-template.txt";
+        const auto outside_template_rc = run_command_capture(binary, {
+            "-P", "quick-smoke-product", "workitem", "intent-template", outside_item_path.string(), "--kind", "handoff"
+        }, outside_template_output);
+        expect(outside_template_rc != 0, "outside product-root path should be rejected for intent-template");
+        expect(read_text(outside_template_output).find("outside active product root") != std::string::npos, "outside intent-template rejection should explain product-root boundary");
+
+        const auto outside_apply_output = temp_root / "outside-create-drift-resolution-apply.txt";
+        const auto outside_apply_rc = run_command_capture(binary, {
+            "-P", "quick-smoke-product", "workitem", "create-drift-resolution", outside_item_path.string(), "--apply", "--agent", "tester"
+        }, outside_apply_output);
+        expect(outside_apply_rc != 0, "outside product-root path should be rejected before create-drift-resolution apply");
+        expect(read_text(outside_apply_output).find("outside active product root") != std::string::npos, "outside apply rejection should explain product-root boundary");
+
+        const auto outside_set_ready_output = temp_root / "outside-set-ready.txt";
+        const auto outside_set_ready_rc = run_command_capture(binary, {
+            "-P", "quick-smoke-product", "workitem", "set-ready", outside_item_path.string(),
+            "--context", "outside product root must not be mutated", "--agent", "tester"
+        }, outside_set_ready_output);
+        expect(outside_set_ready_rc != 0, "outside product-root path should be rejected for set-ready");
+        expect(read_text(outside_set_ready_output).find("outside active product root") != std::string::npos, "outside set-ready rejection should explain product-root boundary");
+
+        const auto outside_update_state_output = temp_root / "outside-update-state.txt";
+        const auto outside_update_state_rc = run_command_capture(binary, {
+            "-P", "quick-smoke-product", "workitem", "update-state", outside_item_path.string(),
+            "--state", "Review", "--agent", "tester", "--force"
+        }, outside_update_state_output);
+        expect(outside_update_state_rc != 0, "outside product-root path should be rejected for update-state");
+        expect(read_text(outside_update_state_output).find("outside active product root") != std::string::npos, "outside update-state rejection should explain product-root boundary");
+
+        const auto apply_without_agent_output = temp_root / "create-drift-resolution-apply-no-agent.txt";
+        const auto apply_without_agent_rc = run_command_capture(binary, {
+            "-P", "quick-smoke-product", "workitem", "create-drift-resolution", "QS-TSK-0002", "--apply"
+        }, apply_without_agent_output);
+        expect(apply_without_agent_rc != 0, "create-drift-resolution --apply should require --agent before writing");
+        expect(read_text(apply_without_agent_output).find("--agent is required with --apply") != std::string::npos, "apply without agent should report required agent");
+
+        const auto no_drift_preflight_output = temp_root / "intent-drift-preflight-no-drift.txt";
+        expect_command_capture_success(
+            run_command_capture(binary, {
+                "-P", "quick-smoke-product", "workitem", "intent-drift-preflight", "QS-TSK-0002",
+                "--result", "no-drift"
+            }, no_drift_preflight_output),
+            no_drift_preflight_output,
+            "intent-drift-preflight no-drift failed"
+        );
+        const auto no_drift_preflight_text = read_text(no_drift_preflight_output);
+        expect(no_drift_preflight_text.find("result: no drift detected") != std::string::npos, "no-drift preflight should allow normal handoff");
+        expect(no_drift_preflight_text.find("handoff allowed: yes") != std::string::npos, "no-drift preflight should state handoff allowed");
+        expect(no_drift_preflight_text.find("## Deterministic Evidence Checked") != std::string::npos, "preflight should materialize deterministic evidence checks");
+        expect(no_drift_preflight_text.find("parent related tickets") != std::string::npos, "preflight should report parent related tickets");
+
+        const auto drift_preflight_output = temp_root / "intent-drift-preflight-drift.txt";
+        expect_command_capture_success(
+            run_command_capture(binary, {
+                "-P", "quick-smoke-product", "workitem", "handoff-preflight", "QS-TSK-0002",
+                "--result", "drift"
+            }, drift_preflight_output),
+            drift_preflight_output,
+            "handoff-preflight drift failed"
+        );
+        const auto drift_preflight_text = read_text(drift_preflight_output);
+        expect(drift_preflight_text.find("result: drift detected") != std::string::npos, "drift preflight should identify drift");
+        expect(drift_preflight_text.find("Intent Drift Resolution ticket") != std::string::npos, "drift preflight should require resolution ticket");
+
+        const auto uncertain_preflight_output = temp_root / "intent-drift-preflight-uncertain.txt";
+        expect_command_capture_success(
+            run_command_capture(binary, {
+                "-P", "quick-smoke-product", "workitem", "codex-handoff-preflight", "QS-TSK-0002",
+                "--result", "uncertain"
+            }, uncertain_preflight_output),
+            uncertain_preflight_output,
+            "codex-handoff-preflight uncertain failed"
+        );
+        expect(read_text(uncertain_preflight_output).find("human confirmation required") != std::string::npos, "uncertain preflight should require human confirmation");
+
+        const auto unknown_preflight_json_output = temp_root / "intent-drift-preflight-unknown.json";
+        expect_command_capture_success(
+            run_command_capture(binary, {
+                "-P", "quick-smoke-product", "workitem", "intent-drift-preflight", "QS-TSK-0002",
+                "--result", "unexpected-value", "--format", "json"
+            }, unknown_preflight_json_output),
+            unknown_preflight_json_output,
+            "intent-drift-preflight unknown json failed"
+        );
+        const auto unknown_preflight_json = read_text(unknown_preflight_json_output);
+        expect(unknown_preflight_json.find("\"result\" : \"uncertain\"") != std::string::npos, "unknown preflight result should normalize to uncertain");
+        expect(unknown_preflight_json.find("\"explicit_blocks\"") != std::string::npos, "preflight json should include explicit blocks evidence");
+        expect(unknown_preflight_json.find("\"recent_worklog\"") != std::string::npos, "preflight json should include worklog/history evidence");
+
+        const auto proposed_amend_output = temp_root / "intent-amend-proposed.json";
+        expect_command_capture_success(
+            run_command_capture(binary, {
+                "-P", "quick-smoke-product", "workitem", "intent-amend", "QS-TSK-0002",
+                "--correction", "Proposed correction one.",
+                "--reason", "Human clarified task scope.",
+                "--applies-to", "Approach",
+                "--agent", "tester",
+                "--format", "json"
+            }, proposed_amend_output),
+            proposed_amend_output,
+            "intent-amend proposed failed"
+        );
+        const auto proposed_amend_json = read_text(proposed_amend_output);
+        expect(proposed_amend_json.find("\"appended\" : true") != std::string::npos, "intent-amend json should report append");
+        expect(proposed_amend_json.find("Clarify Ready fields directly") != std::string::npos, "proposed amendment should emit ready-field guidance");
+        auto amended_task_text = read_text(temp_root / "_kano" / "backlog" / "products" / "quick-smoke-product" / "items" / "task" / "0000" / "QS-TSK-0002_quick-smoke-child-task.md");
+        expect(amended_task_text.find("Proposed correction one.") != std::string::npos, "intent-amend should append correction text");
+        expect(amended_task_text.find("applies_to: Approach") != std::string::npos, "intent-amend should record applies_to metadata");
+        expect(amended_task_text.find("Intent Amendment appended: Human clarified task scope.") != std::string::npos, "intent-amend should append worklog evidence");
+
+        expect(run_command(binary, {"-P", "quick-smoke-product", "workitem", "update-state", "QS-TSK-0002", "--state", "InProgress", "--agent", "tester", "--force"}) == 0,
+            "intent-amend child update InProgress failed");
+        const auto inprogress_amend_output = temp_root / "intent-amend-inprogress.txt";
+        expect_command_capture_success(
+            run_command_capture(binary, {
+                "-P", "quick-smoke-product", "workitem", "intent-amend", "QS-TSK-0002",
+                "--correction", "InProgress correction requires replanning.",
+                "--reason", "Implementation drift detected.",
+                "--applies-to", "Plan",
+                "--agent", "tester"
+            }, inprogress_amend_output),
+            inprogress_amend_output,
+            "intent-amend inprogress failed"
+        );
+        expect(read_text(inprogress_amend_output).find("Needs replan") != std::string::npos, "inprogress amendment should emit replan guidance");
+
+        expect(run_command(binary, {"-P", "quick-smoke-product", "workitem", "update-state", "QS-TSK-0002", "--state", "Review", "--agent", "tester", "--force"}) == 0,
+            "intent-amend child update Review failed");
+        const auto review_amend_output = temp_root / "intent-amend-review.txt";
+        expect_command_capture_success(
+            run_command_capture(binary, {
+                "-P", "quick-smoke-product", "workitem", "intent-amend", "QS-TSK-0002",
+                "--correction", "Review correction blocks Done.",
+                "--reason", "Reviewer found drift.",
+                "--applies-to", "Acceptance Criteria",
+                "--agent", "tester"
+            }, review_amend_output),
+            review_amend_output,
+            "intent-amend review failed"
+        );
+        expect(read_text(review_amend_output).find("Drift finding") != std::string::npos, "review amendment should emit drift-finding guidance");
+
+        expect(run_command(binary, {"-P", "quick-smoke-product", "workitem", "update-state", "QS-TSK-0002", "--state", "Done", "--agent", "tester", "--force"}) == 0,
+            "intent-amend child update Done failed");
+        const auto done_amend_output = temp_root / "intent-amend-done.txt";
+        expect_command_capture_success(
+            run_command_capture(binary, {
+                "-P", "quick-smoke-product", "workitem", "intent-amend", "QS-TSK-0002",
+                "--correction", "Done correction needs follow-up.",
+                "--reason", "Post-done violation found.",
+                "--applies-to", "Validation",
+                "--agent", "tester"
+            }, done_amend_output),
+            done_amend_output,
+            "intent-amend done failed"
+        );
+        expect(read_text(done_amend_output).find("Post-done drift") != std::string::npos, "done amendment should emit post-done guidance");
+        amended_task_text = read_text(temp_root / "_kano" / "backlog" / "products" / "quick-smoke-product" / "items" / "task" / "0000" / "QS-TSK-0002_quick-smoke-child-task.md");
+        expect(amended_task_text.find("Proposed correction one.") < amended_task_text.find("InProgress correction requires replanning."), "intent amendments should remain append-only in order");
+        expect(amended_task_text.find("InProgress correction requires replanning.") < amended_task_text.find("Review correction blocks Done."), "review amendment should append after in-progress amendment");
+        expect(amended_task_text.find("Review correction blocks Done.") < amended_task_text.find("Done correction needs follow-up."), "done amendment should append last");
 
         const auto topic_output = temp_root / "topic-list-templates.json";
         expect_command_capture_success(

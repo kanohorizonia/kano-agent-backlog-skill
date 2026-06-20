@@ -28,7 +28,8 @@ std::string TemplateOps::render_item_body(
     
     ss << "\n# Context\n\n";
     ss << "# Goal\n\n";
-    ss << "# Non-Goals\n\n";
+    ss << "# Non-Goals / Do Not\n\n";
+    ss << "# Intent Amendments\n\n";
     ss << "# Approach\n\n";
     ss << "# Alternatives\n\n";
     ss << "# Acceptance Criteria\n\n";

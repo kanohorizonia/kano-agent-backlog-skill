@@ -37,6 +37,8 @@
 #include <cctype>
 #include <regex>
 #include <cstdlib>
+#include <cerrno>
+#include <cstring>
 #include <cmath>
 #include <cstdio>
 
@@ -1879,6 +1881,26 @@ std::filesystem::path resolve_webview_binary(const std::filesystem::path& cli_di
     return {};
 }
 
+#ifdef _WIN32
+void prepare_webview_runtime_path(const std::filesystem::path& cli_dir) {
+    std::filesystem::path current = cli_dir;
+    for (int depth = 0; depth < 8 && !current.empty(); ++depth) {
+        const auto runtime_dir = current / ".pixi" / "envs" / "default" / "Library" / "bin";
+        if (std::filesystem::exists(runtime_dir)) {
+            const char* existing = std::getenv("PATH");
+            std::string updated = runtime_dir.string();
+            if (existing != nullptr && *existing != '\0') {
+                updated += ";";
+                updated += existing;
+            }
+            _putenv_s("PATH", updated.c_str());
+            return;
+        }
+        current = current.parent_path();
+    }
+}
+#endif
+
 int launch_webview_process(const std::filesystem::path& webview_exe, const std::vector<std::string>& args) {
 #ifdef _WIN32
     std::vector<std::string> argv_storage;
@@ -1891,7 +1913,11 @@ int launch_webview_process(const std::filesystem::path& webview_exe, const std::
         argv.push_back(arg.c_str());
     }
     argv.push_back(nullptr);
-    return static_cast<int>(_spawnv(_P_WAIT, webview_exe.string().c_str(), argv.data()));
+    const int rc = static_cast<int>(_spawnv(_P_WAIT, webview_exe.string().c_str(), argv.data()));
+    if (rc == -1) {
+        std::cerr << "Failed to spawn webview executable: " << std::strerror(errno) << "\n";
+    }
+    return rc;
 #else
     std::string command = shell_quote_arg(webview_exe.string());
     for (const auto& arg : args) {
@@ -3101,6 +3127,7 @@ std::vector<std::pair<std::string, std::string>> native_item_sections(const Back
         {"context", item.context},
         {"goal", item.goal},
         {"non_goals", item.non_goals},
+        {"intent_amendments", item.intent_amendments},
         {"approach", item.approach},
         {"alternatives", item.alternatives},
         {"acceptance_criteria", item.acceptance_criteria},
@@ -3116,6 +3143,786 @@ std::vector<std::pair<std::string, std::string>> native_item_sections(const Back
         sections.push_back({"worklog", worklog});
     }
     return sections;
+}
+
+std::string bounded_text(std::optional<std::string> value, std::size_t max_chars) {
+    if (!value) {
+        return "";
+    }
+    std::string text = trim_copy(*value);
+    if (text.size() <= max_chars) {
+        return text;
+    }
+    if (max_chars <= 3) {
+        return text.substr(0, max_chars);
+    }
+    return text.substr(0, max_chars - 3) + "...";
+}
+
+Json::Value intent_stack_item_json(const IntentStackEntry& entry, std::size_t max_section_chars) {
+    const auto& item = entry.item;
+    Json::Value row(Json::objectValue);
+    row["depth"] = entry.depth;
+    row["role"] = entry.role;
+    row["id"] = item.id;
+    row["uid"] = item.uid;
+    row["type"] = to_string(item.type);
+    row["title"] = item.title;
+    row["state"] = to_string(item.state);
+    row["parent"] = item.parent ? Json::Value(*item.parent) : Json::Value(Json::nullValue);
+    row["context"] = bounded_text(item.context, max_section_chars);
+    row["goal"] = bounded_text(item.goal, max_section_chars);
+    row["approach"] = bounded_text(item.approach, max_section_chars);
+    row["acceptance_criteria"] = bounded_text(item.acceptance_criteria, max_section_chars);
+    row["risks"] = bounded_text(item.risks, max_section_chars);
+    row["non_goals"] = bounded_text(item.non_goals, max_section_chars);
+    row["intent_amendments"] = bounded_text(item.intent_amendments, max_section_chars);
+    return row;
+}
+
+Json::Value intent_stack_json(const IntentStackResult& stack, std::size_t max_section_chars) {
+    Json::Value payload(Json::objectValue);
+    payload["status"] = stack.warnings.empty() ? "complete" : "warning";
+    payload["chain"] = Json::Value(Json::arrayValue);
+    for (const auto& entry : stack.chain) {
+        payload["chain"].append(intent_stack_item_json(entry, max_section_chars));
+    }
+    payload["warnings"] = Json::Value(Json::arrayValue);
+    for (const auto& warning : stack.warnings) {
+        payload["warnings"].append(warning);
+    }
+    payload["evidence_refs"] = Json::Value(Json::arrayValue);
+    for (const auto& ref : stack.evidence_refs) {
+        payload["evidence_refs"].append(ref);
+    }
+    payload["query_plan"]["mode"] = "deterministic-parent-chain";
+    payload["query_plan"]["semantic_retrieval"] = "external-provider-only";
+    payload["query_plan"]["requires_human_confirmation"] = !stack.evidence_refs.empty();
+    return payload;
+}
+
+void print_intent_stack_text(const IntentStackResult& stack, std::size_t max_section_chars) {
+    std::cout << "# Intent Stack\n\n";
+    std::cout << "status: " << (stack.warnings.empty() ? "complete" : "warning") << "\n";
+    for (const auto& warning : stack.warnings) {
+        std::cout << "warning: " << warning << "\n";
+    }
+    std::cout << "\n## Chain\n";
+    for (const auto& entry : stack.chain) {
+        const auto& item = entry.item;
+        std::cout << "\n- depth: " << entry.depth << "\n";
+        std::cout << "  role: " << entry.role << "\n";
+        std::cout << "  id: " << item.id << "\n";
+        std::cout << "  type: " << to_string(item.type) << "\n";
+        std::cout << "  title: " << item.title << "\n";
+        std::cout << "  parent: " << (item.parent ? *item.parent : "null") << "\n";
+        if (const auto text = bounded_text(item.context, max_section_chars); !text.empty()) {
+            std::cout << "  context: " << text << "\n";
+        }
+        if (const auto text = bounded_text(item.goal, max_section_chars); !text.empty()) {
+            std::cout << "  goal: " << text << "\n";
+        }
+        if (const auto text = bounded_text(item.non_goals, max_section_chars); !text.empty()) {
+            std::cout << "  non_goals: " << text << "\n";
+        }
+        if (const auto text = bounded_text(item.intent_amendments, max_section_chars); !text.empty()) {
+            std::cout << "  intent_amendments: " << text << "\n";
+        }
+    }
+    if (!stack.evidence_refs.empty()) {
+        std::cout << "\n## Evidence refs\n";
+        for (const auto& ref : stack.evidence_refs) {
+            std::cout << "- " << ref << "\n";
+        }
+    }
+    std::cout << "\n## Query Plan\n";
+    std::cout << "- mode: deterministic-parent-chain\n";
+    std::cout << "- semantic_retrieval: external-provider-only\n";
+}
+
+Json::Value intent_template_json(
+    const IntentStackResult& stack,
+    const std::string& template_kind,
+    std::size_t max_section_chars
+) {
+    Json::Value payload(Json::objectValue);
+    payload["kind"] = template_kind;
+    payload["intent_stack"] = intent_stack_json(stack, max_section_chars);
+
+    Json::Value preflight(Json::objectValue);
+    preflight["intent_trace"] = Json::Value(Json::arrayValue);
+    preflight["inherited_do_not"] = Json::Value(Json::arrayValue);
+    preflight["task_local_do_not"] = Json::Value(Json::arrayValue);
+    preflight["intent_amendments"] = Json::Value(Json::arrayValue);
+    preflight["plan_risk_prompts"] = Json::Value(Json::arrayValue);
+    preflight["stop_conditions"] = Json::Value(Json::arrayValue);
+
+    Json::Value compliance(Json::objectValue);
+    compliance["task_completion"] = "OK/WARN/VIOLATION: ";
+    compliance["story_level_value"] = "OK/WARN/VIOLATION: ";
+    compliance["feature_boundary"] = "OK/WARN/VIOLATION: ";
+    compliance["epic_alignment"] = "OK/WARN/VIOLATION: ";
+    compliance["do_not_compliance"] = Json::Value(Json::arrayValue);
+    compliance["stale_solution_check"] = Json::Value(Json::arrayValue);
+    compliance["validation"] = Json::Value(Json::arrayValue);
+    compliance["limitations"] = Json::Value(Json::arrayValue);
+    compliance["follow_up"] = Json::Value(Json::arrayValue);
+
+    Json::Value handoff(Json::objectValue);
+    handoff["target_work_item"] = stack.chain.empty() ? Json::Value(Json::nullValue) : intent_stack_item_json(stack.chain.front(), max_section_chars);
+    handoff["current_authoritative_intent"] = Json::Value(Json::arrayValue);
+    handoff["current_authoritative_tickets_evidence"] = Json::Value(Json::arrayValue);
+    handoff["stale_or_legacy_context"] = Json::Value(Json::arrayValue);
+    handoff["candidate_evidence"] = Json::Value(Json::arrayValue);
+    handoff["newer_decisions_overrides"] = Json::Value(Json::arrayValue);
+    handoff["do_not_non_goals"] = Json::Value(Json::arrayValue);
+    handoff["execution_rules"] = Json::Value(Json::arrayValue);
+    handoff["required_preflight_from_coding_agent"] = Json::Value(Json::arrayValue);
+    handoff["required_final_report_from_coding_agent"] = Json::Value(Json::arrayValue);
+
+    for (const auto& entry : stack.chain) {
+        const auto& item = entry.item;
+        Json::Value trace(Json::objectValue);
+        trace["role"] = entry.role;
+        trace["id"] = item.id;
+        trace["title"] = item.title;
+        trace["goal"] = bounded_text(item.goal, max_section_chars);
+        preflight["intent_trace"].append(trace);
+
+        if (item.non_goals && !trim_copy(*item.non_goals).empty()) {
+            Json::Value rule(Json::objectValue);
+            rule["source_id"] = item.id;
+            rule["role"] = entry.role;
+            rule["text"] = bounded_text(item.non_goals, max_section_chars);
+            if (entry.depth == 0) {
+                preflight["task_local_do_not"].append(rule);
+            } else {
+                preflight["inherited_do_not"].append(rule);
+            }
+            compliance["do_not_compliance"].append(rule);
+            handoff["do_not_non_goals"].append(rule);
+        }
+
+        if (item.intent_amendments && !trim_copy(*item.intent_amendments).empty()) {
+            Json::Value amendment(Json::objectValue);
+            amendment["source_id"] = item.id;
+            amendment["role"] = entry.role;
+            amendment["text"] = bounded_text(item.intent_amendments, max_section_chars);
+            preflight["intent_amendments"].append(amendment);
+        }
+
+        if (entry.depth > 0) {
+            Json::Value authority(Json::objectValue);
+            authority["source_id"] = item.id;
+            authority["role"] = entry.role;
+            authority["title"] = item.title;
+            authority["goal"] = bounded_text(item.goal, max_section_chars);
+            handoff["current_authoritative_intent"].append(authority);
+        }
+
+        Json::Value evidence(Json::objectValue);
+        evidence["source_id"] = item.id;
+        evidence["role"] = entry.role;
+        evidence["state"] = to_string(item.state);
+        evidence["summary"] = bounded_text(item.goal ? item.goal : item.context, max_section_chars);
+        handoff["current_authoritative_tickets_evidence"].append(evidence);
+    }
+
+    preflight["candidate_related_evidence"].append("Optional KOA/Miyo/semantic provider candidates supplied by ChatGPT/operator; candidate evidence only.");
+    preflight["stale_or_legacy_evidence"].append("Older tickets or proposed fixes must be labeled historical context until revalidated.");
+    preflight["plan_risk_prompts"].append("Could this plan violate any Do Not item?");
+    preflight["plan_risk_prompts"].append("Could this plan rely on stale architecture?");
+    preflight["plan_risk_prompts"].append("Could this plan accidentally optimize only the leaf task while violating parent intent?");
+    preflight["stop_conditions"].append("Stop if implementation requires violating a Do Not item.");
+    preflight["stop_conditions"].append("Stop if candidate evidence conflicts and no human decision is recorded.");
+    preflight["stop_conditions"].append("Stop if an old ticket's proposed fix targets obsolete architecture.");
+    compliance["stale_solution_check"].append("Was any old proposed fix used?");
+    compliance["stale_solution_check"].append("Was it revalidated against current architecture?");
+    compliance["stale_solution_check"].append("Was any stale approach rejected?");
+    compliance["validation"].append("List commands run and whether they passed.");
+    compliance["limitations"].append("List unverified behavior, unresolved warnings, and any human-confirmation needs.");
+    compliance["follow_up"].append("List resolution tickets, rejected stale assumptions, or human decisions still needed.");
+
+    handoff["stale_or_legacy_context"].append("Explain which older tickets are historical context only and must not be implemented as-is.");
+    handoff["candidate_evidence"].append("Explain what was retrieved semantically or indirectly and whether it is only candidate evidence.");
+    handoff["newer_decisions_overrides"].append("List newer decisions that override older approaches, or 'none supplied'.");
+    handoff["execution_rules"].append("Follow the current authoritative intent.");
+    handoff["execution_rules"].append("Treat stale tickets as historical context only.");
+    handoff["execution_rules"].append("Do not implement old proposed fixes unless revalidated.");
+    handoff["execution_rules"].append("Do not infer final intent from raw backlog evidence.");
+    handoff["execution_rules"].append("Stop and request human review if evidence conflicts.");
+    handoff["required_preflight_from_coding_agent"].append("Restate the synthesized current intent and Do Not boundaries before editing.");
+    handoff["required_preflight_from_coding_agent"].append("Confirm stale/candidate evidence is not being used as execution authority.");
+    handoff["required_final_report_from_coding_agent"].append("Report Do Not compliance, stale solution checks, validation, limitations, and follow-ups.");
+
+    if (template_kind == "preflight" || template_kind == "both" || template_kind == "all") {
+        payload["preflight"] = preflight;
+    }
+    if (template_kind == "compliance" || template_kind == "both" || template_kind == "all") {
+        payload["compliance"] = compliance;
+    }
+    if (template_kind == "handoff" || template_kind == "all") {
+        payload["coding_agent_intent_prompt"] = handoff;
+    }
+    return payload;
+}
+
+void print_intent_template_text(
+    const IntentStackResult& stack,
+    const std::string& template_kind,
+    std::size_t max_section_chars
+) {
+    const auto print_trace = [&]() {
+        std::cout << "## Intent Trace\n";
+        std::cout << "- Current Task: ";
+        bool printed_current = false;
+        for (const auto& entry : stack.chain) {
+            if (entry.depth == 0) {
+                std::cout << entry.item.id << " - " << entry.item.title << "\n";
+                printed_current = true;
+                break;
+            }
+        }
+        if (!printed_current) {
+            std::cout << "unresolved\n";
+        }
+        const auto print_role = [&](const std::string& label, const std::string& role) {
+            std::cout << "- " << label << ": ";
+            for (const auto& entry : stack.chain) {
+                if (entry.role == role) {
+                    std::cout << entry.item.id << " - " << entry.item.title << "\n";
+                    return;
+                }
+            }
+            std::cout << "missing / unresolved\n";
+        };
+        print_role("Parent Story", "story");
+        print_role("Parent Feature", "feature");
+        print_role("Parent Epic", "epic");
+        std::cout << "- Trace Depth: " << stack.chain.size() << "\n";
+        std::cout << "- Missing / unresolved ancestors: " << (stack.warnings.empty() ? "none" : join_strings(stack.warnings, "; ")) << "\n";
+        std::cout << "\n### Current Authoritative Intent\n";
+        for (const auto& entry : stack.chain) {
+            const auto& item = entry.item;
+            std::cout << "- [" << entry.role << "] " << item.id << " - " << item.title << "\n";
+            if (const auto goal = bounded_text(item.goal, max_section_chars); !goal.empty()) {
+                std::cout << "  goal: " << goal << "\n";
+            }
+        }
+    };
+
+    const auto print_do_not = [&]() {
+        std::cout << "## Inherited Do Not\n";
+        bool inherited = false;
+        for (const auto& entry : stack.chain) {
+            if (entry.depth == 0 || !entry.item.non_goals || trim_copy(*entry.item.non_goals).empty()) {
+                continue;
+            }
+            inherited = true;
+            std::cout << "- " << entry.item.id << " (" << entry.role << "): " << bounded_text(entry.item.non_goals, max_section_chars) << "\n";
+        }
+        if (!inherited) {
+            std::cout << "- none recorded\n";
+        }
+        std::cout << "## Task-Local Do Not\n";
+        if (!stack.chain.empty() && stack.chain.front().item.non_goals && !trim_copy(*stack.chain.front().item.non_goals).empty()) {
+            std::cout << "- " << bounded_text(stack.chain.front().item.non_goals, max_section_chars) << "\n";
+        } else {
+            std::cout << "- none recorded\n";
+        }
+    };
+
+    const auto print_amendments = [&]() {
+        std::cout << "## Intent Amendments\n";
+        bool found = false;
+        for (const auto& entry : stack.chain) {
+            if (!entry.item.intent_amendments || trim_copy(*entry.item.intent_amendments).empty()) {
+                continue;
+            }
+            found = true;
+            std::cout << "- " << entry.item.id << " (" << entry.role << "): " << bounded_text(entry.item.intent_amendments, max_section_chars) << "\n";
+        }
+        if (!found) {
+            std::cout << "- none recorded\n";
+        }
+    };
+
+    if (template_kind == "preflight" || template_kind == "both" || template_kind == "all") {
+        std::cout << "# Intent Preflight\n\n";
+        print_trace();
+        print_do_not();
+        print_amendments();
+        std::cout << "## Candidate / Related Evidence\n";
+        std::cout << "- Optional KOA/Miyo/semantic provider candidates supplied by ChatGPT/operator; candidate evidence only.\n";
+        std::cout << "## Stale or Legacy Evidence\n";
+        std::cout << "- Older tickets or proposed fixes must be labeled historical context until revalidated.\n";
+        std::cout << "## Plan Risk Prompts\n";
+        std::cout << "- Could this plan violate any Do Not item?\n";
+        std::cout << "- Could this plan rely on stale architecture?\n";
+        std::cout << "- Could this plan accidentally optimize only the leaf task while violating parent intent?\n";
+        std::cout << "## Stop Conditions\n";
+        std::cout << "- Stop if implementation requires violating a Do Not item.\n";
+        std::cout << "- Stop if candidate evidence conflicts and no human decision is recorded.\n";
+        std::cout << "- Stop if an old ticket's proposed fix targets obsolete architecture.\n\n";
+    }
+
+    if (template_kind == "compliance" || template_kind == "both" || template_kind == "all") {
+        std::cout << "# Do Not Compliance Report\n\n";
+        std::cout << "## Task Completion\n";
+        std::cout << "- OK/WARN/VIOLATION: \n";
+        std::cout << "## Story-level Value\n";
+        std::cout << "- OK/WARN/VIOLATION: \n";
+        std::cout << "## Feature Boundary\n";
+        std::cout << "- OK/WARN/VIOLATION: \n";
+        std::cout << "## Epic Alignment\n";
+        for (const auto& entry : stack.chain) {
+            if (entry.depth == 0) {
+                continue;
+            }
+            std::cout << "- " << entry.item.id << " (" << entry.role << "): OK/WARN/VIOLATION: \n";
+        }
+        if (stack.chain.size() <= 1) {
+            std::cout << "- no resolved parent chain\n";
+        }
+        std::cout << "## Do Not Compliance\n";
+        bool has_rules = false;
+        for (const auto& entry : stack.chain) {
+            if (!entry.item.non_goals || trim_copy(*entry.item.non_goals).empty()) {
+                continue;
+            }
+            has_rules = true;
+            std::cout << "- " << entry.item.id << ": OK/WARN/VIOLATION: " << bounded_text(entry.item.non_goals, max_section_chars) << "\n";
+        }
+        if (!has_rules) {
+            std::cout << "- no Do Not constraints recorded\n";
+        }
+        std::cout << "## Stale Solution Check\n";
+        std::cout << "- Was any old proposed fix used?\n";
+        std::cout << "- Was it revalidated against current architecture?\n";
+        std::cout << "- Was any stale approach rejected?\n";
+        std::cout << "## Validation\n";
+        std::cout << "- commands run: \n";
+        std::cout << "## Limitations\n";
+        std::cout << "- unverified behavior / unresolved warnings: \n";
+        std::cout << "## Follow-up\n";
+        std::cout << "- resolution tickets / human decisions still needed: \n";
+    }
+
+    if (template_kind == "handoff" || template_kind == "all") {
+        std::cout << "# Coding Agent Intent Prompt\n\n";
+        std::cout << "## Target Work Item\n";
+        if (!stack.chain.empty()) {
+            const auto& item = stack.chain.front().item;
+            std::cout << "- " << item.id << " - " << item.title << "\n";
+        } else {
+            std::cout << "- unresolved\n";
+        }
+        std::cout << "## Current Authoritative Intent\n";
+        for (const auto& entry : stack.chain) {
+            std::cout << "- " << entry.item.id << " (" << entry.role << "): " << bounded_text(entry.item.goal ? entry.item.goal : entry.item.context, max_section_chars) << "\n";
+        }
+        std::cout << "## Current Authoritative Tickets / Evidence\n";
+        for (const auto& entry : stack.chain) {
+            std::cout << "- " << entry.item.id << " (" << entry.role << ", state=" << to_string(entry.item.state) << ")\n";
+        }
+        std::cout << "## Stale or Legacy Context\n";
+        std::cout << "Explain which older tickets are historical context only and must not be implemented as-is.\n";
+        std::cout << "## Candidate Evidence\n";
+        std::cout << "Explain what was retrieved semantically or indirectly and whether it is only candidate evidence.\n";
+        std::cout << "## Newer Decisions That Override Older Approaches\n";
+        std::cout << "- none supplied by KOB; ChatGPT/human must label any overrides before handoff.\n";
+        std::cout << "## Do Not / Non-Goals\n";
+        print_do_not();
+        std::cout << "## Execution Rules\n";
+        std::cout << "- Follow the current authoritative intent.\n";
+        std::cout << "- Treat stale tickets as historical context only.\n";
+        std::cout << "- Do not implement old proposed fixes unless revalidated.\n";
+        std::cout << "- Do not infer final intent from raw backlog evidence.\n";
+        std::cout << "- Stop and request human review if evidence conflicts.\n";
+        std::cout << "## Required Preflight From Coding Agent\n";
+        std::cout << "- Restate the synthesized current intent and Do Not boundaries before editing.\n";
+        std::cout << "- Confirm stale/candidate evidence is not being used as execution authority.\n";
+        std::cout << "## Required Final Report From Coding Agent\n";
+        std::cout << "- Report Do Not compliance, stale solution checks, validation, limitations, and follow-ups.\n";
+    }
+}
+
+std::string intent_amendment_guidance(ItemState state) {
+    switch (state) {
+        case ItemState::Proposed:
+        case ItemState::Planned:
+        case ItemState::Ready:
+            return "Clarify Ready fields directly when this changes executable scope; otherwise keep as amendment evidence.";
+        case ItemState::InProgress:
+            return "Needs replan: pause implementation, regenerate preflight, and resume only after the correction is acknowledged.";
+        case ItemState::Review:
+            return "Drift finding: resolve explicitly before Done, or create an Intent Drift Resolution ticket if scope changed.";
+        case ItemState::Done:
+            return "Post-done drift: consider reopen, corrective bug, or follow-up task based on violation severity.";
+        case ItemState::New:
+            return "Clarify item before dispatching work.";
+        case ItemState::Blocked:
+            return "Keep blocker visible and re-evaluate before unblocking work.";
+        case ItemState::Dropped:
+            return "Dropped item amended for audit only; create a new item before execution.";
+    }
+    return "Review amendment before continuing work.";
+}
+
+std::string format_intent_amendment_entry(
+    const BacklogItem& item,
+    const std::string& agent,
+    const std::string& correction,
+    const std::string& reason,
+    const std::vector<std::string>& applies_to
+) {
+    std::ostringstream out;
+    out << "- timestamp: " << current_utc_timestamp() << "\n";
+    out << "  author: " << agent << "\n";
+    out << "  state: " << to_string(item.state) << "\n";
+    out << "  applies_to: " << (applies_to.empty() ? "unspecified" : join_strings(applies_to, ", ")) << "\n";
+    out << "  reason: " << reason << "\n";
+    out << "  correction: " << correction << "\n";
+    out << "  follow_up: " << intent_amendment_guidance(item.state);
+    return out.str();
+}
+
+std::string join_or_none(const std::vector<std::string>& values) {
+    return values.empty() ? "none" : join_strings(values, ", ");
+}
+
+bool is_item_index_markdown(const std::filesystem::path& path) {
+    return path.filename().generic_string().find(".index.md") != std::string::npos;
+}
+
+std::vector<std::string> collect_child_item_ids(CanonicalStore& store, const std::string& source_id) {
+    std::vector<std::string> children;
+    for (const auto& path : store.list_items()) {
+        if (is_item_index_markdown(path)) {
+            continue;
+        }
+        const auto candidate = store.read(path);
+        if (candidate.parent && trim_copy(*candidate.parent) == source_id) {
+            children.push_back(candidate.id);
+        }
+    }
+    return children;
+}
+
+bool looks_like_cli_path_ref(const std::string& ref) {
+    const auto lower = lower_copy(trim_copy(ref));
+    return lower.find('/') != std::string::npos ||
+           lower.find('\\') != std::string::npos ||
+           lower.find(':') != std::string::npos ||
+           (lower.size() >= 3 && lower.substr(lower.size() - 3) == ".md");
+}
+
+void reject_outside_product_path_ref(const std::string& ref, const std::filesystem::path& product_root) {
+    if (!looks_like_cli_path_ref(ref)) {
+        return;
+    }
+    const auto path = expand_user_path(ref);
+    if (!is_inside_path(path, product_root)) {
+        throw std::runtime_error("Item path ref is outside active product root: " + ref);
+    }
+}
+
+void require_item_file_inside_product(const BacklogItem& item, const std::filesystem::path& product_root) {
+    if (!item.file_path) {
+        throw std::runtime_error("Resolved item has no file path: " + item.id);
+    }
+    if (!is_inside_path(*item.file_path, product_root)) {
+        throw std::runtime_error("Resolved item file is outside active product root: " + item.id);
+    }
+}
+
+std::vector<std::string> collect_sibling_item_ids(CanonicalStore& store, const BacklogItem& source) {
+    std::vector<std::string> siblings;
+    if (!source.parent || trim_copy(*source.parent).empty()) {
+        return siblings;
+    }
+    const auto source_parent = trim_copy(*source.parent);
+    for (const auto& path : store.list_items()) {
+        if (is_item_index_markdown(path)) {
+            continue;
+        }
+        const auto candidate = store.read(path);
+        if (candidate.id == source.id) {
+            continue;
+        }
+        if (candidate.parent && trim_copy(*candidate.parent) == source_parent) {
+            siblings.push_back(candidate.id);
+        }
+    }
+    return siblings;
+}
+
+std::vector<std::string> parent_related_ids(const IntentStackResult& stack) {
+    for (const auto& entry : stack.chain) {
+        if (entry.depth == 1) {
+            return entry.item.links.relates;
+        }
+    }
+    return {};
+}
+
+std::vector<std::string> matching_worklog_lines(const BacklogItem& item, const std::vector<std::string>& needles, std::size_t max_lines) {
+    std::vector<std::string> matches;
+    for (const auto& line : item.worklog) {
+        const auto lower = lower_copy(line);
+        const bool found = std::any_of(needles.begin(), needles.end(), [&](const std::string& needle) {
+            return lower.find(needle) != std::string::npos;
+        });
+        if (found) {
+            matches.push_back(line);
+            if (matches.size() >= max_lines) {
+                break;
+            }
+        }
+    }
+    return matches;
+}
+
+std::vector<std::string> recent_worklog_lines(const BacklogItem& item, std::size_t max_lines) {
+    std::vector<std::string> lines;
+    const auto count = item.worklog.size();
+    const auto start = count > max_lines ? count - max_lines : 0;
+    for (std::size_t i = start; i < count; ++i) {
+        lines.push_back(item.worklog[i]);
+    }
+    return lines;
+}
+
+std::vector<std::string> stale_intent_terms(const BacklogItem& item) {
+    std::string haystack = item.title + "\n";
+    const std::vector<std::optional<std::string>> sections = {
+        item.context,
+        item.goal,
+        item.approach,
+        item.acceptance_criteria,
+        item.risks,
+        item.intent_amendments,
+    };
+    for (const auto& section : sections) {
+        if (section) {
+            haystack += *section + "\n";
+        }
+    }
+    haystack += join_worklog_lines(item.worklog);
+    const auto lower = lower_copy(haystack);
+    const std::vector<std::string> terms = {
+        "stale",
+        "legacy",
+        "obsolete",
+        "superseded",
+        "old architecture",
+        "old release",
+        "v0.0.4",
+        "0.0.4",
+    };
+    std::vector<std::string> found;
+    for (const auto& term : terms) {
+        if (lower.find(term) != std::string::npos) {
+            found.push_back(term);
+        }
+    }
+    return found;
+}
+
+Json::Value json_array_from_strings(const std::vector<std::string>& values) {
+    Json::Value array(Json::arrayValue);
+    for (const auto& value : values) {
+        array.append(value);
+    }
+    return array;
+}
+
+std::string normalize_drift_result(std::string value) {
+    value = lower_copy(trim_copy(value));
+    if (value == "none" || value == "no_drift") {
+        return "no-drift";
+    }
+    if (value == "drift-detected") {
+        return "drift";
+    }
+    if (value == "unknown" || value == "needs-human-confirmation") {
+        return "uncertain";
+    }
+    if (value == "no-drift" || value == "drift" || value == "uncertain") {
+        return value;
+    }
+    return "uncertain";
+}
+
+Json::Value drift_resolution_template_json(
+    const BacklogItem& source,
+    const IntentStackResult& stack,
+    const std::vector<std::string>& children,
+    const std::string& detection_stage,
+    const std::string& detected_by,
+    const std::string& drift_type,
+    std::size_t max_section_chars
+) {
+    Json::Value payload(Json::objectValue);
+    payload["workflow_rule"] = "detected drift is not execution permission";
+    payload["source_item"]["id"] = source.id;
+    payload["source_item"]["title"] = source.title;
+    payload["source_item"]["state"] = to_string(source.state);
+    payload["source_item"]["parent"] = source.parent ? Json::Value(*source.parent) : Json::Value(Json::nullValue);
+    payload["detection"]["detection_stage"] = detection_stage;
+    payload["detection"]["detected_by"] = detected_by;
+    payload["detection"]["drift_type"] = drift_type;
+    payload["detection"]["why_this_is_drift"] = "Human/ChatGPT must summarize why current evidence changes the executable boundary.";
+    payload["evidence_pack"]["current_authoritative_evidence"] = intent_stack_json(stack, max_section_chars);
+    payload["evidence_pack"]["stale_legacy_evidence"] = "List older tickets/proposed fixes preserved as evidence only.";
+    payload["evidence_pack"]["candidate_evidence"] = "List optional provider-backed semantic candidates; candidate evidence only.";
+    payload["evidence_pack"]["conflicting_evidence"] = "List conflicts requiring human confirmation.";
+    payload["evidence_pack"]["missing_evidence"] = "List unresolved parent, relation, or contract evidence.";
+    payload["relationship_map"]["parent_chain"] = Json::Value(Json::arrayValue);
+    for (const auto& entry : stack.chain) {
+        payload["relationship_map"]["parent_chain"].append(entry.item.id + " (" + entry.role + ")");
+    }
+    payload["relationship_map"]["children"] = json_array_from_strings(children);
+    payload["relationship_map"]["explicit_relates"] = json_array_from_strings(source.links.relates);
+    payload["relationship_map"]["semantic_candidates"] = "Provider supplied; not generated by KOB core.";
+    payload["human_confirmation"]["decision"] = "required before execution";
+    payload["human_confirmation"]["confirmed_current_intent"] = "";
+    payload["human_confirmation"]["rejected_stale_assumptions"] = "";
+    payload["human_confirmation"]["unresolved_questions"] = "";
+    payload["goal"] = "Resolve confirmed intent drift from " + source.id + ".";
+    payload["non_goals_do_not"] = "Do not execute from the original item; do not use stale proposed fixes unless revalidated.";
+    payload["approach"] = "Use this resolution ticket as the executable boundary after human confirmation.";
+    payload["acceptance_criteria"] = "Evidence is labeled current/stale/candidate/conflicting, human decision is recorded, and validation plan passes.";
+    payload["stop_conditions"] = "Stop if evidence conflicts, human confirmation is missing, or execution would violate Do Not boundaries.";
+    payload["validation_plan"] = "Run the affected implementation validation and report limitations.";
+    payload["links"]["relates"] = source.id;
+    return payload;
+}
+
+void print_drift_resolution_template_text(
+    const BacklogItem& source,
+    const IntentStackResult& stack,
+    const std::vector<std::string>& children,
+    const std::string& detection_stage,
+    const std::string& detected_by,
+    const std::string& drift_type,
+    std::size_t max_section_chars
+) {
+    std::cout << "# Intent Drift Resolution Ticket Template\n\n";
+    std::cout << "Detected drift is not execution permission. The original item preserves history; the new Intent Drift Resolution ticket becomes the executable boundary.\n\n";
+    std::cout << "## Source Item\n";
+    std::cout << "- id: " << source.id << "\n";
+    std::cout << "- title: " << source.title << "\n";
+    std::cout << "- state: " << to_string(source.state) << "\n";
+    std::cout << "- parent: " << (source.parent ? *source.parent : "none") << "\n";
+    std::cout << "## Detection\n";
+    std::cout << "- detection stage: " << detection_stage << "\n";
+    std::cout << "- detected by: " << detected_by << "\n";
+    std::cout << "- drift type: " << drift_type << "\n";
+    std::cout << "- why this is drift: <human/ChatGPT summary required>\n";
+    std::cout << "## Evidence Pack\n";
+    std::cout << "- current authoritative evidence: ";
+    for (const auto& entry : stack.chain) {
+        std::cout << entry.item.id << " (" << entry.role << ") ";
+    }
+    std::cout << "\n";
+    std::cout << "- stale / legacy evidence: <older tickets/proposed fixes preserved as evidence only>\n";
+    std::cout << "- candidate evidence: <provider-backed semantic/indirect candidates; candidate only>\n";
+    std::cout << "- conflicting evidence: <conflicts requiring human confirmation>\n";
+    std::cout << "- missing evidence: " << (stack.warnings.empty() ? "none from deterministic parent chain" : join_strings(stack.warnings, "; ")) << "\n";
+    std::cout << "## Relationship Map\n";
+    std::cout << "- parent chain: ";
+    for (const auto& entry : stack.chain) {
+        std::cout << entry.item.id << " (" << entry.role << ") ";
+    }
+    std::cout << "\n";
+    std::cout << "- children: " << join_or_none(children) << "\n";
+    std::cout << "- explicit relates: " << join_or_none(source.links.relates) << "\n";
+    std::cout << "- parent relates: <inspect parent related tickets before handoff>\n";
+    std::cout << "- semantic candidates: <optional provider evidence; not generated by KOB core>\n";
+    std::cout << "- superseded / duplicate / related done items: <label if known>\n";
+    std::cout << "## Human Confirmation\n";
+    std::cout << "- decision: required before execution\n";
+    std::cout << "- confirmed current intent: \n";
+    std::cout << "- rejected stale assumptions: \n";
+    std::cout << "- unresolved questions: \n";
+    std::cout << "## Goal\nResolve confirmed intent drift from " << source.id << ".\n";
+    std::cout << "## Non-Goals / Do Not\n";
+    std::cout << "- Do not execute from the original item.\n";
+    std::cout << "- Do not use stale proposed fixes unless revalidated.\n";
+    if (source.non_goals && !trim_copy(*source.non_goals).empty()) {
+        std::cout << "- Source Do Not: " << bounded_text(source.non_goals, max_section_chars) << "\n";
+    }
+    std::cout << "## Approach\nUse this resolution ticket as the executable boundary after human confirmation.\n";
+    std::cout << "## Acceptance Criteria\n- Evidence is labeled current/stale/candidate/conflicting.\n- Human decision is recorded.\n- Validation plan passes.\n";
+    std::cout << "## Stop Conditions\n- Stop if evidence conflicts and no human decision is recorded.\n- Stop if execution would violate Do Not boundaries.\n";
+    std::cout << "## Validation Plan\n- Run affected implementation validation and report limitations.\n";
+    std::cout << "## Links\n- relates: " << source.id << "\n";
+}
+
+void print_intent_drift_preflight_text(
+    const BacklogItem& source,
+    const IntentStackResult& stack,
+    const std::vector<std::string>& children,
+    const std::vector<std::string>& siblings,
+    const std::vector<std::string>& parent_relates,
+    const std::vector<std::string>& validation_evidence,
+    const std::vector<std::string>& recent_worklog,
+    const std::vector<std::string>& stale_terms,
+    const std::string& result
+) {
+    std::cout << "# Intent Drift Preflight\n\n";
+    std::cout << "Before ChatGPT recommends or produces a Codex/OpenCode handoff, it must run Intent Drift Preflight. The human is not responsible for knowing whether drift exists.\n\n";
+    std::cout << "Intent Drift Preflight:\n";
+    if (result == "no-drift") {
+        std::cout << "- result: no drift detected\n";
+        std::cout << "- handoff allowed: yes\n";
+    } else if (result == "drift") {
+        std::cout << "- result: drift detected\n";
+        std::cout << "- handoff allowed: no, create an Intent Drift Resolution ticket first and hand that ticket to the coding agent\n";
+    } else {
+        std::cout << "- result: human confirmation required\n";
+        std::cout << "- handoff allowed: no until evidence is classified and confirmed\n";
+    }
+    std::cout << "- checked evidence: deterministic KOB item metadata, item age/updated timestamp, validation/worklog evidence, parent chain, explicit relates/blocks/blocked_by/decisions, parent related tickets, siblings/children, stale architecture/release terms, and Worklog/history\n";
+    std::cout << "- unresolved evidence: " << (stack.warnings.empty() ? "semantic/candidate evidence, newer external decisions, and current KOA/Miyo/tool contracts must be supplied by ChatGPT/operator when relevant" : join_strings(stack.warnings, "; ")) << "\n\n";
+    std::cout << "## Deterministic Evidence Checked\n";
+    std::cout << "- selected item: " << source.id << " - " << source.title << "\n";
+    std::cout << "- state: " << to_string(source.state) << "\n";
+    std::cout << "- created: " << source.created << "\n";
+    std::cout << "- updated: " << source.updated << "\n";
+    std::cout << "- explicit relates: " << join_or_none(source.links.relates) << "\n";
+    std::cout << "- explicit blocks: " << join_or_none(source.links.blocks) << "\n";
+    std::cout << "- explicit blocked_by: " << join_or_none(source.links.blocked_by) << "\n";
+    std::cout << "- linked decisions: " << join_or_none(source.decisions) << "\n";
+    std::cout << "- parent related tickets: " << join_or_none(parent_relates) << "\n";
+    std::cout << "- sibling tickets: " << join_or_none(siblings) << "\n";
+    std::cout << "- child tickets: " << join_or_none(children) << "\n";
+    std::cout << "- validation evidence: " << join_or_none(validation_evidence) << "\n";
+    std::cout << "- recent worklog/history: " << join_or_none(recent_worklog) << "\n";
+    std::cout << "- stale architecture/release terms: " << join_or_none(stale_terms) << "\n";
+    std::cout << "- optional semantic candidates: provider-backed only; not generated by KOB core\n";
+    std::cout << "- current KOA/Miyo/tool contracts: external evidence required when relevant\n\n";
+    std::cout << "## Evidence Classification\n";
+    std::cout << "- current authority: ";
+    for (const auto& entry : stack.chain) {
+        std::cout << entry.item.id << " (" << entry.role << ") ";
+    }
+    std::cout << "\n";
+    std::cout << "- stale / legacy: older tickets, release-line fixes, or proposed approaches not revalidated against current architecture\n";
+    std::cout << "- candidate: provider-backed semantic/indirect evidence supplied by ChatGPT/KOA/Miyo\n";
+    std::cout << "- conflicting: any newer decision or related ticket that overrides the selected item\n";
+    std::cout << "- missing: unresolved parent/relationship/provider evidence\n";
+    std::cout << "## Relationship Snapshot\n";
+    std::cout << "- source item: " << source.id << " - " << source.title << "\n";
+    std::cout << "- children: " << join_or_none(children) << "\n";
+    std::cout << "- siblings: " << join_or_none(siblings) << "\n";
+    std::cout << "- explicit relates: " << join_or_none(source.links.relates) << "\n";
+    std::cout << "- parent relates: " << join_or_none(parent_relates) << "\n";
+    std::cout << "## Drift Handling\n";
+    std::cout << "- If no drift: include the no-drift note in the handoff.\n";
+    std::cout << "- If drift: do not hand the original item to Codex/OpenCode; create an Intent Drift Resolution ticket using the drift-resolution workflow.\n";
+    std::cout << "- If uncertain: produce an evidence pack and require human confirmation; do not let the coding agent resolve uncertainty by implementation.\n";
 }
 
 NativeChunkBuildResult build_native_backlog_chunks_db(
@@ -5020,6 +5827,9 @@ std::optional<int> try_run_workitem_update_state_fast_path(int argc, char** argv
             std::cout << " [Parent synced]";
         }
         std::cout << "\n";
+        for (const auto& diagnostic : result.intent_diagnostics) {
+            std::cout << "Intent warning: " << diagnostic << "\n";
+        }
     } else {
         std::cout << "Item " << result.id << " is already in state " << to_string(result.new_state) << "\n";
     }
@@ -7386,6 +8196,9 @@ int main(int InArgc, char* InArgv[]) {
                     std::cout << "Updated " << result.id << ": " << to_string(result.old_state) << " -> " << to_string(result.new_state);
                     if (result.parent_synced) std::cout << " [Parent synced]";
                     std::cout << "\n";
+                    for (const auto& diagnostic : result.intent_diagnostics) {
+                        std::cout << "Intent warning: " << diagnostic << "\n";
+                    }
                 } else {
                     std::cout << "Item " << result.id << " is already in state " << to_string(result.new_state) << "\n";
                 }
@@ -7398,18 +8211,24 @@ int main(int InArgc, char* InArgv[]) {
         // workitem set-ready
         {
             auto* setReadyCmd = workitemCmd->add_subcommand("set-ready", "Populate Ready-gate body fields on an item");
-            std::string ref, context, goal, approach, acceptance_criteria, risks, set_ready_agent;
-            std::string context_file, goal_file, approach_file, acceptance_criteria_file, risks_file;
+            std::string ref, context, goal, non_goals, approach, intent_amendments, acceptance_criteria, risks, set_ready_agent;
+            std::string context_file, goal_file, non_goals_file, approach_file, intent_amendments_file, acceptance_criteria_file, risks_file;
             bool set_ready_consume_input_files = false;
             setReadyCmd->add_option("ref", ref, "Item ID or UID")->required();
             setReadyCmd->add_option("--context", context, "Context text");
             setReadyCmd->add_option("--goal", goal, "Goal text");
+            setReadyCmd->add_option("--non-goals", non_goals, "Non-Goals / Do Not text");
+            setReadyCmd->add_option("--do-not", non_goals, "Alias for --non-goals");
             setReadyCmd->add_option("--approach", approach, "Approach text");
+            setReadyCmd->add_option("--intent-amendments", intent_amendments, "Intent Amendments text");
             setReadyCmd->add_option("--acceptance-criteria", acceptance_criteria, "Acceptance criteria text");
             setReadyCmd->add_option("--risks", risks, "Risks / Dependencies text");
             setReadyCmd->add_option("--context-file", context_file, "Read Context text from file");
             setReadyCmd->add_option("--goal-file", goal_file, "Read Goal text from file");
+            setReadyCmd->add_option("--non-goals-file", non_goals_file, "Read Non-Goals / Do Not text from file");
+            setReadyCmd->add_option("--do-not-file", non_goals_file, "Alias for --non-goals-file");
             setReadyCmd->add_option("--approach-file", approach_file, "Read Approach text from file");
+            setReadyCmd->add_option("--intent-amendments-file", intent_amendments_file, "Read Intent Amendments text from file");
             setReadyCmd->add_option("--acceptance-criteria-file", acceptance_criteria_file, "Read Acceptance Criteria text from file");
             setReadyCmd->add_option("--risks-file", risks_file, "Read Risks / Dependencies text from file");
             setReadyCmd->add_flag("--consume-input-files", set_ready_consume_input_files, "Delete input files after a successful update; files must be under ~/.kano/tmp/backlog or KANO_BACKLOG_TEXT_TMP");
@@ -7423,7 +8242,9 @@ int main(int InArgc, char* InArgv[]) {
 
                 apply_text_file_option(context, context_file, "--context", "--context-file");
                 apply_text_file_option(goal, goal_file, "--goal", "--goal-file");
+                apply_text_file_option(non_goals, non_goals_file, "--non-goals/--do-not", "--non-goals-file/--do-not-file");
                 apply_text_file_option(approach, approach_file, "--approach", "--approach-file");
+                apply_text_file_option(intent_amendments, intent_amendments_file, "--intent-amendments", "--intent-amendments-file");
                 apply_text_file_option(acceptance_criteria, acceptance_criteria_file, "--acceptance-criteria", "--acceptance-criteria-file");
                 apply_text_file_option(risks, risks_file, "--risks", "--risks-file");
 
@@ -7437,9 +8258,17 @@ int main(int InArgc, char* InArgv[]) {
                     item.goal = goal;
                     updated_fields.push_back("Goal");
                 }
+                if (!non_goals.empty()) {
+                    item.non_goals = non_goals;
+                    updated_fields.push_back("Non-Goals / Do Not");
+                }
                 if (!approach.empty()) {
                     item.approach = approach;
                     updated_fields.push_back("Approach");
+                }
+                if (!intent_amendments.empty()) {
+                    item.intent_amendments = intent_amendments;
+                    updated_fields.push_back("Intent Amendments");
                 }
                 if (!acceptance_criteria.empty()) {
                     item.acceptance_criteria = acceptance_criteria;
@@ -7451,7 +8280,7 @@ int main(int InArgc, char* InArgv[]) {
                 }
 
                 if (updated_fields.empty()) {
-                    throw std::runtime_error("No Ready fields supplied. Pass at least one of --context, --goal, --approach, --acceptance-criteria, --risks");
+                    throw std::runtime_error("No Ready fields supplied. Pass at least one of --context, --goal, --non-goals, --do-not, --approach, --intent-amendments, --acceptance-criteria, --risks");
                 }
 
                 StateMachine::record_worklog(item, set_ready_agent, "Updated Ready fields: " + join_strings(updated_fields));
@@ -7462,7 +8291,9 @@ int main(int InArgc, char* InArgv[]) {
                 if (set_ready_consume_input_files) {
                     consume_backlog_text_file(context_file, "--context-file");
                     consume_backlog_text_file(goal_file, "--goal-file");
+                    consume_backlog_text_file(non_goals_file, "--non-goals-file/--do-not-file");
                     consume_backlog_text_file(approach_file, "--approach-file");
+                    consume_backlog_text_file(intent_amendments_file, "--intent-amendments-file");
                     consume_backlog_text_file(acceptance_criteria_file, "--acceptance-criteria-file");
                     consume_backlog_text_file(risks_file, "--risks-file");
                 }
@@ -7509,6 +8340,408 @@ int main(int InArgc, char* InArgv[]) {
                 }
 
                 std::cout << "OK: " << item.id << " is READY\n";
+            });
+        }
+
+        // workitem intent-stack
+        {
+            auto* intentStackCmd = workitemCmd->add_subcommand("intent-stack", "Resolve a bounded parent-chain intent stack for an item");
+            std::string intent_ref;
+            std::string intent_format = "text";
+            int intent_max_depth = 8;
+            int intent_max_section_chars = 600;
+            intentStackCmd->add_option("ref", intent_ref, "Item ID or UID")->required();
+            intentStackCmd->add_option("--format", intent_format, "Output format: text or json");
+            intentStackCmd->add_option("--max-depth", intent_max_depth, "Maximum parent-chain depth to resolve");
+            intentStackCmd->add_option("--max-section-chars", intent_max_section_chars, "Maximum characters per emitted body section");
+
+            intentStackCmd->callback([&]() {
+                auto ctx = resolve_ctx();
+                reject_outside_product_path_ref(intent_ref, ctx.product_root);
+                CanonicalStore store(ctx.product_root);
+                RefResolver resolver(store);
+                const auto source = resolver.resolve(intent_ref);
+                require_item_file_inside_product(source, ctx.product_root);
+                if (intent_max_depth < 1) {
+                    throw std::runtime_error("--max-depth must be at least 1");
+                }
+                if (intent_max_section_chars < 0) {
+                    throw std::runtime_error("--max-section-chars must be non-negative");
+                }
+                const auto stack = WorkitemOps::resolve_intent_stack(ctx.product_root, source.id, intent_max_depth);
+                const auto max_section_chars = static_cast<std::size_t>(intent_max_section_chars);
+                if (intent_format == "json") {
+                    std::cout << json_to_string(intent_stack_json(stack, max_section_chars), true) << "\n";
+                } else if (intent_format == "text") {
+                    print_intent_stack_text(stack, max_section_chars);
+                } else {
+                    throw std::runtime_error("Unsupported intent-stack format: " + intent_format + " (expected text or json)");
+                }
+            });
+        }
+
+        // workitem intent-template
+        {
+            auto* intentTemplateCmd = workitemCmd->add_subcommand("intent-template", "Generate Intent Preflight, Do Not Compliance, and Coding Agent Intent Prompt templates for an item");
+            std::string template_ref;
+            std::string template_kind = "both";
+            std::string template_format = "text";
+            int template_max_depth = 8;
+            int template_max_section_chars = 600;
+            intentTemplateCmd->add_option("ref", template_ref, "Item ID or UID")->required();
+            intentTemplateCmd->add_option("--kind", template_kind, "Template kind: preflight, compliance, handoff, both, or all");
+            intentTemplateCmd->add_option("--format", template_format, "Output format: text or json");
+            intentTemplateCmd->add_option("--max-depth", template_max_depth, "Maximum parent-chain depth to resolve");
+            intentTemplateCmd->add_option("--max-section-chars", template_max_section_chars, "Maximum characters per emitted body section");
+
+            intentTemplateCmd->callback([&]() {
+                auto ctx = resolve_ctx();
+                reject_outside_product_path_ref(template_ref, ctx.product_root);
+                CanonicalStore store(ctx.product_root);
+                RefResolver resolver(store);
+                const auto source = resolver.resolve(template_ref);
+                require_item_file_inside_product(source, ctx.product_root);
+                template_kind = lower_copy(trim_copy(template_kind));
+                template_format = lower_copy(trim_copy(template_format));
+                if (template_kind != "preflight" && template_kind != "compliance" && template_kind != "handoff" && template_kind != "both" && template_kind != "all") {
+                    throw std::runtime_error("Unsupported intent-template kind: " + template_kind + " (expected preflight, compliance, handoff, both, or all)");
+                }
+                if (template_max_depth < 1) {
+                    throw std::runtime_error("--max-depth must be at least 1");
+                }
+                if (template_max_section_chars < 0) {
+                    throw std::runtime_error("--max-section-chars must be non-negative");
+                }
+                const auto stack = WorkitemOps::resolve_intent_stack(ctx.product_root, source.id, template_max_depth);
+                const auto max_section_chars = static_cast<std::size_t>(template_max_section_chars);
+                if (template_format == "json") {
+                    std::cout << json_to_string(intent_template_json(stack, template_kind, max_section_chars), true) << "\n";
+                } else if (template_format == "text") {
+                    print_intent_template_text(stack, template_kind, max_section_chars);
+                } else {
+                    throw std::runtime_error("Unsupported intent-template format: " + template_format + " (expected text or json)");
+                }
+            });
+        }
+
+        // workitem intent-amend
+        {
+            auto* intentAmendCmd = workitemCmd->add_subcommand("intent-amend", "Append an Intent Amendment for drift correction");
+            std::string amend_ref;
+            std::string amend_correction;
+            std::string amend_correction_file;
+            std::string amend_reason;
+            std::string amend_reason_file;
+            std::vector<std::string> amend_applies_to;
+            std::string amend_agent;
+            std::string amend_format = "text";
+            bool amend_consume_input_files = false;
+            intentAmendCmd->add_option("ref", amend_ref, "Item ID or UID")->required();
+            intentAmendCmd->add_option("--correction", amend_correction, "Human/reviewer correction text");
+            intentAmendCmd->add_option("--correction-file", amend_correction_file, "Read correction text from file");
+            intentAmendCmd->add_option("--reason", amend_reason, "Reason for the amendment");
+            intentAmendCmd->add_option("--reason-file", amend_reason_file, "Read amendment reason from file");
+            intentAmendCmd->add_option("--applies-to", amend_applies_to, "Affected section or scope; repeatable");
+            intentAmendCmd->add_option("--agent", amend_agent, "Author/agent recording the amendment")->required();
+            intentAmendCmd->add_option("--format", amend_format, "Output format: text or json");
+            intentAmendCmd->add_flag("--consume-input-files", amend_consume_input_files, "Delete input files after a successful update; files must be under ~/.kano/tmp/backlog or KANO_BACKLOG_TEXT_TMP");
+
+            intentAmendCmd->callback([&]() {
+                auto ctx = resolve_ctx();
+                CanonicalStore store(ctx.product_root);
+                RefResolver resolver(store);
+                auto item = resolver.resolve(amend_ref);
+
+                apply_text_file_option(amend_correction, amend_correction_file, "--correction", "--correction-file");
+                apply_text_file_option(amend_reason, amend_reason_file, "--reason", "--reason-file");
+                amend_correction = trim_copy(amend_correction);
+                amend_reason = trim_copy(amend_reason);
+                amend_format = lower_copy(trim_copy(amend_format));
+                if (amend_format.empty()) {
+                    amend_format = "text";
+                }
+                if (amend_correction.empty()) {
+                    throw std::runtime_error("Missing amendment correction. Use --correction or --correction-file");
+                }
+                if (amend_reason.empty()) {
+                    throw std::runtime_error("Missing amendment reason. Use --reason or --reason-file");
+                }
+                if (amend_format != "text" && amend_format != "json") {
+                    throw std::runtime_error("Unsupported intent-amend format: " + amend_format + " (expected text or json)");
+                }
+
+                const auto entry = format_intent_amendment_entry(item, amend_agent, amend_correction, amend_reason, amend_applies_to);
+                if (item.intent_amendments && !trim_copy(*item.intent_amendments).empty()) {
+                    item.intent_amendments = trim_copy(*item.intent_amendments) + "\n\n" + entry;
+                } else {
+                    item.intent_amendments = entry;
+                }
+                const auto guidance = intent_amendment_guidance(item.state);
+                StateMachine::record_worklog(item, amend_agent, "Intent Amendment appended: " + amend_reason + " | " + guidance);
+                store.write(item);
+
+                if (amend_consume_input_files) {
+                    consume_backlog_text_file(amend_correction_file, "--correction-file");
+                    consume_backlog_text_file(amend_reason_file, "--reason-file");
+                }
+
+                if (amend_format == "json") {
+                    Json::Value payload(Json::objectValue);
+                    payload["id"] = item.id;
+                    payload["state"] = to_string(item.state);
+                    payload["appended"] = true;
+                    payload["guidance"] = guidance;
+                    payload["entry"] = entry;
+                    payload["worklog_appended"] = true;
+                    std::cout << json_to_string(payload, true) << "\n";
+                } else {
+                    std::cout << "OK: Appended Intent Amendment to " << item.id << "\n";
+                    std::cout << "  State: " << to_string(item.state) << "\n";
+                    std::cout << "  Guidance: " << guidance << "\n";
+                }
+            });
+        }
+
+        // workitem drift-resolution-template
+        {
+            auto* driftTemplateCmd = workitemCmd->add_subcommand("drift-resolution-template", "Generate an Intent Drift Resolution ticket template for a source item");
+            std::string drift_ref;
+            std::string drift_type = "unknown / needs human confirmation";
+            std::string detection_stage = "pre-handoff";
+            std::string detected_by = "ChatGPT/operator";
+            std::string drift_format = "text";
+            int drift_max_depth = 8;
+            int drift_max_section_chars = 600;
+            driftTemplateCmd->add_option("ref", drift_ref, "Source item ID or UID")->required();
+            driftTemplateCmd->add_option("--drift-type", drift_type, "Drift type label");
+            driftTemplateCmd->add_option("--detection-stage", detection_stage, "Detection stage");
+            driftTemplateCmd->add_option("--detected-by", detected_by, "Detector label");
+            driftTemplateCmd->add_option("--format", drift_format, "Output format: text or json");
+            driftTemplateCmd->add_option("--max-depth", drift_max_depth, "Maximum parent-chain depth to resolve");
+            driftTemplateCmd->add_option("--max-section-chars", drift_max_section_chars, "Maximum characters per emitted body section");
+
+            driftTemplateCmd->callback([&]() {
+                auto ctx = resolve_ctx();
+                reject_outside_product_path_ref(drift_ref, ctx.product_root);
+                CanonicalStore store(ctx.product_root);
+                RefResolver resolver(store);
+                const auto source = resolver.resolve(drift_ref);
+                require_item_file_inside_product(source, ctx.product_root);
+                const auto children = collect_child_item_ids(store, source.id);
+                drift_format = lower_copy(trim_copy(drift_format));
+                if (drift_format.empty()) {
+                    drift_format = "text";
+                }
+                if (trim_copy(detection_stage).empty()) {
+                    detection_stage = "pre-handoff";
+                }
+                if (trim_copy(detected_by).empty()) {
+                    detected_by = "ChatGPT/operator";
+                }
+                if (trim_copy(drift_type).empty()) {
+                    drift_type = "unknown / needs human confirmation";
+                }
+                if (drift_max_depth < 1) {
+                    throw std::runtime_error("--max-depth must be at least 1");
+                }
+                if (drift_max_section_chars < 0) {
+                    throw std::runtime_error("--max-section-chars must be non-negative");
+                }
+                const auto stack = WorkitemOps::resolve_intent_stack(ctx.product_root, source.id, drift_max_depth);
+                const auto max_section_chars = static_cast<std::size_t>(drift_max_section_chars);
+                if (drift_format == "json") {
+                    std::cout << json_to_string(drift_resolution_template_json(source, stack, children, detection_stage, detected_by, drift_type, max_section_chars), true) << "\n";
+                } else if (drift_format == "text") {
+                    print_drift_resolution_template_text(source, stack, children, detection_stage, detected_by, drift_type, max_section_chars);
+                } else {
+                    throw std::runtime_error("Unsupported drift-resolution-template format: " + drift_format + " (expected text or json)");
+                }
+            });
+        }
+
+        // workitem create-drift-resolution
+        {
+            auto* createDriftCmd = workitemCmd->add_subcommand("create-drift-resolution", "Dry-run or create an Intent Drift Resolution ticket from a source item");
+            std::string drift_ref;
+            std::string drift_type = "unknown / needs human confirmation";
+            std::string detection_stage = "pre-handoff";
+            std::string detected_by = "ChatGPT/operator";
+            std::string drift_agent;
+            std::string human_decision;
+            bool drift_apply = false;
+            int drift_max_depth = 8;
+            int drift_max_section_chars = 600;
+            createDriftCmd->add_option("ref", drift_ref, "Source item ID or UID")->required();
+            createDriftCmd->add_option("--drift-type", drift_type, "Drift type label");
+            createDriftCmd->add_option("--detection-stage", detection_stage, "Detection stage");
+            createDriftCmd->add_option("--detected-by", detected_by, "Detector label");
+            createDriftCmd->add_option("--human-decision", human_decision, "Human confirmation note to seed the new ticket");
+            createDriftCmd->add_option("--agent", drift_agent, "Agent ID for apply mode");
+            createDriftCmd->add_flag("--apply", drift_apply, "Create the resolution ticket and append drift evidence to the source item");
+            createDriftCmd->add_option("--max-depth", drift_max_depth, "Maximum parent-chain depth to resolve");
+            createDriftCmd->add_option("--max-section-chars", drift_max_section_chars, "Maximum characters per emitted body section");
+
+            createDriftCmd->callback([&]() {
+                auto ctx = resolve_ctx();
+                reject_outside_product_path_ref(drift_ref, ctx.product_root);
+                CanonicalStore store(ctx.product_root);
+                RefResolver resolver(store);
+                auto source = resolver.resolve(drift_ref);
+                require_item_file_inside_product(source, ctx.product_root);
+                const auto children = collect_child_item_ids(store, source.id);
+                if (drift_max_depth < 1) {
+                    throw std::runtime_error("--max-depth must be at least 1");
+                }
+                if (drift_max_section_chars < 0) {
+                    throw std::runtime_error("--max-section-chars must be non-negative");
+                }
+                if (trim_copy(detection_stage).empty()) {
+                    detection_stage = "pre-handoff";
+                }
+                if (trim_copy(detected_by).empty()) {
+                    detected_by = "ChatGPT/operator";
+                }
+                if (trim_copy(drift_type).empty()) {
+                    drift_type = "unknown / needs human confirmation";
+                }
+                const auto stack = WorkitemOps::resolve_intent_stack(ctx.product_root, source.id, drift_max_depth);
+                const auto max_section_chars = static_cast<std::size_t>(drift_max_section_chars);
+                if (!drift_apply) {
+                    std::cout << "DRY RUN: would create an Intent Drift Resolution ticket for " << source.id << "\n\n";
+                    print_drift_resolution_template_text(source, stack, children, detection_stage, detected_by, drift_type, max_section_chars);
+                    return;
+                }
+                if (trim_copy(drift_agent).empty()) {
+                    throw std::runtime_error("--agent is required with --apply");
+                }
+
+                BacklogIndex index(ctx.backlog_root / ".cache" / "index" / "backlog.db");
+                index.initialize();
+                auto created = WorkitemOps::create_item(
+                    index,
+                    ctx.product_root,
+                    ctx.product_def.prefix,
+                    ItemType::Task,
+                    "Resolve intent drift from " + source.id,
+                    drift_agent,
+                    source.parent);
+                auto resolution = store.read(created.path);
+                resolution.links.relates.push_back(source.id);
+                resolution.context = "Intent Drift Resolution ticket generated from source item " + source.id + ". Detected drift is not execution permission; this ticket is the executable boundary after human confirmation.";
+                resolution.goal = "Resolve confirmed intent drift from " + source.id + ".";
+                resolution.non_goals = "Do not execute from the original item. Do not use stale proposed fixes unless revalidated. Do not ask the coding agent to infer final intent from raw backlog evidence.";
+                std::ostringstream approach;
+                approach << "Detection:\n"
+                         << "- detection stage: " << detection_stage << "\n"
+                         << "- detected by: " << detected_by << "\n"
+                         << "- drift type: " << drift_type << "\n\n"
+                         << "Evidence Pack:\n"
+                         << "- current authoritative evidence: deterministic parent chain plus explicitly labeled human/ChatGPT evidence\n"
+                         << "- stale / legacy evidence: preserve as evidence only until revalidated\n"
+                         << "- candidate evidence: provider-backed semantic/indirect candidates only\n"
+                         << "- conflicting evidence: requires human confirmation\n"
+                         << "- missing evidence: " << (stack.warnings.empty() ? "none from deterministic parent chain" : join_strings(stack.warnings, "; ")) << "\n\n"
+                         << "Relationship Map:\n"
+                         << "- parent chain: ";
+                for (const auto& entry : stack.chain) {
+                    approach << entry.item.id << " (" << entry.role << ") ";
+                }
+                approach << "\n- children: " << join_or_none(children) << "\n"
+                         << "- explicit relates: " << join_or_none(source.links.relates) << "\n"
+                         << "- semantic candidates: provider supplied, not generated by KOB core\n\n"
+                         << "Human Confirmation:\n"
+                         << "- decision: " << (human_decision.empty() ? "required before execution" : human_decision) << "\n"
+                         << "- confirmed current intent:\n"
+                         << "- rejected stale assumptions:\n"
+                         << "- unresolved questions:\n";
+                resolution.approach = approach.str();
+                resolution.acceptance_criteria = "- Evidence is labeled current/stale/candidate/conflicting.\n- Human confirmation is recorded.\n- Source item links back through relates.\n- Validation plan passes and limitations are reported.";
+                resolution.risks = "Creating a resolution ticket is not permission to execute unresolved drift. Stop if evidence conflicts, human confirmation is missing, or execution would violate Do Not boundaries.";
+                StateMachine::record_worklog(resolution, drift_agent, "Intent Drift Resolution ticket created from source item " + source.id + ".");
+                store.write(resolution);
+                index.index_item(resolution);
+
+                const std::string finding = "Intent Drift Finding:\n- drift detected: yes\n- resolution ticket created: " + resolution.id + "\n- correction must execute from resolution ticket\n- drift type: " + drift_type;
+                if (source.intent_amendments && !trim_copy(*source.intent_amendments).empty()) {
+                    source.intent_amendments = trim_copy(*source.intent_amendments) + "\n\n" + finding;
+                } else {
+                    source.intent_amendments = finding;
+                }
+                StateMachine::record_worklog(source, drift_agent, "Intent Drift Finding recorded; resolution ticket created: " + resolution.id + ".");
+                store.write(source);
+                index.index_item(source);
+
+                std::cout << "Created Intent Drift Resolution ticket: " << resolution.id << "\n";
+                std::cout << "Source item updated with append-only drift evidence: " << source.id << "\n";
+                std::cout << "Path: " << created.path.string() << "\n";
+            });
+        }
+
+        // workitem intent-drift-preflight
+        {
+            auto* driftPreflightCmd = workitemCmd->add_subcommand("intent-drift-preflight", "Generate proactive pre-handoff Intent Drift Preflight evidence for an item");
+            driftPreflightCmd->alias("handoff-preflight");
+            driftPreflightCmd->alias("codex-handoff-preflight");
+            std::string drift_ref;
+            std::string drift_result = "uncertain";
+            std::string drift_format = "text";
+            int drift_max_depth = 8;
+            driftPreflightCmd->add_option("ref", drift_ref, "Item ID or UID")->required();
+            driftPreflightCmd->add_option("--result", drift_result, "Operator classification: no-drift, drift, or uncertain");
+            driftPreflightCmd->add_option("--format", drift_format, "Output format: text or json");
+            driftPreflightCmd->add_option("--max-depth", drift_max_depth, "Maximum parent-chain depth to resolve");
+            driftPreflightCmd->callback([&]() {
+                auto ctx = resolve_ctx();
+                reject_outside_product_path_ref(drift_ref, ctx.product_root);
+                CanonicalStore store(ctx.product_root);
+                RefResolver resolver(store);
+                const auto source = resolver.resolve(drift_ref);
+                require_item_file_inside_product(source, ctx.product_root);
+                const auto children = collect_child_item_ids(store, source.id);
+                const auto siblings = collect_sibling_item_ids(store, source);
+                if (drift_max_depth < 1) {
+                    throw std::runtime_error("--max-depth must be at least 1");
+                }
+                const auto stack = WorkitemOps::resolve_intent_stack(ctx.product_root, source.id, drift_max_depth);
+                const auto parent_relates = parent_related_ids(stack);
+                const auto validation_evidence = matching_worklog_lines(source, {"validation", "passed", "test", "build"}, 4);
+                const auto recent_worklog = recent_worklog_lines(source, 4);
+                const auto stale_terms = stale_intent_terms(source);
+                drift_result = normalize_drift_result(drift_result);
+                drift_format = lower_copy(trim_copy(drift_format));
+                if (drift_format.empty()) {
+                    drift_format = "text";
+                }
+                if (drift_format == "json") {
+                    Json::Value payload(Json::objectValue);
+                    payload["result"] = drift_result;
+                    payload["handoff_allowed"] = drift_result == "no-drift";
+                    payload["source_item"]["id"] = source.id;
+                    payload["source_item"]["title"] = source.title;
+                    payload["source_item"]["state"] = to_string(source.state);
+                    payload["source_item"]["created"] = source.created;
+                    payload["source_item"]["updated"] = source.updated;
+                    payload["checked_evidence"] = "deterministic KOB metadata, updated timestamp, validation/worklog evidence, parent chain, explicit relates/blocks/blocked_by/decisions, parent related tickets, siblings/children, stale terms, release scope, and Worklog/history";
+                    payload["intent_stack"] = intent_stack_json(stack, 600);
+                    payload["children"] = json_array_from_strings(children);
+                    payload["siblings"] = json_array_from_strings(siblings);
+                    payload["explicit_relates"] = json_array_from_strings(source.links.relates);
+                    payload["explicit_blocks"] = json_array_from_strings(source.links.blocks);
+                    payload["explicit_blocked_by"] = json_array_from_strings(source.links.blocked_by);
+                    payload["linked_decisions"] = json_array_from_strings(source.decisions);
+                    payload["parent_relates"] = json_array_from_strings(parent_relates);
+                    payload["validation_evidence"] = json_array_from_strings(validation_evidence);
+                    payload["recent_worklog"] = json_array_from_strings(recent_worklog);
+                    payload["stale_terms"] = json_array_from_strings(stale_terms);
+                    payload["external_candidate_evidence"] = "semantic candidates, newer external decisions, and current KOA/Miyo/tool contracts must be supplied by ChatGPT/operator when relevant";
+                    payload["if_drift"] = "create an Intent Drift Resolution ticket and hand that ticket to the coding agent";
+                    payload["if_uncertain"] = "produce an evidence pack and require human confirmation";
+                    std::cout << json_to_string(payload, true) << "\n";
+                } else if (drift_format == "text") {
+                    print_intent_drift_preflight_text(source, stack, children, siblings, parent_relates, validation_evidence, recent_worklog, stale_terms, drift_result);
+                } else {
+                    throw std::runtime_error("Unsupported intent-drift-preflight format: " + drift_format + " (expected text or json)");
+                }
             });
         }
 
@@ -17987,6 +19220,9 @@ int main(int InArgc, char* InArgv[]) {
                 std::cout << "Starting webview server...\n";
                 std::cout << "Launching: " << webview_exe << "\n";
                 std::cout << "Press Ctrl+C to stop.\n";
+#ifdef _WIN32
+                prepare_webview_runtime_path(cli_dir);
+#endif
                 int rc = launch_webview_process(webview_exe, forwarded_args);
                 if (rc != 0) throw std::runtime_error("webview server exited with error");
             });

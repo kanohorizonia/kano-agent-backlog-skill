@@ -1,6 +1,7 @@
 #include "kano/backlog_core/frontmatter/frontmatter.hpp"
 #include <iostream>
 #include <sstream>
+#include <vector>
 
 namespace kano::backlog_core {
 
@@ -69,10 +70,12 @@ std::map<std::string, std::string> Frontmatter::parse_body_sections(const std::s
     std::map<std::string, std::string> sections;
     
     // Define predictable section markers for canonical body updates.
-    static const std::map<std::string, std::string> section_markers = {
+    static const std::vector<std::pair<std::string, std::string>> section_markers = {
         {"context", "# Context"},
         {"goal", "# Goal"},
         {"non_goals", "# Non-Goals"},
+        {"non_goals", "# Non-Goals / Do Not"},
+        {"intent_amendments", "# Intent Amendments"},
         {"approach", "# Approach"},
         {"alternatives", "# Alternatives"},
         {"acceptance_criteria", "# Acceptance Criteria"},
@@ -137,7 +140,8 @@ std::string Frontmatter::serialize_body_sections(const std::map<std::string, std
     static const std::vector<std::pair<std::string, std::string>> ordered_sections = {
         {"context", "# Context"},
         {"goal", "# Goal"},
-        {"non_goals", "# Non-Goals"},
+        {"non_goals", "# Non-Goals / Do Not"},
+        {"intent_amendments", "# Intent Amendments"},
         {"approach", "# Approach"},
         {"alternatives", "# Alternatives"},
         {"acceptance_criteria", "# Acceptance Criteria"},

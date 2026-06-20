@@ -11,6 +11,7 @@
 #include <chrono>
 #include <sstream>
 #include <cctype>
+#include <set>
 
 namespace kano::backlog_ops {
 
@@ -65,6 +66,116 @@ std::string parent_ref_for_diagnostic(const std::string& ref) {
         return "<path-like parent ref redacted>";
     }
     return ref;
+}
+
+std::string lower_copy(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+    return value;
+}
+
+std::string trim_text(std::string value) {
+    const auto not_space = [](unsigned char ch) { return !std::isspace(ch); };
+    value.erase(value.begin(), std::find_if(value.begin(), value.end(), not_space));
+    value.erase(std::find_if(value.rbegin(), value.rend(), not_space).base(), value.end());
+    return value;
+}
+
+bool text_contains_any(const std::optional<std::string>& text, const std::vector<std::string>& needles) {
+    if (!text) {
+        return false;
+    }
+    const std::string haystack = lower_copy(*text);
+    return std::any_of(needles.begin(), needles.end(), [&](const std::string& needle) {
+        return haystack.find(needle) != std::string::npos;
+    });
+}
+
+bool worklog_contains_any(const BacklogItem& item, const std::vector<std::string>& needles) {
+    return std::any_of(item.worklog.begin(), item.worklog.end(), [&](const std::string& line) {
+        const std::string haystack = lower_copy(line);
+        return std::any_of(needles.begin(), needles.end(), [&](const std::string& needle) {
+            return haystack.find(needle) != std::string::npos;
+        });
+    });
+}
+
+bool has_parent_ref(const BacklogItem& item) {
+    if (!item.parent) {
+        return false;
+    }
+    const auto parent = trim_text(*item.parent);
+    return !parent.empty() && parent != "~" && parent != "null";
+}
+
+bool is_high_risk_item(const BacklogItem& item) {
+    if (item.type == ItemType::Bug || item.type == ItemType::Issue) {
+        return true;
+    }
+    if (item.priority && (*item.priority == "P0" || *item.priority == "P1")) {
+        return true;
+    }
+    return text_contains_any(item.risks, {"high risk", "high-risk", "security", "data loss", "migration"});
+}
+
+std::vector<std::string> intent_transition_diagnostics(
+    const std::filesystem::path& backlog_root,
+    const BacklogItem& item,
+    ItemState old_state,
+    ItemState new_state
+) {
+    std::vector<std::string> diagnostics;
+
+    if (old_state == ItemState::Proposed && new_state == ItemState::Ready) {
+        if (!has_parent_ref(item)) {
+            diagnostics.push_back("Proposed->Ready intent readiness: missing parent intent; confirm this item is intentionally root-scoped.");
+        }
+        if (is_high_risk_item(item) && (!item.non_goals || trim_text(*item.non_goals).empty())) {
+            diagnostics.push_back("Proposed->Ready intent readiness: high-risk item has no Non-Goals / Do Not constraints recorded.");
+        }
+    }
+
+    if (old_state == ItemState::Ready && new_state == ItemState::InProgress) {
+        const auto stack = WorkitemOps::resolve_intent_stack(backlog_root, item.id, 8);
+        diagnostics.push_back("Ready->InProgress intent preflight: run or review `workitem intent-template " + item.id + " --kind preflight` before implementation.");
+        for (const auto& warning : stack.warnings) {
+            diagnostics.push_back("Ready->InProgress intent-stack: " + warning);
+        }
+        if (stack.chain.size() <= 1) {
+            diagnostics.push_back("Ready->InProgress intent-stack: no parent intent resolved for this item.");
+        }
+    }
+
+    if (old_state == ItemState::InProgress && new_state == ItemState::Review) {
+        const bool has_compliance = text_contains_any(item.intent_amendments, {"do not compliance report", "ok/warn/violation", "compliance"}) ||
+            worklog_contains_any(item, {"do not compliance report", "ok/warn/violation", "compliance"});
+        if (!has_compliance) {
+            diagnostics.push_back("InProgress->Review intent compliance: no Do Not Compliance Report evidence detected; include compliance findings in review evidence.");
+        }
+    }
+
+    if (old_state == ItemState::Review && new_state == ItemState::Done) {
+        const bool has_unresolved_drift = text_contains_any(item.intent_amendments, {"drift finding", "violation", "blocks done", "unresolved"}) ||
+            worklog_contains_any(item, {"drift finding", "violation", "blocks done", "unresolved"});
+        if (has_unresolved_drift) {
+            diagnostics.push_back("Review->Done intent alignment: unresolved drift or Do Not violation evidence detected; confirm explicit resolution before accepting Done.");
+        }
+    }
+
+    return diagnostics;
+}
+
+std::string intent_stack_role_for_type(ItemType type) {
+    switch (type) {
+        case ItemType::Epic: return "epic";
+        case ItemType::Feature: return "feature";
+        case ItemType::UserStory: return "story";
+        case ItemType::Task: return "task";
+        case ItemType::Bug: return "bug";
+        case ItemType::Issue: return "issue";
+    }
+    return "item";
 }
 
 std::string path_for_diagnostic(
@@ -302,8 +413,10 @@ UpdateStateResult WorkitemOps::update_state(
     
     ItemState old_state = item.state;
     if (old_state == new_state) {
-        return {item.id, old_state, new_state, false, false, false};
+        return {item.id, old_state, new_state, false, false, false, {}};
     }
+
+    const auto intent_diagnostics = intent_transition_diagnostics(backlog_root, item, old_state, new_state);
 
     // 3. Ready Gate Validation
     if (new_state == ItemState::InProgress && !force) {
@@ -388,7 +501,7 @@ UpdateStateResult WorkitemOps::update_state(
     // 9. Update index
     index.index_item(item);
     
-    return {item.id, old_state, new_state, true, parent_synced, !refreshed.views_refreshed.empty()};
+    return {item.id, old_state, new_state, true, parent_synced, !refreshed.views_refreshed.empty(), intent_diagnostics};
 }
 
 TrashItemResult WorkitemOps::trash_item(
@@ -579,6 +692,65 @@ RemapIdResult WorkitemOps::remap_id(
     index.index_item(item);
     
     return {old_id, new_id, old_path, new_path, updated_files};
+}
+
+IntentStackResult WorkitemOps::resolve_intent_stack(
+    const std::filesystem::path& backlog_root,
+    const std::string& item_ref,
+    int max_depth
+) {
+    if (max_depth < 1) {
+        max_depth = 1;
+    }
+    if (looks_like_path_ref(item_ref)) {
+        throw std::runtime_error("Intent stack item ref must be an item id or uid, not a path-like ref");
+    }
+
+    CanonicalStore store(backlog_root);
+    RefResolver resolver(store);
+    IntentStackResult result;
+    std::set<std::string> seen;
+    std::set<std::string> evidence_refs;
+
+    BacklogItem current = resolver.resolve(item_ref);
+    for (int depth = 0; depth < max_depth; ++depth) {
+        const std::string identity = !current.uid.empty() ? current.uid : current.id;
+        if (!seen.insert(identity).second) {
+            result.warnings.push_back("Cycle detected at " + current.id + "; stopped parent-chain resolution");
+            break;
+        }
+
+        result.chain.push_back({current, intent_stack_role_for_type(current.type), depth});
+        for (const auto& ref : RefResolver::get_references(current)) {
+            evidence_refs.insert(ref);
+        }
+
+        if (!current.parent || current.parent->empty() || *current.parent == "null" || *current.parent == "~") {
+            break;
+        }
+
+        if (looks_like_path_ref(*current.parent)) {
+            result.warnings.push_back("Parent ref for " + current.id + " is path-like and was not resolved: <redacted>");
+            break;
+        }
+
+        try {
+            current = resolver.resolve(*current.parent);
+        } catch (const std::exception& ex) {
+            result.warnings.push_back("Parent ref for " + current.id + " could not be resolved: " + *current.parent + " (" + ex.what() + ")");
+            break;
+        }
+    }
+
+    if (static_cast<int>(result.chain.size()) >= max_depth) {
+        const auto& tail = result.chain.back().item;
+        if (tail.parent && !tail.parent->empty() && *tail.parent != "null" && *tail.parent != "~") {
+            result.warnings.push_back("Parent-chain depth limit reached at " + tail.id);
+        }
+    }
+
+    result.evidence_refs.assign(evidence_refs.begin(), evidence_refs.end());
+    return result;
 }
 
 } // namespace kano::backlog_ops

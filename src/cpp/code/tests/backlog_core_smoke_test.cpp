@@ -1,6 +1,8 @@
+#include <filesystem>
 #include <iostream>
 #include <stdexcept>
 
+#include "kano/backlog_core/frontmatter/canonical_store.hpp"
 #include "kano/backlog_core/frontmatter/frontmatter.hpp"
 #include "kano/backlog_core/models/models.hpp"
 #include "kano/backlog_core/process/noninteractive_errors.hpp"
@@ -21,6 +23,7 @@ int main() {
     kano::backlog_core::ConfigureNoninteractiveErrorHandling();
 
     using kano::backlog_core::BacklogItem;
+    using kano::backlog_core::CanonicalStore;
     using kano::backlog_core::Frontmatter;
     using kano::backlog_core::FrontmatterContext;
     using kano::backlog_core::ItemState;
@@ -71,6 +74,47 @@ int main() {
         expect(round_trip.metadata["id"].as<std::string>() == item.id, "round-trip id mismatch");
         expect(round_trip.metadata["title"].as<std::string>() == item.title, "round-trip title mismatch");
         expect(round_trip.body.find(*item.context) != std::string::npos, "round-trip context mismatch");
+
+        const auto alias_sections = Frontmatter::parse_body_sections(
+            "# Context\n\nLegacy item context.\n\n"
+            "# Non-Goals / Do Not\n\nDo not change release gates.\n\n"
+            "# Intent Amendments\n\n2026-06-20: Human clarified scope.\n\n"
+            "# Worklog\n\n2026-06-20 00:00 [agent=opencode] Created\n"
+        );
+        expect(alias_sections.at("context") == "Legacy item context.", "context section should parse");
+        expect(alias_sections.at("non_goals") == "Do not change release gates.", "Non-Goals / Do Not alias should parse as non_goals");
+        expect(alias_sections.at("intent_amendments") == "2026-06-20: Human clarified scope.", "intent amendments should parse");
+
+        const auto legacy_sections = Frontmatter::parse_body_sections(
+            "# Non-Goals\n\nKeep old headings readable.\n"
+        );
+        expect(legacy_sections.at("non_goals") == "Keep old headings readable.", "legacy Non-Goals heading should still parse");
+
+        const std::string rendered_sections = Frontmatter::serialize_body_sections({
+            {"context", "Canonical context."},
+            {"non_goals", "Do not add required fields."},
+            {"intent_amendments", "2026-06-20: Preserve chronology."},
+            {"worklog", "2026-06-20 00:00 [agent=opencode] Rendered"}
+        });
+        expect(rendered_sections.find("# Non-Goals / Do Not") != std::string::npos, "canonical render should use Non-Goals / Do Not heading");
+        expect(rendered_sections.find("# Intent Amendments") != std::string::npos, "canonical render should include Intent Amendments heading");
+        expect(rendered_sections.find("# Context") < rendered_sections.find("# Non-Goals / Do Not"), "context should render before non-goals");
+        expect(rendered_sections.find("# Non-Goals / Do Not") < rendered_sections.find("# Intent Amendments"), "non-goals should render before intent amendments");
+        expect(rendered_sections.find("# Intent Amendments") < rendered_sections.find("# Worklog"), "intent amendments should render before worklog");
+
+        const auto temp_root = std::filesystem::temp_directory_path() / "kano-backlog-core-intent-sections-smoke";
+        std::filesystem::remove_all(temp_root);
+        std::filesystem::create_directories(temp_root / "items" / "task" / "0000");
+        CanonicalStore store(temp_root);
+        BacklogItem persisted = item;
+        persisted.file_path = temp_root / "items" / "task" / "0000" / "GT-TSK-0001_native-core-smoke.md";
+        persisted.non_goals = "Do not mutate unrelated dirty files.";
+        persisted.intent_amendments = "2026-06-20: Add optional sections only.";
+        store.write(persisted);
+        const auto reloaded = store.read(*persisted.file_path);
+        expect(reloaded.non_goals == persisted.non_goals, "canonical store should round-trip non_goals");
+        expect(reloaded.intent_amendments == persisted.intent_amendments, "canonical store should round-trip intent_amendments");
+        std::filesystem::remove_all(temp_root);
 
         expect(StateMachine::can_transition(ItemState::Ready, StateAction::Start),
             "ready should transition via Start");

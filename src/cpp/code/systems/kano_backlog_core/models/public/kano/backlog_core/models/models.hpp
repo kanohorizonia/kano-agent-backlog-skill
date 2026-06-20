@@ -82,6 +82,7 @@ struct BacklogItem {
     std::optional<std::string> context;
     std::optional<std::string> goal;
     std::optional<std::string> non_goals;
+    std::optional<std::string> intent_amendments;
     std::optional<std::string> approach;
     std::optional<std::string> alternatives;
     std::optional<std::string> acceptance_criteria;
@@ -106,6 +107,7 @@ struct UpdateStateResult {
     bool worklog_appended;
     bool parent_synced = false;
     bool dashboards_refreshed = false;
+    std::vector<std::string> intent_diagnostics;
 };
 
 struct TrashItemResult {

@@ -9,6 +9,18 @@
 
 namespace kano::backlog_ops {
 
+struct IntentStackEntry {
+    kano::backlog_core::BacklogItem item;
+    std::string role;
+    int depth = 0;
+};
+
+struct IntentStackResult {
+    std::vector<IntentStackEntry> chain;
+    std::vector<std::string> warnings;
+    std::vector<std::string> evidence_refs;
+};
+
 class WorkitemOps {
 public:
     /**
@@ -84,6 +96,15 @@ public:
         const std::string& item_ref,
         const std::string& new_id,
         const std::string& agent
+    );
+
+    /**
+     * Resolve a read-only current-item-to-parent intent stack.
+     */
+    static IntentStackResult resolve_intent_stack(
+        const std::filesystem::path& backlog_root,
+        const std::string& item_ref,
+        int max_depth = 8
     );
 };
 

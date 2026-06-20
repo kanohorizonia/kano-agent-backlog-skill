@@ -72,6 +72,8 @@ std::vector<std::string> RefResolver::get_references(const BacklogItem& item) {
 
     extract(item.context);
     extract(item.goal);
+    extract(item.non_goals);
+    extract(item.intent_amendments);
     extract(item.approach);
     extract(item.acceptance_criteria);
     extract(item.risks);

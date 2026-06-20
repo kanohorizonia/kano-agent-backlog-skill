@@ -1,4 +1,5 @@
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <random>
 #include <sstream>
@@ -34,6 +35,16 @@ std::filesystem::path make_temp_root() {
     return root;
 }
 
+std::string read_text(const std::filesystem::path& path) {
+    std::ifstream input(path, std::ios::binary);
+    if (!input.is_open()) {
+        throw std::runtime_error("failed to read " + path.string());
+    }
+    std::ostringstream buffer;
+    buffer << input.rdbuf();
+    return buffer.str();
+}
+
 void set_ready_fields(kano::backlog_core::BacklogItem& item) {
     item.context = "Need deterministic parent sync coverage.";
     item.goal = "Update a child item without trusting stale indexed host paths.";
@@ -67,6 +78,9 @@ int main() {
 
             auto loaded_path = index.get_path_by_id(created.id);
             expect(loaded_path.has_value(), "created item should be indexed");
+            const auto created_text = read_text(created.path);
+            expect(created_text.find("# Non-Goals / Do Not") != std::string::npos, "created item template should include Non-Goals / Do Not");
+            expect(created_text.find("# Intent Amendments") != std::string::npos, "created item template should include Intent Amendments");
 
             auto queried = index.query_items(ItemType::Task, std::nullopt);
             expect(!queried.empty(), "task item should appear in index query");
@@ -140,6 +154,115 @@ int main() {
             set_ready_fields(child_item);
             store.write(child_item);
             index.index_item(child_item);
+
+            auto epic_created = WorkitemOps::create_item(
+                index,
+                root,
+                "TST",
+                ItemType::Epic,
+                "Intent stack epic smoke",
+                "opencode");
+            auto epic_item = store.read(epic_created.path);
+            epic_item.context = "Epic inherited context.";
+            epic_item.goal = "Epic inherited goal.";
+            epic_item.non_goals = "Do not override epic boundaries.";
+            epic_item.intent_amendments = "2026-06-20: Epic amendment.";
+            store.write(epic_item);
+            index.index_item(epic_item);
+
+            auto feature_created = WorkitemOps::create_item(
+                index,
+                root,
+                "TST",
+                ItemType::Feature,
+                "Intent stack feature smoke",
+                "opencode",
+                epic_created.id);
+            auto feature_item = store.read(feature_created.path);
+            feature_item.context = "Feature inherited context.";
+            feature_item.goal = "Feature inherited goal.";
+            feature_item.acceptance_criteria = "Feature acceptance.";
+            feature_item.non_goals = "Do not skip feature scope.";
+            store.write(feature_item);
+            index.index_item(feature_item);
+
+            auto story_created = WorkitemOps::create_item(
+                index,
+                root,
+                "TST",
+                ItemType::UserStory,
+                "Intent stack story smoke",
+                "opencode",
+                feature_created.id);
+            auto story_item = store.read(story_created.path);
+            story_item.context = "Story inherited context.";
+            story_item.goal = "Story inherited goal.";
+            story_item.acceptance_criteria = "Story acceptance.";
+            story_item.intent_amendments = "2026-06-20: Story amendment.";
+            store.write(story_item);
+            index.index_item(story_item);
+
+            auto stack_task_created = WorkitemOps::create_item(
+                index,
+                root,
+                "TST",
+                ItemType::Task,
+                "Intent stack task smoke",
+                "opencode",
+                story_created.id);
+            auto stack_task = store.read(stack_task_created.path);
+            set_ready_fields(stack_task);
+            stack_task.non_goals = "Do not mutate while resolving.";
+            store.write(stack_task);
+            index.index_item(stack_task);
+
+            auto intent_stack = WorkitemOps::resolve_intent_stack(root, stack_task_created.id);
+            expect(intent_stack.chain.size() == 4, "intent stack should resolve task-story-feature-epic chain");
+            expect(intent_stack.chain[0].item.id == stack_task_created.id, "intent stack should start at current task");
+            expect(intent_stack.chain[1].item.id == story_created.id, "intent stack should include parent story");
+            expect(intent_stack.chain[2].item.id == feature_created.id, "intent stack should include parent feature");
+            expect(intent_stack.chain[3].item.id == epic_created.id, "intent stack should include parent epic");
+            expect(intent_stack.chain[0].role == "task", "intent stack current role should be task");
+            expect(intent_stack.chain[1].role == "story", "intent stack parent role should be story");
+            expect(intent_stack.warnings.empty(), "complete intent stack should not emit warnings");
+            expect(intent_stack.chain[3].item.non_goals && intent_stack.chain[3].item.non_goals->find("epic boundaries") != std::string::npos,
+                "intent stack should preserve ancestor non-goals");
+            expect(intent_stack.chain[1].item.intent_amendments && intent_stack.chain[1].item.intent_amendments->find("Story amendment") != std::string::npos,
+                "intent stack should preserve ancestor intent amendments");
+
+            auto orphan_stack = WorkitemOps::resolve_intent_stack(root, created.id);
+            expect(orphan_stack.chain.size() == 1, "orphan item stack should contain only the current item");
+            expect(orphan_stack.warnings.empty(), "orphan item stack should not warn");
+
+            auto missing_parent_task = stack_task;
+            missing_parent_task.id = "TST-TSK-9997";
+            missing_parent_task.uid = "019cdf6a-0000-7000-8000-000000009997";
+            missing_parent_task.parent = "TST-FTR-9997";
+            missing_parent_task.file_path = root / "items" / "task" / "0000" / "TST-TSK-9997_missing-parent.md";
+            store.write(missing_parent_task);
+            index.index_item(missing_parent_task);
+            auto missing_stack = WorkitemOps::resolve_intent_stack(root, missing_parent_task.id);
+            expect(missing_stack.chain.size() == 1, "missing-parent stack should keep resolved current item");
+            expect(!missing_stack.warnings.empty(), "missing-parent stack should warn");
+            expect(missing_stack.warnings.front().find("could not be resolved") != std::string::npos, "missing-parent warning should be explicit");
+
+            auto path_parent_task = stack_task;
+            path_parent_task.id = "TST-TSK-9996";
+            path_parent_task.uid = "019cdf6a-0000-7000-8000-000000009996";
+            const auto path_like_parent_ref = (root.parent_path() / "outside-root" / "items" / "feature" / "0000" / "outside.md").string();
+            path_parent_task.parent = path_like_parent_ref;
+            path_parent_task.file_path = root / "items" / "task" / "0000" / "TST-TSK-9996_path-parent.md";
+            store.write(path_parent_task);
+            index.index_item(path_parent_task);
+            auto path_stack = WorkitemOps::resolve_intent_stack(root, path_parent_task.id);
+            expect(path_stack.chain.size() == 1, "path-like parent stack should keep resolved current item");
+            expect(!path_stack.warnings.empty(), "path-like parent stack should warn");
+            expect(path_stack.warnings.front().find("path-like") != std::string::npos, "path-like parent warning should be explicit");
+            expect(path_stack.warnings.front().find(path_like_parent_ref) == std::string::npos, "path-like parent warning should redact path");
+
+            auto bounded_stack = WorkitemOps::resolve_intent_stack(root, stack_task_created.id, 2);
+            expect(bounded_stack.chain.size() == 2, "bounded intent stack should stop at max depth");
+            expect(!bounded_stack.warnings.empty(), "bounded intent stack should warn at depth limit");
 
             auto stale_parent_item = parent_item;
             stale_parent_item.file_path = std::filesystem::temp_directory_path() /

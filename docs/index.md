@@ -1,183 +1,188 @@
-# Kano Agent Backlog Skill Technical Release
+# Kano Agent Backlog Skill
 
-> Kano Agent Backlog Skill is local-first backlog tooling for agent-driven software work. It keeps durable work items, worklogs, ADRs, release evidence, and reviewable automation output in ordinary repository files.
+**Evidence-first, repo-native Intent Engineering for AI coding agents.**
 
-> This file is the GitHub Pages home page source. If you are browsing the repository directly on GitHub, use [docs/README.md](README.md) for repo-local links.
+KOB turns messy human requests into durable Markdown work items with Ready gates,
+worklogs, ADRs, and validation evidence so humans and agents can review the same
+source of truth.
 
-## Publish identity
+![Intent Engineering before and after](assets/intent-engineering-before-after.svg)
 
-| Field | Value |
-| --- | --- |
-| Product | `kano-agent-backlog-skill` |
-| CLI | `kob` / `kano-backlog` |
-| Current release line | `0.0.4` native C++ |
-| Source repository | [kanohorizonia/kano-agent-backlog-skill](https://github.com/kanohorizonia/kano-agent-backlog-skill) |
-| CI workflow | [KanoAgentSkills / Cloud Build](https://github.com/kanohorizonia/kano-agent-backlog-skill/actions/workflows/agent-skill-cloud-build.yml) |
+> This file is the GitHub Pages home page source. If you are browsing the
+> repository directly, use [docs/README.md](README.md) for repo-local links.
 
-## CI evidence to review first
+## Problem
 
-Release review starts from generated evidence. The public site keeps stable report slots so reviewers, users, and agents can inspect what was tested without opening Jenkins internals first.
+AI coding agents can produce convincing reports. That does not make the work
+true.
 
-| Evidence | Public entry point | What to verify |
-| --- | --- | --- |
-| Feature-first test report | [Latest public test report](https://agentskill-backlog.kanohorizonia.com/reports/latest/test-report/) | Overall result, platform lanes, feature suites, and detailed BDD scenario pages. |
-| Source-level coverage report | [Latest public coverage report](https://agentskill-backlog.kanohorizonia.com/reports/latest/coverage-report/) | Native coverage by file and function. Source is publishable because this project is open source. |
-| BDD capability tour | [BDD scenarios inside the latest test report](reports/latest/test-report/) | User-facing behavior coverage: repo discovery, work item creation, state transitions, topics, worksets, and release/report contracts. |
-| GitHub cloud evidence | [GitHub Actions runs](https://github.com/kanohorizonia/kano-agent-backlog-skill/actions) | Cloud platform build and report artifact history. |
-| Jenkins release evidence | [KanoAgentSkills latest Build_CI](https://jenkins.kanohorizonia.com/job/KanoAgentSkills/job/kano-agent-backlog-skill/job/Build_CI/lastSuccessfulBuild/) | Internal orchestration, artifact collection, report publication, and release gates. |
+Without a durable repo-native intent layer, the important parts of the request
+drift out of view: why the work exists, what acceptance criteria would prove it,
+which risks were known, which validation actually ran, and what the next human or
+agent should trust.
 
-The test and coverage links must not be placeholder-only pages for an accepted release. Do not send external users to local Jenkins URLs; Jenkins report pages are internal producer evidence, and GitHub Pages report slots are the public consumer contract. If either public slot says that no publishable report HTML is available, treat it as a release evidence blocker.
+## Solution
 
-## BDD as product documentation
+KOB treats agent work as a falsifiable contract:
 
-The test report is also the product tour. Feature suites should read like externally useful capability documentation, while the individual BDD scenarios provide the exact behaviors that were exercised by CI.
+```text
+human intent -> acceptance criteria -> bounded agent work -> validation artifact -> worklog evidence -> human review -> Done
+```
 
-| Feature suite | What a reader should learn |
-| --- | --- |
-| CLI core | How `kob` discovers a backlog, parses commands, exits noninteractively, and reports user-facing failures. |
-| Repo discovery | How the tool locates the nearest backlog root and keeps local-first operation stable across nested workspaces. |
-| Work item operations | How items are created, assigned stable IDs, written to ordinary files, and transitioned through the Ready gate. |
-| Topics and worksets | How agents gather bounded context, assemble focused work orders, and avoid broad workspace assumptions. |
-| Report publication | How Jenkins and GitHub Actions publish JUnit, feature-first HTML, coverage HTML, and public site report slots. |
-| Release channels | How GitHub Releases, Homebrew, winget, apt intent payloads, and post-release install checks fit together. |
+The durable artifact is a Markdown work item in the repository. It carries the
+Context, Goal, Approach, Acceptance Criteria, Risks, Worklog, ADR/Decision links,
+and evidence trail across agent sessions.
+
+## Evidence-first Intent Engineering
+
+> A claim that cannot be falsified is not evidence.
+
+KOB does not treat repeated agent loops as proof. It keeps validation bounded and
+claim-driven: identify the claim, define how it could fail, run the relevant
+check, attach or cite the artifact, and record the result in the worklog. Claims
+without proof stay labeled as planned, hypothesis, design intent, opinion, or
+future work.
+
+![Durable work item anatomy](assets/work-item-anatomy.svg)
+
+## 60-second demo
+
+From a cloned repository:
+
+```bash
+pixi run build-dev
+bash scripts/kob admin init --product my-app --agent local-agent
+bash scripts/kob item create --type task --title "Add login" --product my-app --agent local-agent
+```
+
+Expected generated path:
+
+```text
+_kano/backlog/products/my-app/items/task/0000/<ID>_add-login.md
+```
+
+Open the Markdown file and fill the Ready fields before implementation starts.
+Those fields become the human-reviewable contract for the agent.
+
+## Core workflow
+
+1. Capture human intent in a durable work item.
+2. Fill the Ready gate: context, goal, approach, acceptance criteria, and risks.
+3. Execute bounded agent work against that item.
+4. Validate claims with commands, reports, artifacts, screenshots, or reviews.
+5. Record the evidence and known limitations in the Worklog.
+6. Move to Review when the evidence chain exists.
+7. Close only when human review accepts the evidence.
+
+![Agent handoff lifecycle](assets/agent-handoff-lifecycle.svg)
+
+![Ready and Done state lifecycle](assets/state-lifecycle-ready-done.svg)
+
+## Human review webview preview
+
+The current repository includes local read-only webview support for backlog
+review. If the host-native webview binary is missing or blocked, run the Docker
+Compose path:
+
+```bash
+pixi run webview-compose-up-detached
+```
+
+Then open <http://localhost:8799/> and stop it with:
+
+```bash
+pixi run webview-compose-down
+```
+
+The image below is a concept mock for a future review-console style workflow,
+not a current UI screenshot.
+
+![Conceptual human review console preview](assets/webview-review-console-concept.svg)
+
+## What this is
+
+- repo-native intent and evidence layer
+- durable Markdown work items
+- Ready gate and Done gate workflow
+- append-only worklog and evidence trail
+- ADR and decision links for durable rationale
+- human-reviewable agent work contract
+- native C++ CLI with repo-local launchers
+
+## What this is not
+
+- not a general-purpose issue tracker
+- not a project-management suite
+- not a chat memory layer
+- not a model runtime
+- not an agent scheduler
+- not a CI replacement
+- not magic autonomous management
 
 ## Start here
 
-| Destination | Why open it |
+| I want to... | Go to |
 | --- | --- |
-| [Quick start](guides/quick-start.md) | Install and run the backlog CLI in a local repo. |
-| [Release downloads](https://github.com/kanohorizonia/kano-agent-backlog-skill/releases/latest) | Download installable platform artifacts from the latest GitHub Release. |
-| [Installation](guides/installation.md) | Manual archive install and package-manager channel status. |
-| [CLI reference](cli/commands.md) | Generated command surface for `kob`. |
-| [Release 0.0.4 notes](releases/0.0.4.md) | Native C++ release scope and channel notes. |
-| [Release channels](guides/release-channels.md) | How CI, GitHub Releases, Homebrew, winget, and apt publishing are intended to work. |
-| [Architecture decisions](adr/overview.md) | Backlog model, ID policy, indexing, and local-first decisions. |
-| [GitHub Actions](https://github.com/kanohorizonia/kano-agent-backlog-skill/actions) | Current cloud build, test, report, and Pages runs. |
+| Understand the concept | [README landing page](skill/readme.md) |
+| Try it locally | [Quick start](guides/quick-start.md) |
+| Use it with agents | [Agent quick start](guides/agent-quick-start.md) |
+| Learn commands | [CLI reference](cli/commands.md) |
+| Review architecture | [Workflow reference](references/workflow.md) and [schema reference](references/schema.md) |
+| Maintain releases | [Maintainer guide](automation/maintainer-automation.md) |
 
-## Release quality snapshot
+## Current status
 
-| Signal | Current release policy |
+| Area | Current status |
 | --- | --- |
-| Required platform | Windows x64 |
-| Optional cloud platforms | Windows arm64, Linux x64, Linux arm64, macOS x64, macOS arm64 |
-| Test lane | Full native CTest lane with JUnit output |
-| Public test report | Feature-first HTML report plus BDD scenario pages |
-| Coverage report | Public source-level coverage is allowed for this open-source project |
-| Package artifacts | Native CLI payloads must be downloadable from GitHub Releases before a version is accepted |
+| Product | `kano-agent-backlog-skill` |
+| CLI | `kob` / `kano-backlog` |
+| Runtime | Native C++ CLI through repo-local launchers after local build |
+| Development line | `0.0.5` Intent Engineering feature wave |
+| Release line | `0.0.4` native C++ release target |
+| Public release source | [GitHub Releases](https://github.com/kanohorizonia/kano-agent-backlog-skill/releases) |
+| Public reports | [Latest test report](reports/latest/test-report/) and [latest coverage report](reports/latest/coverage-report/) |
+| Webview | Local read-only webview support; review-console image above is conceptual |
+| Package channels | Manual artifacts are release-gated; winget, Homebrew, and apt are not live unless release metadata says so |
+| Retired runtime | Python runtime and Python package publishing are retired for this milestone |
+| Stability | Pre-1.0; schema, CLI details, and docs can still change |
 
-## Feature highlights
+## Full docs links
 
-| Area | What the automation validates |
+| Area | Links |
 | --- | --- |
-| Backlog core | Config loading, frontmatter parsing, state model behavior, and file layout contracts. |
-| Workitem operations | Canonical item creation, IDs, templates, and repo-backed persistence. |
-| CLI workflow | Repo-root discovery, noninteractive execution, topic/workset flows, and user-facing command behavior. |
-| Release automation | Jenkins and GitHub Actions generate platform artifacts, test reports, coverage reports, and package-manager metadata. |
+| Core guides | [Quick start](guides/quick-start.md), [Agent quick start](guides/agent-quick-start.md), [Usage examples](guides/usage-examples.md) |
+| Workflow | [Worksets](guides/workset.md), [Topics](guides/topic.md), [Workflow reference](references/workflow.md) |
+| CLI and API | [CLI reference](cli/commands.md), [API overview](api/overview.md), [Native executable API](api/native.md) |
+| Release channels | [Installation](guides/installation.md), [Release channels](guides/release-channels.md), [Release notes](releases/0.0.4.md), [Changelog](releases/changelog.md) |
+| Testing | [Latest public test report](reports/latest/test-report/), [Latest public coverage report](reports/latest/coverage-report/), [GitHub Actions](https://github.com/kanohorizonia/kano-agent-backlog-skill/actions) |
+| Tokenizer adapters | [Quick start](guides/tokenizer-quickstart.md), [Overview](guides/tokenizer-adapters.md), [Configuration](guides/tokenizer-configuration.md), [CLI](guides/tokenizer-cli-reference.md), [Troubleshooting](guides/tokenizer-troubleshooting.md), [Performance](guides/tokenizer-performance.md) |
+| Maintainers | [Maintainer automation](automation/maintainer-automation.md), [Docs pipeline](automation/docs-pipeline.md), [Native CLI direction](guides/native-cli-direction.md) |
+| Reference | [Schema reference](references/schema.md), [All references](references/) |
 
-## What this site covers
+## Release and evidence notes
 
-This site brings together release-facing documentation, generated CLI docs, architecture decisions, release notes, and the CI report contract used by Jenkins and GitHub Actions. CI report pages are expected to expose both test detail and coverage detail because the project is open source.
+Release review starts from generated evidence, but evidence is no longer the
+first human entry point. The public site keeps stable report slots so reviewers,
+users, and agents can inspect what was tested without opening internal systems
+first.
 
-## Architecture overview
+| Evidence | Public entry point | What to verify |
+| --- | --- | --- |
+| Feature-first test report | [Latest public test report](reports/latest/test-report/) | Overall result, platform lanes, feature suites, and BDD scenario pages. |
+| Source-level coverage report | [Latest public coverage report](reports/latest/coverage-report/) | Native coverage by file and function. Source is publishable because this project is open source. |
+| Cloud build evidence | [GitHub Actions runs](https://github.com/kanohorizonia/kano-agent-backlog-skill/actions) | Cloud platform build, test, report, and Pages artifact history. |
 
-```mermaid
-flowchart LR
-  reviewer["Human reviewer or agent"] --> site["Public docs site"]
-  site --> reports["Stable report slots"]
-  reports --> tests["Feature-first test report"]
-  reports --> coverage["Source-level coverage report"]
-  tests --> bdd["BDD scenario pages"]
-  coverage --> source["Open-source code coverage views"]
-  jenkins["Jenkins Build_CI"] --> reports
-  actions["GitHub Actions cloud build"] --> reports
-  jenkins --> release["GitHub Release artifacts"]
-  actions --> release
-```
+The test and coverage links must not be placeholder-only pages for an accepted
+release. If either public slot says that no publishable report HTML is available,
+treat it as a release evidence blocker.
 
-```mermaid
-sequenceDiagram
-  actor Reviewer
-  participant Jenkins as Jenkins Build_CI
-  participant CTest as Native CTest lane
-  participant Reporter as Kano report tooling
-  participant Pages as GitHub Pages
-  Reviewer->>Pages: Open public project site
-  Jenkins->>CTest: Build and run platform test lanes
-  CTest-->>Reporter: JUnit XML and coverage inputs
-  Reporter-->>Reporter: Map tests into feature suites and BDD scenarios
-  Reporter-->>Pages: Publish test-report and coverage-report slots
-  Pages-->>Reviewer: Show BDD capabilities and source-level coverage
-```
+## Maintainer details
 
-```mermaid
-stateDiagram-v2
-  [*] --> Proposed
-  Proposed --> InProgress: Ready gate passes
-  Proposed --> Blocked: missing context, goal, approach, acceptance, or risks
-  InProgress --> Review: implementation and evidence ready
-  Review --> Done: accepted
-  Review --> InProgress: follow-up required
-  InProgress --> Blocked: external dependency
-  Blocked --> InProgress: blocker resolved
-  Proposed --> Dropped: no longer needed
-  Review --> Dropped: superseded
-```
+The docs build keeps the existing Quartz plus MkDocs hybrid. Local runs stop at
+build and staging by default. The repository still supports branch-based
+`gh-pages` publishing through `src/shell/docs/`, and that flow restores the
+`CNAME` file from docs build config so the custom domain stays attached.
 
-```mermaid
-classDiagram
-  class Backlog {
-    +products
-    +config
-    +views
-  }
-  class WorkItem {
-    +id
-    +type
-    +state
-    +readyFields
-    +worklog
-  }
-  class Topic {
-    +scope
-    +materials
-    +notes
-  }
-  class Workset {
-    +goal
-    +boundedContext
-    +evidence
-  }
-  class ReportSite {
-    +testReport
-    +coverageReport
-    +publicSlots
-  }
-  Backlog "1" --> "*" WorkItem
-  Backlog "1" --> "*" Topic
-  Topic "1" --> "*" Workset
-  WorkItem "*" --> "*" Workset
-  ReportSite --> WorkItem : release evidence
-```
-
-## Core guides
-
-- [Quick start](guides/quick-start.md)
-- [Agent quick start](guides/agent-quick-start.md)
-- [Worksets](guides/workset.md)
-- [Topics](guides/topic.md)
-- [Usage examples](guides/usage-examples.md)
-
-## Tokenizer adapters
-
-- [Tokenizer quick start](guides/tokenizer-quickstart.md)
-- [Tokenizer adapters overview](guides/tokenizer-adapters.md)
-- [Tokenizer configuration](guides/tokenizer-configuration.md)
-- [Tokenizer CLI reference](guides/tokenizer-cli-reference.md)
-- [Tokenizer troubleshooting](guides/tokenizer-troubleshooting.md)
-- [Tokenizer performance](guides/tokenizer-performance.md)
-
-## Maintainers
-
-The docs build keeps the existing Quartz plus MkDocs hybrid. Local runs now stop at build and staging by default. The repository currently supports branch-based `gh-pages` publishing through `src/shell/docs/`, and that flow restores the `CNAME` file from docs build config so the custom domain stays attached.
-
-This project is currently preparing the `0.0.4` native C++ release. The repo-local executable contract is native only; Python package entrypoints and PyPI publishing are retired for this release line.
+This project is preparing the `0.0.4` native C++ release line. The repo-local
+executable contract is native only; Python package entrypoints and PyPI
+publishing are retired for this release line.

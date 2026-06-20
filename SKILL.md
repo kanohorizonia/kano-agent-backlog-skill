@@ -135,6 +135,108 @@ For any work that changes code, docs, scripts, views, configs, schemas, tests, b
 Do not open items for pure exploratory discussion unless it changes code or design direction. Record minor discussion in an existing Worklog instead.
 
 For pre-1.0.0 Kano skills: prefer clean in-place migration over deprecated/superseded compatibility artifacts unless the human explicitly asks for compatibility.
+
+## Intent Engineering Protocol
+
+Intent Engineering keeps the human purpose of work visible across agent sessions. Use this protocol as an operating contract; it does not add new hierarchy levels or require new CLI/schema fields yet.
+
+### Intent Stack
+
+- The Intent Stack is the existing parent chain: Epic -> Feature -> User Story -> Task/Bug.
+- Before implementation, trace upward until the highest available parent that still carries relevant intent.
+- Summarize inherited intent from parent Context, Goal, Approach, Acceptance Criteria, Risks, Worklog decisions, and any Non-Goals / Do Not notes.
+- Do not copy whole parent documents into child items. Use bounded summaries with item IDs and paths when needed.
+- Missing parents are warnings, not permission to invent intent.
+
+### Non-Goals / Do Not
+
+- Non-Goals / Do Not are observable negative boundaries: things the agent must avoid, defer, or escalate.
+- Good examples:
+  - "Do not publish a release tag or upload artifacts in this task."
+  - "Do not change existing state-transition blocking behavior; warnings only."
+  - "Do not scan arbitrary filesystem paths; resolve only by item id or uid."
+- Bad examples:
+  - "Do not make it bad" (not observable).
+  - "Do not over-engineer" without a concrete forbidden behavior.
+  - "Do not touch anything else" when the required implementation necessarily needs tests/docs.
+- If a requested plan violates a Do Not boundary, stop and request human review before editing or executing the conflicting action.
+
+### Intent Amendments
+
+- Intent Amendments are append-only corrections from a human, reviewer, or maintainer after the original Ready fields were written.
+- Each amendment should record timestamp, author/agent, current state, correction, reason, affected section or scope, and expected follow-up.
+- Never rewrite prior Worklog evidence to hide drift. Add the amendment, then record the resulting plan or state decision.
+- Proposed: update Ready fields directly when safe, or record the clarification as an amendment if history matters.
+- InProgress: pause implementation, re-run preflight, and record whether the plan changed.
+- Review: treat the amendment as a drift finding; do not move to Done until it is resolved or explicitly accepted.
+- Done: record post-done drift and recommend reopen, follow-up Bug, or follow-up Task depending on impact.
+
+### Preflight Intent Trace Template
+
+Use this compact block before non-trivial implementation:
+
+```text
+Intent Preflight
+- Active item: <ID> <title>
+- Intent stack: <Epic> -> <Feature> -> <Story> -> <Task>
+- Inherited intent: <1-3 bullets>
+- Local goal: <1 sentence>
+- Non-Goals / Do Not: <bullets or "none documented">
+- Intent amendments considered: <latest relevant entries or "none">
+- Planned approach: <bounded steps>
+- Stop conditions: <Do Not violations, missing parent, unclear acceptance>
+```
+
+### Completion Do Not Compliance Template
+
+Use this before closing or reporting completed work:
+
+```text
+Do Not Compliance
+- Task completion: OK/WARN/VIOLATION - <evidence>
+- Parent alignment: OK/WARN/VIOLATION - <Epic/Feature/Story fit>
+- Non-Goals checked: OK/WARN/VIOLATION - <each boundary>
+- Intent amendments resolved: OK/WARN/VIOLATION - <evidence>
+- Validation evidence: <commands/reports>
+- Limitations and follow-ups: <known gaps or "none">
+```
+
+### Operator UX
+
+- Codex/OpenCode: include the preflight block in the plan or first worklog update, then include the compliance block in the final report or completion worklog.
+- ChatGPT/MCP: keep responses compact; expose intent stack, Do Not boundaries, and compliance result through the action response or attached evidence.
+- Cross-system TODOs only: KOA, Codex/OpenCode commands, Jenkins gates, and Ark Console visualization may consume these sections later, but this protocol does not implement those integrations.
+
+### Coding-Agent Handoff Rule
+
+- Before ChatGPT recommends or produces a Codex/OpenCode handoff, it must run Intent Drift Preflight. The human is not responsible for knowing whether drift exists.
+- Check deterministic KOB evidence first: selected item, item age/last validation evidence, parent chain, explicit relates/blocks/decisions, parent related tickets, siblings/children, stale architecture or release-line terms, newer decisions, current repo/tool-contract evidence, and Worklog/history.
+- Optional KOA/Miyo/semantic search results are candidate evidence only. KOB core must not implement embedding, tokenizer, or vector search to become the final intent judge.
+- ChatGPT/human synthesis must classify evidence as current authority, stale/legacy, candidate, conflicting, or missing before handoff.
+- If no drift is detected, include a compact no-drift preflight note in the handoff.
+- If drift is detected, do not hand the original item to the coding agent. Create an Intent Drift Resolution ticket and hand that new ticket to Codex/OpenCode instead.
+- If evidence is insufficient or conflicting, produce an evidence pack and require human confirmation. Do not let the coding agent resolve uncertainty by implementation.
+
+Useful command surfaces:
+
+```bash
+kob workitem intent-template <ITEM_ID> --kind handoff
+kob workitem intent-drift-preflight <ITEM_ID> --result no-drift
+kob workitem drift-resolution-template <SOURCE_ITEM_ID> --drift-type "stale architecture"
+kob workitem create-drift-resolution <SOURCE_ITEM_ID> --apply --agent <agent-id>
+```
+
+Supported drift type labels include stale architecture, stale proposed fix, parent intent conflict, related-ticket conflict, semantic evidence conflict, acceptance mismatch, Done validity drift, and unknown / needs human confirmation.
+
+### Intent Drift Resolution Tickets
+
+- Detected drift is not execution permission.
+- The original item preserves history through append-only Intent Drift Finding evidence.
+- The new Intent Drift Resolution ticket becomes the executable boundary after human confirmation.
+- The resolution ticket must be self-contained enough for a human to hand only that new ticket ID to Codex/OpenCode.
+- Include source item, detection stage, detected-by, drift type, why it is drift, evidence pack, relationship map, human confirmation notes, proposed corrected intent, Do Not / Non-Goals, stop conditions, validation plan, and `relates: SOURCE_ITEM_ID`.
+- Do not auto-close, auto-reopen, auto-supersede, or auto-reparent source tickets without explicit human confirmation.
+
 - Hierarchy is in frontmatter links, not folder nesting; avoid moving files to reflect scope changes.
 - Filenames stay stable; use ASCII slugs.
 - Never include secrets in backlog files or logs.

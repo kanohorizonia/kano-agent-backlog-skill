@@ -121,6 +121,11 @@ copy_doc "$SKILL_DIR/CHANGELOG.md" "$BUILD_DIR/content_quartz/releases/changelog
 
 copy_glob_docs "$SKILL_DIR/references" "$BUILD_DIR/content_quartz/references"
 
+if [ -d "$SKILL_DIR/docs/assets" ]; then
+  mkdir -p "$BUILD_DIR/content_quartz/assets"
+  cp -R "$SKILL_DIR/docs/assets/." "$BUILD_DIR/content_quartz/assets/"
+fi
+
 # Generate CLI and API docs first
 echo "Generating CLI documentation..."
 mkdir -p "$BUILD_DIR/content_quartz/cli"

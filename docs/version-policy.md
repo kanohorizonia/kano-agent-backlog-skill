@@ -9,13 +9,17 @@ This document records the current release policy for
 - `0.0.3` was an untagged historical OSS-readiness planning line.
 - `0.0.4` is the current native C++ release target and supersedes the old
   `0.0.3` Python-public package contract.
+- `0.0.5` is the current development marker for the Intent Engineering wave. It
+  is not accepted as a public release until a tag, release artifacts, and release
+  gate evidence are prepared separately.
 
 ## Native Executable Contract
 
 - Repo-local execution is native C++ only through `scripts/kob`,
   `scripts/kano-backlog`, or the built `kano-backlog` binary.
 - Python package entrypoints, editable installs, pytest oracle tests, and PyPI
-  publishing are retired for the `0.0.4` native release line.
+  publishing are retired for the `0.0.4` native release line and remain retired
+  for the `0.0.5` development line.
 - Data formats remain compatible: Markdown backlog files, TOML config, and
   derived SQLite caches continue to be the source-of-truth model.
 - Future exact tokenizer or embedding providers must be implemented as native

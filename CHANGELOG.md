@@ -7,7 +7,8 @@ This project uses Git tags as releases: `vX.Y.Z`.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-Current OSS release target: `0.0.4`.
+Current development target: `0.0.5`.
+Current public release target: `0.0.4`.
 Latest released OSS version: `0.0.2`.
 
 `0.0.3` was an untagged Python-public planning line and is retained only for
@@ -15,6 +16,20 @@ historical release-readiness notes. The native C++ executable contract is
 targeted for `0.0.4`.
 
 `0.1.0` references below are future planning only unless called out elsewhere as internal or experimental.
+
+## [0.0.5] - Unreleased
+
+### Overview
+
+`0.0.5` is the Intent Engineering development wave. It is a development marker
+only until release gates, tags, and public artifacts are prepared separately.
+
+### Changed
+
+- Version metadata is aligned on `0.0.5` across `VERSION`, CMake, and vcpkg for
+  the Intent Engineering feature wave.
+- Public-facing docs distinguish the `0.0.5` development line from the existing
+  `0.0.4` native release target.
 
 ## [0.0.4] - Unreleased
 

@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="380" viewBox="0 0 960 380" role="img" aria-labelledby="title desc">
+  <title id="title">Backlog state lifecycle with Ready and Done gates</title>
+  <desc id="desc">A work item moves from Proposed to Ready through the Ready Gate, then InProgress, Review, and Done through the Done Gate, with optional Blocked, Superseded, or Archived side paths.</desc>
+  <defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10z" fill="#334155"/></marker><style>.state{fill:#fff;stroke:#cbd5e1;stroke-width:2}.gate{fill:#fef9c3;stroke:#ca8a04;stroke-width:2}.done{fill:#dcfce7;stroke:#16a34a;stroke-width:2}.side{fill:#f1f5f9;stroke:#64748b;stroke-width:2}.t{font:700 17px Arial,sans-serif;fill:#0f172a}.s{font:500 12px Arial,sans-serif;fill:#475569}.line{stroke:#334155;stroke-width:2.5;fill:none;marker-end:url(#arrow)}.dash{stroke:#64748b;stroke-width:2;stroke-dasharray:6 5;fill:none;marker-end:url(#arrow)}</style></defs>
+  <rect width="960" height="380" fill="#f8fafc"/>
+  <text x="48" y="48" style="font:700 24px Arial,sans-serif;fill:#0f172a">State lifecycle</text>
+  <g transform="translate(50 116)">
+    <rect width="112" height="64" rx="14" class="state"/><text x="56" y="38" text-anchor="middle" class="t">Proposed</text>
+    <path d="M124 32 H174" class="line"/>
+    <rect x="184" width="112" height="64" rx="14" class="gate"/><text x="240" y="28" text-anchor="middle" class="t">Ready</text><text x="240" y="48" text-anchor="middle" class="s">Gate</text>
+    <path d="M308 32 H358" class="line"/>
+    <rect x="368" width="112" height="64" rx="14" class="state"/><text x="424" y="38" text-anchor="middle" class="t">InProgress</text>
+    <path d="M492 32 H542" class="line"/>
+    <rect x="552" width="112" height="64" rx="14" class="state"/><text x="608" y="38" text-anchor="middle" class="t">Review</text>
+    <path d="M676 32 H726" class="line"/>
+    <rect x="736" width="112" height="64" rx="14" class="done"/><text x="792" y="28" text-anchor="middle" class="t">Done</text><text x="792" y="48" text-anchor="middle" class="s">Gate</text>
+    <path d="M424 74 V132 H285" class="dash"/>
+    <rect x="160" y="118" width="112" height="52" rx="12" class="side"/><text x="216" y="150" text-anchor="middle" class="t">Blocked</text>
+    <path d="M608 74 V132 H745" class="dash"/>
+    <rect x="760" y="118" width="112" height="52" rx="12" class="side"/><text x="816" y="150" text-anchor="middle" class="t">Archived</text>
+    <path d="M608 74 V197 H424" class="dash"/>
+    <rect x="270" y="181" width="136" height="52" rx="12" class="side"/><text x="338" y="213" text-anchor="middle" class="t">Superseded</text>
+  </g>
+  <text x="50" y="332" class="s">Ready Gate checks intent before execution. Done Gate checks falsifiable evidence before closure.</text>
+</svg>

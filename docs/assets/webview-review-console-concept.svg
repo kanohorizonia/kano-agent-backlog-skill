@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="520" viewBox="0 0 960 520" role="img" aria-labelledby="title desc">
+  <title id="title">Conceptual human review console preview</title>
+  <desc id="desc">A conceptual preview of a future review console showing a work item, Ready fields, worklog evidence, validation artifacts, and review decision controls. It is labeled as a concept, not a current UI screenshot.</desc>
+  <defs><style>.chrome{fill:#0f172a}.bg{fill:#f8fafc}.panel{fill:#ffffff;stroke:#cbd5e1;stroke-width:2}.accent{fill:#ecfeff;stroke:#0891b2}.evidence{fill:#f0fdf4;stroke:#16a34a}.warn{fill:#fef9c3;stroke:#ca8a04}.t{font:700 18px Arial,sans-serif;fill:#0f172a}.s{font:500 13px Arial,sans-serif;fill:#334155}.tiny{font:600 11px Arial,sans-serif;fill:#64748b}.white{font:700 14px Arial,sans-serif;fill:#f8fafc}</style></defs>
+  <rect width="960" height="520" class="bg"/>
+  <rect x="48" y="42" width="864" height="430" rx="18" class="panel"/>
+  <rect x="48" y="42" width="864" height="46" rx="18" class="chrome"/>
+  <circle cx="78" cy="65" r="7" fill="#ef4444"/><circle cx="102" cy="65" r="7" fill="#eab308"/><circle cx="126" cy="65" r="7" fill="#22c55e"/>
+  <text x="158" y="70" class="white">Human review console - CONCEPT MOCK</text>
+  <text x="72" y="124" class="tiny">Conceptual preview, not a current UI screenshot</text>
+  <rect x="72" y="146" width="310" height="278" rx="14" class="accent"/>
+  <text x="94" y="182" class="t">KOB-TSK-0042</text><text x="94" y="208" class="s">Revamp README landing page</text>
+  <text x="94" y="248" class="tiny">READY FIELDS</text>
+  <text x="94" y="276" class="s">Context: first screen is unclear</text>
+  <text x="94" y="302" class="s">Goal: product-first landing</text>
+  <text x="94" y="328" class="s">Acceptance: renders, links valid</text>
+  <text x="94" y="354" class="s">Risks: no false feature claims</text>
+  <rect x="414" y="146" width="220" height="128" rx="14" class="evidence"/>
+  <text x="436" y="182" class="t">Evidence</text>
+  <text x="436" y="212" class="s">docs build artifact</text>
+  <text x="436" y="238" class="s">link review artifact</text>
+  <rect x="414" y="296" width="220" height="128" rx="14" class="warn"/>
+  <text x="436" y="332" class="t">Worklog</text>
+  <text x="436" y="362" class="s">Bounded validation</text>
+  <text x="436" y="388" class="s">Known gaps recorded</text>
+  <rect x="666" y="146" width="200" height="278" rx="14" class="panel"/>
+  <text x="688" y="182" class="t">Review</text>
+  <rect x="688" y="214" width="156" height="42" rx="10" fill="#dcfce7" stroke="#16a34a"/>
+  <text x="766" y="241" text-anchor="middle" class="s">Accept evidence</text>
+  <rect x="688" y="276" width="156" height="42" rx="10" fill="#fff1f2" stroke="#e11d48"/>
+  <text x="766" y="303" text-anchor="middle" class="s">Request follow-up</text>
+  <rect x="688" y="338" width="156" height="42" rx="10" fill="#f1f5f9" stroke="#64748b"/>
+  <text x="766" y="365" text-anchor="middle" class="s">Open artifact</text>
+</svg>

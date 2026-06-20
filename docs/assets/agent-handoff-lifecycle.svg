@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="340" viewBox="0 0 960 340" role="img" aria-labelledby="title desc">
+  <title id="title">Agent handoff lifecycle</title>
+  <desc id="desc">Human intent becomes a Ready item, an AI coding agent executes bounded work, validation produces artifacts, the worklog records evidence, and a human reviews the result.</desc>
+  <defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10z" fill="#334155"/></marker><style>.box{fill:#fff;stroke:#cbd5e1;stroke-width:2}.ready{fill:#ecfeff;stroke:#0891b2}.evidence{fill:#f0fdf4;stroke:#16a34a}.review{fill:#fef9c3;stroke:#ca8a04}.t{font:700 17px Arial,sans-serif;fill:#0f172a}.s{font:500 13px Arial,sans-serif;fill:#334155}.line{stroke:#334155;stroke-width:2.5;fill:none;marker-end:url(#arrow)}</style></defs>
+  <rect width="960" height="340" fill="#f8fafc"/>
+  <text x="48" y="48" style="font:700 24px Arial,sans-serif;fill:#0f172a">Agent handoff lifecycle</text>
+  <g transform="translate(54 112)">
+    <rect width="120" height="76" rx="14" class="box"/><text x="60" y="32" text-anchor="middle" class="t">Human</text><text x="60" y="54" text-anchor="middle" class="s">intent</text>
+    <path d="M132 38 H182" class="line"/>
+    <rect x="194" width="120" height="76" rx="14" class="ready"/><text x="254" y="32" text-anchor="middle" class="t">Ready</text><text x="254" y="54" text-anchor="middle" class="s">work item</text>
+    <path d="M326 38 H376" class="line"/>
+    <rect x="388" width="120" height="76" rx="14" class="box"/><text x="448" y="30" text-anchor="middle" class="t">AI coding</text><text x="448" y="53" text-anchor="middle" class="s">agent work</text>
+    <path d="M520 38 H570" class="line"/>
+    <rect x="582" width="120" height="76" rx="14" class="evidence"/><text x="642" y="30" text-anchor="middle" class="t">Validation</text><text x="642" y="53" text-anchor="middle" class="s">artifact</text>
+    <path d="M714 38 H764" class="line"/>
+    <rect x="776" width="120" height="76" rx="14" class="review"/><text x="836" y="30" text-anchor="middle" class="t">Human</text><text x="836" y="53" text-anchor="middle" class="s">review</text>
+    <path d="M642 89 C642 146 255 146 255 92" class="line"/>
+    <text x="450" y="162" text-anchor="middle" class="s">worklog evidence links validation back to the durable item</text>
+  </g>
+</svg>

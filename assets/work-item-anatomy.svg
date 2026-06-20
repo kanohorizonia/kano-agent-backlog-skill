@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="520" viewBox="0 0 960 520" role="img" aria-labelledby="title desc">
+  <title id="title">Durable work item anatomy</title>
+  <desc id="desc">A durable Markdown work item contains context, goal, approach, acceptance criteria, risks, worklog, ADR or decision links, and validation evidence.</desc>
+  <defs><style>.bg{fill:#f8fafc}.card{fill:#ffffff;stroke:#cbd5e1;stroke-width:2}.ready{fill:#ecfeff;stroke:#0891b2}.evidence{fill:#f0fdf4;stroke:#16a34a}.decision{fill:#fef9c3;stroke:#ca8a04}.title{font:700 24px Arial,sans-serif;fill:#0f172a}.h{font:700 17px Arial,sans-serif;fill:#0f172a}.p{font:500 13px Arial,sans-serif;fill:#334155}.mono{font:600 13px Consolas,monospace;fill:#334155}</style></defs>
+  <rect width="960" height="520" class="bg"/>
+  <text x="48" y="48" class="title">Work item anatomy</text>
+  <rect x="48" y="72" width="864" height="392" rx="20" class="card"/>
+  <text x="82" y="112" class="mono">KOB-TSK-0042_revamp-readme-landing-page.md</text>
+  <g transform="translate(82 142)">
+    <rect width="250" height="78" rx="12" class="ready"/><text x="18" y="28" class="h">Context</text><text x="18" y="52" class="p">Why this work exists now</text>
+    <rect x="285" width="250" height="78" rx="12" class="ready"/><text x="303" y="28" class="h">Goal</text><text x="303" y="52" class="p">The human outcome to preserve</text>
+    <rect x="570" width="250" height="78" rx="12" class="ready"/><text x="588" y="28" class="h">Approach</text><text x="588" y="52" class="p">Bounded execution plan</text>
+    <rect y="108" width="250" height="78" rx="12" class="ready"/><text x="18" y="136" class="h">Acceptance Criteria</text><text x="18" y="160" class="p">Falsifiable checks that can fail</text>
+    <rect x="285" y="108" width="250" height="78" rx="12" class="ready"/><text x="303" y="136" class="h">Risks</text><text x="303" y="160" class="p">Known boundaries and stop signs</text>
+    <rect x="570" y="108" width="250" height="78" rx="12" class="evidence"/><text x="588" y="136" class="h">Worklog</text><text x="588" y="160" class="p">Append-only execution trail</text>
+    <rect y="216" width="390" height="78" rx="12" class="decision"/><text x="18" y="244" class="h">ADR / Decision Links</text><text x="18" y="268" class="p">Durable rationale, trade-offs, and authority</text>
+    <rect x="430" y="216" width="390" height="78" rx="12" class="evidence"/><text x="448" y="244" class="h">Evidence</text><text x="448" y="268" class="p">Commands, reports, artifacts, screenshots, reviews</text>
+  </g>
+  <text x="82" y="438" class="p">The Markdown file is the shared contract: humans review it, agents execute against it, and Git keeps the trail.</text>
+</svg>

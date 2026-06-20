@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="420" viewBox="0 0 960 420" role="img" aria-labelledby="title desc">
+  <title id="title">Intent Engineering before and after</title>
+  <desc id="desc">Before: human request flows through a chat thread to an agent and code while context is lost. After: the request becomes a durable work item, passes a Ready gate, records validation evidence, and supports human review.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#475569"/></marker>
+    <style>
+      .panel{fill:#f8fafc;stroke:#cbd5e1;stroke-width:2}.loss{fill:#fff1f2;stroke:#e11d48}.win{fill:#ecfeff;stroke:#0891b2}.gate{fill:#fef9c3;stroke:#ca8a04}.text{font:600 17px Arial,sans-serif;fill:#0f172a}.small{font:500 13px Arial,sans-serif;fill:#334155}.label{font:700 20px Arial,sans-serif;fill:#0f172a}.line{stroke:#475569;stroke-width:2.5;fill:none;marker-end:url(#arrow)}.dash{stroke:#e11d48;stroke-width:2;stroke-dasharray:6 5;fill:none;marker-end:url(#arrow)}
+    </style>
+  </defs>
+  <rect width="960" height="420" fill="#ffffff"/>
+  <rect x="28" y="40" width="904" height="150" rx="18" class="panel"/>
+  <text x="52" y="72" class="label">Before: chat-only agent work</text>
+  <g transform="translate(58 102)">
+    <rect width="125" height="54" rx="12" class="loss"/><text x="62" y="25" text-anchor="middle" class="text">Human</text><text x="62" y="43" text-anchor="middle" class="small">request</text>
+    <path d="M135 27 H205" class="line"/>
+    <rect x="215" width="125" height="54" rx="12" class="loss"/><text x="277" y="25" text-anchor="middle" class="text">Chat</text><text x="277" y="43" text-anchor="middle" class="small">thread</text>
+    <path d="M350 27 H420" class="line"/>
+    <rect x="430" width="125" height="54" rx="12" class="loss"/><text x="492" y="25" text-anchor="middle" class="text">Coding</text><text x="492" y="43" text-anchor="middle" class="small">agent</text>
+    <path d="M565 27 H635" class="line"/>
+    <rect x="645" width="125" height="54" rx="12" class="loss"/><text x="707" y="25" text-anchor="middle" class="text">Code</text><text x="707" y="43" text-anchor="middle" class="small">changes</text>
+    <path d="M278 64 C320 115 455 115 505 64" class="dash"/>
+    <text x="390" y="120" text-anchor="middle" class="small" fill="#be123c">intent, risks, and acceptance drift out of view</text>
+  </g>
+  <rect x="28" y="230" width="904" height="150" rx="18" class="panel"/>
+  <text x="52" y="262" class="label">After: evidence-first Intent Engineering</text>
+  <g transform="translate(50 292)">
+    <rect width="105" height="54" rx="12" class="win"/><text x="52" y="25" text-anchor="middle" class="text">Human</text><text x="52" y="43" text-anchor="middle" class="small">intent</text>
+    <path d="M115 27 H165" class="line"/>
+    <rect x="175" width="120" height="54" rx="12" class="win"/><text x="235" y="24" text-anchor="middle" class="text">Durable</text><text x="235" y="42" text-anchor="middle" class="small">work item</text>
+    <path d="M305 27 H355" class="line"/>
+    <rect x="365" width="105" height="54" rx="12" class="gate"/><text x="417" y="24" text-anchor="middle" class="text">Ready</text><text x="417" y="42" text-anchor="middle" class="small">gate</text>
+    <path d="M480 27 H530" class="line"/>
+    <rect x="540" width="112" height="54" rx="12" class="win"/><text x="596" y="24" text-anchor="middle" class="text">Agent</text><text x="596" y="42" text-anchor="middle" class="small">execution</text>
+    <path d="M662 27 H712" class="line"/>
+    <rect x="722" width="112" height="54" rx="12" class="win"/><text x="778" y="24" text-anchor="middle" class="text">Evidence</text><text x="778" y="42" text-anchor="middle" class="small">and review</text>
+  </g>
+</svg>

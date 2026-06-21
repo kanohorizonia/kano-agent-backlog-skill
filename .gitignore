@@ -116,3 +116,4 @@ vendor/
 venv/
 # <<< STATIC-GITIGNORE
 .kano/cache/git/workspace-manifest.json
+_ws/

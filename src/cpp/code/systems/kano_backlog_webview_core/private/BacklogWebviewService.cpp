@@ -4,6 +4,8 @@
 #include <chrono>
 #include <cctype>
 #include <fstream>
+#include <functional>
+#include <map>
 #include <optional>
 #include <regex>
 #include <set>
@@ -120,6 +122,122 @@ void AppendUnique(std::vector<std::string>& values, const std::string& value) {
   if (std::find(values.begin(), values.end(), value) == values.end()) {
     values.push_back(value);
   }
+}
+
+std::string StripInlineComment(const std::string& value) {
+  bool quoted = false;
+  char quote = '\0';
+  for (size_t i = 0; i < value.size(); ++i) {
+    const char ch = value[i];
+    if (quoted) {
+      if (ch == quote) {
+        quoted = false;
+      }
+      continue;
+    }
+    if (ch == '"' || ch == '\'') {
+      quoted = true;
+      quote = ch;
+      continue;
+    }
+    if (ch == '#') {
+      return Trim(value.substr(0, i));
+    }
+  }
+  return Trim(value);
+}
+
+std::string CleanListToken(std::string value) {
+  value = StripInlineComment(Trim(value));
+  while (!value.empty() && value.back() == ',') {
+    value.pop_back();
+    value = Trim(value);
+  }
+  value = NormalizeNullToken(Unquote(value));
+  if (value == "[]" || value == "{}") {
+    return "";
+  }
+  return value;
+}
+
+std::vector<std::string> ParseListValue(std::string value) {
+  std::vector<std::string> result;
+  value = StripInlineComment(Trim(value));
+  if (value.empty() || value == "[]") {
+    return result;
+  }
+  if (value.size() >= 2 && value.front() == '[' && value.back() == ']') {
+    const auto inner = value.substr(1, value.size() - 2);
+    std::stringstream stream(inner);
+    std::string token;
+    while (std::getline(stream, token, ',')) {
+      AppendUnique(result, CleanListToken(token));
+    }
+    return result;
+  }
+  AppendUnique(result, CleanListToken(value));
+  return result;
+}
+
+std::vector<std::string> ExtractFrontmatterList(const std::string& content,
+                                                const std::string& key) {
+  std::vector<std::string> result;
+  const auto lines = SplitLines(content);
+  if (lines.empty() || Trim(lines.front()) != "---") {
+    return result;
+  }
+
+  bool inLinks = false;
+  std::string activeList;
+  for (size_t i = 1; i < lines.size(); ++i) {
+    const auto raw = lines[i];
+    const auto trimmed = Trim(raw);
+    if (trimmed == "---") {
+      break;
+    }
+    if (trimmed.empty()) {
+      continue;
+    }
+
+    const auto firstNonSpace = raw.find_first_not_of(" \t");
+    const size_t indent =
+        firstNonSpace == std::string::npos ? 0 : firstNonSpace;
+    const auto colon = trimmed.find(':');
+    if (indent == 0 && colon != std::string::npos) {
+      const auto currentKey = Trim(trimmed.substr(0, colon));
+      inLinks = currentKey == "links";
+      activeList.clear();
+      if (currentKey == key) {
+        activeList = key;
+        for (const auto& value : ParseListValue(trimmed.substr(colon + 1))) {
+          AppendUnique(result, value);
+        }
+      }
+      continue;
+    }
+
+    if (colon != std::string::npos) {
+      const auto currentKey = Trim(trimmed.substr(0, colon));
+      if ((inLinks || currentKey == key) && currentKey == key) {
+        activeList = key;
+        for (const auto& value : ParseListValue(trimmed.substr(colon + 1))) {
+          AppendUnique(result, value);
+        }
+        continue;
+      }
+      if (indent <= 2) {
+        activeList.clear();
+      }
+    }
+
+    if (activeList == key && StartsWith(trimmed, "-")) {
+      auto value = Trim(trimmed.substr(1));
+      for (const auto& parsed : ParseListValue(value)) {
+        AppendUnique(result, parsed);
+      }
+    }
+  }
+  return result;
 }
 
 size_t ParseSizeOrDefault(const std::string& value, const size_t fallback,
@@ -691,6 +809,9 @@ ItemRecord BacklogWebviewService::ParseItem(const std::filesystem::path& itemPat
   item.parent = map["parent"];
   item.created = map["created"];
   item.updated = map["updated"];
+  item.relates = ExtractFrontmatterList(content, "relates");
+  item.blocks = ExtractFrontmatterList(content, "blocks");
+  item.blockedBy = ExtractFrontmatterList(content, "blocked_by");
 
   if (item.id.empty()) {
     item.parseError = "Missing id";
@@ -873,6 +994,18 @@ Json::Value BacklogWebviewService::ItemToJson(const ItemRecord& item,
   value["updated"] = item.updated;
   value["path"] = item.relativePath;
   value["valid"] = item.valid;
+  value["links"]["relates"] = Json::arrayValue;
+  value["links"]["blocks"] = Json::arrayValue;
+  value["links"]["blocked_by"] = Json::arrayValue;
+  for (const auto& ref : item.relates) {
+    value["links"]["relates"].append(ref);
+  }
+  for (const auto& ref : item.blocks) {
+    value["links"]["blocks"].append(ref);
+  }
+  for (const auto& ref : item.blockedBy) {
+    value["links"]["blocked_by"].append(ref);
+  }
   if (!item.parseError.empty()) {
     value["parse_error"] = item.parseError;
   }
@@ -1710,72 +1843,343 @@ Json::Value BacklogWebviewService::BuildDependencyGraph(const ItemQueryOptions& 
   response["nodes"] = Json::arrayValue;
   response["edges"] = Json::arrayValue;
   response["missing_nodes"] = Json::arrayValue;
+  response["invalid_refs"] = Json::arrayValue;
+  response["dependency_cycles"] = Json::arrayValue;
   response["read_only"] = true;
+  response["edge_list_debug"] = true;
+  response["visualization"]["kind"] = "first-party-svg";
+  response["visualization"]["layout"] = "deterministic-layered";
 
   auto items = QueryItems(options);
   if (items.isMember("error")) {
     return items;
   }
 
-  std::set<std::string> knownIds;
+  const size_t maxNodes = 1000;
+  const size_t maxEdges = 1000;
+  response["node_limit"] = static_cast<Json::UInt64>(maxNodes);
+  response["edge_limit"] = static_cast<Json::UInt64>(maxEdges);
+  response["query_limit"] = items["limit"];
+  response["query_offset"] = items["offset"];
+  response["query_total"] = items["total"];
+  response["truncated"] =
+      items["total"].asUInt64() >
+      (items["offset"].asUInt64() + items["items"].size());
+
+  auto itemKey = [](const Json::Value& item) {
+    return item["product"].asString() + ":" + item["id"].asString();
+  };
+
+  std::map<std::string, Json::Value> allByKey;
+  std::map<std::string, std::vector<std::string>> keysByBareId;
   for (const auto& item : items["items"]) {
-    if (!itemId.empty() && item["id"].asString() != itemId &&
-        item["parent"].asString() != itemId) {
-      continue;
+    const auto key = itemKey(item);
+    allByKey[key] = item;
+    keysByBareId[item["id"].asString()].push_back(key);
+  }
+
+  std::set<std::string> activeKeys;
+  for (const auto& [key, item] : allByKey) {
+    const bool matchesItem = itemId.empty() || item["id"].asString() == itemId ||
+                             item["parent"].asString() == itemId;
+    const bool matchesTopic = topic.empty() || ItemMatchesTopic(item, topic);
+    if (matchesItem && matchesTopic) {
+      activeKeys.insert(key);
     }
-    if (!topic.empty() && !ItemMatchesTopic(item, topic)) {
-      continue;
+  }
+
+  std::map<std::string, Json::Value> nodesByKey;
+  Json::Value edges(Json::arrayValue);
+  std::set<std::string> edgeKeys;
+  std::map<std::string, std::vector<std::string>> dependencyAdjacency;
+  bool graphTruncated = response["truncated"].asBool();
+
+  auto appendNode = [&](const Json::Value& node) {
+    const auto key = node["id"].asString();
+    if (key.empty() || nodesByKey.count(key) > 0) {
+      return;
     }
-    const auto key = item["product"].asString() + ":" + item["id"].asString();
-    knownIds.insert(item["id"].asString());
+    if (nodesByKey.size() >= maxNodes) {
+      graphTruncated = true;
+      return;
+    }
+    nodesByKey[key] = node;
+  };
+
+  auto appendItemNode = [&](const Json::Value& item) {
     Json::Value node(Json::objectValue);
-    node["id"] = key;
+    node["id"] = itemKey(item);
     node["item_id"] = item["id"].asString();
     node["product"] = item["product"].asString();
     node["label"] = item["title"].asString();
     node["kind"] = item["type"].asString();
     node["state"] = item["state"].asString();
-    response["nodes"].append(node);
+    node["missing"] = false;
+    appendNode(node);
+  };
 
-    const auto itemTopic = item["topic"].asString();
-    if (!itemTopic.empty()) {
-      Json::Value topicNode(Json::objectValue);
-      topicNode["id"] = "topic:" + itemTopic;
-      topicNode["label"] = itemTopic;
-      topicNode["kind"] = "Topic";
-      topicNode["state"] = "open";
-      response["nodes"].append(topicNode);
+  auto appendTopicNode = [&](const std::string& itemTopic) {
+    Json::Value node(Json::objectValue);
+    node["id"] = "topic:" + itemTopic;
+    node["label"] = itemTopic;
+    node["kind"] = "Topic";
+    node["state"] = "open";
+    node["missing"] = false;
+    appendNode(node);
+  };
 
-      Json::Value edge(Json::objectValue);
-      edge["from"] = "topic:" + itemTopic;
-      edge["to"] = key;
-      edge["kind"] = "topic-membership";
-      response["edges"].append(edge);
-    }
-  }
+  auto appendInvalidRef = [&](const std::string& sourceKey,
+                              const std::string& kind,
+                              const std::string& ref) {
+    Json::Value invalid(Json::objectValue);
+    invalid["source"] = sourceKey;
+    invalid["kind"] = kind;
+    invalid["ref"] = ref;
+    response["invalid_refs"].append(invalid);
+  };
 
-  for (const auto& item : items["items"]) {
-    if (!itemId.empty() && item["id"].asString() != itemId &&
-        item["parent"].asString() != itemId) {
-      continue;
+  auto appendMissingNode = [&](const std::string& sourceKey,
+                               const std::string& kind,
+                               const std::string& ref,
+                               const std::string& targetKey) {
+    Json::Value missing(Json::objectValue);
+    missing["id"] = targetKey;
+    missing["ref"] = ref;
+    missing["source"] = sourceKey;
+    missing["kind"] = kind;
+    response["missing_nodes"].append(missing);
+
+    Json::Value node(Json::objectValue);
+    node["id"] = targetKey;
+    node["item_id"] = ref;
+    node["product"] = targetKey.find(':') == std::string::npos
+                          ? ""
+                          : targetKey.substr(0, targetKey.find(':'));
+    node["label"] = ref;
+    node["kind"] = "Missing";
+    node["state"] = "unresolved";
+    node["missing"] = true;
+    appendNode(node);
+  };
+
+  struct RefTarget {
+    std::string product;
+    std::string itemId;
+    std::string key;
+    std::string display;
+    bool valid = false;
+  };
+
+  auto resolveRef = [&](const std::string& rawRef,
+                        const std::string& defaultProduct) {
+    RefTarget target;
+    target.display = CleanListToken(rawRef);
+    if (target.display.empty()) {
+      return target;
     }
-    if (!topic.empty() && !ItemMatchesTopic(item, topic)) {
-      continue;
+    const auto colon = target.display.find(':');
+    if (colon != std::string::npos) {
+      target.product = Trim(target.display.substr(0, colon));
+      target.itemId = Trim(target.display.substr(colon + 1));
+    } else {
+      target.product = defaultProduct;
+      target.itemId = Trim(target.display);
     }
-    const auto parent = item["parent"].asString();
-    if (parent.empty()) {
-      continue;
+
+    static const std::regex productRegex("^[A-Za-z0-9._-]+$");
+    static const std::regex itemIdRegex("^[A-Z][A-Z0-9]*-[A-Z]+-[0-9]+$");
+    target.valid = std::regex_match(target.product, productRegex) &&
+                   std::regex_match(target.itemId, itemIdRegex);
+    if (!target.valid) {
+      return target;
+    }
+
+    target.key = target.product + ":" + target.itemId;
+    if (colon == std::string::npos && allByKey.count(target.key) == 0) {
+      const auto bareIt = keysByBareId.find(target.itemId);
+      if (bareIt != keysByBareId.end() && bareIt->second.size() == 1) {
+        target.key = bareIt->second.front();
+        target.product = target.key.substr(0, target.key.find(':'));
+      }
+    }
+    return target;
+  };
+
+  auto ensureRefNode = [&](const std::string& sourceKey,
+                           const std::string& kind,
+                           const RefTarget& target) {
+    if (!target.valid) {
+      appendInvalidRef(sourceKey, kind, target.display);
+      return;
+    }
+    activeKeys.insert(target.key);
+    const auto targetIt = allByKey.find(target.key);
+    if (targetIt != allByKey.end()) {
+      appendItemNode(targetIt->second);
+    } else {
+      appendMissingNode(sourceKey, kind, target.display, target.key);
+    }
+  };
+
+  auto appendEdge = [&](const std::string& from,
+                        const std::string& to,
+                        const std::string& kind,
+                        const std::string& semantic,
+                        const std::string& source) {
+    if (from.empty() || to.empty()) {
+      return;
+    }
+    const auto edgeKey = from + "\n" + to + "\n" + kind;
+    if (!edgeKeys.insert(edgeKey).second) {
+      return;
+    }
+    if (edges.size() >= maxEdges) {
+      graphTruncated = true;
+      return;
     }
     Json::Value edge(Json::objectValue);
-    edge["from"] = item["product"].asString() + ":" + parent;
-    edge["to"] = item["product"].asString() + ":" + item["id"].asString();
-    edge["kind"] = "parent";
-    response["edges"].append(edge);
-    if (!knownIds.count(parent)) {
-      response["missing_nodes"].append(parent);
+    edge["from"] = from;
+    edge["to"] = to;
+    edge["kind"] = kind;
+    edge["semantic"] = semantic;
+    edge["source"] = source;
+    edge["dependency"] = semantic == "dependency";
+    edges.append(edge);
+    if (semantic == "dependency") {
+      dependencyAdjacency[from].push_back(to);
+    }
+  };
+
+  for (const auto& key : activeKeys) {
+    const auto itemIt = allByKey.find(key);
+    if (itemIt != allByKey.end()) {
+      appendItemNode(itemIt->second);
     }
   }
 
+  for (const auto& [key, item] : allByKey) {
+    if (activeKeys.count(key) == 0) {
+      continue;
+    }
+
+    for (const auto& itemTopic : SplitCsv(item["topic"].asString())) {
+      const auto topicKey = "topic:" + itemTopic;
+      appendTopicNode(itemTopic);
+      appendEdge(topicKey, key, "topic-membership", "grouping", key);
+    }
+
+    const auto parent = item["parent"].asString();
+    if (!parent.empty()) {
+      const auto target = resolveRef(parent, item["product"].asString());
+      ensureRefNode(key, "parent", target);
+      if (target.valid) {
+        appendEdge(target.key, key, "parent", "structural", key);
+      }
+    }
+
+    for (const auto& ref : item["links"]["blocks"]) {
+      const auto target = resolveRef(ref.asString(), item["product"].asString());
+      ensureRefNode(key, "blocks", target);
+      if (target.valid) {
+        appendEdge(key, target.key, "blocks", "dependency", key);
+      }
+    }
+
+    for (const auto& ref : item["links"]["blocked_by"]) {
+      const auto target = resolveRef(ref.asString(), item["product"].asString());
+      ensureRefNode(key, "blocked_by", target);
+      if (target.valid) {
+        appendEdge(target.key, key, "blocked_by", "dependency", key);
+      }
+    }
+
+    for (const auto& ref : item["links"]["relates"]) {
+      const auto target = resolveRef(ref.asString(), item["product"].asString());
+      ensureRefNode(key, "relates", target);
+      if (target.valid) {
+        appendEdge(key, target.key, "relates", "reference", key);
+      }
+    }
+  }
+
+  std::map<std::string, size_t> visualLayers;
+  for (const auto& [key, node] : nodesByKey) {
+    if (StartsWith(key, "topic:")) {
+      visualLayers[key] = 0;
+    } else if (node.get("missing", false).asBool()) {
+      visualLayers[key] = 3;
+    } else {
+      visualLayers[key] = 1;
+    }
+  }
+  for (const auto& edge : edges) {
+    const auto kind = edge["kind"].asString();
+    const auto from = edge["from"].asString();
+    const auto to = edge["to"].asString();
+    if (kind == "blocks" || kind == "blocked_by") {
+      visualLayers[from] = std::min(visualLayers[from], size_t{0});
+      visualLayers[to] = std::max(visualLayers[to], size_t{2});
+    } else if (kind == "parent" || kind == "topic-membership") {
+      visualLayers[from] = std::min(visualLayers[from], size_t{0});
+      visualLayers[to] = std::max(visualLayers[to], size_t{1});
+    } else if (kind == "relates") {
+      visualLayers[to] = std::max(visualLayers[to], size_t{2});
+    }
+  }
+
+  std::set<std::string> visiting;
+  std::set<std::string> visited;
+  std::set<std::string> emittedCycles;
+  std::vector<std::string> path;
+  std::function<void(const std::string&)> visit = [&](const std::string& node) {
+    if (response["dependency_cycles"].size() >= 10) {
+      return;
+    }
+    if (visiting.count(node) > 0 || visited.count(node) > 0) {
+      return;
+    }
+    visiting.insert(node);
+    path.push_back(node);
+    const auto edgeIt = dependencyAdjacency.find(node);
+    if (edgeIt != dependencyAdjacency.end()) {
+      for (const auto& next : edgeIt->second) {
+        const auto stackIt = std::find(path.begin(), path.end(), next);
+        if (stackIt != path.end()) {
+          Json::Value cycle(Json::arrayValue);
+          std::ostringstream keyStream;
+          for (auto it = stackIt; it != path.end(); ++it) {
+            cycle.append(*it);
+            keyStream << *it << ">";
+          }
+          cycle.append(next);
+          keyStream << next;
+          if (emittedCycles.insert(keyStream.str()).second) {
+            response["dependency_cycles"].append(cycle);
+          }
+          continue;
+        }
+        visit(next);
+      }
+    }
+    path.pop_back();
+    visiting.erase(node);
+    visited.insert(node);
+  };
+
+  for (const auto& [key, _] : dependencyAdjacency) {
+    visit(key);
+  }
+
+  for (auto& [key, node] : nodesByKey) {
+    node["visual_layer"] = static_cast<Json::UInt64>(visualLayers[key]);
+    response["nodes"].append(node);
+  }
+  response["edges"] = edges;
+  response["node_count"] = static_cast<Json::UInt64>(response["nodes"].size());
+  response["edge_count"] = static_cast<Json::UInt64>(response["edges"].size());
+  response["missing_node_count"] =
+      static_cast<Json::UInt64>(response["missing_nodes"].size());
+  response["truncated"] = graphTruncated;
   return response;
 }
 

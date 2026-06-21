@@ -23,6 +23,9 @@ struct ItemRecord {
   std::string updated;
   std::string relativePath;
   std::string rawContent;
+  std::vector<std::string> relates;
+  std::vector<std::string> blocks;
+  std::vector<std::string> blockedBy;
   bool valid;
   std::string parseError;
 };

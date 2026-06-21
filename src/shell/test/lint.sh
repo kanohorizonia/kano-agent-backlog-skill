@@ -66,9 +66,11 @@ fi
 remaining_py="$(
   find "$SKILL_ROOT" -type f \( -name '*.py' -o -name '*.pyi' \) \
     ! -path "$SKILL_ROOT/src/cpp/out/*" \
+    ! -path "$SKILL_ROOT/_ws/*" \
     ! -path "$SKILL_ROOT/.git/*" \
     ! -path "$SKILL_ROOT/.kano/*" \
     ! -path "$SKILL_ROOT/.pixi/*" \
+    ! -path "$SKILL_ROOT/node_modules/*" \
     2>/dev/null || true
 )"
 if [[ -n "$remaining_py" ]]; then

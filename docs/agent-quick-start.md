@@ -83,6 +83,11 @@ bash scripts/kob admin init --product <product-name> --agent <agent-id>
 bash scripts/kob admin init --product my-app --agent kiro
 ```
 
+Use an explicit `--prefix` for Kano products whose derived prefix would collide
+in a shared backlog root. `kano-agent-ark-skill` should be initialized with
+`--prefix KOA`; `kano-ai-3d-asset-skill` should use a distinct prefix such as
+`KA3D` or `K3DA`, not the ambiguous derived `KA`.
+
 **What this creates:**
 ```
 _kano/backlog/

@@ -120,19 +120,22 @@ intent, scope, acceptance, risk, decisions, and evidence across agent sessions.
 
 ## Human review webview
 
-The repository includes local webview support for reading backlog state. When the
-host-native webview binary is missing or blocked, the Docker Compose path can run
-the read-only webview:
+The repository includes local webview support for reading backlog state. The
+host path builds the native webview and serves it on the workstation:
 
 ```bash
-pixi run webview-compose-up-detached
+pixi run webview
 ```
 
-Then open <http://localhost:8799/>. Stop it with:
+The Docker path builds the image, starts a restartable container, and opens the
+same local URL:
 
 ```bash
-pixi run webview-compose-down
+pixi run webview-docker
 ```
+
+The CLI shortcut `kob gui` runs the same Docker path. Stop the container with
+`pixi run webview-docker-down`.
 
 The visual below is a concept mock for a future review-console style experience,
 not a current UI screenshot.

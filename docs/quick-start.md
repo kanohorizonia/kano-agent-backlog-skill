@@ -40,6 +40,16 @@ bash scripts/kob admin init --product my-app --agent my-agent
 
 This scaffolds local markdown artifacts under `_kano/backlog/`, including product config, backlog items, decisions, and generated views.
 
+Use `--prefix` when the derived two-letter prefix would collide with another
+product in the same shared backlog root. For example,
+`kano-agent-ark-skill` should use `KOA`; `kano-ai-3d-asset-skill` should use a
+distinct prefix such as `KA3D` or `K3DA`, not the ambiguous derived `KA`.
+
+```bash
+bash scripts/kob admin init --product kano-agent-ark-skill --prefix KOA --agent my-agent
+bash scripts/kob admin init --product kano-ai-3d-asset-skill --prefix KA3D --agent my-agent
+```
+
 Add derived data to `.gitignore`:
 
 ```gitignore

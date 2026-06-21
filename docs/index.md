@@ -9,7 +9,9 @@ source of truth.
 ![Intent Engineering before and after](assets/intent-engineering-before-after.svg)
 
 > This file is the GitHub Pages home page source. If you are browsing the
-> repository directly, use [docs/README.md](README.md) for repo-local links.
+> repository directly, use
+> [docs/README.md](https://github.com/kanohorizonia/kano-agent-backlog-skill/blob/main/docs/README.md)
+> for repo-local links.
 
 ## Problem
 
@@ -81,18 +83,22 @@ Those fields become the human-reviewable contract for the agent.
 ## Human review webview preview
 
 The current repository includes local read-only webview support for backlog
-review. If the host-native webview binary is missing or blocked, run the Docker
-Compose path:
+review. The host path builds the native webview and serves it on the
+workstation:
 
 ```bash
-pixi run webview-compose-up-detached
+pixi run webview
 ```
 
-Then open <http://localhost:8799/> and stop it with:
+The Docker path builds the image, starts a restartable container, and opens the
+same local URL:
 
 ```bash
-pixi run webview-compose-down
+pixi run webview-docker
 ```
+
+The CLI shortcut `kob gui` runs the same Docker path. Stop the container with
+`pixi run webview-docker-down`.
 
 The image below is a concept mock for a future review-console style workflow,
 not a current UI screenshot.

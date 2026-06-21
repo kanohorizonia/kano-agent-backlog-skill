@@ -111,6 +111,19 @@ const char* kIndexHtml = R"HTML(
     .tree .leaf-spacer { display: inline-block; width: 12px; }
     .btn { border: 1px solid #cfd9ea; background: #fff; border-radius: 6px; padding: 4px 10px; cursor: pointer; }
     .btn:hover { background: #f2f6ff; }
+    .status-wrap { display: inline-flex; align-items: center; gap: 7px; min-width: 190px; }
+    .spinner { width: 14px; height: 14px; border: 2px solid #cbd6e8; border-top-color: #1f4fa3; border-radius: 50%; animation: spin 0.8s linear infinite; }
+    .status-wrap .spinner { display: none; }
+    .status-wrap.busy .spinner { display: inline-block; }
+    .busy-banner { display: none; align-items: center; gap: 12px; border: 1px solid #b9c9e8; border-left: 5px solid #1f4fa3; background: #f5f8ff; border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; box-shadow: 0 1px 2px rgba(30, 55, 95, 0.08); }
+    .busy-banner.visible { display: flex; }
+    .busy-body { flex: 1; min-width: 0; }
+    .busy-title { font-weight: 700; color: #1d3158; margin-bottom: 4px; }
+    .busy-progress { position: relative; height: 5px; overflow: hidden; border-radius: 999px; background: #dfe8f7; margin-top: 8px; }
+    .busy-progress-fill { position: absolute; inset: 0 auto 0 0; width: 42%; border-radius: 999px; background: linear-gradient(90deg, #1f4fa3, #4d7ed6); animation: busy-slide 1.1s ease-in-out infinite; }
+    .status-error { color: #9c1c1c; font-weight: 600; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes busy-slide { 0% { transform: translateX(-105%); } 50% { transform: translateX(65%); } 100% { transform: translateX(245%); } }
     .filter-panel { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
     .filter-group { display: flex; flex-direction: column; gap: 8px; }
     .filter-group-title { font-size: 12px; font-weight: 700; color: #3c4a63; text-transform: uppercase; }
@@ -136,6 +149,10 @@ const char* kIndexHtml = R"HTML(
     .md-view .obs-wikilink { color: #1f4fa3; text-decoration: none; }
     .md-view .obs-wikilink:hover { text-decoration: underline; }
     code { background: #eef2f8; padding: 1px 4px; border-radius: 4px; }
+    .md-view pre code { display: block; background: transparent; padding: 0; border-radius: 0; overflow-x: auto; }
+    .md-code-lang { display: inline-block; margin-bottom: 6px; color: #66738a; font-size: 11px; text-transform: uppercase; letter-spacing: 0; }
+    .md-view a { color: #1f4fa3; text-decoration: none; }
+    .md-view a:hover { text-decoration: underline; }
     .muted { color: #586074; font-size: 12px; }
     .graph-canvas { width: 100%; overflow: auto; border: 1px solid #dbe4f2; border-radius: 8px; background: #fbfcff; margin-bottom: 12px; }
     .graph-svg { min-width: 760px; display: block; }
@@ -153,7 +170,6 @@ const char* kIndexHtml = R"HTML(
     .graph-edge-label { font-size: 10px; fill: #47536a; }
     .graph-diagnostics { display: grid; gap: 6px; margin-bottom: 12px; }
   </style>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github.min.css" />
 </head>
 <body>
   <div class="app-shell">
@@ -178,7 +194,19 @@ const char* kIndexHtml = R"HTML(
     <label for="limit">Limit:</label>
     <input id="limit" class="limit-input" type="number" min="1" max="1000" value="200" />
     <button id="refresh">Refresh</button>
-    <span id="status" class="muted"></span>
+    <span id="status-wrap" class="status-wrap" aria-live="polite">
+      <span class="spinner" aria-hidden="true"></span>
+      <span id="status" class="muted"></span>
+    </span>
+  </div>
+
+  <div id="busy-banner" class="busy-banner" role="status" aria-live="polite">
+    <span class="spinner" aria-hidden="true"></span>
+    <div class="busy-body">
+      <div id="busy-title" class="busy-title">Loading backlog data</div>
+      <div id="busy-detail" class="muted">Starting refresh...</div>
+      <div class="busy-progress" aria-hidden="true"><div class="busy-progress-fill"></div></div>
+    </div>
   </div>
 
   <div class="panel filter-panel">
@@ -268,9 +296,7 @@ const char* kIndexHtml = R"HTML(
   </div>
 
 )HTML"
-R"HTML(  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/highlight.min.js"></script>
-  <script>
+R"HTML(  <script>
     const state = {
       product: 'all',
       products: [],
@@ -284,16 +310,30 @@ R"HTML(  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></scrip
       treeOpen: new Set(),
       treeTouched: false,
       activeTab: 'tree',
-      allItems: []
+      allItems: [],
+      refreshSeq: 0,
+      refreshAbort: null,
+      refreshTimer: null,
+      refreshTickTimer: null
     };
     const lanes = ['Backlog', 'Doing', 'Blocked', 'Review', 'Done'];
     const itemStates = ['Proposed', 'Ready', 'InProgress', 'Blocked', 'Review', 'Done', 'Dropped'];
     const itemTypes = ['Theme', 'Epic', 'Feature', 'UserStory', 'Task', 'Bug', 'Issue', 'ADR', 'Topic', 'Workset'];
     const workspaceStorageKey = 'kano_webview_workspaces_v2';
 
-    async function getJson(url) {
-      const resp = await fetch(url);
-      return resp.json();
+    async function getJson(url, options = {}) {
+      const resp = await fetch(url, { signal: options.signal });
+      let body = null;
+      try {
+        body = await resp.json();
+      } catch (_e) {
+        body = {};
+      }
+      if (!resp.ok || body?.ok === false) {
+        const detail = body?.data?.error || body?.error || `HTTP ${resp.status}`;
+        throw new Error(detail);
+      }
+      return body;
     }
 
     function nowIso() {
@@ -521,6 +561,41 @@ R"HTML(  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></scrip
       return `${products.length} products`;
     }
 
+    function formatElapsed(startedAt) {
+      const seconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+      if (seconds < 60) {
+        return `${seconds}s`;
+      }
+      return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, '0')}s`;
+    }
+
+    function setStatus(text, kind = '') {
+      const status = document.getElementById('status');
+      status.textContent = text || '';
+      status.classList.toggle('status-error', kind === 'error');
+    }
+
+    function setBusy(active) {
+      document.getElementById('status-wrap').classList.toggle('busy', active);
+      document.getElementById('busy-banner').classList.toggle('visible', active);
+      if (!active && state.refreshTickTimer) {
+        clearInterval(state.refreshTickTimer);
+        state.refreshTickTimer = null;
+      }
+    }
+
+    function updateBusy(title, detail) {
+      document.getElementById('busy-title').textContent = title;
+      document.getElementById('busy-detail').textContent = detail;
+    }
+
+    function describeRefreshError(error) {
+      if (error?.name === 'AbortError') {
+        return 'Refresh replaced by a newer request';
+      }
+      return error?.message || String(error || 'Unknown refresh error');
+    }
+
     function selectedTokens(values, allValues) {
       if (values.size === allValues.length) {
         return '';
@@ -565,48 +640,162 @@ R"HTML(  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></scrip
       return `${node.product || ''}::${node.id || ''}`;
     }
 
-    function renderMarkdownWithObsidian(raw) {
-      let text = String(raw || '');
+    function safeHref(href) {
+      const value = String(href || '').trim();
+      if (!value) return '#';
+      if (/^(https?:|mailto:|#|\/)/i.test(value)) return value;
+      if (/^[A-Za-z][A-Za-z0-9+.-]*:/i.test(value)) return '#';
+      return value;
+    }
 
-      text = text.replace(/\[\[([^\]|]+)(\|([^\]]+))?\]\]/g, (_m, target, _p2, alias) => {
-        const cleanTarget = String(target || '').trim();
-        const label = String(alias || cleanTarget || '').trim();
-        return `<a href="#" class="obs-wikilink" data-item-id="${escAttr(cleanTarget)}">${esc(label)}</a>`;
-      });
+    function renderInlineMarkdown(raw) {
+      const text = String(raw || '');
+      const pattern = /`([^`]+)`|\[\[([^\]|]+)(?:\|([^\]]+))?\]\]|\[([^\]]+)\]\(([^)\s]+)\)/g;
+      let out = '';
+      let last = 0;
+      let match = null;
+      while ((match = pattern.exec(text)) !== null) {
+        out += esc(text.slice(last, match.index));
+        if (match[1] !== undefined) {
+          out += `<code>${esc(match[1])}</code>`;
+        } else if (match[2] !== undefined) {
+          const cleanTarget = String(match[2] || '').trim();
+          const label = String(match[3] || cleanTarget || '').trim();
+          out += `<a href="#" class="obs-wikilink" data-item-id="${escAttr(cleanTarget)}">${esc(label)}</a>`;
+        } else {
+          const label = String(match[4] || '').trim();
+          const href = safeHref(match[5]);
+          out += `<a href="${escAttr(href)}" target="_blank" rel="noreferrer">${esc(label || href)}</a>`;
+        }
+        last = pattern.lastIndex;
+      }
+      out += esc(text.slice(last));
+      return out;
+    }
 
-      text = text.replace(/(^|\n)>\s*\[!([A-Za-z0-9_-]+)\]\s*(.*)\n((?:>.*\n?)*)/g,
-        (_m, lead, kind, title, content) => {
-          const body = String(content || '')
-            .split('\n')
-            .map((line) => line.replace(/^>\s?/, ''))
-            .join('\n')
-            .trim();
-          const resolvedTitle = (title || kind || 'Callout').trim();
-          return `${lead}<div class="obs-callout"><div class="obs-callout-title">${esc(resolvedTitle)}</div>\n\n${body}\n</div>\n`;
-        });
+    function splitTableRow(line) {
+      return String(line || '')
+        .trim()
+        .replace(/^\|/, '')
+        .replace(/\|$/, '')
+        .split('|')
+        .map((cell) => cell.trim());
+    }
 
-      if (window.marked) {
-        marked.setOptions({
-          gfm: true,
-          breaks: true,
-          highlight(code, lang) {
-            if (window.hljs) {
-              try {
-                if (lang && hljs.getLanguage(lang)) {
-                  return hljs.highlight(code, { language: lang }).value;
-                }
-                return hljs.highlightAuto(code).value;
-              } catch (_e) {
-                return esc(code);
-              }
-            }
-            return esc(code);
+    function isTableSeparator(line) {
+      const cells = splitTableRow(line);
+      return cells.length > 1 && cells.every((cell) => /^:?-{3,}:?$/.test(cell));
+    }
+
+)HTML"
+R"HTML(
+    function renderMarkdownBlocks(lines) {
+      const out = [];
+      let paragraph = [];
+
+      const flushParagraph = () => {
+        if (!paragraph.length) return;
+        const text = paragraph.join(' ').trim();
+        if (text) out.push(`<p>${renderInlineMarkdown(text)}</p>`);
+        paragraph = [];
+      };
+
+      for (let i = 0; i < lines.length; ++i) {
+        const line = String(lines[i] || '');
+        const trimmed = line.trim();
+        if (!trimmed) {
+          flushParagraph();
+          continue;
+        }
+
+        const fence = trimmed.match(/^```([A-Za-z0-9_+.-]*)\s*$/);
+        if (fence) {
+          flushParagraph();
+          const lang = fence[1] || '';
+          const codeLines = [];
+          i += 1;
+          while (i < lines.length && !String(lines[i] || '').trim().startsWith('```')) {
+            codeLines.push(String(lines[i] || ''));
+            i += 1;
           }
-        });
-        return marked.parse(text);
+          const langLabel = lang ? `<span class="md-code-lang">${esc(lang)}</span>` : '';
+          out.push(`<pre>${langLabel}<code class="${lang ? `language-${escAttr(lang)}` : ''}">${esc(codeLines.join('\n'))}</code></pre>`);
+          continue;
+        }
+
+        const heading = trimmed.match(/^(#{1,6})\s+(.+)$/);
+        if (heading) {
+          flushParagraph();
+          const level = Math.min(6, heading[1].length);
+          out.push(`<h${level}>${renderInlineMarkdown(heading[2])}</h${level}>`);
+          continue;
+        }
+
+        if (trimmed.startsWith('>')) {
+          flushParagraph();
+          const quoteLines = [];
+          while (i < lines.length && String(lines[i] || '').trim().startsWith('>')) {
+            quoteLines.push(String(lines[i] || '').replace(/^\s*>\s?/, ''));
+            i += 1;
+          }
+          i -= 1;
+          const callout = String(quoteLines[0] || '').trim().match(/^\[!([A-Za-z0-9_-]+)\]\s*(.*)$/);
+          if (callout) {
+            const title = String(callout[2] || callout[1] || 'Callout').trim();
+            out.push(`<div class="obs-callout"><div class="obs-callout-title">${esc(title)}</div>${renderMarkdownBlocks(quoteLines.slice(1))}</div>`);
+          } else {
+            out.push(`<blockquote>${renderMarkdownBlocks(quoteLines)}</blockquote>`);
+          }
+          continue;
+        }
+
+        const unordered = trimmed.match(/^[-*+]\s+(.+)$/);
+        const ordered = trimmed.match(/^\d+[.)]\s+(.+)$/);
+        if (unordered || ordered) {
+          flushParagraph();
+          const orderedList = Boolean(ordered);
+          const items = [];
+          while (i < lines.length) {
+            const itemLine = String(lines[i] || '').trim();
+            const matchItem = orderedList
+              ? itemLine.match(/^\d+[.)]\s+(.+)$/)
+              : itemLine.match(/^[-*+]\s+(.+)$/);
+            if (!matchItem) break;
+            items.push(`<li>${renderInlineMarkdown(matchItem[1])}</li>`);
+            i += 1;
+          }
+          i -= 1;
+          out.push(`<${orderedList ? 'ol' : 'ul'}>${items.join('')}</${orderedList ? 'ol' : 'ul'}>`);
+          continue;
+        }
+
+        if (trimmed.includes('|') && i + 1 < lines.length && isTableSeparator(lines[i + 1])) {
+          flushParagraph();
+          const headers = splitTableRow(trimmed);
+          i += 2;
+          const rows = [];
+          while (i < lines.length && String(lines[i] || '').trim().includes('|')) {
+            rows.push(splitTableRow(lines[i]));
+            i += 1;
+          }
+          i -= 1;
+          out.push('<table><thead><tr>' +
+            headers.map((cell) => `<th>${renderInlineMarkdown(cell)}</th>`).join('') +
+            '</tr></thead><tbody>' +
+            rows.map((row) => '<tr>' + row.map((cell) => `<td>${renderInlineMarkdown(cell)}</td>`).join('') + '</tr>').join('') +
+            '</tbody></table>');
+          continue;
+        }
+
+        paragraph.push(line);
       }
 
-      return `<pre>${esc(text)}</pre>`;
+      flushParagraph();
+      return out.join('\n');
+    }
+
+    function renderMarkdownWithObsidian(raw) {
+      return renderMarkdownBlocks(String(raw || '').split(/\r?\n/));
     }
 
 )HTML"
@@ -736,14 +925,6 @@ R"HTML(    function typeIcon(type) {
         });
       });
 
-      if (window.hljs) {
-        document.querySelectorAll('#item-modal-body pre code').forEach((block) => {
-          try {
-            hljs.highlightElement(block);
-          } catch (_e) {
-          }
-        });
-      }
     }
 
 )HTML"
@@ -799,10 +980,8 @@ R"HTML(
       renderTokenFilters('type-filters', itemTypes, state.selectedTypes, 'data-filter-type');
     }
 
-    async function loadProducts() {
-      const result = await getJson('/api/products');
+    function renderProductSelectOptions() {
       const select = document.getElementById('product');
-      state.products = result.data || [];
       select.innerHTML = '';
       const allOpt = document.createElement('option');
       allOpt.value = 'all';
@@ -814,17 +993,40 @@ R"HTML(
         opt.textContent = product;
         select.appendChild(opt);
       }
+      syncProductSelect();
+    }
+
+    async function loadProducts(signal) {
+      if (!document.getElementById('product').options.length) {
+        renderProductSelectOptions();
+        renderFilters();
+        document.getElementById('product-filters').insertAdjacentHTML(
+            'beforeend',
+            '<span class="muted">Loading products...</span>');
+      }
+
+      try {
+        const result = await getJson('/api/products', { signal });
+        state.products = result.data || [];
+      } catch (error) {
+        renderProductSelectOptions();
+        renderFilters();
+        setStatus(`Product list unavailable: ${describeRefreshError(error)}`, 'error');
+        return;
+      }
+
       const currentProducts = selectedProductValues();
       const validSelection = currentProducts.length === 1 &&
           (currentProducts[0] === 'all' || state.products.includes(currentProducts[0]));
       if (!validSelection) {
         state.selectedProducts = new Set(['all']);
       }
+      renderProductSelectOptions();
       renderFilters();
     }
 
-    async function loadTree() {
-      const result = await getJson(`/api/tree?${queryString()}`);
+    async function loadTree(signal) {
+      const result = await getJson(`/api/tree?${queryString()}`, { signal });
       const roots = result?.data?.roots || [];
       if (!state.treeTouched && state.treeOpen.size === 0) {
         for (const root of roots) {
@@ -835,8 +1037,8 @@ R"HTML(
       bindTreeToggles();
     }
 
-    async function loadKanban() {
-      const result = await getJson(`/api/kanban?${queryString()}`);
+    async function loadKanban(signal) {
+      const result = await getJson(`/api/kanban?${queryString()}`, { signal });
       const lanesData = result?.data?.lanes || {};
       const html = lanes.map((lane) => {
         const cards = (lanesData[lane] || [])
@@ -857,8 +1059,8 @@ R"HTML(
       });
     }
 
-    async function loadContext() {
-      const result = await getJson(`/api/items?${queryString()}`);
+    async function loadContext(signal) {
+      const result = await getJson(`/api/items?${queryString()}`, { signal });
       const items = (result?.data?.items || []);
       state.allItems = items;
       const contextItems = items.filter((item) => {
@@ -890,14 +1092,14 @@ R"HTML(
       });
     }
 
-    async function loadReview() {
-      const viewsResult = await getJson('/api/review/saved-views');
+    async function loadReview(signal) {
+      const viewsResult = await getJson('/api/review/saved-views', { signal });
       const views = viewsResult?.data?.views || [];
       document.getElementById('saved-views').innerHTML = views.map((view) =>
         `<button class="btn" data-saved-view="${escAttr(view.id)}">${esc(view.title)}</button>`
       ).join('');
 
-      const inboxResult = await getJson(`/api/review/inbox?${queryString()}`);
+      const inboxResult = await getJson(`/api/review/inbox?${queryString()}`, { signal });
       const lanesData = inboxResult?.data?.lanes || {};
       const laneNames = Object.keys(lanesData);
       document.getElementById('review-inbox').innerHTML = laneNames.map((lane) => {
@@ -1012,8 +1214,8 @@ R"HTML(
       `</svg></div>`;
     }
 
-    async function loadGraph() {
-      const result = await getJson(`/api/review/graph?${queryString()}`);
+    async function loadGraph(signal) {
+      const result = await getJson(`/api/review/graph?${queryString()}`, { signal });
       const data = result?.data || {};
       const nodes = data.nodes || [];
       const edges = data.edges || [];
@@ -1048,8 +1250,8 @@ R"HTML(
       ].join('');
     }
 
-    async function loadRuns() {
-      const result = await getJson(`/api/review/runs?${queryString()}`);
+    async function loadRuns(signal) {
+      const result = await getJson(`/api/review/runs?${queryString()}`, { signal });
       const runs = result?.data?.runs || [];
       document.getElementById('runs-summary').textContent = `${runs.length} run(s)`;
       document.getElementById('runs-list').innerHTML = runs.map((run) =>
@@ -1102,14 +1304,92 @@ R"HTML(
 
 )HTML"
 R"HTML(
+    function scheduleRefresh(delayMs = 120) {
+      if (state.refreshTimer) {
+        clearTimeout(state.refreshTimer);
+      }
+      state.refreshTimer = setTimeout(() => {
+        state.refreshTimer = null;
+        refreshAll();
+      }, delayMs);
+    }
+
     async function refreshAll() {
       if (selectedProductValues().length === 0) {
-        document.getElementById('status').textContent = 'No product found';
+        setStatus('No product found', 'error');
+        setBusy(false);
         return;
       }
-      document.getElementById('status').textContent = 'Loading...';
-      await Promise.all([loadTree(), loadKanban(), loadContext(), loadReview(), loadGraph(), loadRuns()]);
-      document.getElementById('status').textContent = `Loaded ${productScopeLabel()}`;
+
+      if (state.refreshTimer) {
+        clearTimeout(state.refreshTimer);
+        state.refreshTimer = null;
+      }
+      if (state.refreshAbort) {
+        state.refreshAbort.abort();
+      }
+
+      const refreshId = ++state.refreshSeq;
+      const controller = new AbortController();
+      state.refreshAbort = controller;
+      const signal = controller.signal;
+      const startedAt = Date.now();
+      const scopeLabel = productScopeLabel();
+      const steps = [
+        ['tree', () => loadTree(signal)],
+        ['kanban', () => loadKanban(signal)],
+        ['context', () => loadContext(signal)],
+        ['review', () => loadReview(signal)],
+        ['graph', () => loadGraph(signal)],
+        ['runs', () => loadRuns(signal)],
+      ];
+      let completed = 0;
+      const total = steps.length;
+
+      setStatus(`Loading ${scopeLabel}...`);
+      setBusy(true);
+      updateBusy(`Loading ${scopeLabel}`, `Starting refresh, 0/${total} complete`);
+      if (state.refreshTickTimer) {
+        clearInterval(state.refreshTickTimer);
+      }
+      state.refreshTickTimer = setInterval(() => {
+        if (refreshId === state.refreshSeq) {
+          updateBusy(
+              `Loading ${scopeLabel}`,
+              `${completed}/${total} complete, elapsed ${formatElapsed(startedAt)}`);
+        }
+      }, 1000);
+
+      const results = await Promise.allSettled(steps.map(async ([label, run]) => {
+        if (refreshId === state.refreshSeq) {
+          updateBusy(
+              `Loading ${scopeLabel}`,
+              `Loading ${label}, ${completed}/${total} complete, elapsed ${formatElapsed(startedAt)}`);
+        }
+        await run();
+        completed += 1;
+        if (refreshId === state.refreshSeq) {
+          updateBusy(
+              `Loading ${scopeLabel}`,
+              `Loaded ${label}, ${completed}/${total} complete, elapsed ${formatElapsed(startedAt)}`);
+        }
+      }));
+
+      if (refreshId !== state.refreshSeq) {
+        return;
+      }
+      state.refreshAbort = null;
+      setBusy(false);
+
+      const failures = results.filter((result) =>
+          result.status === 'rejected' && result.reason?.name !== 'AbortError');
+      if (failures.length) {
+        const first = describeRefreshError(failures[0].reason);
+        setStatus(`Refresh failed: ${first}`, 'error');
+        return;
+      }
+
+      setStatus(`Loaded ${scopeLabel} in ${formatElapsed(startedAt)}`);
     }
 
     document.getElementById('product').addEventListener('change', async (e) => {
@@ -1121,14 +1401,14 @@ R"HTML(
       renderProductFilters();
       state.treeOpen.clear();
       state.treeTouched = false;
-      await refreshAll();
+      scheduleRefresh(0);
     });
 
     document.getElementById('search').addEventListener('input', async (e) => {
       state.q = e.target.value.trim();
       state.treeTouched = false;
       state.treeOpen.clear();
-      await refreshAll();
+      scheduleRefresh(250);
     });
 
     document.getElementById('workspace-add').addEventListener('click', async () => {
@@ -1185,7 +1465,7 @@ R"HTML(
       renderProductFilters();
       state.treeOpen.clear();
       state.treeTouched = false;
-      await refreshAll();
+      scheduleRefresh(120);
     });
 
     document.getElementById('state-filters').addEventListener('change', async (event) => {
@@ -1201,7 +1481,7 @@ R"HTML(
       }
       state.treeOpen.clear();
       state.treeTouched = false;
-      await refreshAll();
+      scheduleRefresh(120);
     });
 
     document.getElementById('type-filters').addEventListener('change', async (event) => {
@@ -1217,21 +1497,31 @@ R"HTML(
       }
       state.treeOpen.clear();
       state.treeTouched = false;
-      await refreshAll();
+      scheduleRefresh(120);
     });
 
     document.getElementById('limit').addEventListener('change', async (event) => {
       const parsed = Number.parseInt(event.target.value, 10);
       state.limit = Number.isFinite(parsed) ? Math.max(1, Math.min(parsed, 1000)) : 200;
       event.target.value = String(state.limit);
-      await refreshAll();
+      scheduleRefresh(0);
     });
 
     document.getElementById('refresh').addEventListener('click', async () => {
       const products = selectedProductValues();
       const refreshScope = products.length === 1 ? products[0] : 'all';
-      await getJson(`/api/refresh?product=${encodeURIComponent(refreshScope)}`);
-      await refreshAll();
+      const startedAt = Date.now();
+      setStatus(`Refreshing ${productScopeLabel()}...`);
+      setBusy(true);
+      updateBusy(`Refreshing ${productScopeLabel()}`, 'Invalidating cached backlog data');
+      try {
+        await getJson(`/api/refresh?product=${encodeURIComponent(refreshScope)}`);
+        setStatus(`Refresh requested in ${formatElapsed(startedAt)}`);
+        await refreshAll();
+      } catch (error) {
+        setBusy(false);
+        setStatus(`Refresh failed: ${describeRefreshError(error)}`, 'error');
+      }
     });
 
     document.getElementById('command-preview').addEventListener('click', loadCommandPreview);

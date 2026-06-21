@@ -128,9 +128,15 @@ For any work that changes code, docs, scripts, views, configs, schemas, tests, b
 **After implementation:**
 1. Run the relevant validation commands.
 2. Append a Worklog entry summarizing files changed, commands run, test results, and known gaps.
-3. If all acceptance criteria are complete, move the item to `Done`.
-4. If incomplete, leave it `InProgress`, `Review`, or `Blocked` with a clear Worklog entry.
-5. Refresh views after backlog changes: `kob view refresh --agent <id> --product <name> --backlog-root <path>`.
+3. For code-changing Done evidence, record branch convergence in Worklog or Intent Amendments:
+   - `Branch convergence: target=<branch>` or `target_branch=<branch>`; the target is the repo default branch unless a human explicitly names another target.
+   - `implementation_commit=<sha>`, `reachable_from_target=true`, and `remote_publication=<remote/ref>`.
+   - Side-branch-only Done is allowed only when a human explicitly chose it; record `side_branch_delivery=explicit-human-choice` or `side_branch_delivery=human-approved`.
+   - Nested/submodule work needs parent pointer evidence such as `nested_gitlink=<parent gitlink/submodule pointer evidence>`.
+   - If convergence is blocked, do not close as Done; record `Blocked convergence: branch=<branch>; reason=<reason>; next=<step>; blocker=<owner/item>`.
+4. If all acceptance criteria are complete, move the item to `Done`.
+5. If incomplete, leave it `InProgress`, `Review`, or `Blocked` with a clear Worklog entry.
+6. Refresh views after backlog changes: `kob view refresh --agent <id> --product <name> --backlog-root <path>`.
 
 Do not open items for pure exploratory discussion unless it changes code or design direction. Record minor discussion in an existing Worklog instead.
 

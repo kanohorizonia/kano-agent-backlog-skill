@@ -74,6 +74,16 @@ To move Tasks, Bugs, or Issues into active execution, each item must include:
 
 Epics and Features use the lighter profile-specific gates in validation, but should still carry enough context for review.
 
+## Done evidence for code-changing items
+
+Record branch convergence evidence in Worklog or Intent Amendments before closing code-changing items:
+- `Branch convergence: target=<branch>` or `target_branch=<branch>`; target means the repo default branch unless a human explicitly names another target.
+- `implementation_commit=<sha>` and `reachable_from_target=true` or `reachable_from_target=yes`.
+- `remote_publication=<remote/ref>` or `remote_publication=true/yes` for the target branch publication evidence.
+- `side_branch_delivery=explicit-human-choice` or `side_branch_delivery=human-approved` when a human chooses side-branch-only Done.
+- `nested_gitlink=<evidence>` when nested/submodule work needs parent gitlink or submodule pointer evidence.
+- `Blocked convergence: branch=<branch>; reason=<reason>; next=<step>; blocker=<owner/item>` when convergence is blocked; the item should remain not Done until resolved.
+
 ## File naming
 
 - `<ID>_<slug>.md`

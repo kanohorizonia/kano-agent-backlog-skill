@@ -77,6 +77,10 @@ Issues should not stay as a vague holding pen after triage. Once the problem is 
 2. Append a Worklog summary with:
    - What changed
    - Related items and ADRs
+   - Branch convergence for code changes: `Branch convergence: target=<branch>`, `implementation_commit=<sha>`, `reachable_from_target=true`, and `remote_publication=<remote/ref>`.
+3. The target is the repo default branch unless a human explicitly names another target. Side-branch-only Done requires `side_branch_delivery=explicit-human-choice` or `side_branch_delivery=human-approved`.
+4. Nested/submodule work needs `nested_gitlink=<parent gitlink/submodule pointer evidence>`.
+5. If convergence is blocked, keep the item out of Done and record `Blocked convergence: branch=<branch>; reason=<reason>; next=<step>; blocker=<owner/item>`.
 
 ## D.1) Parent sync (forward-only)
 

@@ -45,6 +45,8 @@ check, attach or cite the artifact, and record the result in the worklog. Claims
 without proof stay labeled as planned, hypothesis, design intent, opinion, or
 future work.
 
+![Evidence chain from human intent to Done](assets/evidence-chain.svg)
+
 ![Durable work item anatomy](assets/work-item-anatomy.svg)
 
 ## 60-second demo

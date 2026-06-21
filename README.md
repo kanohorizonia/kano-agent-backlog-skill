@@ -76,6 +76,8 @@ acceptance criteria that could fail, commands or artifacts that can be inspected
 worklog entries that say what changed, and human review that can reject the
 result.
 
+![Evidence chain from human intent to Done](docs/assets/evidence-chain.svg)
+
 ## 60-second demo
 
 From a cloned repository, build the native CLI and create one task:

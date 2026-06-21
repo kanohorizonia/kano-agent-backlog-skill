@@ -10,6 +10,7 @@ target_sources(kano_backlog_core
     models/private/errors.cpp
     config/public/kano/backlog_core/config/config.hpp
     config/private/config.cpp
+    diagnostics/public/kano/backlog_core/diagnostics/mutation_timing.hpp
     frontmatter/public/kano/backlog_core/frontmatter/frontmatter.hpp
     frontmatter/private/frontmatter.cpp
     frontmatter/public/kano/backlog_core/frontmatter/canonical_store.hpp
@@ -39,6 +40,7 @@ target_include_directories(kano_backlog_core
       version/public
       models/public
       config/public
+      diagnostics/public
       frontmatter/public
       state/public
       validation/public

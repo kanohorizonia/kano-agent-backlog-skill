@@ -1,4 +1,5 @@
 #include "kano/backlog_core/frontmatter/canonical_store.hpp"
+#include "kano/backlog_core/diagnostics/mutation_timing.hpp"
 #include "kano/backlog_core/frontmatter/frontmatter.hpp"
 #include "kano/backlog_core/validation/validator.hpp"
 #include "kano/backlog_core/models/errors.hpp"
@@ -9,6 +10,7 @@
 #include <chrono>
 #include <random>
 #include <iomanip>
+#include <sstream>
 
 namespace kano::backlog_core {
 
@@ -91,29 +93,55 @@ bool is_inside_path(const std::filesystem::path& child_path, const std::filesyst
     return true;
 }
 
-}  // namespace
-
-CanonicalStore::CanonicalStore(const std::filesystem::path& product_root) 
-    : product_root_(product_root), items_root_(product_root / "items") {}
-
-BacklogItem CanonicalStore::read(const std::filesystem::path& item_path) const {
-    if (!is_inside_path(item_path, product_root_)) {
-        throw ParseError(item_path, "Item path is outside active product root");
+std::optional<std::pair<ItemType, int>> parse_display_id_type_and_number(const std::string& id) {
+    const auto last_dash = id.rfind('-');
+    if (last_dash == std::string::npos || last_dash + 1 >= id.size()) {
+        return std::nullopt;
     }
-    if (!std::filesystem::exists(item_path)) {
-        throw ItemNotFoundError(item_path.string());
+    const auto type_dash = id.rfind('-', last_dash - 1);
+    if (type_dash == std::string::npos || type_dash + 1 >= last_dash) {
+        return std::nullopt;
     }
 
-    std::ifstream f(item_path);
-    if (!f.is_open()) {
-        throw ParseError(item_path.string(), "Failed to open file");
+    const std::string type_code = id.substr(type_dash + 1, last_dash - type_dash - 1);
+    const std::string number_text = id.substr(last_dash + 1);
+    if (number_text.empty() || !std::all_of(number_text.begin(), number_text.end(), [](unsigned char ch) {
+            return std::isdigit(ch);
+        })) {
+        return std::nullopt;
     }
 
-    std::stringstream buffer;
-    buffer << f.rdbuf();
-    std::string content = buffer.str();
+    std::optional<ItemType> type;
+    if (type_code == "EPIC") type = ItemType::Epic;
+    else if (type_code == "FTR") type = ItemType::Feature;
+    else if (type_code == "USR") type = ItemType::UserStory;
+    else if (type_code == "TSK") type = ItemType::Task;
+    else if (type_code == "BUG") type = ItemType::Bug;
+    else if (type_code == "ISS") type = ItemType::Issue;
 
-    auto ctx = Frontmatter::parse(content);
+    if (!type) {
+        return std::nullopt;
+    }
+    return std::make_pair(*type, std::stoi(number_text));
+}
+
+std::string item_type_directory(ItemType type) {
+    switch (type) {
+        case ItemType::Epic: return "epic";
+        case ItemType::Feature: return "feature";
+        case ItemType::UserStory: return "userstory";
+        case ItemType::Task: return "task";
+        case ItemType::Bug: return "bug";
+        case ItemType::Issue: return "issue";
+    }
+    return "item";
+}
+
+BacklogItem item_from_context(
+    const std::filesystem::path& item_path,
+    const FrontmatterContext& ctx,
+    bool include_body_sections
+) {
     if (ctx.metadata.IsNull()) {
         throw ParseError(item_path.string(), "Invalid or missing frontmatter");
     }
@@ -121,8 +149,7 @@ BacklogItem CanonicalStore::read(const std::filesystem::path& item_path) const {
     try {
         BacklogItem item;
         item.file_path = item_path;
-        
-        // Map frontmatter
+
         item.id = ctx.metadata["id"].as<std::string>();
         item.uid = ctx.metadata["uid"].as<std::string>();
         item.type = parse_item_type(ctx.metadata["type"].as<std::string>()).value();
@@ -154,22 +181,23 @@ BacklogItem CanonicalStore::read(const std::filesystem::path& item_path) const {
             item.links.blocked_by = parse_string_list(links["blocked_by"]);
         }
 
-        // Body sections
-        auto sections = Frontmatter::parse_body_sections(ctx.body);
-        if (sections.count("context")) item.context = sections["context"];
-        if (sections.count("goal")) item.goal = sections["goal"];
-        if (sections.count("non_goals")) item.non_goals = sections["non_goals"];
-        if (sections.count("intent_amendments")) item.intent_amendments = sections["intent_amendments"];
-        if (sections.count("approach")) item.approach = sections["approach"];
-        if (sections.count("alternatives")) item.alternatives = sections["alternatives"];
-        if (sections.count("acceptance_criteria")) item.acceptance_criteria = sections["acceptance_criteria"];
-        if (sections.count("risks")) item.risks = sections["risks"];
-        
-        if (sections.count("worklog")) {
-            std::stringstream work_ss(sections["worklog"]);
-            std::string line;
-            while (std::getline(work_ss, line)) {
-                if (!line.empty()) item.worklog.push_back(line);
+        if (include_body_sections) {
+            auto sections = Frontmatter::parse_body_sections(ctx.body);
+            if (sections.count("context")) item.context = sections["context"];
+            if (sections.count("goal")) item.goal = sections["goal"];
+            if (sections.count("non_goals")) item.non_goals = sections["non_goals"];
+            if (sections.count("intent_amendments")) item.intent_amendments = sections["intent_amendments"];
+            if (sections.count("approach")) item.approach = sections["approach"];
+            if (sections.count("alternatives")) item.alternatives = sections["alternatives"];
+            if (sections.count("acceptance_criteria")) item.acceptance_criteria = sections["acceptance_criteria"];
+            if (sections.count("risks")) item.risks = sections["risks"];
+
+            if (sections.count("worklog")) {
+                std::stringstream work_ss(sections["worklog"]);
+                std::string line;
+                while (std::getline(work_ss, line)) {
+                    if (!line.empty()) item.worklog.push_back(line);
+                }
             }
         }
 
@@ -179,7 +207,86 @@ BacklogItem CanonicalStore::read(const std::filesystem::path& item_path) const {
     }
 }
 
+}  // namespace
+
+CanonicalStore::CanonicalStore(const std::filesystem::path& product_root)
+    : product_root_(product_root), items_root_(product_root / "items") {}
+
+BacklogItem CanonicalStore::read(const std::filesystem::path& item_path) const {
+    diagnostics::ScopedMutationSpan span("canonical_store.read", item_path.filename().string());
+    if (!is_inside_path(item_path, product_root_)) {
+        throw ParseError(item_path, "Item path is outside active product root");
+    }
+    if (!std::filesystem::exists(item_path)) {
+        throw ItemNotFoundError(item_path.string());
+    }
+
+    std::ifstream f(item_path);
+    if (!f.is_open()) {
+        throw ParseError(item_path.string(), "Failed to open file");
+    }
+
+    std::stringstream buffer;
+    buffer << f.rdbuf();
+    std::string content = buffer.str();
+
+    auto ctx = Frontmatter::parse(content);
+    return item_from_context(item_path, ctx, true);
+}
+
+BacklogItem CanonicalStore::read_metadata(const std::filesystem::path& item_path) const {
+    diagnostics::ScopedMutationSpan span("canonical_store.read_metadata", item_path.filename().string());
+    if (!is_inside_path(item_path, product_root_)) {
+        throw ParseError(item_path, "Item path is outside active product root");
+    }
+    if (!std::filesystem::exists(item_path)) {
+        throw ItemNotFoundError(item_path.string());
+    }
+
+    std::ifstream f(item_path);
+    if (!f.is_open()) {
+        throw ParseError(item_path.string(), "Failed to open file");
+    }
+
+    std::string first_line;
+    if (!std::getline(f, first_line)) {
+        throw ParseError(item_path.string(), "Empty item file");
+    }
+    if (!first_line.empty() && first_line.back() == '\r') {
+        first_line.pop_back();
+    }
+    if (first_line != "---") {
+        throw ParseError(item_path.string(), "Invalid or missing frontmatter");
+    }
+
+    std::ostringstream yaml;
+    std::string line;
+    bool closed = false;
+    while (std::getline(f, line)) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+        if (line == "---") {
+            closed = true;
+            break;
+        }
+        yaml << line << "\n";
+    }
+    if (!closed) {
+        throw ParseError(item_path.string(), "Unclosed frontmatter");
+    }
+
+    FrontmatterContext ctx;
+    try {
+        ctx.metadata = YAML::Load(yaml.str());
+    } catch (const YAML::Exception&) {
+        ctx.metadata = YAML::Node(YAML::NodeType::Null);
+    }
+    return item_from_context(item_path, ctx, false);
+}
+
 void CanonicalStore::write(BacklogItem& item) const {
+    diagnostics::ScopedMutationSpan span("canonical_store.write", item.id);
     auto errors = Validator::validate_schema(item);
     if (!errors.empty()) {
         std::string err_msg;
@@ -325,6 +432,7 @@ BacklogItem CanonicalStore::create(const std::string& prefix, ItemType type, con
 }
 
 std::vector<std::filesystem::path> CanonicalStore::list_items(std::optional<ItemType> type) const {
+    diagnostics::ScopedMutationSpan span("canonical_store.list_items", type ? to_string(*type) : std::string("all"));
     std::vector<std::filesystem::path> results;
     if (!std::filesystem::exists(items_root_)) return results;
 
@@ -353,6 +461,43 @@ std::vector<std::filesystem::path> CanonicalStore::list_items(std::optional<Item
     }
 
     return results;
+}
+
+std::optional<std::filesystem::path> CanonicalStore::find_item_path_by_id(const std::string& id) const {
+    diagnostics::ScopedMutationSpan span("canonical_store.find_item_path_by_id", id);
+    auto parsed = parse_display_id_type_and_number(id);
+    if (!parsed) {
+        return std::nullopt;
+    }
+
+    const auto [type, number] = *parsed;
+    const int bucket = (number / 100) * 100;
+    std::ostringstream bucket_ss;
+    bucket_ss << std::setfill('0') << std::setw(4) << bucket;
+
+    const auto bucket_dir = items_root_ / item_type_directory(type) / bucket_ss.str();
+    if (!std::filesystem::exists(bucket_dir)) {
+        return std::nullopt;
+    }
+
+    std::vector<std::filesystem::path> candidates;
+    for (const auto& entry : std::filesystem::directory_iterator(bucket_dir)) {
+        if (!entry.is_regular_file() || entry.path().extension() != ".md") {
+            continue;
+        }
+        const auto filename = entry.path().filename().string();
+        if (filename.rfind(id, 0) != 0) {
+            continue;
+        }
+        if (filename.size() == id.size() || filename[id.size()] == '_' || filename[id.size()] == '.') {
+            candidates.push_back(entry.path());
+        }
+    }
+
+    if (candidates.size() == 1) {
+        return candidates.front();
+    }
+    return std::nullopt;
 }
 
 int CanonicalStore::get_next_id_number(ItemType type) const {

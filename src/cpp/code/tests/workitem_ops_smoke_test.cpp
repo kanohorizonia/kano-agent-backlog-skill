@@ -115,6 +115,12 @@ int main() {
             expect(!queried.empty(), "task item should appear in index query");
 
             CanonicalStore store(root);
+            auto exact_path = store.find_item_path_by_id(created.id);
+            expect(exact_path.has_value(), "exact id lookup should resolve deterministic bucket path");
+            expect(exact_path->filename() == created.path.filename(), "exact id lookup should return created item path");
+            auto metadata_only = store.read_metadata(created.path);
+            expect(metadata_only.id == created.id, "metadata-only read should preserve id");
+            expect(metadata_only.worklog.empty(), "metadata-only read should not parse body worklog");
 
             auto issue_created = WorkitemOps::create_item(
                 index,
@@ -148,6 +154,7 @@ int main() {
                 "opencode",
                 std::string("Issue triage started"));
             expect(issue_update.worklog_appended, "issue state update should append worklog");
+            expect(!issue_update.dashboards_refreshed, "state update should defer dashboard refresh by default");
             auto issue_after_update = store.read(issue_created.path);
             expect(issue_after_update.state == ItemState::InProgress, "issue should transition to InProgress");
             expect(issue_after_update.worklog.back().find("Issue triage started") != std::string::npos, "issue worklog should preserve update message");

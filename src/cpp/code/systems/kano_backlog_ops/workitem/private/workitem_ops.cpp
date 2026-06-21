@@ -1,4 +1,5 @@
 #include "kano/backlog_ops/workitem/workitem_ops.hpp"
+#include "kano/backlog_core/diagnostics/mutation_timing.hpp"
 #include "kano/backlog_core/frontmatter/canonical_store.hpp"
 #include "kano/backlog_core/refs/ref_resolver.hpp"
 #include "kano/backlog_core/state/state_machine.hpp"
@@ -542,6 +543,7 @@ CreateItemResult WorkitemOps::create_item(
     std::string area,
     std::string iteration
 ) {
+    diagnostics::ScopedMutationSpan total_span("workitem.create_item.total", title);
     CanonicalStore store(backlog_root);
     
     // 1. Generate ID and UID
@@ -555,10 +557,18 @@ CreateItemResult WorkitemOps::create_item(
         case ItemType::Issue: type_code = "ISS"; break;
     }
     
-    int number = index.get_next_number(prefix, type_code);
+    int number = 0;
+    {
+        diagnostics::ScopedMutationSpan span("workitem.create_item.next_number", prefix + "-" + type_code);
+        number = index.get_next_number(prefix, type_code);
+    }
     
     // 2. Prepare item via store
-    BacklogItem item = store.create(prefix, type, title, number, parent);
+    BacklogItem item;
+    {
+        diagnostics::ScopedMutationSpan span("workitem.create_item.prepare");
+        item = store.create(prefix, type, title, number, parent);
+    }
     item.state = ItemState::Proposed;
     item.priority = priority;
     item.area = area;
@@ -566,21 +576,30 @@ CreateItemResult WorkitemOps::create_item(
     item.tags = tags;
     
     // 3. Render content using templates
-    std::string content = TemplateOps::render_item_body(item, agent, "Created item");
+    std::string content;
+    {
+        diagnostics::ScopedMutationSpan span("workitem.create_item.render_template", item.id);
+        content = TemplateOps::render_item_body(item, agent, "Created item");
+    }
     
     // 4. Calculate path and write file
     // Note: CanonicalStore should have a way to calculate path without internal knowledge
     // For now we'll use a hack or implement it in store.
     std::filesystem::path item_path = *item.file_path;
-    std::filesystem::create_directories(item_path.parent_path());
-    
-    std::ofstream ofs(item_path);
-    ofs << content;
-    ofs.close();
+    {
+        diagnostics::ScopedMutationSpan span("workitem.create_item.write_file", item.id);
+        std::filesystem::create_directories(item_path.parent_path());
+        std::ofstream ofs(item_path);
+        ofs << content;
+        ofs.close();
+    }
     
     // 5. Update index
     item.file_path = item_path;
-    index.index_item(item);
+    {
+        diagnostics::ScopedMutationSpan span("workitem.create_item.index_item", item.id);
+        index.index_item(item);
+    }
     
     return {item.id, item.uid, item_path, type};
 }
@@ -592,10 +611,16 @@ UpdateStateResult WorkitemOps::update_state(
     ItemState new_state,
     const std::string& agent,
     std::optional<std::string> message,
-    bool force
+    bool force,
+    bool refresh_views
 ) {
+    diagnostics::ScopedMutationSpan total_span("workitem.update_state.total", item_ref);
     CanonicalStore store(backlog_root);
-    BacklogItem item = resolve_item_or_throw(store, item_ref);
+    BacklogItem item;
+    {
+        diagnostics::ScopedMutationSpan span("workitem.update_state.resolve_item", item_ref);
+        item = resolve_item_or_throw(store, item_ref);
+    }
     if (!item.file_path) {
         throw std::runtime_error("Resolved item has no file path: " + item_ref);
     }
@@ -605,10 +630,15 @@ UpdateStateResult WorkitemOps::update_state(
         return {item.id, old_state, new_state, false, false, false, {}};
     }
 
-    const auto intent_diagnostics = intent_transition_diagnostics(backlog_root, item, old_state, new_state);
+    std::vector<std::string> intent_diagnostics;
+    {
+        diagnostics::ScopedMutationSpan span("workitem.update_state.intent_diagnostics", item.id);
+        intent_diagnostics = intent_transition_diagnostics(backlog_root, item, old_state, new_state);
+    }
 
     // 3. Ready Gate Validation
     if (new_state == ItemState::InProgress && !force) {
+        diagnostics::ScopedMutationSpan span("workitem.update_state.ready_validation", item.id);
         auto [ready, gaps] = Validator::is_ready(item);
         if (!ready) {
             std::string gap_msg;
@@ -655,11 +685,15 @@ UpdateStateResult WorkitemOps::update_state(
     }
 
     // 6. Transition via StateMachine
-    StateMachine::transition(item, action, agent, final_msg);
+    {
+        diagnostics::ScopedMutationSpan span("workitem.update_state.transition", item.id);
+        StateMachine::transition(item, action, agent, final_msg);
+    }
     
     // 7. Parent sync logic
     bool parent_synced = false;
     if (item.parent) {
+        diagnostics::ScopedMutationSpan span("workitem.update_state.parent_sync", item.id);
         BacklogItem parent_item = resolve_parent_item(index, store, backlog_root, *item.parent);
         ItemState parent_next_state = parent_item.state;
 
@@ -684,13 +718,25 @@ UpdateStateResult WorkitemOps::update_state(
     }
 
     // 8. Write back
-    store.write(item);
-    auto refreshed = ViewOps::refresh_dashboards(backlog_root, agent);
+    {
+        diagnostics::ScopedMutationSpan span("workitem.update_state.write_item", item.id);
+        store.write(item);
+    }
+
+    bool dashboards_refreshed = false;
+    if (refresh_views) {
+        diagnostics::ScopedMutationSpan span("workitem.update_state.refresh_views", item.id);
+        auto refreshed = ViewOps::refresh_dashboards(backlog_root, agent);
+        dashboards_refreshed = !refreshed.views_refreshed.empty();
+    }
     
     // 9. Update index
-    index.index_item(item);
+    {
+        diagnostics::ScopedMutationSpan span("workitem.update_state.index_item", item.id);
+        index.index_item(item);
+    }
     
-    return {item.id, old_state, new_state, true, parent_synced, !refreshed.views_refreshed.empty(), intent_diagnostics};
+    return {item.id, old_state, new_state, true, parent_synced, dashboards_refreshed, intent_diagnostics};
 }
 
 TrashItemResult WorkitemOps::trash_item(
@@ -743,24 +789,36 @@ void WorkitemOps::remap_parent(
     const std::string& new_parent_ref,
     const std::string& agent
 ) {
+    diagnostics::ScopedMutationSpan total_span("workitem.remap_parent.total", item_ref);
     CanonicalStore store(backlog_root);
     RefResolver resolver(store);
-    BacklogItem item = resolver.resolve(item_ref);
+    BacklogItem item;
+    {
+        diagnostics::ScopedMutationSpan span("workitem.remap_parent.resolve_item", item_ref);
+        item = resolver.resolve(item_ref);
+    }
 
     // 2. Resolve parent
     if (new_parent_ref == "none" || new_parent_ref.empty() || new_parent_ref == "null") {
         item.parent = std::nullopt;
     } else {
+        diagnostics::ScopedMutationSpan span("workitem.remap_parent.resolve_parent", new_parent_ref);
         BacklogItem parent_item = resolver.resolve(new_parent_ref);
         item.parent = parent_item.id;
     }
 
     // 3. Mark update and write
     StateMachine::record_worklog(item, agent, "Remapped parent to: " + item.parent.value_or("none"));
-    store.write(item);
+    {
+        diagnostics::ScopedMutationSpan span("workitem.remap_parent.write_item", item.id);
+        store.write(item);
+    }
     
     // 4. Update index
-    index.index_item(item);
+    {
+        diagnostics::ScopedMutationSpan span("workitem.remap_parent.index_item", item.id);
+        index.index_item(item);
+    }
 }
 
 DecisionWritebackResult WorkitemOps::add_decision_writeback(

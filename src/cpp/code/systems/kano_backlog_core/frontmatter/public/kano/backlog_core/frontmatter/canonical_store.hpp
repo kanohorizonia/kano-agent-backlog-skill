@@ -19,6 +19,12 @@ public:
     BacklogItem read(const std::filesystem::path& item_path) const;
 
     /**
+     * Read only frontmatter-backed metadata from a markdown backlog item.
+     * Body sections are intentionally skipped for scans such as dashboard refresh.
+     */
+    BacklogItem read_metadata(const std::filesystem::path& item_path) const;
+
+    /**
      * Write item to file, preserving frontmatter and body structure.
      * Throws ValidationError or WriteError.
      */
@@ -40,6 +46,12 @@ public:
      * List all item file paths, optionally filtered by type.
      */
     std::vector<std::filesystem::path> list_items(std::optional<ItemType> type = std::nullopt) const;
+
+    /**
+     * Resolve the deterministic path bucket for a display id when possible.
+     * Returns nullopt for unsupported ids, missing files, or ambiguous matches.
+     */
+    std::optional<std::filesystem::path> find_item_path_by_id(const std::string& id) const;
 
     // Helpers
     int get_next_id_number(ItemType type) const;

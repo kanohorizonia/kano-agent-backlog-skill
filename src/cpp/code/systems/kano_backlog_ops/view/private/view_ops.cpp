@@ -1,4 +1,5 @@
 #include "kano/backlog_ops/view/view_ops.hpp"
+#include "kano/backlog_core/diagnostics/mutation_timing.hpp"
 #include "kano/backlog_core/frontmatter/canonical_store.hpp"
 #include "kano/backlog_core/models/errors.hpp"
 #include <sstream>
@@ -172,46 +173,56 @@ RefreshDashboardsResult ViewOps::refresh_dashboards(
     const std::filesystem::path& product_root,
     const std::string& agent
 ) {
+    diagnostics::ScopedMutationSpan total_span("view.refresh_dashboards.total", product_root.filename().string());
     CanonicalStore store(product_root);
     std::vector<BacklogItem> items;
-    for (const auto& path : store.list_items()) {
-        const auto filename = path.filename().string();
-        if (has_suffix(filename, ".index.md") || path.filename() == "README.md") {
-            continue;
-        }
-        try {
-            items.push_back(store.read(path));
-        } catch (const std::exception&) {
-            continue;
+    {
+        diagnostics::ScopedMutationSpan read_span("view.refresh_dashboards.read_metadata", product_root.filename().string());
+        for (const auto& path : store.list_items()) {
+            const auto filename = path.filename().string();
+            if (has_suffix(filename, ".index.md") || path.filename() == "README.md") {
+                continue;
+            }
+            try {
+                items.push_back(store.read_metadata(path));
+            } catch (const std::exception&) {
+                continue;
+            }
         }
     }
 
-    std::sort(items.begin(), items.end(), [](const BacklogItem& left, const BacklogItem& right) {
-        if (type_rank(left.type) != type_rank(right.type)) {
-            return type_rank(left.type) < type_rank(right.type);
-        }
-        return left.id < right.id;
-    });
+    {
+        diagnostics::ScopedMutationSpan sort_span("view.refresh_dashboards.sort", std::to_string(items.size()));
+        std::sort(items.begin(), items.end(), [](const BacklogItem& left, const BacklogItem& right) {
+            if (type_rank(left.type) != type_rank(right.type)) {
+                return type_rank(left.type) < type_rank(right.type);
+            }
+            return left.id < right.id;
+        });
+    }
 
     std::filesystem::path views_root = product_root / "views";
     std::filesystem::create_directories(views_root);
 
     RefreshDashboardsResult result;
-    for (const std::string& group : {std::string("InProgress"), std::string("New"), std::string("Done")}) {
-        std::map<ItemType, std::vector<BacklogItem>> grouped;
-        for (const auto& item : items) {
-            if (group_for_state(item.state) == group) {
-                grouped[item.type].push_back(item);
+    {
+        diagnostics::ScopedMutationSpan write_span("view.refresh_dashboards.render_write", std::to_string(items.size()));
+        for (const std::string& group : {std::string("InProgress"), std::string("New"), std::string("Done")}) {
+            std::map<ItemType, std::vector<BacklogItem>> grouped;
+            for (const auto& item : items) {
+                if (group_for_state(item.state) == group) {
+                    grouped[item.type].push_back(item);
+                }
             }
-        }
 
-        std::filesystem::path output_path = views_root / filename_for_group(group);
-        std::ofstream out(output_path);
-        if (!out.is_open()) {
-            throw WriteError("Failed to open " + output_path.string() + " for writing");
+            std::filesystem::path output_path = views_root / filename_for_group(group);
+            std::ofstream out(output_path);
+            if (!out.is_open()) {
+                throw WriteError("Failed to open " + output_path.string() + " for writing");
+            }
+            out << render_dashboard(title_for_group(group), group, grouped, output_path, agent);
+            result.views_refreshed.push_back(output_path);
         }
-        out << render_dashboard(title_for_group(group), group, grouped, output_path, agent);
-        result.views_refreshed.push_back(output_path);
     }
 
     return result;

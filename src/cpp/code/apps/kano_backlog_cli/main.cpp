@@ -8,6 +8,7 @@
 #include "kano/backlog_ops/doctor/doctor_ops.hpp"
 #include "kano/backlog_ops/topic/topic_ops.hpp"
 #include "kano/backlog_ops/workset/workset_ops.hpp"
+#include "kano/backlog_core/diagnostics/mutation_timing.hpp"
 #include "kano/backlog_core/frontmatter/canonical_store.hpp"
 #include "kano/backlog_core/state/state_machine.hpp"
 #include "kano/backlog_core/refs/ref_resolver.hpp"
@@ -5635,6 +5636,8 @@ std::optional<int> try_run_workitem_set_ready_fast_path(int argc, char** argv) {
         return std::nullopt;
     }
 
+    kano::backlog_core::diagnostics::ScopedMutationSpan total_span("command.workitem_set_ready.total", ref);
+
     auto ctx = BacklogContext::resolve(
         path_str,
         product.empty() ? std::nullopt : std::optional<std::string>(product),
@@ -5721,6 +5724,7 @@ std::optional<int> try_run_workitem_update_state_fast_path(int argc, char** argv
     std::string message_file;
     bool consume_input_files = false;
     bool force = false;
+    bool refresh_views = false;
 
     const auto option_value = [&](int& index, const std::string& option) -> std::optional<std::string> {
         const std::string arg = argv[index];
@@ -5805,6 +5809,10 @@ std::optional<int> try_run_workitem_update_state_fast_path(int argc, char** argv
             force = true;
             continue;
         }
+        if (arg == "--refresh-views") {
+            refresh_views = true;
+            continue;
+        }
         if (arg.rfind("-", 0) != 0) {
             if (ref.empty()) {
                 ref = arg;
@@ -5835,6 +5843,8 @@ std::optional<int> try_run_workitem_update_state_fast_path(int argc, char** argv
 
     apply_text_file_option(message, message_file, "-m/--message", "--message-file");
 
+    kano::backlog_core::diagnostics::ScopedMutationSpan total_span("command.workitem_update_state.total", ref);
+
     auto ctx = BacklogContext::resolve(
         path_str,
         product.empty() ? std::nullopt : std::optional<std::string>(product),
@@ -5848,7 +5858,8 @@ std::optional<int> try_run_workitem_update_state_fast_path(int argc, char** argv
         *state_opt,
         agent,
         message.empty() ? std::nullopt : std::optional<std::string>(message),
-        force
+        force,
+        refresh_views
     );
 
     if (result.worklog_appended) {
@@ -5983,6 +5994,8 @@ std::optional<int> try_run_worklog_append_fast_path(int argc, char** argv) {
     if (item_ref.empty()) {
         return std::nullopt;
     }
+
+    kano::backlog_core::diagnostics::ScopedMutationSpan total_span("command.worklog_append.total", item_ref);
 
     auto ctx = BacklogContext::resolve(
         path_str,
@@ -8188,6 +8201,7 @@ int main(int InArgc, char* InArgv[]) {
             auto* updateStateCmd = workitemCmd->add_subcommand("update-state", "Update item state");
             std::string ref, state_str, state_opt_str, update_agent, update_msg, update_msg_file;
             bool update_consume_input_files = false;
+            bool update_refresh_views = false;
             updateStateCmd->add_option("ref", ref, "Item ID or UID")->required();
             updateStateCmd->add_option("state_arg", state_str, "New state (positional)");
             updateStateCmd->add_option("--state", state_opt_str, "New state (option form)");
@@ -8197,6 +8211,7 @@ int main(int InArgc, char* InArgv[]) {
             updateStateCmd->add_flag("--consume-input-files", update_consume_input_files, "Delete input files after a successful update; files must be under ~/.kano/tmp/backlog or KANO_BACKLOG_TEXT_TMP");
             bool update_force = false;
             updateStateCmd->add_flag("-f,--force", update_force, "Bypass Ready gate validation");
+            updateStateCmd->add_flag("--refresh-views", update_refresh_views, "Synchronously refresh dashboards after the state update");
 
             updateStateCmd->callback([&]() {
                 auto ctx = resolve_ctx();
@@ -8219,7 +8234,8 @@ int main(int InArgc, char* InArgv[]) {
                     *state_opt,
                     update_agent,
                     update_msg.empty() ? std::nullopt : std::optional<std::string>(update_msg),
-                    update_force
+                    update_force,
+                    update_refresh_views
                 );
 
                 if (result.worklog_appended) {
@@ -8265,6 +8281,7 @@ int main(int InArgc, char* InArgv[]) {
             setReadyCmd->add_option("--agent", set_ready_agent, "Agent ID")->required();
 
             setReadyCmd->callback([&]() {
+                kano::backlog_core::diagnostics::ScopedMutationSpan total_span("command.workitem_set_ready.total", ref);
                 auto ctx = resolve_ctx();
                 CanonicalStore store(ctx.product_root);
                 RefResolver resolver(store);
@@ -17104,6 +17121,7 @@ int main(int InArgc, char* InArgv[]) {
                 appendCmd->add_option("--model", model, "Model used by agent");
                 appendCmd->add_flag("--consume-input-files", append_consume_input_files, "Delete input files after a successful append; files must be under ~/.kano/tmp/backlog or KANO_BACKLOG_TEXT_TMP");
                 appendCmd->callback([&]() {
+                    kano::backlog_core::diagnostics::ScopedMutationSpan total_span("command.worklog_append.total", item_ref);
                     auto ctx = resolve_ctx();
                     CanonicalStore store(ctx.product_root);
                     RefResolver resolver(store);

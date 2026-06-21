@@ -50,7 +50,8 @@ public:
         kano::backlog_core::ItemState new_state,
         const std::string& agent,
         std::optional<std::string> message = std::nullopt,
-        bool force = false
+        bool force = false,
+        bool refresh_views = false
     );
 
     /**

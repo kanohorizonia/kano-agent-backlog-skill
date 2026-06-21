@@ -1,4 +1,5 @@
 #include "kano/backlog_core/refs/ref_resolver.hpp"
+#include "kano/backlog_core/diagnostics/mutation_timing.hpp"
 #include "kano/backlog_core/models/errors.hpp"
 #include <regex>
 #include <set>
@@ -11,6 +12,7 @@ namespace kano::backlog_core {
 RefResolver::RefResolver(const CanonicalStore& canonical) : canonical_(canonical) {}
 
 BacklogItem RefResolver::resolve(const std::string& ref) const {
+    diagnostics::ScopedMutationSpan span("ref_resolver.resolve", ref);
     auto parsed = RefParser::parse(ref);
     if (!parsed) {
         throw ParseError(ref, "Cannot parse reference format");
@@ -83,6 +85,15 @@ std::vector<std::string> RefResolver::get_references(const BacklogItem& item) {
 }
 
 BacklogItem RefResolver::resolve_display_id(const DisplayIdRef& parsed) const {
+    diagnostics::ScopedMutationSpan span("ref_resolver.resolve_display_id", parsed.raw);
+    if (auto exact_path = canonical_.find_item_path_by_id(parsed.raw)) {
+        auto item = canonical_.read(*exact_path);
+        if (item.id == parsed.raw) {
+            return item;
+        }
+    }
+
+    diagnostics::ScopedMutationSpan fallback_span("ref_resolver.resolve_display_id.scan", parsed.raw);
     std::vector<BacklogItem> matches;
     for (const auto& path : canonical_.list_items()) {
         try {
@@ -110,6 +121,7 @@ BacklogItem RefResolver::resolve_display_id(const DisplayIdRef& parsed) const {
 }
 
 BacklogItem RefResolver::resolve_adr(const AdrRef& parsed) const {
+    diagnostics::ScopedMutationSpan span("ref_resolver.resolve_adr", parsed.raw);
     // Resolve ADR-NNNN to KABSD-ADR-NNNN
     std::stringstream ss;
     ss << "KABSD-ADR-" << std::setfill('0') << std::setw(4) << parsed.number;
@@ -125,6 +137,7 @@ BacklogItem RefResolver::resolve_adr(const AdrRef& parsed) const {
 }
 
 BacklogItem RefResolver::resolve_uuid(const UuidRef& parsed) const {
+    diagnostics::ScopedMutationSpan span("ref_resolver.resolve_uuid.scan", parsed.uuid);
     for (const auto& path : canonical_.list_items()) {
         try {
             auto item = canonical_.read(path);

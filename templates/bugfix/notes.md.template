@@ -152,6 +152,15 @@ def fix_implementation():
 - [ ] **Regression Tests**: All passing
 - [ ] **Manual Testing**: Bug no longer reproducible
 
+### Branch Convergence Evidence
+- **Target branch**: repo default unless a human explicitly names another target
+- **Implementation commit**: `implementation_commit=<sha>`
+- **Reachable from target**: `reachable_from_target=true`
+- **Remote publication**: `remote_publication=<remote/ref>`
+- **Side-branch-only Done**: only when human chosen; record `side_branch_delivery=explicit-human-choice` or `side_branch_delivery=human-approved`
+- **Nested/submodule pointer**: `nested_gitlink=<evidence>` when applicable
+- **Blocked convergence**: `Blocked convergence: branch=<branch>; reason=<reason>; next=<step>; blocker=<owner/item>`
+
 ### Performance Impact
 - **Before Fix**: Performance metrics before the fix
 - **After Fix**: Performance metrics after the fix

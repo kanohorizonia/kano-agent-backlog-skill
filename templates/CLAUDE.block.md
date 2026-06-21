@@ -4,6 +4,7 @@
 - Backlog root: `{{BACKLOG_ROOT}}`
 - Before coding, create/update backlog items and meet the Ready gate.
 - Worklog is append-only; record decisions and state changes.
+- Before code-changing Done, record branch convergence: target branch (repo default unless human names another), implementation commit, reachable-from-target, remote publication, side-branch human choice when applicable, nested gitlink evidence when applicable, or blocked convergence with blocker/branch/reason/next.
 - Prefer running the native `kob` CLI so actions are auditable (and dashboards stay current):
   - `{{SKILL_ROOT}}/scripts/kob admin init --product <name> --agent <agent-name>`
   - `{{SKILL_ROOT}}/scripts/kob workitem create|update-state ... --agent <agent-name> [--product <name>]`

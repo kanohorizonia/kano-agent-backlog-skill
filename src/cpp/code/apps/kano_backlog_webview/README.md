@@ -73,7 +73,9 @@ scripts\build\build_win_ninja_msvc.bat
 From the repository root:
 
 ```bash
-pixi run webview-compose-up-detached
+pixi run webview-docker
 ```
 
-The compose path binds the webview to `0.0.0.0` inside the container, publishes it on host port `8799`, and mounts `../_kano/backlog` read-only at `/workspace/_kano/backlog`.
+The Docker path binds the webview to `0.0.0.0` inside the container, publishes
+it on host port `8799`, mounts `../_kano/backlog` read-only at
+`/workspace/_kano/backlog`, and uses Docker's `unless-stopped` restart policy.

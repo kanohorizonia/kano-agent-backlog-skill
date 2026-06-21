@@ -47,7 +47,8 @@ std::string item_doc(const std::string& id,
                      const std::string& title,
                      const std::string& state,
                      const std::string& parent,
-                     const std::string& body) {
+                     const std::string& body,
+                     const std::string& extra_frontmatter = "") {
     std::ostringstream out;
     out << "---\n";
     out << "id: " << id << "\n";
@@ -56,6 +57,7 @@ std::string item_doc(const std::string& id,
     out << "title: " << title << "\n";
     out << "state: " << state << "\n";
     out << "parent: " << (parent.empty() ? "null" : parent) << "\n";
+    out << extra_frontmatter;
     out << "created: 2026-06-14\n";
     out << "updated: 2026-06-14\n";
     out << "---\n\n";
@@ -73,6 +75,20 @@ std::optional<Json::Value> find_item(const Json::Value& items,
         }
     }
     return std::nullopt;
+}
+
+bool has_edge(const Json::Value& edges,
+              const std::string& from,
+              const std::string& to,
+              const std::string& kind) {
+    for (const auto& edge : edges) {
+        if (edge["from"].asString() == from &&
+            edge["to"].asString() == to &&
+            edge["kind"].asString() == kind) {
+            return true;
+        }
+    }
+    return false;
 }
 
 } // namespace
@@ -108,7 +124,43 @@ int main() {
                      "## Worklog\n\n"
                      "2026-06-14 10:00 [agent=codex] Work order dispatched for native migration review.\n"
                      "2026-06-14 10:10 [agent=codex] Artifact attached: [report](../artifacts/PRA-TSK-0001/report.md).\n"
-                     "2026-06-14 10:20 [agent=codex] Validation: pixi run quick-test PASS.\n"));
+                     "2026-06-14 10:20 [agent=codex] Validation: pixi run quick-test PASS.\n",
+                     "links:\n"
+                     "  relates:\n"
+                     "    - product-beta:PRB-BUG-0001\n"
+                     "    - PRA-TSK-0003\n"
+                     "    - PRA-TSK-9999\n"
+                     "  blocks:\n"
+                     "    - PRA-TSK-0002\n"
+                     "  blocked_by: []\n"));
+        write_text(
+            products / "product-alpha" / "items" / "task" / "0002" / "PRA-TSK-0002.md",
+            item_doc("PRA-TSK-0002",
+                     "019ec100-0000-7000-8000-000000000004",
+                     "Task",
+                     "Alpha blocked task",
+                     "Blocked",
+                     "PRA-EPIC-0001",
+                     "Blocked by the native task.",
+                     "links:\n"
+                     "  relates: []\n"
+                     "  blocks: []\n"
+                     "  blocked_by:\n"
+                     "    - PRA-TSK-0001\n"));
+        write_text(
+            products / "product-alpha" / "items" / "task" / "0003" / "PRA-TSK-0003.md",
+            item_doc("PRA-TSK-0003",
+                     "019ec100-0000-7000-8000-000000000005",
+                     "Task",
+                     "Alpha related task",
+                     "Ready",
+                     "PRA-EPIC-0001",
+                     "Related-only cycle coverage.",
+                     "links:\n"
+                     "  relates:\n"
+                     "    - PRA-TSK-0001\n"
+                     "  blocks: []\n"
+                     "  blocked_by: []\n"));
         write_text(
             products / "product-beta" / "items" / "bug" / "0001" / "PRB-BUG-0001.md",
             item_doc("PRB-BUG-0001",
@@ -117,7 +169,11 @@ int main() {
                      "Beta live bug",
                      "InProgress",
                      "",
-                     "Beta product bug body."));
+                     "Beta product bug body.",
+                     "links:\n"
+                     "  relates: [product-alpha:PRA-TSK-0001]\n"
+                     "  blocks: []\n"
+                     "  blocked_by: []\n"));
 
         write_text(root / "topics" / "native-migration" / "manifest.json",
                    R"json({"topic":"Native Migration","status":"open","seed_items":["019ec100-0000-7000-8000-000000000002","PRA-TSK-0001"]})json");
@@ -134,7 +190,7 @@ int main() {
         auto all = service.QueryItems(allOptions);
         expect(!all.isMember("error"), "all-products query should not fail");
         expect(all["products"].size() == 2, "all-products query should include both products");
-        expect(all["total"].asUInt64() == 4, "all-products query should include items plus unique topic pseudo-items");
+        expect(all["total"].asUInt64() == 6, "all-products query should include items plus unique topic pseudo-items");
 
         auto task = find_item(all["items"], "product-alpha", "PRA-TSK-0001");
         expect(task.has_value(), "alpha task should be present");
@@ -157,7 +213,7 @@ int main() {
         webview::ItemQueryOptions limited;
         limited.limit = 2;
         auto limitedResult = service.QueryItems(limited);
-        expect(limitedResult["total"].asUInt64() == 4, "limited query should preserve total");
+        expect(limitedResult["total"].asUInt64() == all["total"].asUInt64(), "limited query should preserve total");
         expect(limitedResult["items"].size() == 2, "limited query should return requested page size");
 
         webview::ItemQueryOptions treeOptions;
@@ -166,7 +222,7 @@ int main() {
         expect(!tree.isMember("error"), "tree query should not fail");
         expect(tree["roots"].size() == 1, "filtered tree should have one root");
         expect(tree["roots"][0]["id"].asString() == "PRA-EPIC-0001", "tree root id mismatch");
-        expect(tree["roots"][0]["children"].size() == 1, "tree should attach task child");
+        expect(tree["roots"][0]["children"].size() == 3, "tree should attach task children");
 
         auto kanban = service.BuildKanban(betaDoing);
         expect(kanban["lanes"]["Doing"].size() == 1, "kanban should place InProgress item in Doing lane");
@@ -209,6 +265,28 @@ int main() {
         auto graph = service.BuildDependencyGraph(allOptions, "PRA-TSK-0001");
         expect(graph["nodes"].size() >= 1, "dependency graph should include selected item node");
         expect(graph["edges"].size() >= 1, "dependency graph should include parent or topic edges");
+        expect(graph["visualization"]["kind"].asString() == "first-party-svg",
+               "dependency graph should advertise the first-party visualization payload");
+        expect(has_edge(graph["edges"], "product-alpha:PRA-EPIC-0001", "product-alpha:PRA-TSK-0001", "parent"),
+               "dependency graph should include structural parent edge");
+        expect(has_edge(graph["edges"], "topic:Native Migration", "product-alpha:PRA-TSK-0001", "topic-membership"),
+               "dependency graph should include grouping topic edge");
+        expect(has_edge(graph["edges"], "product-alpha:PRA-TSK-0001", "product-alpha:PRA-TSK-0002", "blocks"),
+               "links.blocks should render A -> B dependency direction");
+        expect(has_edge(graph["edges"], "product-alpha:PRA-TSK-0001", "product-alpha:PRA-TSK-0002", "blocked_by"),
+               "links.blocked_by should render blocker -> blocked dependency direction");
+        expect(has_edge(graph["edges"], "product-alpha:PRA-TSK-0001", "product-beta:PRB-BUG-0001", "relates"),
+               "dependency graph should include cross-product relates reference");
+        expect(has_edge(graph["edges"], "product-alpha:PRA-TSK-0001", "product-alpha:PRA-TSK-0003", "relates"),
+               "dependency graph should include non-blocking relates reference");
+        expect(graph["missing_nodes"].size() >= 1, "dependency graph should expose unresolved references");
+        expect(graph["dependency_cycles"].empty(),
+               "related-only cycles should not participate in dependency cycle semantics");
+
+        webview::ItemQueryOptions boundedOptions;
+        boundedOptions.limit = 1;
+        auto boundedGraph = service.BuildDependencyGraph(boundedOptions);
+        expect(boundedGraph["truncated"].asBool(), "dependency graph should report bounded truncated output");
 
         auto timeline = service.BuildWorkOrderTimeline(allOptions, "PRA-TSK-0001");
         expect(timeline["events"].size() >= 3, "timeline should expose worklog-backed events");

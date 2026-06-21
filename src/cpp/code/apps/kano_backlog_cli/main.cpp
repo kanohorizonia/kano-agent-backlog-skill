@@ -1858,6 +1858,36 @@ std::string shell_null_redirect() {
 #endif
 }
 
+std::optional<std::filesystem::path> find_skill_repo_root_for_webview(const std::filesystem::path& start_path) {
+    auto cur = start_path.empty() ? std::filesystem::current_path() : normalized_absolute_path(start_path);
+    if (!std::filesystem::is_directory(cur)) {
+        cur = cur.parent_path();
+    }
+    while (!cur.empty() && cur != cur.parent_path()) {
+        if (std::filesystem::exists(cur / "pixi.toml") &&
+            std::filesystem::exists(cur / "docker-compose.webview.yml") &&
+            std::filesystem::exists(cur / "scripts" / "kob")) {
+            return cur;
+        }
+        const auto nested_skill = cur / "kano-agent-backlog-skill";
+        if (std::filesystem::exists(nested_skill / "pixi.toml") &&
+            std::filesystem::exists(nested_skill / "docker-compose.webview.yml") &&
+            std::filesystem::exists(nested_skill / "scripts" / "kob")) {
+            return nested_skill;
+        }
+        cur = cur.parent_path();
+    }
+    return std::nullopt;
+}
+
+int run_shell_command_in_dir(const std::filesystem::path& cwd, const std::string& command) {
+#ifdef _WIN32
+    return std::system(("cd /d " + shell_quote_arg(cwd.string()) + " && " + command).c_str());
+#else
+    return std::system(("cd " + shell_quote_arg(cwd.string()) + " && " + command).c_str());
+#endif
+}
+
 std::filesystem::path resolve_webview_binary(const std::filesystem::path& cli_dir) {
 #ifdef _WIN32
     const std::string webview_name = "kano_backlog_webview.exe";
@@ -9184,14 +9214,44 @@ int main(int InArgc, char* InArgv[]) {
             validateConfigCmd->add_option("--profile", validate_profile, "Profile path or shorthand");
             validateConfigCmd->add_option("--workset", validate_workset, "Workset item id");
             validateConfigCmd->callback([&]() {
+                std::vector<std::string> errors;
+
+                const auto resolved_path = config_command_path(validate_path);
+                const auto config_path = ConfigLoader::find_project_config(
+                    resolved_path.empty() ? std::filesystem::path(".") : std::filesystem::path(resolved_path)
+                );
+                if (!config_path) {
+                    errors.push_back("Project config file not found");
+                } else if (const auto project_config = ProjectConfig::load_from_toml(*config_path)) {
+                    const auto collisions = project_config->find_prefix_collisions(*config_path);
+                    if (!collisions.empty()) {
+                        std::istringstream collision_lines(ProjectConfig::describe_prefix_collisions(collisions));
+                        std::string line;
+                        while (std::getline(collision_lines, line)) {
+                            if (!line.empty()) {
+                                errors.push_back(line);
+                            }
+                        }
+                    }
+                } else {
+                    errors.push_back("Failed to parse project config at " + config_path->string());
+                }
+
+                if (!errors.empty()) {
+                    std::cout << "Validation failed:\n";
+                    for (const auto& error : errors) {
+                        std::cout << "- " << error << "\n";
+                    }
+                    throw std::runtime_error("Config validation failed");
+                }
+
                 auto ctx = BacklogContext::resolve(
-                    config_command_path(validate_path),
+                    resolved_path,
                     validate_product.empty()
                         ? (product_name_opt.empty() ? std::nullopt : std::optional<std::string>(product_name_opt))
                         : std::optional<std::string>(validate_product),
                     validate_sandbox.empty() ? std::nullopt : std::optional<std::string>(validate_sandbox)
                 );
-                std::vector<std::string> errors;
                 if (ctx.product_def.name.empty()) {
                     errors.push_back("[product].name is required and must be a non-empty string");
                 }
@@ -19190,6 +19250,35 @@ int main(int InArgc, char* InArgv[]) {
         // webview group
         // ============================================================
         {
+            auto* guiCmd = app.add_subcommand("gui", "Build and launch the Docker webview");
+            guiCmd->callback([&]() {
+                std::vector<std::filesystem::path> seeds;
+                if (InArgc > 0 && InArgv != nullptr && InArgv[0] != nullptr) {
+                    const std::filesystem::path cli_exe = std::filesystem::absolute(InArgv[0]);
+                    seeds.push_back(cli_exe.parent_path());
+                }
+                seeds.push_back(std::filesystem::current_path());
+
+                std::optional<std::filesystem::path> repo_root;
+                for (const auto& seed : seeds) {
+                    repo_root = find_skill_repo_root_for_webview(seed);
+                    if (repo_root) {
+                        break;
+                    }
+                }
+                if (!repo_root) {
+                    throw std::runtime_error("Could not locate kano-agent-backlog-skill repo root for webview Docker launch");
+                }
+
+                std::cout << "Launching backlog webview Docker stack...\n";
+                std::cout << "Repo root: " << *repo_root << "\n";
+                std::cout << "Command: pixi run webview-docker\n";
+                const int rc = run_shell_command_in_dir(*repo_root, "pixi run webview-docker");
+                if (rc != 0) {
+                    throw std::runtime_error("webview Docker launcher exited with error");
+                }
+            });
+
             auto* webviewCmd = app.add_subcommand("webview", "Launch local webview server");
             webviewCmd->require_subcommand(0);
             auto* serveCmd = webviewCmd->add_subcommand("serve", "Start the webview HTTP server");

@@ -39,7 +39,7 @@ find_native_bin() {
     macos-ninja-clang-x64
     macos-ninja-clang-arm64
   )
-  local -a configs=(debug release relwithdebinfo minsizerel)
+  local -a configs=(release relwithdebinfo minsizerel debug)
   local preset
   local config
   local candidate
@@ -147,6 +147,8 @@ commands=(
   chunks
   search
   tokenizer
+  gui
+  webview
   orphan
   links
   repo-hygiene
@@ -174,6 +176,8 @@ declare -A status=(
   [chunks]="native covered"
   [search]="native covered"
   [tokenizer]="native covered"
+  [gui]="native covered"
+  [webview]="native covered"
   [orphan]="native covered"
   [links]="native covered"
   [repo-hygiene]="native covered"

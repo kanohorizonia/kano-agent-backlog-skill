@@ -143,6 +143,8 @@ int main(int argc, char** argv) {
 
         expect(run_command(binary, {"--help"}) == 0, "help command failed");
         expect(run_command(binary, {"--version"}) == 0, "version command failed");
+        expect(run_command(binary, {"gui", "--help"}) == 0, "gui help failed");
+        expect(run_command(binary, {"webview", "--help"}) == 0, "webview help failed");
         expect(run_command(binary, {"admin", "items", "--help"}) == 0, "admin items help failed");
         expect(run_command(binary, {"admin", "validate", "--help"}) == 0, "admin validate help failed");
 

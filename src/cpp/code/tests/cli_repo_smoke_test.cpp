@@ -237,6 +237,8 @@ int main(int argc, char** argv) {
 
         expect(run_command(binary, {"--help"}) == 0, "help command failed");
         expect(run_command(binary, {"--version"}) == 0, "version command failed");
+        expect(run_command(binary, {"gui", "--help"}) == 0, "gui help failed");
+        expect(run_command(binary, {"webview", "--help"}) == 0, "webview help failed");
         const auto hygiene_output = std::filesystem::temp_directory_path() / "kano-backlog-repo-hygiene-smoke.txt";
         expect_command_capture_success(
             run_command_capture(binary, {"repo-hygiene", "check", "--archive-safe"}, hygiene_output),
@@ -324,8 +326,26 @@ int main(int argc, char** argv) {
             "admin init should reject colliding product prefix",
             "Product prefix collision"
         );
+        const auto kfg_collision_text = read_text(kfg_collision_output);
+        expect(kfg_collision_text.find("kano-forge-skill") != std::string::npos, "prefix collision did not list existing product");
+        expect(kfg_collision_text.find("another-forge-skill") != std::string::npos, "prefix collision did not list requested product");
+        expect(kfg_collision_text.find("prefix=KFG") != std::string::npos, "prefix collision did not list both prefixes");
+        expect(kfg_collision_text.find("backlog_config.toml") != std::string::npos, "prefix collision did not list config path");
         expect(!std::filesystem::exists(temp_root / "_kano" / "backlog" / "products" / "another-forge-skill"), "prefix collision created the other product directory");
         expect(read_text(temp_root / ".kano" / "backlog_config.toml").find("[products.another-forge-skill]") == std::string::npos, "prefix collision registered the other product");
+
+        expect(run_command(binary, {
+            "admin", "init",
+            "--product", "kano-forge-skill",
+            "--agent", "tester",
+            "--product-name", "Kano Forge Skill Updated",
+            "--force",
+            "--skip-refresh-views"
+        }) == 0, "forced admin init should preserve existing explicit product prefix");
+        const auto kfg_force_text = read_text(temp_root / ".kano" / "backlog_config.toml");
+        expect(kfg_force_text.find("name = \"Kano Forge Skill Updated\"") != std::string::npos, "force admin init did not update product display name");
+        expect(kfg_force_text.find("prefix = \"KFG\"") != std::string::npos, "force admin init did not preserve explicit KFG prefix");
+        expect(kfg_force_text.find("[products.kano-forge-skill]", kfg_force_text.find("[products.kano-forge-skill]") + 1) == std::string::npos, "force admin init duplicated explicit-prefix product config block");
 
         for (const auto& bad_prefix : std::vector<std::string>{"K/FG", "K\\FG", "..", "K.FG", "K FG", "1FG", "KFGKFGKFGKFGKFGKFG"}) {
             const auto invalid_prefix_output = temp_root / ("admin-init-invalid-prefix-" + std::to_string(std::hash<std::string>{}(bad_prefix)) + ".txt");
@@ -343,6 +363,93 @@ int main(int argc, char** argv) {
             );
             expect(!std::filesystem::exists(temp_root / "_kano" / "backlog" / "products" / "invalid-prefix-product"), "invalid prefix created product directory");
         }
+
+        const auto derived_collision_root = temp_root / "derived-prefix-collision";
+        std::filesystem::create_directories(derived_collision_root);
+        std::filesystem::current_path(derived_collision_root);
+        expect(run_command(binary, {
+            "admin", "init",
+            "--product", "kano-agent-ark-skill",
+            "--agent", "tester",
+            "--product-name", "Kano Agent Ark Skill",
+            "--skip-refresh-views"
+        }) == 0, "admin init derived KA product failed");
+        const auto derived_collision_output = derived_collision_root / "admin-init-derived-collision.txt";
+        expect_command_capture_failure(
+            run_command_capture(binary, {
+                "admin", "init",
+                "--product", "kano-ai-3d-asset-skill",
+                "--agent", "tester",
+                "--product-name", "Kano AI 3D Asset Skill",
+                "--skip-refresh-views"
+            }, derived_collision_output),
+            derived_collision_output,
+            "admin init should reject derived product prefix collision",
+            "Product prefix collision"
+        );
+        const auto derived_collision_text = read_text(derived_collision_output);
+        expect(derived_collision_text.find("normalized prefix KA") != std::string::npos, "derived prefix collision did not report normalized KA prefix");
+        expect(derived_collision_text.find("kano-agent-ark-skill") != std::string::npos, "derived prefix collision did not list existing product");
+        expect(derived_collision_text.find("kano-ai-3d-asset-skill") != std::string::npos, "derived prefix collision did not list requested product");
+        std::filesystem::current_path(temp_root);
+
+        const auto duplicate_prefix_root = temp_root / "duplicate-prefix-config";
+        std::filesystem::create_directories(duplicate_prefix_root);
+        std::filesystem::current_path(duplicate_prefix_root);
+        expect(run_command(binary, {
+            "admin", "init",
+            "--product", "duplicate-prefix-one",
+            "--agent", "tester",
+            "--prefix", "DUP",
+            "--skip-refresh-views"
+        }) == 0, "admin init first duplicate-prefix fixture failed");
+        expect(run_command(binary, {
+            "admin", "init",
+            "--product", "duplicate-prefix-two",
+            "--agent", "tester",
+            "--prefix", "UNQ",
+            "--skip-refresh-views"
+        }) == 0, "admin init second duplicate-prefix fixture failed");
+        const auto duplicate_config_path = duplicate_prefix_root / ".kano" / "backlog_config.toml";
+        auto duplicate_config_text = read_text(duplicate_config_path);
+        const auto unq_pos = duplicate_config_text.find("prefix = \"UNQ\"");
+        expect(unq_pos != std::string::npos, "duplicate-prefix fixture missing UNQ prefix");
+        duplicate_config_text.replace(unq_pos, std::string("prefix = \"UNQ\"").size(), "prefix = \"DUP\"");
+        write_text(duplicate_config_path, duplicate_config_text);
+
+        const auto duplicate_doctor_output = duplicate_prefix_root / "doctor-duplicate-prefix.txt";
+        expect(run_command_capture(binary, {"doctor"}, duplicate_doctor_output) == 0, "doctor should report duplicate prefix diagnostics without crashing");
+        const auto duplicate_doctor_text = read_text(duplicate_doctor_output);
+        expect(duplicate_doctor_text.find("[FAIL] Product Prefix Uniqueness") != std::string::npos, "doctor did not fail duplicate prefix check");
+        expect(duplicate_doctor_text.find("duplicate-prefix-one") != std::string::npos, "doctor duplicate prefix did not list first product");
+        expect(duplicate_doctor_text.find("duplicate-prefix-two") != std::string::npos, "doctor duplicate prefix did not list second product");
+
+        const auto duplicate_validate_output = duplicate_prefix_root / "config-validate-duplicate-prefix.txt";
+        expect_command_capture_failure(
+            run_command_capture(binary, {
+                "config", "validate",
+                "--path", duplicate_prefix_root.string(),
+                "--product", "duplicate-prefix-one"
+            }, duplicate_validate_output),
+            duplicate_validate_output,
+            "config validate should reject duplicate product prefixes",
+            "Product prefix collision"
+        );
+
+        const auto duplicate_create_output = duplicate_prefix_root / "workitem-create-duplicate-prefix.txt";
+        expect_command_capture_failure(
+            run_command_capture(binary, {
+                "-P", "duplicate-prefix-one",
+                "workitem", "create",
+                "-t", "task",
+                "--title", "Ambiguous prefix smoke",
+                "--agent", "tester"
+            }, duplicate_create_output),
+            duplicate_create_output,
+            "workitem create should reject ambiguous duplicate prefixes",
+            "Product prefix collision"
+        );
+        std::filesystem::current_path(temp_root);
 
         expect(run_command(binary, {"admin", "init", "--product", "kano-ai-3d-asset-skill", "--agent", "tester", "--skip-refresh-views"}) == 0, "admin init command failed");
         const auto duplicate_admin_init_output = temp_root / "admin-init-duplicate.txt";

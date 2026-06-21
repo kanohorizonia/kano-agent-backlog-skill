@@ -137,6 +137,21 @@ const char* kIndexHtml = R"HTML(
     .md-view .obs-wikilink:hover { text-decoration: underline; }
     code { background: #eef2f8; padding: 1px 4px; border-radius: 4px; }
     .muted { color: #586074; font-size: 12px; }
+    .graph-canvas { width: 100%; overflow: auto; border: 1px solid #dbe4f2; border-radius: 8px; background: #fbfcff; margin-bottom: 12px; }
+    .graph-svg { min-width: 760px; display: block; }
+    .graph-edge { stroke: #7a879d; stroke-width: 1.5; fill: none; }
+    .graph-edge.blocks,.graph-edge.blocked_by { stroke: #b44646; stroke-width: 2; }
+    .graph-edge.parent { stroke: #4f6fa9; }
+    .graph-edge.topic-membership { stroke: #498264; stroke-dasharray: 5 4; }
+    .graph-edge.relates { stroke: #7d6aa6; stroke-dasharray: 3 4; }
+    .graph-node rect { fill: #fff; stroke: #b9c7de; rx: 8; }
+    .graph-node.topic rect { fill: #eef8f2; stroke: #7eb58d; }
+    .graph-node.missing rect { fill: #fff4f4; stroke: #d48b8b; stroke-dasharray: 5 4; }
+    .graph-node.dependency rect { stroke: #c65f5f; }
+    .graph-label { font-size: 12px; fill: #1a1f2e; }
+    .graph-meta { font-size: 10px; fill: #65738b; }
+    .graph-edge-label { font-size: 10px; fill: #47536a; }
+    .graph-diagnostics { display: grid; gap: 6px; margin-bottom: 12px; }
   </style>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github.min.css" />
 </head>
@@ -904,20 +919,130 @@ R"HTML(
       });
     }
 
+)HTML"
+R"HTML(
+    function graphEdgeClass(kind) {
+      return String(kind || '').replace(/[^A-Za-z0-9_-]/g, '-');
+    }
+
+    function graphNodeClass(node, incomingDependency) {
+      const classes = ['graph-node'];
+      if (String(node.id || '').startsWith('topic:')) classes.push('topic');
+      if (node.missing || node.kind === 'Missing') classes.push('missing');
+      if (incomingDependency) classes.push('dependency');
+      return classes.join(' ');
+    }
+
+    function shortGraphLabel(value, max = 28) {
+      const text = String(value || '');
+      return text.length > max ? `${text.slice(0, max - 1)}...` : text;
+    }
+
+    function renderGraphSvg(nodes, edges) {
+      if (!nodes.length) {
+        return '<div class="muted">No graph nodes for the current filters.</div>';
+      }
+
+      const incomingDependency = new Set(edges
+        .filter((edge) => edge.dependency)
+        .map((edge) => edge.to));
+      const byId = new Map(nodes.map((node) => [node.id, node]));
+      const sortedNodes = [...nodes].sort((a, b) => {
+        const layerA = Number(a.visual_layer ?? 1);
+        const layerB = Number(b.visual_layer ?? 1);
+        if (layerA !== layerB) return layerA - layerB;
+        return String(a.id || '').localeCompare(String(b.id || ''));
+      });
+
+      const layerCounts = new Map();
+      const positioned = new Map();
+      const nodeW = 180;
+      const nodeH = 54;
+      const layerGap = 250;
+      const rowGap = 86;
+      const margin = 28;
+      for (const node of sortedNodes) {
+        const layer = Number(node.visual_layer ?? 1);
+        const row = layerCounts.get(layer) || 0;
+        layerCounts.set(layer, row + 1);
+        positioned.set(node.id, {
+          node,
+          x: margin + layer * layerGap,
+          y: margin + row * rowGap,
+          w: nodeW,
+          h: nodeH,
+        });
+      }
+
+      const maxLayer = Math.max(0, ...[...layerCounts.keys()]);
+      const maxRows = Math.max(1, ...[...layerCounts.values()]);
+      const width = margin * 2 + (maxLayer + 1) * layerGap + nodeW;
+      const height = margin * 2 + maxRows * rowGap + nodeH;
+
+      const edgeMarkup = edges.slice(0, 160).map((edge, index) => {
+        const from = positioned.get(edge.from);
+        const to = positioned.get(edge.to);
+        if (!from || !to) return '';
+        const x1 = from.x + from.w;
+        const y1 = from.y + from.h / 2;
+        const x2 = to.x;
+        const y2 = to.y + to.h / 2;
+        const midX = (x1 + x2) / 2;
+        const c1x = x1 + Math.max(40, Math.abs(x2 - x1) / 3);
+        const c2x = x2 - Math.max(40, Math.abs(x2 - x1) / 3);
+        const labelY = (y1 + y2) / 2 - 5 - (index % 3) * 12;
+        return `<path class="graph-edge ${escAttr(graphEdgeClass(edge.kind))}" d="M ${x1} ${y1} C ${c1x} ${y1}, ${c2x} ${y2}, ${x2} ${y2}" marker-end="url(#graph-arrow)" />` +
+          `<text class="graph-edge-label" x="${midX}" y="${labelY}" text-anchor="middle">${esc(edge.kind || '')}</text>`;
+      }).join('');
+
+      const nodeMarkup = sortedNodes.map((node) => {
+        const pos = positioned.get(node.id);
+        const meta = [node.product, node.kind, node.state].filter(Boolean).join(' / ');
+        return `<g class="${escAttr(graphNodeClass(node, incomingDependency.has(node.id)))}" transform="translate(${pos.x}, ${pos.y})">` +
+          `<rect width="${pos.w}" height="${pos.h}"></rect>` +
+          `<text class="graph-label" x="10" y="20">${esc(shortGraphLabel(node.item_id || node.id, 24))}</text>` +
+          `<text class="graph-meta" x="10" y="38">${esc(shortGraphLabel(node.label || '', 30))}</text>` +
+          `<title>${esc(`${node.id || ''} ${meta}`)}</title>` +
+        `</g>`;
+      }).join('');
+
+      return `<div class="graph-canvas"><svg class="graph-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Dependency graph visualization">` +
+        `<defs><marker id="graph-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#6c778d"></path></marker></defs>` +
+        edgeMarkup + nodeMarkup +
+      `</svg></div>`;
+    }
+
     async function loadGraph() {
       const result = await getJson(`/api/review/graph?${queryString()}`);
       const data = result?.data || {};
       const nodes = data.nodes || [];
       const edges = data.edges || [];
+      const missing = data.missing_nodes || [];
+      const truncated = data.truncated ? ' truncated' : '';
       document.getElementById('graph-summary').textContent =
-        `${nodes.length} node(s), ${edges.length} edge(s), ${(data.missing_nodes || []).length} missing node(s)`;
-      document.getElementById('graph-list').innerHTML = [
-        `<h4>Edges</h4>`,
-        ...(edges.slice(0, 80).map((edge) =>
-          `<div class="card"><code>${esc(edge.from || '')}</code> -> <code>${esc(edge.to || '')}</code><div class="muted">${esc(edge.kind || '')}</div></div>`
+        `${nodes.length} node(s), ${edges.length} edge(s), ${missing.length} missing node(s)${truncated}`;
+
+      const diagnostics = [
+        ...missing.slice(0, 20).map((node) =>
+          `<div class="card"><strong>Missing</strong> <code>${esc(node.id || node.ref || '')}</code><div class="muted">${esc(node.kind || '')} from ${esc(node.source || '')}</div></div>`
+        ),
+        ...((data.invalid_refs || []).slice(0, 20).map((ref) =>
+          `<div class="card"><strong>Invalid ref</strong> <code>${esc(ref.ref || '')}</code><div class="muted">${esc(ref.kind || '')} from ${esc(ref.source || '')}</div></div>`
         )),
-        `<h4>Nodes</h4>`,
-        ...(nodes.slice(0, 80).map((node) =>
+        ...((data.dependency_cycles || []).slice(0, 10).map((cycle) =>
+          `<div class="card"><strong>Dependency cycle</strong><div class="muted">${esc((cycle || []).join(' -> '))}</div></div>`
+        )),
+      ].join('');
+
+      document.getElementById('graph-list').innerHTML = [
+        renderGraphSvg(nodes, edges),
+        diagnostics ? `<div class="graph-diagnostics">${diagnostics}</div>` : '',
+        `<h4>Edge details</h4>`,
+        ...(edges.slice(0, 120).map((edge) =>
+          `<div class="card"><code>${esc(edge.from || '')}</code> -> <code>${esc(edge.to || '')}</code><div class="muted">${esc(edge.kind || '')} / ${esc(edge.semantic || '')}</div></div>`
+        )),
+        `<h4>Node details</h4>`,
+        ...(nodes.slice(0, 120).map((node) =>
           `<div class="card"><code>${esc(node.id || '')}</code><div>${esc(node.label || '')}</div><div class="muted">${esc(node.kind || '')} ${esc(node.state || '')}</div></div>`
         )),
       ].join('');

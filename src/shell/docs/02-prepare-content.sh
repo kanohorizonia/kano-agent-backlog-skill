@@ -66,6 +66,43 @@ copy_glob_docs() {
   shopt -u nullglob
 }
 
+rewrite_public_readme_links() {
+  local target_path="$1"
+  [ -f "$target_path" ] || return 0
+
+  sed -i \
+    -e 's#](LICENSE)#](https://github.com/kanohorizonia/kano-agent-backlog-skill/blob/main/LICENSE)#g' \
+    -e 's#](CONTRIBUTING.md)#](https://github.com/kanohorizonia/kano-agent-backlog-skill/blob/main/CONTRIBUTING.md)#g' \
+    -e 's#](docs/assets/#](../assets/#g' \
+    -e 's#](docs/quick-start.md)#](../guides/quick-start.md)#g' \
+    -e 's#](docs/agent-quick-start.md)#](../guides/agent-quick-start.md)#g' \
+    -e 's#](docs/installation.md)#](../guides/installation.md)#g' \
+    -e 's#](docs/configuration.md)#](../guides/configuration.md)#g' \
+    -e 's#](docs/usage-examples.md)#](../guides/usage-examples.md)#g' \
+    -e 's#](docs/workset.md)#](../guides/workset.md)#g' \
+    -e 's#](docs/topic.md)#](../guides/topic.md)#g' \
+    -e 's#](docs/version-policy.md)#](../guides/version-policy.md)#g' \
+    -e 's#](docs/release-channels.md)#](../guides/release-channels.md)#g' \
+    -e 's#](docs/design/native-cli-direction.md)#](../guides/native-cli-direction.md)#g' \
+    -e 's#](docs/maintainer-automation.md)#](../automation/maintainer-automation.md)#g' \
+    -e 's#](docs/experimental-features.md)#](../guides/experimental-features.md)#g' \
+    -e 's#](docs/demo-maintenance.md)#](../guides/demo-maintenance.md)#g' \
+    -e 's#](references/)#](../references/)#g' \
+    -e 's#](REFERENCE.md)#](../REFERENCE.md)#g' \
+    -e 's#](SKILL.md)#](guide.md)#g' \
+    -e 's#](CHANGELOG.md)#](../CHANGELOG.md)#g' \
+    "$target_path"
+}
+
+rewrite_public_skill_guide_links() {
+  local target_path="$1"
+  [ -f "$target_path" ] || return 0
+
+  sed -i \
+    -e 's#](docs/agent-quick-start.md)#](../guides/agent-quick-start.md)#g' \
+    "$target_path"
+}
+
 write_kob_help() {
   local output_path="$1"
   local fallback_path="$SKILL_DIR/docs/cli/kob-help.txt"
@@ -92,6 +129,12 @@ copy_doc "$SKILL_DIR/README.md" "$BUILD_DIR/content_quartz/skill/readme.md"
 copy_doc "$SKILL_DIR/SKILL.md" "$BUILD_DIR/content_quartz/skill/guide.md"
 copy_doc "$SKILL_DIR/REFERENCE.md" "$BUILD_DIR/content_quartz/skill/reference.md"
 copy_doc "$SKILL_DIR/CHANGELOG.md" "$BUILD_DIR/content_quartz/skill/changelog.md"
+copy_doc "$SKILL_DIR/CONTRIBUTING.md" "$BUILD_DIR/content_quartz/CONTRIBUTING.md"
+copy_doc "$SKILL_DIR/REFERENCE.md" "$BUILD_DIR/content_quartz/REFERENCE.md"
+copy_doc "$SKILL_DIR/CHANGELOG.md" "$BUILD_DIR/content_quartz/CHANGELOG.md"
+
+rewrite_public_readme_links "$BUILD_DIR/content_quartz/skill/readme.md"
+rewrite_public_skill_guide_links "$BUILD_DIR/content_quartz/skill/guide.md"
 
 copy_doc "$SKILL_DIR/docs/quick-start.md" "$BUILD_DIR/content_quartz/guides/quick-start.md"
 copy_doc "$SKILL_DIR/docs/agent-quick-start.md" "$BUILD_DIR/content_quartz/guides/agent-quick-start.md"

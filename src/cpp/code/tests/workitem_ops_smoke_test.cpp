@@ -1,6 +1,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <optional>
 #include <random>
 #include <sstream>
 #include <stdexcept>
@@ -51,6 +52,34 @@ void set_ready_fields(kano::backlog_core::BacklogItem& item) {
     item.approach = "Use isolated temp roots and a deliberately stale parent index row.";
     item.acceptance_criteria = "Child state update syncs the real parent file.";
     item.risks = "Low risk - isolated smoke fixture.";
+}
+
+bool diagnostics_contain(
+    const kano::backlog_core::UpdateStateResult& result,
+    const std::string& needle
+) {
+    for (const auto& diagnostic : result.intent_diagnostics) {
+        if (diagnostic.find(needle) != std::string::npos) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void expect_diagnostic_contains(
+    const kano::backlog_core::UpdateStateResult& result,
+    const std::string& needle,
+    const std::string& message
+) {
+    expect(diagnostics_contain(result, needle), message);
+}
+
+void expect_no_diagnostic_contains(
+    const kano::backlog_core::UpdateStateResult& result,
+    const std::string& needle,
+    const std::string& message
+) {
+    expect(!diagnostics_contain(result, needle), message);
 }
 
 } // namespace
@@ -233,6 +262,113 @@ int main() {
             auto orphan_stack = WorkitemOps::resolve_intent_stack(root, created.id);
             expect(orphan_stack.chain.size() == 1, "orphan item stack should contain only the current item");
             expect(orphan_stack.warnings.empty(), "orphan item stack should not warn");
+
+            const auto create_review_task = [&](const std::string& title,
+                                                const std::vector<std::string>& worklog,
+                                                std::optional<std::string> amendments = std::nullopt) {
+                auto convergence_created = WorkitemOps::create_item(
+                    index,
+                    root,
+                    "TST",
+                    ItemType::Task,
+                    title,
+                    "opencode");
+                auto convergence_item = store.read(convergence_created.path);
+                set_ready_fields(convergence_item);
+                convergence_item.state = ItemState::Review;
+                convergence_item.worklog = worklog;
+                convergence_item.intent_amendments = amendments;
+                store.write(convergence_item);
+                index.index_item(convergence_item);
+                return convergence_created.id;
+            };
+
+            const auto close_review_task = [&](const std::string& item_id) {
+                return WorkitemOps::update_state(
+                    index,
+                    root,
+                    item_id,
+                    ItemState::Done,
+                    "opencode",
+                    std::string("Done branch convergence smoke"));
+            };
+
+            const auto missing_convergence_id = create_review_task(
+                "Missing branch convergence evidence smoke",
+                {"Implementation finished; validation passed without branch convergence keys."});
+            auto missing_convergence_done = close_review_task(missing_convergence_id);
+            expect_diagnostic_contains(
+                missing_convergence_done,
+                "missing target branch evidence",
+                "missing branch convergence evidence should warn about target/default target evidence");
+
+            const auto default_target_id = create_review_task(
+                "Default target convergence evidence smoke",
+                {"Branch convergence: target=repo-default; implementation_commit=abc1234; reachable_from_target=true; remote_publication=origin/main"});
+            auto default_target_done = close_review_task(default_target_id);
+            expect_no_diagnostic_contains(
+                default_target_done,
+                "Review->Done branch convergence",
+                "complete default target convergence evidence should not warn");
+
+            const auto explicit_target_id = create_review_task(
+                "Explicit target convergence evidence smoke",
+                {"Branch convergence: target=release/2026.06; implementation_commit=def5678; reachable_from_target=yes; remote_publication=origin/release/2026.06"});
+            auto explicit_target_done = close_review_task(explicit_target_id);
+            expect_no_diagnostic_contains(
+                explicit_target_done,
+                "Review->Done branch convergence",
+                "complete explicit target convergence evidence should not warn");
+
+            const auto side_branch_id = create_review_task(
+                "Side branch delivery without human choice smoke",
+                {"Branch convergence: target=feature/side-only; implementation_commit=f00d123; reachable_from_target=true; remote_publication=origin/feature/side-only; side_branch_delivery=agent-choice"});
+            auto side_branch_done = close_review_task(side_branch_id);
+            expect_diagnostic_contains(
+                side_branch_done,
+                "side-branch delivery lacks explicit human choice",
+                "side-branch-only delivery without human approval should warn");
+
+            const auto unpublished_id = create_review_task(
+                "Unpublished target convergence smoke",
+                {"Branch convergence: target=main; implementation_commit=badcafe; reachable_from_target=true"});
+            auto unpublished_done = close_review_task(unpublished_id);
+            expect_diagnostic_contains(
+                unpublished_done,
+                "missing remote_publication",
+                "missing target branch remote publication evidence should warn");
+
+            const auto nested_missing_id = create_review_task(
+                "Nested gitlink missing evidence smoke",
+                {"Submodule update affected nested work. Branch convergence: target=main; implementation_commit=123abcd; reachable_from_target=true; remote_publication=origin/main"});
+            auto nested_missing_done = close_review_task(nested_missing_id);
+            expect_diagnostic_contains(
+                nested_missing_done,
+                "without nested_gitlink evidence",
+                "nested/submodule marker without parent gitlink evidence should warn");
+
+            const auto nested_complete_id = create_review_task(
+                "Nested gitlink complete evidence smoke",
+                {"Submodule update affected nested work. Branch convergence: target=main; implementation_commit=456abcd; reachable_from_target=true; remote_publication=origin/main; nested_gitlink=parent-pointer-updated"});
+            auto nested_complete_done = close_review_task(nested_complete_id);
+            expect_no_diagnostic_contains(
+                nested_complete_done,
+                "without nested_gitlink evidence",
+                "nested/submodule work with nested_gitlink evidence should not warn");
+
+            const auto blocked_convergence_id = create_review_task(
+                "Blocked convergence advisory smoke",
+                {"Blocked convergence: branch=feature/stuck; reason=target conflict; next=ask maintainer to choose target; blocker=KOB-TSK-0099"});
+            auto blocked_convergence_done = close_review_task(blocked_convergence_id);
+            expect(blocked_convergence_done.new_state == ItemState::Done, "blocked convergence warning should remain advisory only");
+            expect_diagnostic_contains(
+                blocked_convergence_done,
+                "blocked convergence recorded; item should remain not Done",
+                "blocked convergence evidence should warn that the item should remain not Done");
+            expect_diagnostic_contains(
+                blocked_convergence_done,
+                "branch=feature/stuck; blocker=KOB-TSK-0099; reason=target conflict; next=ask maintainer to choose target",
+                "blocked convergence diagnostic should retain branch, blocker, reason, and next step");
 
             auto missing_parent_task = stack_task;
             missing_parent_task.id = "TST-TSK-9997";

@@ -101,6 +101,193 @@ bool worklog_contains_any(const BacklogItem& item, const std::vector<std::string
     });
 }
 
+std::vector<std::string> split_evidence_lines(const std::string& text) {
+    std::vector<std::string> lines;
+    std::istringstream input(text);
+    std::string line;
+    while (std::getline(input, line)) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+        lines.push_back(line);
+    }
+    return lines;
+}
+
+std::vector<std::string> branch_convergence_evidence_lines(const BacklogItem& item) {
+    std::vector<std::string> lines;
+    if (item.intent_amendments) {
+        auto amendment_lines = split_evidence_lines(*item.intent_amendments);
+        lines.insert(lines.end(), amendment_lines.begin(), amendment_lines.end());
+    }
+    lines.insert(lines.end(), item.worklog.begin(), item.worklog.end());
+    return lines;
+}
+
+bool evidence_contains_any(const std::vector<std::string>& lines, const std::vector<std::string>& needles) {
+    return std::any_of(lines.begin(), lines.end(), [&](const std::string& line) {
+        const std::string haystack = lower_copy(line);
+        return std::any_of(needles.begin(), needles.end(), [&](const std::string& needle) {
+            return haystack.find(needle) != std::string::npos;
+        });
+    });
+}
+
+std::optional<std::string> extract_evidence_token(
+    const std::vector<std::string>& lines,
+    const std::string& key,
+    bool require_branch_convergence_line = false
+) {
+    const std::string key_pattern = lower_copy(key) + "=";
+    for (const auto& line : lines) {
+        const std::string lowered = lower_copy(line);
+        if (require_branch_convergence_line && lowered.find("branch convergence:") == std::string::npos) {
+            continue;
+        }
+        const auto key_pos = lowered.find(key_pattern);
+        if (key_pos == std::string::npos) {
+            continue;
+        }
+        auto value_begin = key_pos + key_pattern.size();
+        while (value_begin < line.size() && std::isspace(static_cast<unsigned char>(line[value_begin]))) {
+            ++value_begin;
+        }
+        auto value_end = value_begin;
+        while (value_end < line.size()) {
+            const auto ch = static_cast<unsigned char>(line[value_end]);
+            if (std::isspace(ch) || line[value_end] == ';' || line[value_end] == ',') {
+                break;
+            }
+            ++value_end;
+        }
+        auto value = trim_text(line.substr(value_begin, value_end - value_begin));
+        if (!value.empty()) {
+            return value;
+        }
+    }
+    return std::nullopt;
+}
+
+std::optional<std::string> extract_evidence_field(const std::string& line, const std::string& key) {
+    const std::string key_pattern = lower_copy(key) + "=";
+    const std::string lowered = lower_copy(line);
+    const auto key_pos = lowered.find(key_pattern);
+    if (key_pos == std::string::npos) {
+        return std::nullopt;
+    }
+    auto value_begin = key_pos + key_pattern.size();
+    while (value_begin < line.size() && std::isspace(static_cast<unsigned char>(line[value_begin]))) {
+        ++value_begin;
+    }
+    auto value_end = line.find(';', value_begin);
+    if (value_end == std::string::npos) {
+        value_end = line.size();
+    }
+    auto value = trim_text(line.substr(value_begin, value_end - value_begin));
+    if (!value.empty()) {
+        return value;
+    }
+    return std::nullopt;
+}
+
+bool evidence_yes(const std::optional<std::string>& value) {
+    if (!value) {
+        return false;
+    }
+    const auto normalized = lower_copy(trim_text(*value));
+    return normalized == "true" || normalized == "yes";
+}
+
+struct BlockedConvergenceEvidence {
+    bool present = false;
+    std::optional<std::string> branch;
+    std::optional<std::string> reason;
+    std::optional<std::string> next;
+    std::optional<std::string> blocker;
+};
+
+BlockedConvergenceEvidence find_blocked_convergence(const std::vector<std::string>& lines) {
+    BlockedConvergenceEvidence evidence;
+    for (const auto& line : lines) {
+        if (lower_copy(line).find("blocked convergence:") == std::string::npos) {
+            continue;
+        }
+        evidence.present = true;
+        evidence.branch = extract_evidence_field(line, "branch");
+        evidence.reason = extract_evidence_field(line, "reason");
+        evidence.next = extract_evidence_field(line, "next");
+        evidence.blocker = extract_evidence_field(line, "blocker");
+        return evidence;
+    }
+    return evidence;
+}
+
+std::string value_or_missing(const std::optional<std::string>& value) {
+    return value && !trim_text(*value).empty() ? trim_text(*value) : "<missing>";
+}
+
+std::vector<std::string> branch_convergence_diagnostics(const BacklogItem& item) {
+    std::vector<std::string> diagnostics;
+    const auto lines = branch_convergence_evidence_lines(item);
+    const auto blocked = find_blocked_convergence(lines);
+    if (blocked.present) {
+        diagnostics.push_back(
+            "Review->Done branch convergence: blocked convergence recorded; item should remain not Done until resolved "
+            "(branch=" + value_or_missing(blocked.branch) +
+            "; blocker=" + value_or_missing(blocked.blocker) +
+            "; reason=" + value_or_missing(blocked.reason) +
+            "; next=" + value_or_missing(blocked.next) + ").");
+        return diagnostics;
+    }
+
+    const bool has_target = extract_evidence_token(lines, "target_branch").has_value() ||
+        extract_evidence_token(lines, "target", true).has_value();
+    if (!has_target) {
+        diagnostics.push_back(
+            "Review->Done branch convergence: missing target branch evidence; record "
+            "Branch convergence: target=<repo-default-branch> unless a human explicitly names another target.");
+    }
+
+    if (!extract_evidence_token(lines, "implementation_commit").has_value()) {
+        diagnostics.push_back(
+            "Review->Done branch convergence: missing implementation_commit=<sha> evidence.");
+    }
+
+    if (!evidence_yes(extract_evidence_token(lines, "reachable_from_target"))) {
+        diagnostics.push_back(
+            "Review->Done branch convergence: missing reachable_from_target=true/yes evidence for the implementation commit.");
+    }
+
+    if (!extract_evidence_token(lines, "remote_publication").has_value()) {
+        diagnostics.push_back(
+            "Review->Done branch convergence: missing remote_publication=<remote/ref> or true/yes evidence.");
+    }
+
+    const auto side_branch_delivery = extract_evidence_token(lines, "side_branch_delivery");
+    const bool mentions_side_branch = side_branch_delivery.has_value() ||
+        evidence_contains_any(lines, {"side-branch", "side branch"});
+    if (mentions_side_branch) {
+        const auto normalized = side_branch_delivery ? lower_copy(trim_text(*side_branch_delivery)) : "";
+        if (normalized != "explicit-human-choice" && normalized != "human-approved") {
+            diagnostics.push_back(
+                "Review->Done branch convergence: side-branch delivery lacks explicit human choice; "
+                "record side_branch_delivery=explicit-human-choice or human-approved.");
+        }
+    }
+
+    const bool has_nested_gitlink = extract_evidence_token(lines, "nested_gitlink").has_value();
+    const bool mentions_nested_work = evidence_contains_any(lines, {
+        "nested/submodule", "submodule", "nested repo", "nested-repo", "nested work", "gitlink"
+    });
+    if (mentions_nested_work && !has_nested_gitlink) {
+        diagnostics.push_back(
+            "Review->Done branch convergence: nested/submodule work marker found without nested_gitlink evidence; "
+            "record parent gitlink/submodule pointer evidence.");
+    }
+
+    return diagnostics;
+}
+
 bool has_parent_ref(const BacklogItem& item) {
     if (!item.parent) {
         return false;
@@ -161,6 +348,8 @@ std::vector<std::string> intent_transition_diagnostics(
         if (has_unresolved_drift) {
             diagnostics.push_back("Review->Done intent alignment: unresolved drift or Do Not violation evidence detected; confirm explicit resolution before accepting Done.");
         }
+        auto convergence_diagnostics = branch_convergence_diagnostics(item);
+        diagnostics.insert(diagnostics.end(), convergence_diagnostics.begin(), convergence_diagnostics.end());
     }
 
     return diagnostics;

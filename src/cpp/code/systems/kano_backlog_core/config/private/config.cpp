@@ -150,6 +150,28 @@ void apply_product_value(ProductDefinition& product, const std::string& key, con
     else if (key == "tokenizer_model") product.tokenizer_model = parse_toml_string_value(value);
 }
 
+std::string normalize_product_prefix(std::string prefix) {
+    prefix = trim_copy_local(prefix);
+    std::transform(prefix.begin(), prefix.end(), prefix.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::toupper(ch));
+    });
+    return prefix;
+}
+
+std::string display_path(const std::filesystem::path& path) {
+    std::error_code ec;
+    auto absolute = std::filesystem::absolute(path, ec);
+    if (ec) {
+        absolute = path;
+        ec.clear();
+    }
+    auto normalized = std::filesystem::weakly_canonical(absolute, ec);
+    if (ec) {
+        normalized = absolute.lexically_normal();
+    }
+    return normalized.string();
+}
+
 }  // namespace
 
 namespace kano::backlog_core {
@@ -225,6 +247,81 @@ std::optional<std::filesystem::path> ProjectConfig::resolve_backlog_root(const s
         resolved = std::filesystem::absolute(project_root / backlog_root, ec).lexically_normal();
     }
     return resolved;
+}
+
+std::vector<ProductPrefixCollision> ProjectConfig::find_prefix_collisions(const std::filesystem::path& config_file_path) const {
+    std::vector<ProductPrefixCollision> collisions;
+    std::map<std::string, std::vector<std::string>> products_by_prefix;
+
+    for (const auto& [product_name, definition] : products) {
+        const auto normalized_prefix = normalize_product_prefix(definition.prefix);
+        if (normalized_prefix.empty()) {
+            continue;
+        }
+        products_by_prefix[normalized_prefix].push_back(product_name);
+    }
+
+    const auto config_display = display_path(config_file_path);
+    for (const auto& [prefix, product_names] : products_by_prefix) {
+        if (product_names.size() < 2) {
+            continue;
+        }
+        for (std::size_t left_index = 0; left_index < product_names.size(); ++left_index) {
+            for (std::size_t right_index = left_index + 1; right_index < product_names.size(); ++right_index) {
+                const auto& left_product = product_names[left_index];
+                const auto& right_product = product_names[right_index];
+                const auto left_definition = products.at(left_product);
+                const auto right_definition = products.at(right_product);
+                ProductPrefixCollision collision;
+                collision.prefix = prefix;
+                collision.left_product = left_product;
+                collision.left_prefix = trim_copy_local(left_definition.prefix);
+                collision.left_config_path = config_display;
+                if (const auto root = resolve_backlog_root(left_product, config_file_path)) {
+                    collision.left_backlog_root = display_path(*root);
+                }
+                collision.right_product = right_product;
+                collision.right_prefix = trim_copy_local(right_definition.prefix);
+                collision.right_config_path = config_display;
+                if (const auto root = resolve_backlog_root(right_product, config_file_path)) {
+                    collision.right_backlog_root = display_path(*root);
+                }
+                collisions.push_back(collision);
+            }
+        }
+    }
+
+    return collisions;
+}
+
+std::string ProjectConfig::describe_prefix_collision(const ProductPrefixCollision& collision) {
+    std::ostringstream out;
+    out << "Product prefix collision: normalized prefix " << collision.prefix
+        << " is shared by product " << collision.left_product
+        << " (prefix=" << collision.left_prefix
+        << ", config=" << collision.left_config_path;
+    if (!collision.left_backlog_root.empty()) {
+        out << ", backlog_root=" << collision.left_backlog_root;
+    }
+    out << ") and product " << collision.right_product
+        << " (prefix=" << collision.right_prefix
+        << ", config=" << collision.right_config_path;
+    if (!collision.right_backlog_root.empty()) {
+        out << ", backlog_root=" << collision.right_backlog_root;
+    }
+    out << ")";
+    return out.str();
+}
+
+std::string ProjectConfig::describe_prefix_collisions(const std::vector<ProductPrefixCollision>& collisions) {
+    std::ostringstream out;
+    for (std::size_t index = 0; index < collisions.size(); ++index) {
+        if (index > 0) {
+            out << "\n";
+        }
+        out << describe_prefix_collision(collisions[index]);
+    }
+    return out.str();
 }
 
 // ConfigLoader Implementation
@@ -305,6 +402,9 @@ BacklogContext BacklogContext::resolve(
     auto project_config = ProjectConfig::load_from_toml(*config_path);
     if (!project_config) {
         throw ConfigError("Failed to parse project config at " + config_path->string());
+    }
+    if (const auto collisions = project_config->find_prefix_collisions(*config_path); !collisions.empty()) {
+        throw ConfigError(ProjectConfig::describe_prefix_collisions(collisions));
     }
 
     std::string product_name;

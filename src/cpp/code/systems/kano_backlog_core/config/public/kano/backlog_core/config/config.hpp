@@ -78,6 +78,18 @@ struct ProductDefinition {
     std::optional<std::string> tokenizer_model;
 };
 
+struct ProductPrefixCollision {
+    std::string prefix;
+    std::string left_product;
+    std::string left_prefix;
+    std::string left_config_path;
+    std::string left_backlog_root;
+    std::string right_product;
+    std::string right_prefix;
+    std::string right_config_path;
+    std::string right_backlog_root;
+};
+
 class ProjectConfig {
 public:
     std::map<std::string, ProductDefinition> products;
@@ -85,6 +97,9 @@ public:
     static std::optional<ProjectConfig> load_from_toml(const std::filesystem::path& file_path);
     std::optional<ProductDefinition> get_product(const std::string& name) const;
     std::optional<std::filesystem::path> resolve_backlog_root(const std::string& product_name, const std::filesystem::path& config_file_path) const;
+    std::vector<ProductPrefixCollision> find_prefix_collisions(const std::filesystem::path& config_file_path) const;
+    static std::string describe_prefix_collision(const ProductPrefixCollision& collision);
+    static std::string describe_prefix_collisions(const std::vector<ProductPrefixCollision>& collisions);
 };
 
 class BacklogContext {

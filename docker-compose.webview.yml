@@ -4,6 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile.webview
     image: kano-agent-backlog-webview:local
+    restart: unless-stopped
     environment:
       KANO_BACKLOG_PRODUCTS_ROOT: /workspace/_kano/backlog/products
       KANO_WEBVIEW_HOST: 0.0.0.0

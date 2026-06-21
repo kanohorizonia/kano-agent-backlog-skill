@@ -401,6 +401,29 @@ DoctorCheckResult check_backlog_discovery(const DoctorDiscovery& discovery) {
     return res;
 }
 
+DoctorCheckResult check_product_prefix_uniqueness(const DoctorDiscovery& discovery) {
+    DoctorCheckResult res;
+    res.name = "Product Prefix Uniqueness";
+
+    if (!discovery.project_config || !discovery.config_path || !exists_path(*discovery.config_path)) {
+        res.passed = true;
+        res.message = "No parsed product config available";
+        return res;
+    }
+
+    const auto collisions = discovery.project_config->find_prefix_collisions(*discovery.config_path);
+    if (collisions.empty()) {
+        res.passed = true;
+        res.message = "No duplicate product prefixes found";
+        return res;
+    }
+
+    res.passed = false;
+    res.message = "Duplicate product prefixes found";
+    res.details = ProjectConfig::describe_prefix_collisions(collisions);
+    return res;
+}
+
 } // namespace
 
 std::vector<DoctorCheckResult> DoctorOps::run_all_checks(const DoctorOptions& options) {
@@ -409,6 +432,7 @@ std::vector<DoctorCheckResult> DoctorOps::run_all_checks(const DoctorOptions& op
     const auto backlog_root = discovery.backlog_root.value_or(std::filesystem::path{});
 
     results.push_back(check_backlog_discovery(discovery));
+    results.push_back(check_product_prefix_uniqueness(discovery));
     results.push_back(check_backlog_structure(backlog_root));
     results.push_back(check_backlog_initialized(backlog_root, discovery.config_path));
     results.push_back(check_sqlite_status(backlog_root));

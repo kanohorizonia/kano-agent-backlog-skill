@@ -240,6 +240,9 @@ void validate_prefix_collision(
     if (!config) {
         return;
     }
+    if (const auto collisions = config->find_prefix_collisions(config_path); !collisions.empty()) {
+        throw std::runtime_error(kano::backlog_core::ProjectConfig::describe_prefix_collisions(collisions));
+    }
 
     for (const auto& [configured_product, definition] : config->products) {
         const std::string configured_prefix = trim(definition.prefix);
@@ -247,9 +250,18 @@ void validate_prefix_collision(
             continue;
         }
         if (normalize_prefix(configured_prefix) == prefix) {
-            throw std::runtime_error(
-                "Product prefix collision: " + prefix + " is already configured for product " + configured_product
-            );
+            kano::backlog_core::ProductPrefixCollision collision;
+            collision.prefix = prefix;
+            collision.left_product = configured_product;
+            collision.left_prefix = configured_prefix;
+            collision.left_config_path = config_path.string();
+            if (const auto root = config->resolve_backlog_root(configured_product, config_path)) {
+                collision.left_backlog_root = root->string();
+            }
+            collision.right_product = product;
+            collision.right_prefix = prefix;
+            collision.right_config_path = config_path.string();
+            throw std::runtime_error(kano::backlog_core::ProjectConfig::describe_prefix_collision(collision));
         }
     }
 }
@@ -449,7 +461,20 @@ OrchestrationOps::InitResult OrchestrationOps::initialize_backlog(const InitOpti
     if (actual_product_name.empty()) {
         throw std::runtime_error("Product name cannot be empty");
     }
-    const std::string actual_prefix = normalize_prefix(options.prefix ? *options.prefix : derive_prefix(actual_product_name));
+    std::optional<std::string> existing_product_prefix;
+    if (!options.prefix && std::filesystem::exists(config_path)) {
+        const auto existing_config = kano::backlog_core::ProjectConfig::load_from_toml(config_path);
+        if (existing_config) {
+            if (const auto existing_product = existing_config->get_product(product)) {
+                if (!trim(existing_product->prefix).empty()) {
+                    existing_product_prefix = existing_product->prefix;
+                }
+            }
+        }
+    }
+    const std::string actual_prefix = normalize_prefix(
+        options.prefix ? *options.prefix : existing_product_prefix.value_or(derive_prefix(actual_product_name))
+    );
 
     validate_prefix_collision(config_path, product, actual_prefix);
 

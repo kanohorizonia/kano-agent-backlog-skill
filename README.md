@@ -181,6 +181,7 @@ not a current UI screenshot.
 - [Version policy](docs/version-policy.md)
 - [Release channels](docs/release-channels.md)
 - [Native CLI direction](docs/design/native-cli-direction.md)
+- [Backboard partial UI boundary](docs/design/backboard-partial-ui-boundary.md)
 - [Maintainer automation](docs/maintainer-automation.md)
 - [Agent quick start](docs/agent-quick-start.md)
 - [Experimental features](docs/experimental-features.md)

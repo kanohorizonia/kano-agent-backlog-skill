@@ -79,6 +79,13 @@ class BacklogWebviewService {
                                  const std::string& agent = "",
                                  const std::string& runState = "",
                                  size_t staleDays = 3);
+  std::string RenderTreePartial(const ItemQueryOptions& options);
+  std::string RenderKanbanPartial(const ItemQueryOptions& options);
+  std::string RenderReviewPartial(const ItemQueryOptions& options);
+  std::string RenderContextPartial(const ItemQueryOptions& options);
+  std::string RenderFiltersPartial(const ItemQueryOptions& options);
+  std::string RenderItemPartial(const std::string& product,
+                                const std::string& id);
   Json::Value Refresh(const std::string& product);
   Json::Value GetWorkspaceInfo() const;
   Json::Value SwitchWorkspace(const std::string& inputPath);

@@ -89,6 +89,138 @@ std::vector<std::string> SplitCsv(const std::string& value) {
   return result;
 }
 
+std::string HtmlEscape(const std::string& value) {
+  std::string result;
+  result.reserve(value.size());
+  for (const char ch : value) {
+    switch (ch) {
+      case '&':
+        result += "&amp;";
+        break;
+      case '<':
+        result += "&lt;";
+        break;
+      case '>':
+        result += "&gt;";
+        break;
+      case '"':
+        result += "&quot;";
+        break;
+      case '\'':
+        result += "&#39;";
+        break;
+      default:
+        result.push_back(ch);
+        break;
+    }
+  }
+  return result;
+}
+
+std::string RenderErrorPartial(const std::string& message) {
+  return "<div class=\"card\" role=\"alert\"><strong>Unable to load partial</strong><div class=\"muted\">" +
+         HtmlEscape(message) + "</div></div>";
+}
+
+std::string ItemMetaText(const Json::Value& item) {
+  std::vector<std::string> parts;
+  for (const auto& key : {"product", "type", "state", "source_kind"}) {
+    if (item.isMember(key) && !item[key].asString().empty()) {
+      parts.push_back(item[key].asString());
+    }
+  }
+  parts.push_back(item.get("topic", "").asString().empty()
+                      ? "Topic: none"
+                      : "Topic: " + item.get("topic", "").asString());
+  std::ostringstream out;
+  for (size_t i = 0; i < parts.size(); ++i) {
+    if (i > 0) {
+      out << " / ";
+    }
+    out << parts[i];
+  }
+  return out.str();
+}
+
+std::string RenderItemLink(const Json::Value& item) {
+  return "<a href=\"#\" class=\"item-link\" data-item-id=\"" +
+         HtmlEscape(item.get("id", "").asString()) +
+         "\" data-item-product=\"" +
+         HtmlEscape(item.get("product", "").asString()) + "\">" +
+         HtmlEscape(item.get("title", "").asString()) + "</a>";
+}
+
+std::string RenderItemCardPartial(const Json::Value& item) {
+  return "<div class=\"card\"><div><code>" +
+         HtmlEscape(item.get("id", "").asString()) + "</code></div><div>" +
+         RenderItemLink(item) + "</div><div class=\"muted\">" +
+         HtmlEscape(ItemMetaText(item)) + "</div></div>";
+}
+
+std::string RenderTreeNodePartial(const Json::Value& node, int depth) {
+  const auto nodeKey =
+      node.get("product", "").asString() + "::" + node.get("id", "").asString();
+  const auto label =
+      "<span class=\"node-line\"><span>[" +
+      HtmlEscape(node.get("type", "").asString()) + "]</span><code>" +
+      HtmlEscape(node.get("id", "").asString()) + "</code>" +
+      RenderItemLink(node) + "<span class=\"muted\">(" +
+      HtmlEscape(ItemMetaText(node)) + ")</span></span>";
+  const auto& children = node["children"];
+  if (children.empty()) {
+    return "<li><span class=\"leaf-spacer\"></span>" + label + "</li>";
+  }
+
+  std::string html = "<li><details data-node-key=\"" + HtmlEscape(nodeKey) +
+                     "\" " + (depth <= 1 ? "open" : "") + "><summary>" +
+                     label + "</summary><ul>";
+  for (const auto& child : children) {
+    html += RenderTreeNodePartial(child, depth + 1);
+  }
+  html += "</ul></details></li>";
+  return html;
+}
+
+std::string RenderEvidenceSummaryPartial(const Json::Value& evidence) {
+  const auto score = evidence.get("score", 0);
+  std::ostringstream scoreText;
+  if (score.isNumeric()) {
+    scoreText << score.asDouble();
+  } else {
+    scoreText << score.asString();
+  }
+  std::string html = "<div class=\"muted\">Evidence score: " +
+                     HtmlEscape(scoreText.str()) + "</div>";
+  if (!evidence["missing"].empty()) {
+    html += "<div class=\"muted\">Missing: ";
+    for (const auto& missing : evidence["missing"]) {
+      html += "<span class=\"pill missing\">" +
+              HtmlEscape(missing.asString()) + "</span> ";
+    }
+    html += "</div>";
+  }
+  return html;
+}
+
+std::string RenderReviewBundlePartial(const Json::Value& bundle) {
+  const auto& item = bundle["item"];
+  std::string html = RenderItemCardPartial(item);
+  const auto reason = bundle.get("review_reason", "").asString();
+  if (!reason.empty()) {
+    html += "<div class=\"review-reason muted\"><strong>Why this needs review:</strong> " +
+            HtmlEscape(reason) + "</div>";
+  }
+  html += RenderEvidenceSummaryPartial(bundle["evidence"]);
+  return html;
+}
+
+std::string RenderCheckbox(const std::string& name, const std::string& value,
+                           bool checked) {
+  return "<label><input type=\"checkbox\" name=\"" + HtmlEscape(name) +
+         "\" value=\"" + HtmlEscape(value) + "\" " +
+         (checked ? "checked" : "") + " /> " + HtmlEscape(value) + "</label>";
+}
+
 std::string JoinStrings(const std::vector<std::string>& values,
                         const std::string& separator) {
   std::ostringstream out;
@@ -484,6 +616,16 @@ Json::Value MakeReviewBundle(const Json::Value& item, const Json::Value& evidenc
   bundle["recommended_action"] =
       evidence["complete"].asBool() ? "review_result" : "request_evidence";
   return bundle;
+}
+
+Json::Value MakeReviewQueueBundle(
+    const Json::Value& bundle,
+    const std::string& queue,
+    const std::string& reason) {
+  Json::Value out = bundle;
+  out["review_queue"] = queue;
+  out["review_reason"] = reason;
+  return out;
 }
 
 bool ItemMatchesTopic(const Json::Value& item, const std::string& topic) {
@@ -1731,6 +1873,8 @@ Json::Value BacklogWebviewService::BuildReviewInbox(const ItemQueryOptions& opti
   Json::Value response(Json::objectValue);
   response["lanes"] = Json::objectValue;
   const std::vector<std::string> lanes = {
+      "Needs Review", "False Done", "Evidence Gap", "Blocked / Dirty",
+      "Stale / Drift", "Ready Frontier",
       "Ready Approval", "Result Review", "Done Candidate", "Blocked by Human",
       "Missing Evidence", "Rejected Needs Fix"};
   for (const auto& lane : lanes) {
@@ -1748,25 +1892,48 @@ Json::Value BacklogWebviewService::BuildReviewInbox(const ItemQueryOptions& opti
     const auto evidence = detail["evidence"];
     const auto state = text::ToLower(item["state"].asString());
     auto bundle = MakeReviewBundle(item, evidence);
+    const auto searchable = item["id"].asString() + "\n" + item["title"].asString() + "\n" +
+                            item["content"].asString();
+
+    auto appendQueue = [&](const std::string& lane, const std::string& reason) {
+      response["lanes"][lane].append(MakeReviewQueueBundle(bundle, lane, reason));
+    };
 
     if (state == "ready") {
+      appendQueue("Ready Frontier", "Ready item is waiting for human approval, dispatch, or prioritization.");
       response["lanes"]["Ready Approval"].append(bundle);
     }
     if (state == "review") {
+      appendQueue("Needs Review", "Item is in Review and needs a human result or evidence decision.");
       response["lanes"]["Result Review"].append(bundle);
     }
     if (state == "inprogress" && evidence["signals"]["validation"].asBool()) {
       response["lanes"]["Done Candidate"].append(bundle);
     }
     if (state == "blocked") {
+      appendQueue("Blocked / Dirty", "Blocked item needs a human unblock decision or cleanup follow-up.");
       response["lanes"]["Blocked by Human"].append(bundle);
     }
     if (!evidence["complete"].asBool() &&
         (state == "ready" || state == "review" || state == "done")) {
+      appendQueue("Evidence Gap", "Reviewable item is missing durable validation, artifact, or worklog evidence.");
       response["lanes"]["Missing Evidence"].append(bundle);
+    }
+    if (state == "done" && !evidence["complete"].asBool()) {
+      appendQueue("False Done", "Done item is missing enough evidence to trust the completed state.");
+    }
+    if (ContentContainsAny(searchable, {"stale", "drift", "outdated", "timeout", "timed out"})) {
+      appendQueue("Stale / Drift", "Item text signals stale state, drift, timeout, or freshness risk.");
+    }
+    if (state != "blocked" &&
+        ContentContainsAny(searchable, {"dirty", "uncommitted", "git status", "worktree"})) {
+      appendQueue("Blocked / Dirty", "Item text mentions dirty or uncommitted work that needs reconciliation.");
     }
     if (ContentContainsAny(item["title"].asString() + "\n" + item["id"].asString(),
                            {"rejected", "needs fix"})) {
+      if (state != "review") {
+        appendQueue("Needs Review", "Rejected or needs-fix item requires a human correction decision.");
+      }
       response["lanes"]["Rejected Needs Fix"].append(bundle);
     }
   }
@@ -2287,6 +2454,178 @@ Json::Value BacklogWebviewService::BuildAgentRunBoard(const ItemQueryOptions& op
   return response;
 }
 
+std::string BacklogWebviewService::RenderTreePartial(
+    const ItemQueryOptions& options) {
+  const auto tree = BuildTree(options);
+  if (tree.isMember("error")) {
+    return RenderErrorPartial(tree["error"].asString());
+  }
+  if (tree["roots"].empty()) {
+    return "<div class=\"muted\">No items for the current filters.</div>";
+  }
+
+  std::string html = "<ul>";
+  for (const auto& root : tree["roots"]) {
+    html += RenderTreeNodePartial(root, 0);
+  }
+  html += "</ul>";
+  return html;
+}
+
+std::string BacklogWebviewService::RenderKanbanPartial(
+    const ItemQueryOptions& options) {
+  const auto kanban = BuildKanban(options);
+  if (kanban.isMember("error")) {
+    return RenderErrorPartial(kanban["error"].asString());
+  }
+
+  const std::vector<std::string> lanes = {"Backlog", "Doing", "Blocked",
+                                          "Review", "Done"};
+  std::string html;
+  for (const auto& lane : lanes) {
+    html += "<div class=\"lane\"><strong>" + HtmlEscape(lane) + "</strong>";
+    const auto& items = kanban["lanes"][lane];
+    if (items.empty()) {
+      html += "<div class=\"muted\">No items</div>";
+    } else {
+      for (const auto& item : items) {
+        html += RenderItemCardPartial(item);
+      }
+    }
+    html += "</div>";
+  }
+  return html;
+}
+
+std::string BacklogWebviewService::RenderReviewPartial(
+    const ItemQueryOptions& options) {
+  const auto inbox = BuildReviewInbox(options);
+  if (inbox.isMember("error")) {
+    return RenderErrorPartial(inbox["error"].asString());
+  }
+
+  const std::vector<std::string> lanes = {
+      "Needs Review", "False Done", "Evidence Gap", "Blocked / Dirty",
+      "Stale / Drift", "Ready Frontier"};
+  std::string html;
+  for (const auto& lane : lanes) {
+    const auto& bundles = inbox["lanes"][lane];
+    html += "<div class=\"review-lane\"><strong>" + HtmlEscape(lane) +
+            "</strong><div class=\"muted\">" +
+            std::to_string(bundles.size()) + " item(s)</div>";
+    if (bundles.empty()) {
+      html += "<div class=\"muted\">No items</div>";
+    } else {
+      for (const auto& bundle : bundles) {
+        html += RenderReviewBundlePartial(bundle);
+      }
+    }
+    html += "</div>";
+  }
+  return html.empty() ? "<div class=\"muted\">No review queues for the current filters.</div>"
+                      : html;
+}
+
+std::string BacklogWebviewService::RenderContextPartial(
+    const ItemQueryOptions& options) {
+  const auto items = QueryItems(options);
+  if (items.isMember("error")) {
+    return RenderErrorPartial(items["error"].asString());
+  }
+
+  std::map<std::string, size_t> counts;
+  std::string cards;
+  for (const auto& item : items["items"]) {
+    const auto type = item.get("type", "").asString();
+    if (type != "ADR" && type != "Topic" && type != "Workset") {
+      continue;
+    }
+    ++counts[type];
+    cards += RenderItemCardPartial(item);
+  }
+
+  std::string html = "<div id=\"context-summary\" class=\"muted\" style=\"margin-bottom:8px;\">ADR: " +
+                     std::to_string(counts["ADR"]) + " | Topic: " +
+                     std::to_string(counts["Topic"]) + " | Workset: " +
+                     std::to_string(counts["Workset"]) + "</div>";
+  html += cards.empty() ? "<div class=\"muted\">No context items</div>" : cards;
+  return html;
+}
+
+std::string BacklogWebviewService::RenderFiltersPartial(
+    const ItemQueryOptions& options) {
+  const auto products = ListProducts();
+  const std::vector<std::string> states = {"Proposed", "Ready", "InProgress",
+                                           "Blocked", "Review", "Done",
+                                           "Dropped"};
+  const std::vector<std::string> types = {"Theme", "Epic", "Feature",
+                                          "UserStory", "Task", "Bug",
+                                          "Issue", "ADR", "Topic",
+                                          "Workset"};
+  const bool allProducts =
+      options.products.empty() || ContainsToken(options.products, "all");
+
+  std::string html =
+      "<div class=\"filter-group\"><div class=\"filter-group-title\">Products</div><div class=\"filters\">";
+  html += RenderCheckbox("product", "all", allProducts);
+  for (const auto& product : products) {
+    const auto value = product.asString();
+    html += RenderCheckbox("product", value,
+                           !allProducts && ContainsToken(options.products, value));
+  }
+  html += "</div></div><div class=\"filter-group\"><div class=\"filter-group-title\">States</div><div class=\"filters\">";
+  for (const auto& state : states) {
+    html += RenderCheckbox("state", state,
+                           options.states.empty() ||
+                               ContainsToken(options.states, state));
+  }
+  html += "</div></div><div class=\"filter-group\"><div class=\"filter-group-title\">Types</div><div class=\"filters\">";
+  for (const auto& type : types) {
+    html += RenderCheckbox("type", type,
+                           options.types.empty() ||
+                               ContainsToken(options.types, type));
+  }
+  html += "</div></div>";
+  return html;
+}
+
+std::string BacklogWebviewService::RenderItemPartial(const std::string& product,
+                                                     const std::string& id) {
+  const auto detail = GetEvidenceDetail(product.empty() ? "all" : product, id);
+  if (detail.isMember("error")) {
+    return RenderErrorPartial(detail["error"].asString());
+  }
+
+  const auto& item = detail["item"];
+  std::string html = "<div class=\"row\"><code>" +
+                     HtmlEscape(item.get("id", "").asString()) +
+                     "</code><span class=\"muted\">" +
+                     HtmlEscape(ItemMetaText(item)) + "</span></div>";
+  html += "<div class=\"muted\" style=\"margin-bottom:8px;\">" +
+          HtmlEscape(item.get("path", "").asString()) + "</div>";
+  html += "<div class=\"panel\" style=\"margin:0 0 12px 0;\"><h4>Evidence</h4>" +
+          RenderEvidenceSummaryPartial(detail["evidence"]) + "</div>";
+  html += "<div class=\"panel\" style=\"margin:0 0 12px 0;\"><h4>Timeline</h4>";
+  if (detail["worklog_events"].empty()) {
+    html += "<div class=\"muted\">No worklog events</div>";
+  } else {
+    for (const auto& event : detail["worklog_events"]) {
+      html += "<div class=\"card\"><div><code>" +
+              HtmlEscape(event.get("timestamp", "").asString()) +
+              "</code> <span class=\"pill\">" +
+              HtmlEscape(event.get("kind", "worklog").asString()) +
+              "</span></div><div>" +
+              HtmlEscape(event.get("text", "").asString()) +
+              "</div><div class=\"muted\">" +
+              HtmlEscape(event.get("agent", "unknown").asString()) +
+              "</div></div>";
+    }
+  }
+  html += "</div><pre>" +
+          HtmlEscape(item.get("content", "").asString()) + "</pre>";
+  return html;
+}
+
 Json::Value BacklogWebviewService::Refresh(const std::string& product) {
   Json::Value response(Json::objectValue);
   if (product.empty() || text::ToLower(product) == "all") {
@@ -2364,6 +2703,76 @@ void RegisterBacklogWebviewRoutes(
         ParseSizeOrDefault(request->getParameter("offset"), 0, 1000000);
     return options;
   };
+  auto htmlResponse = [](const std::string& html) {
+    auto response = HttpResponse::newHttpResponse();
+    response->setStatusCode(k200OK);
+    response->setContentTypeCode(CT_TEXT_HTML);
+    response->setBody(html);
+    return response;
+  };
+
+  app().registerHandler(
+      "/partials/tree",
+      [&service, queryOptionsFromRequest, htmlResponse](
+          const HttpRequestPtr& request,
+          std::function<void(const HttpResponsePtr&)>&& callback) {
+        callback(htmlResponse(
+            service.RenderTreePartial(queryOptionsFromRequest(request))));
+      },
+      {Get});
+
+  app().registerHandler(
+      "/partials/kanban",
+      [&service, queryOptionsFromRequest, htmlResponse](
+          const HttpRequestPtr& request,
+          std::function<void(const HttpResponsePtr&)>&& callback) {
+        callback(htmlResponse(
+            service.RenderKanbanPartial(queryOptionsFromRequest(request))));
+      },
+      {Get});
+
+  app().registerHandler(
+      "/partials/review",
+      [&service, queryOptionsFromRequest, htmlResponse](
+          const HttpRequestPtr& request,
+          std::function<void(const HttpResponsePtr&)>&& callback) {
+        callback(htmlResponse(
+            service.RenderReviewPartial(queryOptionsFromRequest(request))));
+      },
+      {Get});
+
+  app().registerHandler(
+      "/partials/context",
+      [&service, queryOptionsFromRequest, htmlResponse](
+          const HttpRequestPtr& request,
+          std::function<void(const HttpResponsePtr&)>&& callback) {
+        callback(htmlResponse(
+            service.RenderContextPartial(queryOptionsFromRequest(request))));
+      },
+      {Get});
+
+  app().registerHandler(
+      "/partials/filters",
+      [&service, queryOptionsFromRequest, htmlResponse](
+          const HttpRequestPtr& request,
+          std::function<void(const HttpResponsePtr&)>&& callback) {
+        callback(htmlResponse(
+            service.RenderFiltersPartial(queryOptionsFromRequest(request))));
+      },
+      {Get});
+
+  app().registerHandler(
+      "/partials/item/{1}",
+      [&service, htmlResponse](const HttpRequestPtr& request,
+          std::function<void(const HttpResponsePtr&)>&& callback,
+          const std::string& itemId) {
+        auto product = request->getParameter("product");
+        if (product.empty()) {
+          product = request->getParameter("products");
+        }
+        callback(htmlResponse(service.RenderItemPartial(product, itemId)));
+      },
+      {Get});
 
   app().registerHandler(
       "/healthz",

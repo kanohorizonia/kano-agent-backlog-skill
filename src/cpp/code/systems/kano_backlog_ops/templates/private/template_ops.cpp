@@ -99,8 +99,18 @@ std::string TemplateOps::render_frontmatter(const BacklogItem& item) {
     ss << "owner: " << (item.owner ? *item.owner : "null") << "\n";
     
     ss << "external:\n";
-    ss << "  azure_id: null\n";
-    ss << "  jira_key: null\n";
+    auto emit_external = [&](const std::string& key, const std::string& fallback) {
+        auto it = item.external.find(key);
+        ss << "  " << key << ": " << (it != item.external.end() ? it->second : fallback) << "\n";
+    };
+    emit_external("azure_id", "null");
+    emit_external("jira_key", "null");
+    for (const auto& [key, value] : item.external) {
+        if (key == "azure_id" || key == "jira_key") {
+            continue;
+        }
+        ss << "  " << key << ": " << value << "\n";
+    }
     
     ss << "links:\n";
     ss << "  relates: []\n";

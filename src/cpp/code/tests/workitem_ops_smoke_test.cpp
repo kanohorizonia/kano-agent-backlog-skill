@@ -137,6 +137,32 @@ int main() {
             auto issue_queried = index.query_items(ItemType::Issue, std::nullopt);
             expect(!issue_queried.empty(), "issue item should appear in index query");
 
+            auto assigned_bug_created = WorkitemOps::create_item(
+                index,
+                root,
+                "TST",
+                ItemType::Bug,
+                "Default assignment smoke",
+                "opencode",
+                std::nullopt,
+                "P2",
+                {},
+                "general",
+                "backlog",
+                std::optional<std::string>("koa"),
+                std::optional<std::string>("reviewer-koa"),
+                "inherited:product.default_assignee",
+                "inherited:product.default_bug_reviewer");
+            const auto assigned_bug_text = read_text(assigned_bug_created.path);
+            expect(assigned_bug_text.find("owner: koa") != std::string::npos,
+                   "created bug should materialize inherited owner");
+            expect(assigned_bug_text.find("  reviewer: reviewer-koa") != std::string::npos,
+                   "created bug should materialize inherited reviewer");
+            expect(assigned_bug_text.find("  owner_source: inherited:product.default_assignee") != std::string::npos,
+                   "created bug should record inherited owner source");
+            expect(assigned_bug_text.find("  reviewer_source: inherited:product.default_bug_reviewer") != std::string::npos,
+                   "created bug should record inherited reviewer source");
+
             auto issue_item = store.read(issue_created.path);
             expect(issue_item.type == ItemType::Issue, "created issue should round-trip with Issue type");
             set_ready_fields(issue_item);

@@ -17,6 +17,24 @@
 
 These derived paths should be ignored in version control unless your team has a deliberate reason to keep selected generated artifacts.
 
+## Product assignment defaults
+
+Product configuration can define repo-visible actor aliases for new items:
+
+```toml
+[product]
+default_assignee = "koa"
+default_bug_reviewer = "reviewer-koa"
+```
+
+`default_assignee` applies to newly created items when the caller does not pass
+`--owner` or `--assignee`. `default_bug_reviewer` applies only to new Bug items
+when the caller does not pass `--reviewer`.
+
+Product-local `_config/config.toml` overrides project-level `[products.<name>]`
+defaults. Created items record whether assignment came from an explicit CLI
+argument or from product policy.
+
 ## 0.0.3 configuration notes
 
 Release `0.0.3` tightens the effective config flow:
@@ -28,6 +46,7 @@ Release `0.0.3` tightens the effective config flow:
 ## References
 
 - [Tokenizer configuration](tokenizer-configuration.md)
+- [Actor alias and assignment policy](design/actor-alias-and-assignment-policy.md)
 - [Skill reference](../REFERENCE.md)
 - [Project config implementation notes](../references/project-config-implementation.md)
 - [0.0.3 release notes](releases/0.0.3.md)

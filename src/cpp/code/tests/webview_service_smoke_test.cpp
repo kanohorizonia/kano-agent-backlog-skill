@@ -236,7 +236,7 @@ int main() {
         auto savedViews = service.ListSavedViews();
         expect(savedViews["views"].size() >= 4, "saved views should expose review lanes");
 
-        auto readyView = service.RunSavedView("ready-approval", allOptions);
+        auto readyView = service.RunSavedView("ready-frontier", allOptions);
         expect(!readyView.isMember("error"), "ready saved view should run");
         expect(readyView["result"]["total"].asUInt64() >= 1, "ready saved view should include ready work");
 
@@ -251,14 +251,19 @@ int main() {
         expect(preview["mutation_allowed"].asBool() == false, "command preview must stay read-only");
 
         auto inbox = service.BuildReviewInbox(allOptions);
-        expect(inbox["lanes"]["Ready Approval"].size() >= 1, "review inbox should classify ready work");
-        for (const auto& lane : {"Needs Review", "False Done", "Evidence Gap", "Blocked / Dirty", "Stale / Drift",
-                                 "Ready Frontier"}) {
+        expect(!inbox["lanes"].isMember("Ready Approval"), "review inbox should not expose legacy Ready Approval lane");
+        for (const auto& lane : {"Needs Review", "Done Candidate", "False Done Suspect", "Evidence Gap",
+                                 "Blocked/Dirty", "Stale/Drift", "Ready Frontier"}) {
             expect(inbox["lanes"].isMember(lane), std::string("review inbox should expose queue: ") + lane);
         }
+        expect(inbox["lane_taxonomy"].size() >= 7, "review inbox should expose lane taxonomy metadata");
         expect(inbox["lanes"]["Ready Frontier"].size() >= 1, "review inbox should expose ready frontier queue");
         expect(!inbox["lanes"]["Ready Frontier"][0]["review_reason"].asString().empty(),
                "review inbox bundles should explain why the item needs review");
+        expect(!inbox["lanes"]["Ready Frontier"][0]["reason_code"].asString().empty(),
+               "review inbox bundles should expose deterministic reason codes");
+        expect(inbox["lanes"]["Ready Frontier"][0]["source_fields"].size() >= 1,
+               "review inbox bundles should expose source fields");
 
         auto evidence = service.GetEvidenceDetail("product-alpha", "PRA-TSK-0001");
         expect(evidence["evidence"]["signals"]["artifact"].asBool(), "evidence detail should detect artifact signal");
@@ -314,6 +319,8 @@ int main() {
         auto reviewPartial = service.RenderReviewPartial(allOptions);
         expect(reviewPartial.find("Ready Frontier") != std::string::npos,
                "review partial should render review queues");
+        expect(reviewPartial.find("Done Candidate") != std::string::npos,
+               "review partial should render canonical done candidate lane");
         expect(reviewPartial.find("Why this needs review") != std::string::npos,
                "review partial should render review reasons");
 

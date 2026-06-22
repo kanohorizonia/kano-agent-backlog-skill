@@ -207,8 +207,16 @@ std::string RenderReviewBundlePartial(const Json::Value& bundle) {
   std::string html = RenderItemCardPartial(item);
   const auto reason = bundle.get("review_reason", "").asString();
   if (!reason.empty()) {
+    const auto reasonCode = bundle.get("reason_code", "").asString();
     html += "<div class=\"review-reason muted\"><strong>Why this needs review:</strong> " +
-            HtmlEscape(reason) + "</div>";
+            (reasonCode.empty() ? "" : "<code>" + HtmlEscape(reasonCode) + "</code> ") +
+            HtmlEscape(reason);
+    const auto decision = bundle.get("suggested_human_decision", "").asString();
+    if (!decision.empty()) {
+      html += "<div class=\"muted\">Suggested decision: " +
+              HtmlEscape(decision) + "</div>";
+    }
+    html += "</div>";
   }
   html += RenderEvidenceSummaryPartial(bundle["evidence"]);
   return html;
@@ -394,19 +402,19 @@ struct SavedViewDefinition {
 
 const std::vector<SavedViewDefinition>& SavedViews() {
   static const std::vector<SavedViewDefinition> views = {
-      {"ready-approval", "Ready Approval",
-       "Items that are ready for a human to approve or dispatch.",
+      {"ready-frontier", "Ready Frontier",
+       "Ready items waiting for a human to approve, dispatch, or defer.",
        "state:Ready type:Feature type:UserStory type:Task type:Bug"},
-      {"result-review", "Result Review",
+      {"needs-review", "Needs Review",
        "Items waiting for a human to review delivered results.",
        "state:Review"},
-      {"blocked", "Blocked Work",
+      {"blocked-dirty", "Blocked/Dirty",
        "Items that cannot move forward without an explicit blocker decision.",
        "state:Blocked"},
-      {"stale-inprogress", "Stale InProgress",
+      {"stale-drift", "Stale/Drift",
        "Active items that need an execution freshness check.",
        "state:InProgress"},
-      {"missing-evidence", "Missing Evidence",
+      {"evidence-gap", "Evidence Gap",
        "Reviewable items whose worklog or detail text lacks concrete evidence markers.",
        "state:Ready state:Review state:Done"}};
   return views;
@@ -618,13 +626,105 @@ Json::Value MakeReviewBundle(const Json::Value& item, const Json::Value& evidenc
   return bundle;
 }
 
+Json::Value ReviewSourceFields(std::initializer_list<const char*> fields) {
+  Json::Value value(Json::arrayValue);
+  for (const auto* field : fields) {
+    value.append(field);
+  }
+  return value;
+}
+
+Json::Value ReviewLaneDefinition(const std::string& id,
+                                 const std::string& title,
+                                 const std::string& purpose,
+                                 const std::string& inclusion,
+                                 const std::string& exclusion,
+                                 const std::string& emptyState,
+                                 int priority) {
+  Json::Value lane(Json::objectValue);
+  lane["id"] = id;
+  lane["title"] = title;
+  lane["purpose"] = purpose;
+  lane["inclusion_criteria"] = inclusion;
+  lane["exclusion_criteria"] = exclusion;
+  lane["empty_state"] = emptyState;
+  lane["priority"] = priority;
+  lane["read_only"] = true;
+  return lane;
+}
+
+const std::vector<std::string>& ReviewLaneOrder() {
+  static const std::vector<std::string> order = {
+      "Needs Review", "Done Candidate", "False Done Suspect",
+      "Evidence Gap", "Blocked/Dirty", "Stale/Drift", "Ready Frontier"};
+  return order;
+}
+
+Json::Value ReviewLaneTaxonomy() {
+  Json::Value lanes(Json::arrayValue);
+  lanes.append(ReviewLaneDefinition(
+      "needs-review", "Needs Review",
+      "Items that require a human result or evidence decision.",
+      "state=Review, rejected/needs-fix marker, or explicit review reason.",
+      "Items already closed with sufficient evidence unless a false-done signal exists.",
+      "No items currently need human review.", 10));
+  lanes.append(ReviewLaneDefinition(
+      "done-candidate", "Done Candidate",
+      "In-progress items with validation evidence that may be ready for review.",
+      "state=InProgress and validation evidence signal is present.",
+      "Items without validation evidence or already in Review/Done.",
+      "No in-progress items look ready for completion review.", 20));
+  lanes.append(ReviewLaneDefinition(
+      "false-done-suspect", "False Done Suspect",
+      "Done items whose evidence chain is incomplete.",
+      "state=Done and evidence summary is incomplete.",
+      "Done items with enough durable evidence signals.",
+      "No Done items look under-evidenced.", 30));
+  lanes.append(ReviewLaneDefinition(
+      "evidence-gap", "Evidence Gap",
+      "Reviewable items missing durable validation, artifact, or worklog evidence.",
+      "state in Ready/Review/Done and evidence summary is incomplete.",
+      "Items outside reviewable states unless another lane explains them.",
+      "No reviewable items have obvious evidence gaps.", 40));
+  lanes.append(ReviewLaneDefinition(
+      "blocked-dirty", "Blocked/Dirty",
+      "Items blocked by humans or by dirty/uncommitted work signals.",
+      "state=Blocked or item text mentions dirty/uncommitted work.",
+      "Ordinary Ready/Review items without blocker or dirty-work evidence.",
+      "No blocker or dirty-work items are visible.", 50));
+  lanes.append(ReviewLaneDefinition(
+      "stale-drift", "Stale/Drift",
+      "Items whose text signals stale intent, drift, timeout, or freshness risk.",
+      "Item id, title, or body mentions stale, drift, outdated, timeout, or timed out.",
+      "Fresh items with no drift/freshness terms.",
+      "No stale or drift candidates are visible.", 60));
+  lanes.append(ReviewLaneDefinition(
+      "ready-frontier", "Ready Frontier",
+      "Ready items waiting for human approval, dispatch, or prioritization.",
+      "state=Ready.",
+      "Items already in execution, review, blocked, done, or dropped.",
+      "No Ready items are waiting at the frontier.", 70));
+  return lanes;
+}
+
 Json::Value MakeReviewQueueBundle(
     const Json::Value& bundle,
     const std::string& queue,
-    const std::string& reason) {
+    const std::string& reasonCode,
+    const std::string& reason,
+    const Json::Value& sourceFields,
+    const std::string& suggestedDecision,
+    const std::string& diagnosticStatus = "deterministic",
+    const std::string& confidence = "high") {
   Json::Value out = bundle;
   out["review_queue"] = queue;
+  out["reason_code"] = reasonCode;
   out["review_reason"] = reason;
+  out["reason_text"] = reason;
+  out["source_fields"] = sourceFields;
+  out["confidence"] = confidence;
+  out["diagnostic_status"] = diagnosticStatus;
+  out["suggested_human_decision"] = suggestedDecision;
   return out;
 }
 
@@ -1783,7 +1883,18 @@ Json::Value BacklogWebviewService::RunKobql(const std::string& query,
 Json::Value BacklogWebviewService::RunSavedView(const std::string& viewId,
                                                 const ItemQueryOptions& options) {
   Json::Value response(Json::objectValue);
-  const auto normalized = text::ToLower(Trim(viewId));
+  auto normalized = text::ToLower(Trim(viewId));
+  if (normalized == "ready-approval") {
+    normalized = "ready-frontier";
+  } else if (normalized == "result-review") {
+    normalized = "needs-review";
+  } else if (normalized == "blocked") {
+    normalized = "blocked-dirty";
+  } else if (normalized == "stale-inprogress") {
+    normalized = "stale-drift";
+  } else if (normalized == "missing-evidence") {
+    normalized = "evidence-gap";
+  }
   const auto* selected = static_cast<const SavedViewDefinition*>(nullptr);
   for (const auto& view : SavedViews()) {
     if (view.id == normalized) {
@@ -1798,7 +1909,7 @@ Json::Value BacklogWebviewService::RunSavedView(const std::string& viewId,
 
   response["view"] = SavedViewToJson(*selected);
   auto result = RunKobql(selected->kobql, options);
-  if (selected->id == "missing-evidence" && !result.isMember("error")) {
+  if (selected->id == "evidence-gap" && !result.isMember("error")) {
     Json::Value filtered(Json::arrayValue);
     for (const auto& item : result["items"]) {
       auto detail = GetEvidenceDetail(item["product"].asString(), item["id"].asString());
@@ -1872,11 +1983,12 @@ Json::Value BacklogWebviewService::PreviewCommand(const std::string& phrase,
 Json::Value BacklogWebviewService::BuildReviewInbox(const ItemQueryOptions& options) {
   Json::Value response(Json::objectValue);
   response["lanes"] = Json::objectValue;
-  const std::vector<std::string> lanes = {
-      "Needs Review", "False Done", "Evidence Gap", "Blocked / Dirty",
-      "Stale / Drift", "Ready Frontier",
-      "Ready Approval", "Result Review", "Done Candidate", "Blocked by Human",
-      "Missing Evidence", "Rejected Needs Fix"};
+  response["lane_taxonomy"] = ReviewLaneTaxonomy();
+  response["lane_order"] = Json::arrayValue;
+  for (const auto& lane : ReviewLaneOrder()) {
+    response["lane_order"].append(lane);
+  }
+  const auto& lanes = ReviewLaneOrder();
   for (const auto& lane : lanes) {
     response["lanes"][lane] = Json::arrayValue;
   }
@@ -1895,46 +2007,73 @@ Json::Value BacklogWebviewService::BuildReviewInbox(const ItemQueryOptions& opti
     const auto searchable = item["id"].asString() + "\n" + item["title"].asString() + "\n" +
                             item["content"].asString();
 
-    auto appendQueue = [&](const std::string& lane, const std::string& reason) {
-      response["lanes"][lane].append(MakeReviewQueueBundle(bundle, lane, reason));
+    auto appendQueue = [&](const std::string& lane,
+                           const std::string& reasonCode,
+                           const std::string& reason,
+                           const Json::Value& sourceFields,
+                           const std::string& suggestedDecision,
+                           const std::string& diagnosticStatus = "deterministic",
+                           const std::string& confidence = "high") {
+      response["lanes"][lane].append(MakeReviewQueueBundle(
+          bundle, lane, reasonCode, reason, sourceFields, suggestedDecision,
+          diagnosticStatus, confidence));
     };
 
     if (state == "ready") {
-      appendQueue("Ready Frontier", "Ready item is waiting for human approval, dispatch, or prioritization.");
-      response["lanes"]["Ready Approval"].append(bundle);
+      appendQueue("Ready Frontier", "ready_frontier_candidate",
+                  "Ready item is waiting for human approval, dispatch, or prioritization.",
+                  ReviewSourceFields({"state"}), "approve_dispatch_or_defer");
     }
     if (state == "review") {
-      appendQueue("Needs Review", "Item is in Review and needs a human result or evidence decision.");
-      response["lanes"]["Result Review"].append(bundle);
+      appendQueue("Needs Review", "review_state",
+                  "Item is in Review and needs a human result or evidence decision.",
+                  ReviewSourceFields({"state"}), "accept_reject_or_request_evidence");
     }
     if (state == "inprogress" && evidence["signals"]["validation"].asBool()) {
-      response["lanes"]["Done Candidate"].append(bundle);
+      appendQueue("Done Candidate", "validation_seen_in_progress",
+                  "In-progress item has validation evidence and may be ready to move to Review.",
+                  ReviewSourceFields({"state", "evidence.signals.validation"}),
+                  "review_for_completion");
     }
     if (state == "blocked") {
-      appendQueue("Blocked / Dirty", "Blocked item needs a human unblock decision or cleanup follow-up.");
-      response["lanes"]["Blocked by Human"].append(bundle);
+      appendQueue("Blocked/Dirty", "blocked_state",
+                  "Blocked item needs a human unblock decision or cleanup follow-up.",
+                  ReviewSourceFields({"state"}), "unblock_defer_or_split_followup");
     }
     if (!evidence["complete"].asBool() &&
         (state == "ready" || state == "review" || state == "done")) {
-      appendQueue("Evidence Gap", "Reviewable item is missing durable validation, artifact, or worklog evidence.");
-      response["lanes"]["Missing Evidence"].append(bundle);
+      appendQueue("Evidence Gap", "evidence_missing",
+                  "Reviewable item is missing durable validation, artifact, or worklog evidence.",
+                  ReviewSourceFields({"state", "evidence.complete", "evidence.missing"}),
+                  "request_evidence_or_reopen_scope");
     }
     if (state == "done" && !evidence["complete"].asBool()) {
-      appendQueue("False Done", "Done item is missing enough evidence to trust the completed state.");
+      appendQueue("False Done Suspect", "false_done_evidence_gap",
+                  "Done item is missing enough evidence to trust the completed state.",
+                  ReviewSourceFields({"state", "evidence.complete", "evidence.missing"}),
+                  "reopen_or_accept_risk");
     }
     if (ContentContainsAny(searchable, {"stale", "drift", "outdated", "timeout", "timed out"})) {
-      appendQueue("Stale / Drift", "Item text signals stale state, drift, timeout, or freshness risk.");
+      appendQueue("Stale/Drift", "stale_or_drift_signal",
+                  "Item text signals stale state, drift, timeout, or freshness risk.",
+                  ReviewSourceFields({"id", "title", "content"}), "refresh_intent_or_split_followup",
+                  "keyword-signal", "medium");
     }
     if (state != "blocked" &&
         ContentContainsAny(searchable, {"dirty", "uncommitted", "git status", "worktree"})) {
-      appendQueue("Blocked / Dirty", "Item text mentions dirty or uncommitted work that needs reconciliation.");
+      appendQueue("Blocked/Dirty", "dirty_work_signal",
+                  "Item text mentions dirty or uncommitted work that needs reconciliation.",
+                  ReviewSourceFields({"title", "content"}), "reconcile_worktree_before_done",
+                  "keyword-signal", "medium");
     }
     if (ContentContainsAny(item["title"].asString() + "\n" + item["id"].asString(),
                            {"rejected", "needs fix"})) {
       if (state != "review") {
-        appendQueue("Needs Review", "Rejected or needs-fix item requires a human correction decision.");
+        appendQueue("Needs Review", "rejected_or_needs_fix",
+                    "Rejected or needs-fix item requires a human correction decision.",
+                    ReviewSourceFields({"id", "title"}), "decide_fix_reopen_or_drop",
+                    "keyword-signal", "medium");
       }
-      response["lanes"]["Rejected Needs Fix"].append(bundle);
     }
   }
 
@@ -2505,8 +2644,8 @@ std::string BacklogWebviewService::RenderReviewPartial(
   }
 
   const std::vector<std::string> lanes = {
-      "Needs Review", "False Done", "Evidence Gap", "Blocked / Dirty",
-      "Stale / Drift", "Ready Frontier"};
+      "Needs Review", "Done Candidate", "False Done Suspect", "Evidence Gap",
+      "Blocked/Dirty", "Stale/Drift", "Ready Frontier"};
   std::string html;
   for (const auto& lane : lanes) {
     const auto& bundles = inbox["lanes"][lane];

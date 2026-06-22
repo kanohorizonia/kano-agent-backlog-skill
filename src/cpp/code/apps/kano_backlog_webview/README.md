@@ -1,9 +1,15 @@
 # kano_backlog_webview (C++ Drogon)
 
-Local-only backlog visualization service.
+Local-only backlog visualization service for Backboard.
 
-The partial UI boundary is documented in
-[`docs/design/backboard-partial-ui-boundary.md`](../../../../../docs/design/backboard-partial-ui-boundary.md).
+Backboard is the product-facing local review UI. KOB Webview is the technical
+name for this native service, its binary, routes, and Docker wrapper.
+
+Design contracts:
+
+- [`docs/design/backboard-information-architecture.md`](../../../../../docs/design/backboard-information-architecture.md)
+- [`docs/design/backboard-review-inbox-model.md`](../../../../../docs/design/backboard-review-inbox-model.md)
+- [`docs/design/backboard-partial-ui-boundary.md`](../../../../../docs/design/backboard-partial-ui-boundary.md)
 
 ## Scope (MVP)
 
@@ -27,7 +33,8 @@ The partial UI boundary is documented in
   - `GET /partials/item/<id>?product=all|<name>`
 - First-party UI runtime:
   - `GET /assets/kob-ui.js`
-- UI: product/state/type/search filters + context summary + tree + kanban at `/`
+- UI: Backboard Review Inbox, product map, flow, context, dependencies, agent
+  runs, and command preview at `/`
 
 `kob-ui.js` is intentionally small and first-party. It owns partial fetch/swap,
 delegated partial links, filter debounce support, URL query-state helpers, and

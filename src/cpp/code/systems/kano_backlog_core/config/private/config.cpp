@@ -148,6 +148,42 @@ void apply_product_value(ProductDefinition& product, const std::string& key, con
     else if (key == "chunking_max_tokens") product.chunking_max_tokens = parse_toml_int(value);
     else if (key == "tokenizer_adapter") product.tokenizer_adapter = parse_toml_string_value(value);
     else if (key == "tokenizer_model") product.tokenizer_model = parse_toml_string_value(value);
+    else if (key == "default_assignee") product.default_assignee = parse_toml_string_value(value);
+    else if (key == "default_bug_reviewer") product.default_bug_reviewer = parse_toml_string_value(value);
+}
+
+void apply_product_local_config_file(ProductDefinition& product, const std::filesystem::path& file_path) {
+    if (!std::filesystem::exists(file_path)) {
+        return;
+    }
+
+    std::ifstream input(file_path, std::ios::binary);
+    if (!input.is_open()) {
+        throw kano::backlog_core::ConfigError("Failed to read product TOML from " + file_path.string());
+    }
+
+    bool in_product_section = false;
+    std::string line;
+    while (std::getline(input, line)) {
+        line = trim_copy_local(strip_inline_comment(line));
+        if (line.empty()) {
+            continue;
+        }
+        if (line.front() == '[' && line.back() == ']') {
+            in_product_section = trim_copy_local(line.substr(1, line.size() - 2)) == "product";
+            continue;
+        }
+        if (!in_product_section) {
+            continue;
+        }
+        const auto eq = line.find('=');
+        if (eq == std::string::npos) {
+            continue;
+        }
+        const auto key = trim_copy_local(line.substr(0, eq));
+        const auto value = trim_copy_local(line.substr(eq + 1));
+        apply_product_value(product, key, value);
+    }
 }
 
 std::string normalize_product_prefix(std::string prefix) {
@@ -447,6 +483,10 @@ BacklogContext BacklogContext::resolve(
     if (it != project_config->products.end()) {
         ctx.product_def = it->second;
     }
+    apply_product_local_config_file(
+        ctx.product_def,
+        ctx.product_root / "_config" / "config.toml"
+    );
 
     if (sandbox_name && !sandbox_name->empty()) {
         ctx.sandbox_root = backlog_root.parent_path() / "backlog_sandbox" / *sandbox_name;

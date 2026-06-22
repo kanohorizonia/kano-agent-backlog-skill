@@ -541,7 +541,11 @@ CreateItemResult WorkitemOps::create_item(
     std::string priority,
     std::vector<std::string> tags,
     std::string area,
-    std::string iteration
+    std::string iteration,
+    std::optional<std::string> owner,
+    std::optional<std::string> reviewer,
+    std::string owner_source,
+    std::string reviewer_source
 ) {
     diagnostics::ScopedMutationSpan total_span("workitem.create_item.total", title);
     CanonicalStore store(backlog_root);
@@ -574,6 +578,18 @@ CreateItemResult WorkitemOps::create_item(
     item.area = area;
     item.iteration = iteration;
     item.tags = tags;
+    if (owner && !owner->empty()) {
+        item.owner = *owner;
+        if (!owner_source.empty()) {
+            item.external["owner_source"] = owner_source;
+        }
+    }
+    if (reviewer && !reviewer->empty()) {
+        item.external["reviewer"] = *reviewer;
+        if (!reviewer_source.empty()) {
+            item.external["reviewer_source"] = reviewer_source;
+        }
+    }
     
     // 3. Render content using templates
     std::string content;

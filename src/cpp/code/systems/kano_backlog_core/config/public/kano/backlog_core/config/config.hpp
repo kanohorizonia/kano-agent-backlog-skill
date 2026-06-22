@@ -76,6 +76,8 @@ struct ProductDefinition {
     std::optional<int> chunking_max_tokens;
     std::optional<std::string> tokenizer_adapter;
     std::optional<std::string> tokenizer_model;
+    std::optional<std::string> default_assignee;
+    std::optional<std::string> default_bug_reviewer;
 };
 
 struct ProductPrefixCollision {

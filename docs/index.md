@@ -82,11 +82,10 @@ Those fields become the human-reviewable contract for the agent.
 
 ![Ready and Done state lifecycle](assets/state-lifecycle-ready-done.svg)
 
-## Human review webview preview
+## Backboard preview
 
-The current repository includes local read-only webview support for backlog
-review. The host path builds the native webview and serves it on the
-workstation:
+Backboard is the local read-only review surface for backlog state. The host path
+builds the native KOB Webview runtime and serves Backboard on the workstation:
 
 ```bash
 pixi run webview
@@ -149,7 +148,7 @@ not a current UI screenshot.
 | Release line | `0.0.4` native C++ release target |
 | Public release source | [GitHub Releases](https://github.com/kanohorizonia/kano-agent-backlog-skill/releases) |
 | Public reports | [Latest test report](reports/latest/test-report/) and [latest coverage report](reports/latest/coverage-report/) |
-| Webview | Local read-only webview support; review-console image above is conceptual |
+| Backboard | Local read-only review surface through the KOB Webview runtime; review-console image above is conceptual |
 | Package channels | Manual artifacts are release-gated; winget, Homebrew, and apt are not live unless release metadata says so |
 | Retired runtime | Python runtime and Python package publishing are retired for this milestone |
 | Stability | Pre-1.0; schema, CLI details, and docs can still change |
@@ -164,7 +163,7 @@ not a current UI screenshot.
 | Release channels | [Installation](guides/installation.md), [Release channels](guides/release-channels.md), [Release notes](releases/0.0.4.md), [Changelog](releases/changelog.md) |
 | Testing | [Latest public test report](reports/latest/test-report/), [Latest public coverage report](reports/latest/coverage-report/), [GitHub Actions](https://github.com/kanohorizonia/kano-agent-backlog-skill/actions) |
 | Tokenizer adapters | [Quick start](guides/tokenizer-quickstart.md), [Overview](guides/tokenizer-adapters.md), [Configuration](guides/tokenizer-configuration.md), [CLI](guides/tokenizer-cli-reference.md), [Troubleshooting](guides/tokenizer-troubleshooting.md), [Performance](guides/tokenizer-performance.md) |
-| Maintainers | [Maintainer automation](automation/maintainer-automation.md), [Docs pipeline](automation/docs-pipeline.md), [Native CLI direction](guides/native-cli-direction.md) |
+| Maintainers | [Maintainer automation](automation/maintainer-automation.md), [Docs pipeline](automation/docs-pipeline.md), [Native CLI direction](guides/native-cli-direction.md), [Backboard IA](design/backboard-information-architecture.md), [Actor aliases](design/actor-alias-and-assignment-policy.md) |
 | Reference | [Schema reference](references/schema.md), [All references](references/) |
 
 ## Release and evidence notes

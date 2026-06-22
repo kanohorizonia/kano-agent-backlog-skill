@@ -37,7 +37,11 @@ public:
         std::string priority = "P2",
         std::vector<std::string> tags = {},
         std::string area = "general",
-        std::string iteration = "backlog"
+        std::string iteration = "backlog",
+        std::optional<std::string> owner = std::nullopt,
+        std::optional<std::string> reviewer = std::nullopt,
+        std::string owner_source = "",
+        std::string reviewer_source = ""
     );
 
     /**

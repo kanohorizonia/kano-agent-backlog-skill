@@ -1,7 +1,11 @@
 #include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <optional>
+#include <sstream>
 #include <stdexcept>
 
+#include "kano/backlog_core/config/config.hpp"
 #include "kano/backlog_core/frontmatter/canonical_store.hpp"
 #include "kano/backlog_core/frontmatter/frontmatter.hpp"
 #include "kano/backlog_core/models/models.hpp"
@@ -17,17 +21,28 @@ void expect(bool condition, const std::string& message) {
     }
 }
 
+void write_text(const std::filesystem::path& path, const std::string& text) {
+    std::filesystem::create_directories(path.parent_path());
+    std::ofstream output(path, std::ios::binary);
+    if (!output.is_open()) {
+        throw std::runtime_error("failed to write " + path.string());
+    }
+    output << text;
+}
+
 } // namespace
 
 int main() {
     kano::backlog_core::ConfigureNoninteractiveErrorHandling();
 
     using kano::backlog_core::BacklogItem;
+    using kano::backlog_core::BacklogContext;
     using kano::backlog_core::CanonicalStore;
     using kano::backlog_core::Frontmatter;
     using kano::backlog_core::FrontmatterContext;
     using kano::backlog_core::ItemState;
     using kano::backlog_core::ItemType;
+    using kano::backlog_core::ProjectConfig;
     using kano::backlog_core::StateAction;
     using kano::backlog_core::StateMachine;
     using kano::backlog_core::Validator;
@@ -160,6 +175,38 @@ int main() {
         expect(to_string(ItemType::Issue) == "Issue", "issue type should stringify");
         expect(parse_item_type("issue").value_or(ItemType::Task) == ItemType::Issue, "issue type should parse");
         expect(parse_item_type("Issue").value_or(ItemType::Task) == ItemType::Issue, "Issue type should parse case-insensitively");
+
+        const auto config_root = std::filesystem::temp_directory_path() / "kano-backlog-core-config-defaults-smoke";
+        std::filesystem::remove_all(config_root);
+        write_text(
+            config_root / ".kano" / "backlog_config.toml",
+            "[products.demo]\n"
+            "name = \"demo\"\n"
+            "prefix = \"DEM\"\n"
+            "backlog_root = \"_kano/backlog/products/demo\"\n"
+            "default_assignee = \"agent-default\"\n"
+            "default_bug_reviewer = \"review-default\"\n");
+        write_text(
+            config_root / "_kano" / "backlog" / "products" / "demo" / "_config" / "config.toml",
+            "[product]\n"
+            "name = \"demo\"\n"
+            "prefix = \"DEM\"\n"
+            "default_assignee = \"koa\"\n"
+            "default_bug_reviewer = \"reviewer-koa\"\n");
+
+        auto project_config = ProjectConfig::load_from_toml(config_root / ".kano" / "backlog_config.toml");
+        expect(project_config.has_value(), "project config should parse");
+        expect(project_config->products.at("demo").default_assignee.value_or("") == "agent-default",
+               "project config should parse default_assignee");
+        expect(project_config->products.at("demo").default_bug_reviewer.value_or("") == "review-default",
+               "project config should parse default_bug_reviewer");
+
+        auto resolved_context = BacklogContext::resolve(config_root, std::optional<std::string>("demo"), std::nullopt);
+        expect(resolved_context.product_def.default_assignee.value_or("") == "koa",
+               "product-local config should override default_assignee");
+        expect(resolved_context.product_def.default_bug_reviewer.value_or("") == "reviewer-koa",
+               "product-local config should override default_bug_reviewer");
+        std::filesystem::remove_all(config_root);
 
         std::cout << "backlog_core_smoke_test: PASS\n";
         return 0;

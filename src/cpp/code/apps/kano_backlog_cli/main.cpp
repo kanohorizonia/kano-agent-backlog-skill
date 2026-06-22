@@ -2928,6 +2928,8 @@ Json::Value effective_config_json_for_context(const BacklogContext& ctx) {
     product["name"] = ctx.product_def.name.empty() ? ctx.product_name : ctx.product_def.name;
     product["prefix"] = ctx.product_def.prefix;
     product["backlog_root"] = ctx.product_def.backlog_root;
+    product["default_assignee"] = optional_text(ctx.product_def.default_assignee);
+    product["default_bug_reviewer"] = optional_text(ctx.product_def.default_bug_reviewer);
     config["product"] = product;
 
     Json::Value embedding(Json::objectValue);
@@ -5377,6 +5379,8 @@ std::optional<int> try_run_workitem_create_fast_path(int argc, char** argv) {
     std::string title;
     std::string agent;
     std::string parent;
+    std::string owner;
+    std::string reviewer;
 
     const auto option_value = [&](int& index, const std::string& option) -> std::optional<std::string> {
         const std::string arg = argv[index];
@@ -5453,6 +5457,18 @@ std::optional<int> try_run_workitem_create_fast_path(int argc, char** argv) {
             parent = *value;
             continue;
         }
+        if (auto value = option_value(i, "--owner")) {
+            owner = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--assignee")) {
+            owner = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--reviewer")) {
+            reviewer = *value;
+            continue;
+        }
         return std::nullopt;
     }
 
@@ -5473,6 +5489,28 @@ std::optional<int> try_run_workitem_create_fast_path(int argc, char** argv) {
         throw std::runtime_error("Invalid item type: " + type_str);
     }
 
+    std::optional<std::string> effective_owner;
+    std::string owner_source;
+    if (!owner.empty()) {
+        effective_owner = owner;
+        owner_source = "explicit";
+    } else if (ctx.product_def.default_assignee && !ctx.product_def.default_assignee->empty()) {
+        effective_owner = *ctx.product_def.default_assignee;
+        owner_source = "inherited:product.default_assignee";
+    }
+
+    std::optional<std::string> effective_reviewer;
+    std::string reviewer_source;
+    if (!reviewer.empty()) {
+        effective_reviewer = reviewer;
+        reviewer_source = "explicit";
+    } else if (*type_opt == ItemType::Bug &&
+               ctx.product_def.default_bug_reviewer &&
+               !ctx.product_def.default_bug_reviewer->empty()) {
+        effective_reviewer = *ctx.product_def.default_bug_reviewer;
+        reviewer_source = "inherited:product.default_bug_reviewer";
+    }
+
     auto result = WorkitemOps::create_item(
         index,
         ctx.product_root,
@@ -5480,7 +5518,15 @@ std::optional<int> try_run_workitem_create_fast_path(int argc, char** argv) {
         *type_opt,
         title,
         agent,
-        parent.empty() ? std::nullopt : std::optional<std::string>(parent)
+        parent.empty() ? std::nullopt : std::optional<std::string>(parent),
+        "P2",
+        {},
+        "general",
+        "backlog",
+        effective_owner,
+        effective_reviewer,
+        owner_source,
+        reviewer_source
     );
 
     std::cout << "Created item: " << result.id << " (" << result.uid << ")\n";
@@ -7857,6 +7903,9 @@ std::optional<int> try_run_config_smoke_fast_path(int argc, char** argv) {
         text << "[product]\n";
         text << "name = " << toml_quote_string(ctx.product_name) << "\n";
         text << "prefix = " << toml_quote_string(effective_prefix) << "\n\n";
+        text << "# Repo-visible actor aliases only; do not store personal names or emails here.\n";
+        text << "default_assignee = " << toml_quote_string(ctx.product_def.default_assignee.value_or("")) << "\n";
+        text << "default_bug_reviewer = " << toml_quote_string(ctx.product_def.default_bug_reviewer.value_or("")) << "\n\n";
         text << "[chunking]\n";
         text << "target_tokens = " << ctx.product_def.chunking_target_tokens.value_or(256) << "\n";
         text << "max_tokens = " << ctx.product_def.chunking_max_tokens.value_or(512) << "\n\n";
@@ -8167,11 +8216,13 @@ int main(int InArgc, char* InArgv[]) {
         // workitem create
         {
             auto* createCmd = workitemCmd->add_subcommand("create", "Create a new work item");
-            std::string type_str, title, agent, parent;
+            std::string type_str, title, agent, parent, owner, reviewer;
             createCmd->add_option("-t,--type", type_str, "Item type (epic, feature, userstory, task, bug, issue)")->required();
             createCmd->add_option("--title", title, "Item title")->required();
             createCmd->add_option("--agent", agent, "Agent ID")->required();
             createCmd->add_option("--parent", parent, "Parent item ID");
+            createCmd->add_option("--owner,--assignee", owner, "Explicit repo-visible owner/assignee alias");
+            createCmd->add_option("--reviewer", reviewer, "Explicit repo-visible reviewer alias");
 
             createCmd->callback([&]() {
                 auto ctx = resolve_ctx();
@@ -8181,6 +8232,28 @@ int main(int InArgc, char* InArgv[]) {
                 auto type_opt = parse_item_type(type_str);
                 if (!type_opt) throw std::runtime_error("Invalid item type: " + type_str);
 
+                std::optional<std::string> effective_owner;
+                std::string owner_source;
+                if (!owner.empty()) {
+                    effective_owner = owner;
+                    owner_source = "explicit";
+                } else if (ctx.product_def.default_assignee && !ctx.product_def.default_assignee->empty()) {
+                    effective_owner = *ctx.product_def.default_assignee;
+                    owner_source = "inherited:product.default_assignee";
+                }
+
+                std::optional<std::string> effective_reviewer;
+                std::string reviewer_source;
+                if (!reviewer.empty()) {
+                    effective_reviewer = reviewer;
+                    reviewer_source = "explicit";
+                } else if (*type_opt == ItemType::Bug &&
+                           ctx.product_def.default_bug_reviewer &&
+                           !ctx.product_def.default_bug_reviewer->empty()) {
+                    effective_reviewer = *ctx.product_def.default_bug_reviewer;
+                    reviewer_source = "inherited:product.default_bug_reviewer";
+                }
+
                 auto result = WorkitemOps::create_item(
                     index,
                     ctx.product_root,
@@ -8188,7 +8261,15 @@ int main(int InArgc, char* InArgv[]) {
                     *type_opt,
                     title,
                     agent,
-                    parent.empty() ? std::nullopt : std::optional<std::string>(parent)
+                    parent.empty() ? std::nullopt : std::optional<std::string>(parent),
+                    "P2",
+                    {},
+                    "general",
+                    "backlog",
+                    effective_owner,
+                    effective_reviewer,
+                    owner_source,
+                    reviewer_source
                 );
 
                 std::cout << "Created item: " << result.id << " (" << result.uid << ")\n";
@@ -9322,6 +9403,9 @@ int main(int InArgc, char* InArgv[]) {
                 text << "[product]\n";
                 text << "name = " << toml_quote_string(ctx.product_name) << "\n";
                 text << "prefix = " << toml_quote_string(prefix) << "\n\n";
+                text << "# Repo-visible actor aliases only; do not store personal names or emails here.\n";
+                text << "default_assignee = " << toml_quote_string(ctx.product_def.default_assignee.value_or("")) << "\n";
+                text << "default_bug_reviewer = " << toml_quote_string(ctx.product_def.default_bug_reviewer.value_or("")) << "\n\n";
                 text << "[chunking]\n";
                 text << "target_tokens = " << ctx.product_def.chunking_target_tokens.value_or(256) << "\n";
                 text << "max_tokens = " << ctx.product_def.chunking_max_tokens.value_or(512) << "\n\n";

@@ -19,6 +19,10 @@ If you are reading the repository directly, start here instead of `docs/index.md
 - [Version policy](version-policy.md)
 - [Release channels](release-channels.md)
 - [Native CLI direction](design/native-cli-direction.md)
+- [Backboard information architecture](design/backboard-information-architecture.md)
+- [Backboard Review Inbox model](design/backboard-review-inbox-model.md)
+- [Backboard partial UI boundary](design/backboard-partial-ui-boundary.md)
+- [Actor alias and assignment policy](design/actor-alias-and-assignment-policy.md)
 
 ## Release notes
 

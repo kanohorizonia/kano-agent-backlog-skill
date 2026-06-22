@@ -234,7 +234,7 @@ const char* kIndexHtml = R"HTML(
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Kano Backlog Webview</title>
+  <title>Backboard - Kano Backlog</title>
   <style>
     body { font-family: "Segoe UI", sans-serif; margin: 0; padding: 16px; background: #f7f8fa; color: #1a1f2e; }
     .app-shell { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 12px; align-items: start; }
@@ -339,7 +339,9 @@ const char* kIndexHtml = R"HTML(
 <body>
   <div class="app-shell">
     <aside class="panel sidebar">
-      <h3 style="margin-top:0;">Workspaces</h3>
+      <h3 style="margin-top:0;">Backboard</h3>
+      <div class="muted" style="margin-bottom:8px;">KOB Webview runtime</div>
+      <h4 style="margin:10px 0 6px 0;">Workspaces</h4>
       <div id="workspace-current" class="muted" style="margin-bottom:8px;"></div>
       <div class="row" style="margin-bottom:8px;">
         <input id="workspace-input" placeholder="Path: backlog root or products" style="width:100%;" />
@@ -396,19 +398,19 @@ const char* kIndexHtml = R"HTML(
 
   <div class="panel">
     <div class="tabs">
-      <button id="tab-review" class="tab-btn active" data-tab="review">Review</button>
-      <button id="tab-tree" class="tab-btn" data-tab="tree">Tree</button>
-      <button id="tab-kanban" class="tab-btn" data-tab="kanban">Kanban</button>
+      <button id="tab-review" class="tab-btn active" data-tab="review">Review Inbox</button>
+      <button id="tab-tree" class="tab-btn" data-tab="tree">Product Map</button>
+      <button id="tab-kanban" class="tab-btn" data-tab="kanban">Flow</button>
       <button id="tab-context" class="tab-btn" data-tab="context">Context</button>
-      <button id="tab-graph" class="tab-btn" data-tab="graph">Graph</button>
-      <button id="tab-runs" class="tab-btn" data-tab="runs">Runs</button>
+      <button id="tab-graph" class="tab-btn" data-tab="graph">Dependencies</button>
+      <button id="tab-runs" class="tab-btn" data-tab="runs">Agent Runs</button>
       <button id="tab-command" class="tab-btn" data-tab="command">Command</button>
     </div>
   </div>
 
   <div id="page-tree" class="panel tree page">
       <div class="row" style="margin: 0 0 8px 0;">
-        <h3 style="margin: 0;">Tree</h3>
+        <h3 style="margin: 0;">Product Map</h3>
         <button id="expand-all" class="btn">Expand All</button>
         <button id="collapse-all" class="btn">Collapse All</button>
       </div>
@@ -416,7 +418,7 @@ const char* kIndexHtml = R"HTML(
   </div>
 
   <div id="page-kanban" class="panel page">
-      <h3>Kanban</h3>
+      <h3>Flow</h3>
       <div id="kanban" class="kanban"></div>
   </div>
 
@@ -427,7 +429,7 @@ const char* kIndexHtml = R"HTML(
   </div>
 
   <div id="page-review" class="panel page active">
-    <h3>Human Review Inbox</h3>
+    <h3>Backboard Review Inbox</h3>
     <div id="saved-views" class="row" style="align-items:flex-start; flex-wrap:wrap;"></div>
     <div id="review-inbox" class="review-grid"></div>
   </div>
@@ -490,7 +492,7 @@ R"HTML(  <script src="/assets/kob-ui.js"></script>
       lastRefreshDiagnostic: null
     };
     const lanes = ['Backlog', 'Doing', 'Blocked', 'Review', 'Done'];
-    const reviewQueueOrder = ['Needs Review', 'False Done', 'Evidence Gap', 'Blocked / Dirty', 'Stale / Drift', 'Ready Frontier'];
+    const reviewQueueOrder = ['Needs Review', 'Done Candidate', 'False Done Suspect', 'Evidence Gap', 'Blocked/Dirty', 'Stale/Drift', 'Ready Frontier'];
     const itemStates = ['Proposed', 'Ready', 'InProgress', 'Blocked', 'Review', 'Done', 'Dropped'];
     const itemTypes = ['Theme', 'Epic', 'Feature', 'UserStory', 'Task', 'Bug', 'Issue', 'ADR', 'Topic', 'Workset'];
     const workspaceStorageKey = 'kano_webview_workspaces_v2';
@@ -735,6 +737,8 @@ R"HTML(  <script src="/assets/kob-ui.js"></script>
       await refreshAll();
     }
 
+)HTML"
+R"HTML(
     function esc(v) {
       return String(v ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');
     }
@@ -1083,7 +1087,9 @@ R"HTML(    function typeIcon(type) {
     function renderReviewCard(bundle, lane) {
       const item = bundle?.item || {};
       const reason = bundle?.review_reason || `Queued for ${lane || 'review'} review.`;
-      return `<div class="card"><div><code>${esc(item.id || '')}</code></div><div><a href="#" class="item-link" data-item-id="${escAttr(item.id || '')}" data-item-product="${escAttr(item.product || '')}">${esc(item.title || item.id || '')}</a></div><div class="muted">${esc(renderMeta(item))}</div><div class="muted review-reason"><strong>Why this needs review:</strong> ${esc(reason)}</div></div>`;
+      const reasonCode = bundle?.reason_code ? `<code>${esc(bundle.reason_code)}</code> ` : '';
+      const decision = bundle?.suggested_human_decision ? `<div class="muted">Suggested decision: ${esc(bundle.suggested_human_decision)}</div>` : '';
+      return `<div class="card"><div><code>${esc(item.id || '')}</code></div><div><a href="#" class="item-link" data-item-id="${escAttr(item.id || '')}" data-item-product="${escAttr(item.product || '')}">${esc(item.title || item.id || '')}</a></div><div class="muted">${esc(renderMeta(item))}</div><div class="muted review-reason"><strong>Why this needs review:</strong> ${reasonCode}${esc(reason)}${decision}</div></div>`;
     }
 
     function bindItemLinks(selector) {

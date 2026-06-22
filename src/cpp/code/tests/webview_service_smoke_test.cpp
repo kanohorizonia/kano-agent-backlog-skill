@@ -252,6 +252,13 @@ int main() {
 
         auto inbox = service.BuildReviewInbox(allOptions);
         expect(inbox["lanes"]["Ready Approval"].size() >= 1, "review inbox should classify ready work");
+        for (const auto& lane : {"Needs Review", "False Done", "Evidence Gap", "Blocked / Dirty", "Stale / Drift",
+                                 "Ready Frontier"}) {
+            expect(inbox["lanes"].isMember(lane), std::string("review inbox should expose queue: ") + lane);
+        }
+        expect(inbox["lanes"]["Ready Frontier"].size() >= 1, "review inbox should expose ready frontier queue");
+        expect(!inbox["lanes"]["Ready Frontier"][0]["review_reason"].asString().empty(),
+               "review inbox bundles should explain why the item needs review");
 
         auto evidence = service.GetEvidenceDetail("product-alpha", "PRA-TSK-0001");
         expect(evidence["evidence"]["signals"]["artifact"].asBool(), "evidence detail should detect artifact signal");
@@ -293,6 +300,36 @@ int main() {
 
         auto runs = service.BuildAgentRunBoard(allOptions, "codex");
         expect(runs["runs"].size() >= 1, "agent run board should include codex run evidence");
+
+        auto treePartial = service.RenderTreePartial(treeOptions);
+        expect(treePartial.find("PRA-EPIC-0001") != std::string::npos,
+               "tree partial should render item ids");
+        expect(treePartial.find("data-item-id") != std::string::npos,
+               "tree partial should expose item link hooks");
+
+        auto kanbanPartial = service.RenderKanbanPartial(betaDoing);
+        expect(kanbanPartial.find("Beta live bug") != std::string::npos,
+               "kanban partial should render matching cards");
+
+        auto reviewPartial = service.RenderReviewPartial(allOptions);
+        expect(reviewPartial.find("Ready Frontier") != std::string::npos,
+               "review partial should render review queues");
+        expect(reviewPartial.find("Why this needs review") != std::string::npos,
+               "review partial should render review reasons");
+
+        auto contextPartial = service.RenderContextPartial(allOptions);
+        expect(contextPartial.find("Native Migration") != std::string::npos,
+               "context partial should render topic context");
+
+        auto filterPartial = service.RenderFiltersPartial(allOptions);
+        expect(filterPartial.find("product-alpha") != std::string::npos,
+               "filters partial should render products");
+
+        auto itemPartial = service.RenderItemPartial("product-alpha", "PRA-TSK-0001");
+        expect(itemPartial.find("Native migration evidence") != std::string::npos,
+               "item partial should render item content");
+        expect(itemPartial.find("Evidence") != std::string::npos,
+               "item partial should render evidence summary");
 
         std::cout << "webview_service_smoke_test: PASS\n";
         std::filesystem::remove_all(root);

@@ -65,6 +65,169 @@ std::string ResolveHost(int argc, char** argv) {
   return host;
 }
 
+const char* kKobUiJs = R"JS(
+(function () {
+  'use strict';
+
+  const timers = new Map();
+
+  function targetElement(target) {
+    if (!target) return null;
+    if (typeof target === 'string') return document.querySelector(target);
+    return target;
+  }
+
+  function showError(target, message) {
+    const element = targetElement(target);
+    const text = String(message || 'Request failed');
+    const html = '<div class="card" role="alert"><strong>Unable to load content</strong><div class="muted">' +
+      text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;') +
+      '</div></div>';
+    if (element) {
+      element.innerHTML = html;
+    }
+    return html;
+  }
+
+  function swapTarget(target, html) {
+    const element = targetElement(target);
+    if (!element) {
+      throw new Error('Partial target not found');
+    }
+    element.innerHTML = html;
+    element.dispatchEvent(new CustomEvent('kob-ui:swapped', { bubbles: true, detail: { target: element } }));
+    return element;
+  }
+
+  async function fetchPartial(url, options) {
+    const settings = options || {};
+    const timeoutMs = Number(settings.timeoutMs || 15000);
+    const controller = new AbortController();
+    const externalSignal = settings.signal;
+    const timeout = setTimeout(function () {
+      controller.abort();
+    }, timeoutMs);
+
+    if (externalSignal) {
+      if (externalSignal.aborted) {
+        controller.abort();
+      } else {
+        externalSignal.addEventListener('abort', function () {
+          controller.abort();
+        }, { once: true });
+      }
+    }
+
+    try {
+      if (settings.onStatus) settings.onStatus('loading');
+      const response = await fetch(url, {
+        method: settings.method || 'GET',
+        signal: controller.signal,
+        headers: { 'Accept': 'text/html' },
+      });
+      const html = await response.text();
+      if (!response.ok) {
+        throw new Error('HTTP ' + response.status);
+      }
+      if (settings.target) {
+        swapTarget(settings.target, html);
+      }
+      if (settings.onStatus) settings.onStatus('loaded');
+      return html;
+    } catch (error) {
+      if (settings.target) {
+        showError(settings.target, error && error.message ? error.message : String(error));
+      }
+      if (settings.onStatus) settings.onStatus('failed');
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  function debounce(key, run, delayMs) {
+    const name = String(key || 'default');
+    if (timers.has(name)) {
+      clearTimeout(timers.get(name));
+    }
+    const timer = setTimeout(function () {
+      timers.delete(name);
+      run();
+    }, Number(delayMs || 0));
+    timers.set(name, timer);
+    return timer;
+  }
+
+  function cancelDebounce(key) {
+    const name = String(key || 'default');
+    if (!timers.has(name)) return;
+    clearTimeout(timers.get(name));
+    timers.delete(name);
+  }
+
+  function setQueryState(update, options) {
+    const settings = options || {};
+    const url = new URL(window.location.href);
+    Object.entries(update || {}).forEach(function (entry) {
+      const key = entry[0];
+      const value = entry[1];
+      if (value === null || value === undefined || value === '') {
+        url.searchParams.delete(key);
+      } else {
+        url.searchParams.set(key, String(value));
+      }
+    });
+    if (settings.replace !== false) {
+      window.history.replaceState({}, '', url);
+    } else {
+      window.history.pushState({}, '', url);
+    }
+  }
+
+  function readQueryState() {
+    const result = {};
+    new URLSearchParams(window.location.search).forEach(function (value, key) {
+      result[key] = value;
+    });
+    return result;
+  }
+
+  function bindDelegates(root) {
+    const container = root || document;
+    if (container.__kobUiDelegatesBound) return;
+    container.__kobUiDelegatesBound = true;
+    container.addEventListener('click', function (event) {
+      const trigger = event.target && event.target.closest
+        ? event.target.closest('[data-kob-partial]')
+        : null;
+      if (!trigger) return;
+      event.preventDefault();
+      const url = trigger.getAttribute('data-kob-partial');
+      const target = trigger.getAttribute('data-kob-target');
+      if (!url || !target) return;
+      fetchPartial(url, { target: target }).catch(function () {});
+    });
+  }
+
+  window.KobUi = {
+    bindDelegates: bindDelegates,
+    cancelDebounce: cancelDebounce,
+    debounce: debounce,
+    fetchPartial: fetchPartial,
+    readQueryState: readQueryState,
+    setQueryState: setQueryState,
+    showError: showError,
+    swapTarget: swapTarget,
+  };
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function () { bindDelegates(document); });
+  } else {
+    bindDelegates(document);
+  }
+})();
+)JS";
+
 const char* kIndexHtml = R"HTML(
 <!doctype html>
 <html lang="en">
@@ -95,6 +258,7 @@ const char* kIndexHtml = R"HTML(
     .card { border: 1px solid #cfd9ea; border-radius: 8px; padding: 8px; margin-bottom: 8px; background: #fcfdff; }
     .review-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
     .review-lane { border: 1px solid #d8e1f0; border-radius: 8px; padding: 8px; background: #fff; min-height: 120px; }
+    .review-reason { margin-top: 6px; padding-top: 6px; border-top: 1px solid #edf1f7; }
     .evidence-row { display: grid; grid-template-columns: 130px 90px minmax(0, 1fr); gap: 8px; padding: 4px 0; border-bottom: 1px solid #edf1f7; }
     .pill { display: inline-block; border: 1px solid #cfd9ea; border-radius: 999px; padding: 2px 7px; font-size: 12px; background: #f8fbff; }
     .pill.passed { border-color: #86c48b; background: #f1fbf2; color: #245c2a; }
@@ -121,6 +285,7 @@ const char* kIndexHtml = R"HTML(
     .busy-title { font-weight: 700; color: #1d3158; margin-bottom: 4px; }
     .busy-progress { position: relative; height: 5px; overflow: hidden; border-radius: 999px; background: #dfe8f7; margin-top: 8px; }
     .busy-progress-fill { position: absolute; inset: 0 auto 0 0; width: 42%; border-radius: 999px; background: linear-gradient(90deg, #1f4fa3, #4d7ed6); animation: busy-slide 1.1s ease-in-out infinite; }
+    .busy-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
     .status-error { color: #9c1c1c; font-weight: 600; }
     @keyframes spin { to { transform: rotate(360deg); } }
     @keyframes busy-slide { 0% { transform: translateX(-105%); } 50% { transform: translateX(65%); } 100% { transform: translateX(245%); } }
@@ -206,6 +371,11 @@ const char* kIndexHtml = R"HTML(
       <div id="busy-title" class="busy-title">Loading backlog data</div>
       <div id="busy-detail" class="muted">Starting refresh...</div>
       <div class="busy-progress" aria-hidden="true"><div class="busy-progress-fill"></div></div>
+      <div class="busy-actions">
+        <button id="busy-cancel" class="btn" type="button">Cancel</button>
+        <button id="busy-retry" class="btn" type="button" hidden>Retry</button>
+        <button id="busy-copy" class="btn" type="button">Copy diagnostics</button>
+      </div>
     </div>
   </div>
 
@@ -226,17 +396,17 @@ const char* kIndexHtml = R"HTML(
 
   <div class="panel">
     <div class="tabs">
-      <button id="tab-tree" class="tab-btn active" data-tab="tree">Tree</button>
+      <button id="tab-review" class="tab-btn active" data-tab="review">Review</button>
+      <button id="tab-tree" class="tab-btn" data-tab="tree">Tree</button>
       <button id="tab-kanban" class="tab-btn" data-tab="kanban">Kanban</button>
       <button id="tab-context" class="tab-btn" data-tab="context">Context</button>
-      <button id="tab-review" class="tab-btn" data-tab="review">Review</button>
       <button id="tab-graph" class="tab-btn" data-tab="graph">Graph</button>
       <button id="tab-runs" class="tab-btn" data-tab="runs">Runs</button>
       <button id="tab-command" class="tab-btn" data-tab="command">Command</button>
     </div>
   </div>
 
-  <div id="page-tree" class="panel tree page active">
+  <div id="page-tree" class="panel tree page">
       <div class="row" style="margin: 0 0 8px 0;">
         <h3 style="margin: 0;">Tree</h3>
         <button id="expand-all" class="btn">Expand All</button>
@@ -256,7 +426,7 @@ const char* kIndexHtml = R"HTML(
     <div id="context-list"></div>
   </div>
 
-  <div id="page-review" class="panel page">
+  <div id="page-review" class="panel page active">
     <h3>Human Review Inbox</h3>
     <div id="saved-views" class="row" style="align-items:flex-start; flex-wrap:wrap;"></div>
     <div id="review-inbox" class="review-grid"></div>
@@ -296,7 +466,8 @@ const char* kIndexHtml = R"HTML(
   </div>
 
 )HTML"
-R"HTML(  <script>
+R"HTML(  <script src="/assets/kob-ui.js"></script>
+  <script>
     const state = {
       product: 'all',
       products: [],
@@ -309,17 +480,47 @@ R"HTML(  <script>
       workspaces: [],
       treeOpen: new Set(),
       treeTouched: false,
-      activeTab: 'tree',
+      activeTab: 'review',
       allItems: [],
       refreshSeq: 0,
       refreshAbort: null,
       refreshTimer: null,
-      refreshTickTimer: null
+      refreshTickTimer: null,
+      refreshCancelRequested: false,
+      lastRefreshDiagnostic: null
     };
     const lanes = ['Backlog', 'Doing', 'Blocked', 'Review', 'Done'];
+    const reviewQueueOrder = ['Needs Review', 'False Done', 'Evidence Gap', 'Blocked / Dirty', 'Stale / Drift', 'Ready Frontier'];
     const itemStates = ['Proposed', 'Ready', 'InProgress', 'Blocked', 'Review', 'Done', 'Dropped'];
     const itemTypes = ['Theme', 'Epic', 'Feature', 'UserStory', 'Task', 'Bug', 'Issue', 'ADR', 'Topic', 'Workset'];
     const workspaceStorageKey = 'kano_webview_workspaces_v2';
+
+    function tokenSetFromQuery(value, fallback) {
+      if (!value) return new Set(fallback);
+      if (value === '__none__') return new Set();
+      return new Set(String(value).split(',').map((x) => x.trim()).filter(Boolean));
+    }
+
+    (function applyInitialQueryState() {
+      const query = window.KobUi?.readQueryState?.() || {};
+      if (query.products) {
+        state.selectedProducts = tokenSetFromQuery(query.products, []);
+      } else if (query.product) {
+        state.selectedProducts = new Set([query.product]);
+      }
+      state.selectedStates = tokenSetFromQuery(query.state, itemStates);
+      state.selectedTypes = tokenSetFromQuery(query.type, itemTypes);
+      if (query.q) state.q = query.q;
+      if (query.limit) {
+        const parsed = Number.parseInt(query.limit, 10);
+        if (Number.isFinite(parsed)) {
+          state.limit = Math.max(1, Math.min(parsed, 1000));
+        }
+      }
+      if (query.tab && ['review', 'tree', 'kanban', 'context', 'graph', 'runs', 'command'].includes(query.tab)) {
+        state.activeTab = query.tab;
+      }
+    })();
 
     async function getJson(url, options = {}) {
       const resp = await fetch(url, { signal: options.signal });
@@ -575,9 +776,12 @@ R"HTML(  <script>
       status.classList.toggle('status-error', kind === 'error');
     }
 
-    function setBusy(active) {
+    function setBusy(active, recoverable = false) {
       document.getElementById('status-wrap').classList.toggle('busy', active);
-      document.getElementById('busy-banner').classList.toggle('visible', active);
+      document.getElementById('busy-banner').classList.toggle('visible', active || recoverable);
+      document.getElementById('busy-cancel').hidden = !active;
+      document.getElementById('busy-retry').hidden = !recoverable;
+      document.getElementById('busy-copy').hidden = !(active || recoverable);
       if (!active && state.refreshTickTimer) {
         clearInterval(state.refreshTickTimer);
         state.refreshTickTimer = null;
@@ -594,6 +798,38 @@ R"HTML(  <script>
         return 'Refresh replaced by a newer request';
       }
       return error?.message || String(error || 'Unknown refresh error');
+    }
+
+    function makeRefreshDiagnostic(status, detail, startedAt, failures = []) {
+      return {
+        status,
+        detail,
+        generated_at: nowIso(),
+        elapsed: formatElapsed(startedAt || Date.now()),
+        workspace: state.workspace || '',
+        product_scope: selectedProductValues(),
+        query: state.q,
+        states: [...state.selectedStates],
+        types: [...state.selectedTypes],
+        limit: state.limit,
+        active_tab: state.activeTab,
+        failures: failures.map((failure) => ({
+          status: failure.status || 'rejected',
+          reason: describeRefreshError(failure.reason || failure),
+        })),
+      };
+    }
+
+    async function copyRefreshDiagnostic() {
+      const diagnostic = state.lastRefreshDiagnostic ||
+          makeRefreshDiagnostic('idle', 'No refresh diagnostic is available', Date.now(), []);
+      const text = JSON.stringify(diagnostic, null, 2);
+      try {
+        await navigator.clipboard.writeText(text);
+        setStatus('Refresh diagnostics copied');
+      } catch (_error) {
+        setStatus('Unable to copy diagnostics', 'error');
+      }
     }
 
     function selectedTokens(values, allValues) {
@@ -624,6 +860,25 @@ R"HTML(  <script>
       }
       params.set('limit', String(state.limit || 200));
       return params.toString();
+    }
+
+    function updateUrlState() {
+      const products = selectedProductValues();
+      const update = {
+        tab: state.activeTab,
+        product: null,
+        products: null,
+        q: state.q || null,
+        state: selectedTokens(state.selectedStates, itemStates) || null,
+        type: selectedTokens(state.selectedTypes, itemTypes) || null,
+        limit: String(state.limit || 200),
+      };
+      if (products.length === 1) {
+        update.product = products[0];
+      } else {
+        update.products = products.join(',');
+      }
+      window.KobUi?.setQueryState?.(update, { replace: true });
     }
 
     function renderMeta(item) {
@@ -825,6 +1080,12 @@ R"HTML(    function typeIcon(type) {
       return `<div class="card"><div><code>${esc(item.id || '')}</code></div><div><a href="#" class="item-link" data-item-id="${escAttr(item.id || '')}" data-item-product="${escAttr(item.product || '')}">${esc(item.title || item.id || '')}</a></div><div class="muted">${esc(renderMeta(item))}</div></div>`;
     }
 
+    function renderReviewCard(bundle, lane) {
+      const item = bundle?.item || {};
+      const reason = bundle?.review_reason || `Queued for ${lane || 'review'} review.`;
+      return `<div class="card"><div><code>${esc(item.id || '')}</code></div><div><a href="#" class="item-link" data-item-id="${escAttr(item.id || '')}" data-item-product="${escAttr(item.product || '')}">${esc(item.title || item.id || '')}</a></div><div class="muted">${esc(renderMeta(item))}</div><div class="muted review-reason"><strong>Why this needs review:</strong> ${esc(reason)}</div></div>`;
+    }
+
     function bindItemLinks(selector) {
       document.querySelectorAll(`${selector} .item-link[data-item-id]`).forEach((link) => {
         link.addEventListener('click', async (event) => {
@@ -902,19 +1163,26 @@ R"HTML(    function typeIcon(type) {
 
     async function openItemModal(itemId, product = '') {
       const productScope = product || (selectedProductValues().length === 1 ? selectedProductValues()[0] : 'all');
-      const data = await getJson(`/api/items/${encodeURIComponent(itemId)}?product=${encodeURIComponent(productScope)}`);
-      const item = data?.data?.item;
-      if (!item) {
-        openModal(itemId, '<div class="muted">Item not found.</div>');
+      openModal(itemId, '<div class="muted">Loading item detail...</div>');
+      let item = null;
+      try {
+        const data = await getJson(`/api/items/${encodeURIComponent(itemId)}?product=${encodeURIComponent(productScope)}`);
+        item = data?.data?.item;
+        if (!item) {
+          openModal(itemId, '<div class="muted">Item not found.</div>');
+          return;
+        }
+        const evidenceResult = await getJson(`/api/review/evidence/${encodeURIComponent(itemId)}?product=${encodeURIComponent(item.product || productScope)}`);
+        const timelineResult = await getJson(`/api/review/timeline?item=${encodeURIComponent(itemId)}&product=${encodeURIComponent(item.product || productScope)}&limit=200`);
+        const evidence = evidenceResult?.data?.evidence || {};
+        const timeline = timelineResult?.data?.events || [];
+        const contentHtml = renderMarkdownWithObsidian(item.content || '(no content)');
+        const body = `<div class="row"><code>${esc(item.id)}</code><span class="muted">${esc(renderMeta(item))}</span></div><div class="muted" style="margin-bottom:8px;">${esc(item.path || '')}</div>${renderEvidenceMatrix(evidence)}${renderTimeline(timeline)}<div class="md-view">${contentHtml}</div>`;
+        openModal(item.title || item.id, body);
+      } catch (error) {
+        openModal(itemId, `<div class="muted">Unable to load item detail: ${esc(describeRefreshError(error))}</div>`);
         return;
       }
-      const evidenceResult = await getJson(`/api/review/evidence/${encodeURIComponent(itemId)}?product=${encodeURIComponent(item.product || productScope)}`);
-      const timelineResult = await getJson(`/api/review/timeline?item=${encodeURIComponent(itemId)}&product=${encodeURIComponent(item.product || productScope)}&limit=200`);
-      const evidence = evidenceResult?.data?.evidence || {};
-      const timeline = timelineResult?.data?.events || [];
-      const contentHtml = renderMarkdownWithObsidian(item.content || '(no content)');
-      const body = `<div class="row"><code>${esc(item.id)}</code><span class="muted">${esc(renderMeta(item))}</span></div><div class="muted" style="margin-bottom:8px;">${esc(item.path || '')}</div>${renderEvidenceMatrix(evidence)}${renderTimeline(timeline)}<div class="md-view">${contentHtml}</div>`;
-      openModal(item.title || item.id, body);
 
       document.querySelectorAll('#item-modal-body .obs-wikilink[data-item-id]').forEach((link) => {
         link.addEventListener('click', async (event) => {
@@ -1033,7 +1301,9 @@ R"HTML(
           if (root.id) state.treeOpen.add(treeNodeKey(root));
         }
       }
-      document.getElementById('tree').innerHTML = `<ul>${roots.map((node) => renderTreeNode(node, 0)).join('')}</ul>`;
+      document.getElementById('tree').innerHTML = roots.length
+        ? `<ul>${roots.map((node) => renderTreeNode(node, 0)).join('')}</ul>`
+        : '<div class="muted">No items for the current filters.</div>';
       bindTreeToggles();
     }
 
@@ -1101,12 +1371,12 @@ R"HTML(
 
       const inboxResult = await getJson(`/api/review/inbox?${queryString()}`, { signal });
       const lanesData = inboxResult?.data?.lanes || {};
-      const laneNames = Object.keys(lanesData);
+      const laneNames = reviewQueueOrder.filter((lane) => Object.prototype.hasOwnProperty.call(lanesData, lane));
       document.getElementById('review-inbox').innerHTML = laneNames.map((lane) => {
         const bundles = lanesData[lane] || [];
-        const cards = bundles.map((bundle) => renderItemCard(bundle.item || {})).join('');
+        const cards = bundles.map((bundle) => renderReviewCard(bundle, lane)).join('');
         return `<div class="review-lane"><strong>${esc(lane)}</strong><div class="muted">${bundles.length} item(s)</div>${cards || '<div class="muted">No items</div>'}</div>`;
-      }).join('');
+      }).join('') || '<div class="muted">No review queues for the current filters.</div>';
       bindItemLinks('#review-inbox');
 
       document.querySelectorAll('#saved-views [data-saved-view]').forEach((button) => {
@@ -1300,18 +1570,23 @@ R"HTML(
       document.getElementById('page-graph').classList.toggle('active', isGraph);
       document.getElementById('page-runs').classList.toggle('active', isRuns);
       document.getElementById('page-command').classList.toggle('active', isCommand);
+      updateUrlState();
     }
 
 )HTML"
 R"HTML(
     function scheduleRefresh(delayMs = 120) {
+      updateUrlState();
       if (state.refreshTimer) {
         clearTimeout(state.refreshTimer);
       }
-      state.refreshTimer = setTimeout(() => {
+      const runRefresh = () => {
         state.refreshTimer = null;
         refreshAll();
-      }, delayMs);
+      };
+      state.refreshTimer = window.KobUi?.debounce
+          ? window.KobUi.debounce('refresh-all', runRefresh, delayMs)
+          : setTimeout(runRefresh, delayMs);
     }
 
     async function refreshAll() {
@@ -1332,6 +1607,7 @@ R"HTML(
       const refreshId = ++state.refreshSeq;
       const controller = new AbortController();
       state.refreshAbort = controller;
+      state.refreshCancelRequested = false;
       const signal = controller.signal;
       const startedAt = Date.now();
       const scopeLabel = productScopeLabel();
@@ -1381,14 +1657,30 @@ R"HTML(
       state.refreshAbort = null;
       setBusy(false);
 
+      if (signal.aborted && state.refreshCancelRequested) {
+        state.lastRefreshDiagnostic =
+            makeRefreshDiagnostic('canceled', 'Refresh canceled by user', startedAt, []);
+        updateBusy('Refresh canceled', `Canceled after ${formatElapsed(startedAt)}`);
+        setBusy(false, true);
+        setStatus(`Refresh canceled after ${formatElapsed(startedAt)}`);
+        state.refreshCancelRequested = false;
+        return;
+      }
+
       const failures = results.filter((result) =>
           result.status === 'rejected' && result.reason?.name !== 'AbortError');
       if (failures.length) {
         const first = describeRefreshError(failures[0].reason);
+        state.lastRefreshDiagnostic =
+            makeRefreshDiagnostic('failed', first, startedAt, failures);
+        updateBusy('Refresh failed', `${first}; elapsed ${formatElapsed(startedAt)}`);
+        setBusy(false, true);
         setStatus(`Refresh failed: ${first}`, 'error');
         return;
       }
 
+      state.lastRefreshDiagnostic =
+          makeRefreshDiagnostic('loaded', `Loaded ${scopeLabel}`, startedAt, []);
       setStatus(`Loaded ${scopeLabel} in ${formatElapsed(startedAt)}`);
     }
 
@@ -1519,10 +1811,31 @@ R"HTML(
         setStatus(`Refresh requested in ${formatElapsed(startedAt)}`);
         await refreshAll();
       } catch (error) {
+        const detail = describeRefreshError(error);
+        state.lastRefreshDiagnostic =
+            makeRefreshDiagnostic('failed', detail, startedAt, [{ status: 'rejected', reason: error }]);
+        updateBusy('Refresh failed', `${detail}; elapsed ${formatElapsed(startedAt)}`);
         setBusy(false);
-        setStatus(`Refresh failed: ${describeRefreshError(error)}`, 'error');
+        setBusy(false, true);
+        setStatus(`Refresh failed: ${detail}`, 'error');
       }
     });
+
+    document.getElementById('busy-cancel').addEventListener('click', () => {
+      if (!state.refreshAbort) {
+        return;
+      }
+      state.refreshCancelRequested = true;
+      state.refreshAbort.abort();
+      updateBusy('Canceling refresh', 'Waiting for in-flight requests to stop');
+      setStatus('Canceling refresh...');
+    });
+
+    document.getElementById('busy-retry').addEventListener('click', () => {
+      scheduleRefresh(0);
+    });
+
+    document.getElementById('busy-copy').addEventListener('click', copyRefreshDiagnostic);
 
     document.getElementById('command-preview').addEventListener('click', loadCommandPreview);
     document.getElementById('command-input').addEventListener('keydown', async (event) => {
@@ -1557,11 +1870,13 @@ R"HTML(
     });
 
     (async () => {
-      setActiveTab('tree');
+      setActiveTab(state.activeTab);
       state.workspaces = loadSavedWorkspaces();
       renderWorkspaceList();
       await loadWorkspaceInfo();
       document.getElementById('workspace-input').value = state.workspace || '';
+      document.getElementById('search').value = state.q;
+      document.getElementById('limit').value = String(state.limit);
       await loadProducts();
       await refreshAll();
     })();
@@ -1586,6 +1901,18 @@ int main(int argc, char** argv) {
   };
 
   kano::backlog::webview::RegisterBacklogWebviewRoutes(service, appendMeta);
+
+  drogon::app().registerHandler(
+      "/assets/kob-ui.js",
+      [](const drogon::HttpRequestPtr&,
+         std::function<void(const drogon::HttpResponsePtr&)>&& callback) {
+        auto response = drogon::HttpResponse::newHttpResponse();
+        response->setStatusCode(drogon::k200OK);
+        response->setContentTypeString("application/javascript; charset=utf-8");
+        response->setBody(kKobUiJs);
+        callback(response);
+      },
+      {drogon::Get});
 
   drogon::app().registerHandler(
       "/",

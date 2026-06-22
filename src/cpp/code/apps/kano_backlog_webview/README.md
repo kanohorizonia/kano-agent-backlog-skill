@@ -2,6 +2,9 @@
 
 Local-only backlog visualization service.
 
+The partial UI boundary is documented in
+[`docs/design/backboard-partial-ui-boundary.md`](../../../../../docs/design/backboard-partial-ui-boundary.md).
+
 ## Scope (MVP)
 
 - Read canonical markdown backlog files under `_kano/backlog/products/*/items/`
@@ -15,7 +18,20 @@ Local-only backlog visualization service.
   - `GET /api/tree?product=all|<name>[&products=a,b][&q=...][&state=...][&type=...][&limit=...]`
   - `GET /api/kanban?product=all|<name>[&products=a,b][&q=...][&state=...][&type=...][&limit=...]`
   - `GET /api/refresh[?product=all|<name>][&products=a,b]`
+- Server-rendered partials:
+  - `GET /partials/tree?...`
+  - `GET /partials/kanban?...`
+  - `GET /partials/review?...`
+  - `GET /partials/context?...`
+  - `GET /partials/filters?...`
+  - `GET /partials/item/<id>?product=all|<name>`
+- First-party UI runtime:
+  - `GET /assets/kob-ui.js`
 - UI: product/state/type/search filters + context summary + tree + kanban at `/`
+
+`kob-ui.js` is intentionally small and first-party. It owns partial fetch/swap,
+delegated partial links, filter debounce support, URL query-state helpers, and
+bounded error rendering without npm or a frontend build step.
 
 ## Security Defaults
 

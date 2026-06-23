@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentskill-backlog.kanohorizonia.com/references/product-map-projection.schema.json",
+  "title": "Backboard Product Map Projection",
+  "type": "object",
+  "required": ["schema", "product", "generated_at", "nodes", "edges", "diagnostics"],
+  "properties": {
+    "schema": { "const": "kob.backboard.product_map_projection.v1" },
+    "product": { "type": "string", "minLength": 1 },
+    "generated_at": { "type": "string", "minLength": 1 },
+    "nodes": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/node" }
+    },
+    "edges": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/edge" }
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/diagnostic" }
+    }
+  },
+  "$defs": {
+    "ref": {
+      "type": "object",
+      "required": ["product"],
+      "properties": {
+        "product": { "type": "string", "minLength": 1 },
+        "item_id": { "type": "string" },
+        "uid": { "type": "string" },
+        "topic_id": { "type": "string" },
+        "adr_id": { "type": "string" },
+        "evidence_id": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "node": {
+      "type": "object",
+      "required": ["id", "node_type", "title", "ref"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "node_type": {
+          "enum": ["vision", "epic", "feature", "topic", "work_order", "adr", "evidence"]
+        },
+        "title": { "type": "string" },
+        "summary": { "type": "string" },
+        "ref": { "$ref": "#/$defs/ref" },
+        "evidence_refs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ref" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "edge": {
+      "type": "object",
+      "required": ["from", "to", "edge_type"],
+      "properties": {
+        "from": { "type": "string", "minLength": 1 },
+        "to": { "type": "string", "minLength": 1 },
+        "edge_type": { "type": "string", "minLength": 1 },
+        "source_ref": { "$ref": "#/$defs/ref" }
+      },
+      "additionalProperties": false
+    },
+    "diagnostic": {
+      "type": "object",
+      "required": ["code", "target", "message"],
+      "properties": {
+        "code": { "enum": ["missing_ref", "stale_ref", "ambiguous_ref", "evidence_gap"] },
+        "target": { "type": "string", "minLength": 1 },
+        "message": { "type": "string", "minLength": 1 },
+        "evidence_refs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ref" }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

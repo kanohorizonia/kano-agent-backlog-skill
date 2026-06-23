@@ -1,0 +1,27 @@
+{
+  "schema": "kob.product_memory.adr_lifecycle.v1",
+  "adr_id": "KOB-ADR-0001",
+  "decision_status": "accepted",
+  "feature_refs": [
+    { "product": "kano-agent-backlog-skill", "item_id": "KOB-FTR-0021" }
+  ],
+  "accepted_option": {
+    "summary": "Use Backboard as the product-facing name for the local review surface.",
+    "rationale": "The implementation name KOB Webview remains technical, while Backboard describes the human review surface."
+  },
+  "rejected_options": [
+    {
+      "summary": "Use Ark Console as the Backboard UI name.",
+      "reason": "Ark Console is a separate execution admission surface and must not be confused with Backboard."
+    }
+  ],
+  "evidence_refs": [
+    { "product": "kano-agent-backlog-skill", "item_id": "KOB-TSK-0060" }
+  ],
+  "superseded_by": [],
+  "revisit_condition": {
+    "summary": "Revisit if Backboard gains write or execution controls.",
+    "evidence_ref": { "product": "kano-agent-backlog-skill", "item_id": "KOB-TSK-0057" }
+  },
+  "diagnostics": []
+}

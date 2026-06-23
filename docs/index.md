@@ -164,6 +164,7 @@ not a current UI screenshot.
 | Testing | [Latest public test report](reports/latest/test-report/), [Latest public coverage report](reports/latest/coverage-report/), [GitHub Actions](https://github.com/kanohorizonia/kano-agent-backlog-skill/actions) |
 | Tokenizer adapters | [Quick start](guides/tokenizer-quickstart.md), [Overview](guides/tokenizer-adapters.md), [Configuration](guides/tokenizer-configuration.md), [CLI](guides/tokenizer-cli-reference.md), [Troubleshooting](guides/tokenizer-troubleshooting.md), [Performance](guides/tokenizer-performance.md) |
 | Maintainers | [Maintainer automation](automation/maintainer-automation.md), [Docs pipeline](automation/docs-pipeline.md), [Native CLI direction](guides/native-cli-direction.md), [Backboard IA](design/backboard-information-architecture.md), [Actor aliases](design/actor-alias-and-assignment-policy.md) |
+| Product Memory | [Product Map](design/product-map-projection-schema.md), [ADR lifecycle](design/adr-lifecycle-metadata.md), [Feature evolution](design/feature-evolution-event-model.md), [Design-history graph](design/design-history-graph-edge-semantics.md) |
 | Reference | [Schema reference](references/schema.md), [All references](references/) |
 
 ## Release and evidence notes

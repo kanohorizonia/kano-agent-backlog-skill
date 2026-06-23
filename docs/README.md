@@ -23,6 +23,10 @@ If you are reading the repository directly, start here instead of `docs/index.md
 - [Backboard Review Inbox model](design/backboard-review-inbox-model.md)
 - [Backboard partial UI boundary](design/backboard-partial-ui-boundary.md)
 - [Actor alias and assignment policy](design/actor-alias-and-assignment-policy.md)
+- [Product Map projection schema](design/product-map-projection-schema.md)
+- [ADR lifecycle metadata](design/adr-lifecycle-metadata.md)
+- [Feature evolution event model](design/feature-evolution-event-model.md)
+- [Design-history graph edge semantics](design/design-history-graph-edge-semantics.md)
 
 ## Release notes
 
@@ -35,6 +39,10 @@ If you are reading the repository directly, start here instead of `docs/index.md
 - [Repository reference](../REFERENCE.md)
 - [Workflow reference](../references/workflow.md)
 - [Schema reference](../references/schema.md)
+- [Product Map schema fixture](../references/product-map-projection.schema.json)
+- [ADR lifecycle schema fixture](../references/adr-lifecycle-metadata.schema.json)
+- [Feature evolution schema fixture](../references/feature-evolution-event.schema.json)
+- [Design-history graph schema fixture](../references/design-history-graph.schema.json)
 
 ## Repo-local launcher behavior
 

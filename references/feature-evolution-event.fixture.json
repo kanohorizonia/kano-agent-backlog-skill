@@ -1,0 +1,16 @@
+{
+  "schema": "kob.product_memory.feature_evolution_event.v1",
+  "event_id": "kob-feature-evolution-0001",
+  "event_type": "decision",
+  "feature_ref": { "product": "kano-agent-backlog-skill", "item_id": "KOB-FTR-0021" },
+  "summary": "Backboard Product Memory should expose design history as evidence-backed events.",
+  "occurred_at": "2026-06-23T00:00:00Z",
+  "source_refs": [
+    { "product": "kano-agent-backlog-skill", "item_id": "KOB-TSK-0063" }
+  ],
+  "evidence_refs": [],
+  "display_hint": "timeline",
+  "diagnostics": [
+    "No validation artifact is attached to this fixture event."
+  ]
+}

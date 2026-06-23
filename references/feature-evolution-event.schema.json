@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentskill-backlog.kanohorizonia.com/references/feature-evolution-event.schema.json",
+  "title": "KOB Feature Evolution Event",
+  "type": "object",
+  "required": ["schema", "event_id", "event_type", "feature_ref", "summary", "occurred_at", "source_refs"],
+  "properties": {
+    "schema": { "const": "kob.product_memory.feature_evolution_event.v1" },
+    "event_id": { "type": "string", "minLength": 1 },
+    "event_type": {
+      "enum": [
+        "idea",
+        "decision",
+        "rejected_option",
+        "spike",
+        "implementation_version",
+        "validation",
+        "incident",
+        "migration",
+        "current_state",
+        "debt",
+        "revisit_condition"
+      ]
+    },
+    "feature_ref": { "$ref": "#/$defs/ref" },
+    "summary": { "type": "string", "minLength": 1 },
+    "occurred_at": { "type": "string", "minLength": 1 },
+    "source_refs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/ref" },
+      "minItems": 1
+    },
+    "evidence_refs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/ref" }
+    },
+    "display_hint": { "type": "string" },
+    "diagnostics": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "$defs": {
+    "ref": {
+      "type": "object",
+      "required": ["product"],
+      "properties": {
+        "product": { "type": "string", "minLength": 1 },
+        "item_id": { "type": "string" },
+        "uid": { "type": "string" },
+        "adr_id": { "type": "string" },
+        "evidence_id": { "type": "string" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

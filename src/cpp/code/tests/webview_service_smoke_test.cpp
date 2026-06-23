@@ -586,6 +586,10 @@ int main() {
                "main source should keep the typing-context shortcut guard");
         expect(mainSource.find("function selectItemByDelta") != std::string::npos,
                "main source should keep keyboard selection helpers");
+        expect(mainSource.find("selectedItemVisibleIndex") != std::string::npos,
+               "main source should keep a single roving-tabindex card selection index");
+        expect(mainSource.find("card === selectedCard") != std::string::npos,
+               "main source should select one visible card instance even when item keys repeat");
         expect(mainSource.find("function openSelectedItem") != std::string::npos,
                "main source should keep keyboard open helper");
         expect(mainSource.find("Focus the backlog search field") != std::string::npos,

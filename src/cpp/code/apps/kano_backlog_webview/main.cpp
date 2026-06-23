@@ -549,6 +549,7 @@ R"HTML(  <script src="/assets/kob-ui.js"></script>
         selectedItemKey: '',
         selectedItemId: '',
         selectedItemProduct: '',
+        selectedItemVisibleIndex: -1,
         shortcutHelpOpen: false
     };
     const lanes = ['Backlog', 'Doing', 'Blocked', 'Review', 'Done'];
@@ -1344,10 +1345,11 @@ R"HTML(    function typeIcon(type) {
       );
     }
 
-    function setSelectedItemState(id, product) {
+    function setSelectedItemState(id, product, visibleIndex = -1) {
       state.selectedItemId = String(id || '');
       state.selectedItemProduct = String(product || '');
       state.selectedItemKey = state.selectedItemId ? itemSelectionKey(state.selectedItemId, state.selectedItemProduct) : '';
+      state.selectedItemVisibleIndex = Number.isInteger(visibleIndex) ? visibleIndex : -1;
     }
 
     function activeSelectableCards() {
@@ -1358,18 +1360,31 @@ R"HTML(    function typeIcon(type) {
       );
     }
 
+    function findSelectedVisibleCard(visibleCards) {
+      if (!state.selectedItemKey) return null;
+      const indexedCard = visibleCards[state.selectedItemVisibleIndex];
+      if (indexedCard && itemSelectionKeyFromElement(indexedCard) === state.selectedItemKey) {
+        return indexedCard;
+      }
+      return visibleCards.find((card) => itemSelectionKeyFromElement(card) === state.selectedItemKey) || null;
+    }
+
     function syncSelectableItems() {
       const visibleCards = activeSelectableCards();
-      const visibleKeys = new Set(visibleCards.map((card) => itemSelectionKeyFromElement(card)));
+      let selectedCard = findSelectedVisibleCard(visibleCards);
       if (!visibleCards.length) {
         setSelectedItemState('', '');
-      } else if (!state.selectedItemKey || !visibleKeys.has(state.selectedItemKey)) {
-        const first = visibleCards[0];
-        setSelectedItemState(first.getAttribute('data-item-id') || '', first.getAttribute('data-item-product') || '');
+      } else {
+        selectedCard = selectedCard || visibleCards[0];
+        setSelectedItemState(
+          selectedCard.getAttribute('data-item-id') || '',
+          selectedCard.getAttribute('data-item-product') || '',
+          visibleCards.indexOf(selectedCard)
+        );
       }
 
       document.querySelectorAll('[data-selectable-item]').forEach((card) => {
-        const selected = state.selectedItemKey && itemSelectionKeyFromElement(card) === state.selectedItemKey && visibleKeys.has(state.selectedItemKey);
+        const selected = card === selectedCard;
         card.classList.toggle('is-selected', Boolean(selected));
         card.setAttribute('aria-selected', selected ? 'true' : 'false');
         card.setAttribute('tabindex', selected ? '0' : '-1');
@@ -1382,7 +1397,12 @@ R"HTML(    function typeIcon(type) {
         syncSelectableItems();
         return false;
       }
-      setSelectedItemState(card.getAttribute('data-item-id') || '', card.getAttribute('data-item-product') || '');
+      const visibleCards = activeSelectableCards();
+      setSelectedItemState(
+        card.getAttribute('data-item-id') || '',
+        card.getAttribute('data-item-product') || '',
+        visibleCards.indexOf(card)
+      );
       syncSelectableItems();
       if (options.scroll !== false) {
         card.scrollIntoView({ block: 'nearest', inline: 'nearest' });
@@ -1415,7 +1435,8 @@ R"HTML(    function typeIcon(type) {
     function selectItemByDelta(delta) {
       const cards = activeSelectableCards();
       if (!cards.length) return false;
-      const currentIndex = cards.findIndex((card) => itemSelectionKeyFromElement(card) === state.selectedItemKey);
+      const currentCard = findSelectedVisibleCard(cards);
+      const currentIndex = currentCard ? cards.indexOf(currentCard) : -1;
       const nextIndex = currentIndex >= 0
         ? (currentIndex + delta + cards.length) % cards.length
         : (delta >= 0 ? 0 : cards.length - 1);
@@ -1425,7 +1446,7 @@ R"HTML(    function typeIcon(type) {
     async function openSelectedItem() {
       const cards = activeSelectableCards();
       if (!cards.length) return false;
-      const selected = cards.find((card) => itemSelectionKeyFromElement(card) === state.selectedItemKey) || cards[0];
+      const selected = findSelectedVisibleCard(cards) || cards[0];
       setSelectedCard(selected, { focus: false, scroll: false });
       const itemId = selected.getAttribute('data-item-id') || '';
       const product = selected.getAttribute('data-item-product') || '';

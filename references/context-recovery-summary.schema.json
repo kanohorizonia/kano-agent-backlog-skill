@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentskill-backlog.kanohorizonia.com/references/context-recovery-summary.schema.json",
+  "title": "KOB Context Recovery Summary",
+  "type": "object",
+  "required": ["schema", "area", "area_summary", "current_state", "key_decisions", "active_risks", "evidence", "next_actions", "do_not_touch"],
+  "properties": {
+    "schema": { "const": "kob.context.recovery_summary.v1" },
+    "area": { "type": "string", "minLength": 1 },
+    "area_summary": { "$ref": "#/$defs/section" },
+    "current_state": { "$ref": "#/$defs/section" },
+    "key_decisions": { "$ref": "#/$defs/section" },
+    "active_risks": { "$ref": "#/$defs/section" },
+    "evidence": { "$ref": "#/$defs/section" },
+    "next_actions": { "$ref": "#/$defs/section" },
+    "do_not_touch": { "$ref": "#/$defs/section" }
+  },
+  "$defs": {
+    "section": {
+      "type": "object",
+      "required": ["summary", "refs", "confidence"],
+      "properties": {
+        "summary": { "type": "string", "minLength": 1 },
+        "refs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ref" }
+        },
+        "confidence": { "enum": ["strong", "weak", "missing", "stale", "unclear", "contradicting"] },
+        "notes": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "ref": {
+      "type": "object",
+      "required": ["product"],
+      "properties": {
+        "product": { "type": "string", "minLength": 1 },
+        "item_id": { "type": "string" },
+        "uid": { "type": "string" },
+        "adr_id": { "type": "string" },
+        "evidence_id": { "type": "string" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,51 @@
+{
+  "schema": "kob.context.recovery_summary.v1",
+  "area": "Backboard Product Memory",
+  "area_summary": {
+    "summary": "Backboard Product Memory has draft schema contracts for roadmap, evidence, and context recovery.",
+    "refs": [
+      { "product": "kano-agent-backlog-skill", "item_id": "KOB-TSK-0067" }
+    ],
+    "confidence": "weak",
+    "notes": ["Runtime rendering is not part of this fixture."]
+  },
+  "current_state": {
+    "summary": "Contracts are defined as docs and JSON fixtures.",
+    "refs": [
+      { "product": "kano-agent-backlog-skill", "item_id": "KOB-TSK-0065" },
+      { "product": "kano-agent-backlog-skill", "item_id": "KOB-TSK-0066" }
+    ],
+    "confidence": "weak",
+    "notes": []
+  },
+  "key_decisions": {
+    "summary": "Backboard remains read-only and separate from Ark Console.",
+    "refs": [],
+    "confidence": "strong",
+    "notes": []
+  },
+  "active_risks": {
+    "summary": "Do not infer unsupported history as fact.",
+    "refs": [],
+    "confidence": "strong",
+    "notes": []
+  },
+  "evidence": {
+    "summary": "Fixture evidence is design-level only.",
+    "refs": [],
+    "confidence": "weak",
+    "notes": []
+  },
+  "next_actions": {
+    "summary": "Implement read-only projections only after contract review.",
+    "refs": [],
+    "confidence": "unclear",
+    "notes": []
+  },
+  "do_not_touch": {
+    "summary": "Do not add frontend frameworks, agent dispatch, or private path exposure.",
+    "refs": [],
+    "confidence": "strong",
+    "notes": []
+  }
+}

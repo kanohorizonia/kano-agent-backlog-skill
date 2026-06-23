@@ -1,0 +1,20 @@
+{
+  "schema": "kob.evidence.quality_classification.v1",
+  "claim_ref": { "product": "kano-agent-backlog-skill", "item_id": "KOB-TSK-0066" },
+  "quality_state": "weak",
+  "inputs": {
+    "commits": [],
+    "validation": [],
+    "artifacts": [],
+    "worklogs": [
+      { "product": "kano-agent-backlog-skill", "item_id": "KOB-TSK-0066" }
+    ],
+    "dogfood": [],
+    "falsifiers": []
+  },
+  "human_wording": "Evidence exists as a design contract, but runtime proof is not attached.",
+  "fallback_behavior": "Show weak evidence and ask for validation before treating this as proven.",
+  "diagnostics": [
+    "Heuristic classification must link back to raw records."
+  ]
+}

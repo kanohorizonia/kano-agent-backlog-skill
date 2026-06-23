@@ -1,0 +1,22 @@
+{
+  "schema": "kob.roadmap.version_goal_ledger.v1",
+  "product": "kano-agent-backlog-skill",
+  "target_version": "0.0.5",
+  "goals": [
+    {
+      "goal_id": "backboard-product-memory-contracts",
+      "summary": "Backboard can display Product Memory contracts for roadmap and review surfaces.",
+      "status": "Implemented/Unverified",
+      "evidence_quality": "weak",
+      "linked_refs": [
+        { "product": "kano-agent-backlog-skill", "item_id": "KOB-TSK-0065" }
+      ],
+      "dogfood_coverage": {
+        "status": "unknown",
+        "evidence_refs": []
+      },
+      "gap_state": "Schema fixture exists; runtime projection evidence is not part of this ticket.",
+      "rationale": "Use Implemented/Unverified until Backboard runtime renders and validates the ledger."
+    }
+  ]
+}

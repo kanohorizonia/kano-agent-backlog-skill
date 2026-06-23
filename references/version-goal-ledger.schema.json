@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentskill-backlog.kanohorizonia.com/references/version-goal-ledger.schema.json",
+  "title": "KOB Version Goal Ledger",
+  "type": "object",
+  "required": ["schema", "product", "target_version", "goals"],
+  "properties": {
+    "schema": { "const": "kob.roadmap.version_goal_ledger.v1" },
+    "product": { "type": "string", "minLength": 1 },
+    "target_version": { "type": "string", "minLength": 1 },
+    "goals": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/goal" }
+    }
+  },
+  "$defs": {
+    "goal": {
+      "type": "object",
+      "required": ["goal_id", "summary", "status", "evidence_quality", "linked_refs", "gap_state"],
+      "properties": {
+        "goal_id": { "type": "string", "minLength": 1 },
+        "summary": { "type": "string", "minLength": 1 },
+        "status": {
+          "enum": ["Done", "Implemented/Unverified", "Partial", "Deferred", "Cut", "Blocked", "At Risk", "Unknown"]
+        },
+        "evidence_quality": {
+          "enum": ["strong", "weak", "missing", "stale", "unclear", "contradicting"]
+        },
+        "linked_refs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ref" }
+        },
+        "dogfood_coverage": {
+          "type": "object",
+          "required": ["status"],
+          "properties": {
+            "status": { "enum": ["covered", "not_covered", "unknown"] },
+            "evidence_refs": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/ref" }
+            }
+          },
+          "additionalProperties": false
+        },
+        "gap_state": { "type": "string" },
+        "rationale": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "ref": {
+      "type": "object",
+      "required": ["product"],
+      "properties": {
+        "product": { "type": "string", "minLength": 1 },
+        "item_id": { "type": "string" },
+        "uid": { "type": "string" },
+        "topic_id": { "type": "string" },
+        "adr_id": { "type": "string" },
+        "evidence_id": { "type": "string" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

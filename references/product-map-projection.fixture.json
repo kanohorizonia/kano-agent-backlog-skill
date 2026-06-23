@@ -1,0 +1,39 @@
+{
+  "schema": "kob.backboard.product_map_projection.v1",
+  "product": "kano-agent-backlog-skill",
+  "generated_at": "2026-06-23T00:00:00Z",
+  "nodes": [
+    {
+      "id": "feature:KOB-FTR-0021",
+      "node_type": "feature",
+      "title": "Work intent model",
+      "summary": "Intent Engineering feature wave for durable design and review contracts.",
+      "ref": { "product": "kano-agent-backlog-skill", "item_id": "KOB-FTR-0021" },
+      "evidence_refs": []
+    },
+    {
+      "id": "work_order:KOB-TSK-0061",
+      "node_type": "work_order",
+      "title": "Define Product Map projection schema",
+      "summary": "Design contract for bounded Backboard Product Map projection.",
+      "ref": { "product": "kano-agent-backlog-skill", "item_id": "KOB-TSK-0061" },
+      "evidence_refs": []
+    }
+  ],
+  "edges": [
+    {
+      "from": "feature:KOB-FTR-0021",
+      "to": "work_order:KOB-TSK-0061",
+      "edge_type": "contains",
+      "source_ref": { "product": "kano-agent-backlog-skill", "item_id": "KOB-TSK-0061" }
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "evidence_gap",
+      "target": "work_order:KOB-TSK-0061",
+      "message": "Fixture node has no validation artifact yet; Backboard should show this as a gap, not infer completion.",
+      "evidence_refs": []
+    }
+  ]
+}

@@ -1,0 +1,43 @@
+{
+  "schema": "kob.product_memory.design_history_graph.v1",
+  "product": "kano-agent-backlog-skill",
+  "nodes": [
+    {
+      "id": "adr:KOB-ADR-0001",
+      "node_type": "adr",
+      "title": "Backboard naming decision",
+      "source_ref": { "product": "kano-agent-backlog-skill", "adr_id": "KOB-ADR-0001" }
+    },
+    {
+      "id": "work_order:KOB-TSK-0060",
+      "node_type": "work_order",
+      "title": "Adopt Backboard naming in Webview UX",
+      "source_ref": { "product": "kano-agent-backlog-skill", "item_id": "KOB-TSK-0060" }
+    },
+    {
+      "id": "evidence:backboard-quick-test",
+      "node_type": "evidence",
+      "title": "Backboard quick-test evidence",
+      "source_ref": { "product": "kano-agent-backlog-skill", "evidence_id": "backboard-quick-test" }
+    }
+  ],
+  "edges": [
+    {
+      "from": "adr:KOB-ADR-0001",
+      "to": "work_order:KOB-TSK-0060",
+      "edge_type": "implemented_by",
+      "source_ref": { "product": "kano-agent-backlog-skill", "item_id": "KOB-TSK-0060" },
+      "render_hint": "decision-to-work"
+    },
+    {
+      "from": "work_order:KOB-TSK-0060",
+      "to": "evidence:backboard-quick-test",
+      "edge_type": "validated_by",
+      "source_ref": { "product": "kano-agent-backlog-skill", "evidence_id": "backboard-quick-test" },
+      "render_hint": "work-to-evidence"
+    }
+  ],
+  "diagnostics": [
+    "Design-history edges are separate from parent, blocks, and blocked_by execution edges."
+  ]
+}

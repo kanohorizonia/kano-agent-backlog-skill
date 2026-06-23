@@ -101,6 +101,21 @@ pixi run webview-docker
 The CLI shortcut `kob gui` runs the same Docker path. Stop the container with
 `pixi run webview-docker-down`.
 
+For deterministic repo-local smoke evidence, run:
+
+```bash
+pixi run webview-smoke-artifacts
+```
+
+The command stores `_ws/test-output/webview-smoke/root.html`,
+`_ws/test-output/webview-smoke/healthz.txt`,
+`_ws/test-output/webview-smoke/items-all-limit-10.json`, and
+`_ws/test-output/webview-smoke/manifest.txt`. Set
+`KANO_WEBVIEW_SMOKE_BASE_URL=http://127.0.0.1:8799` to reuse an already running
+service; otherwise the script starts a local host with `KANO_WEBVIEW_OPEN=0`
+and shuts it down after capture. If `8799` is already occupied and should not be
+reused, set `KANO_WEBVIEW_SMOKE_PORT` to a free port first.
+
 The image below is a concept mock for a future review-console style workflow,
 not a current UI screenshot.
 

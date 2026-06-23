@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <map>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -17,15 +18,22 @@ struct ItemRecord {
   std::string sourceKind;
   std::string title;
   std::string state;
+  std::string priority;
   std::string parent;
+  std::string owner;
+  std::string area;
+  std::string iteration;
   std::string topic;
   std::string created;
   std::string updated;
   std::string relativePath;
   std::string rawContent;
+  std::vector<std::string> tags;
+  std::vector<std::string> decisions;
   std::vector<std::string> relates;
   std::vector<std::string> blocks;
   std::vector<std::string> blockedBy;
+  std::map<std::string, std::string> external;
   bool valid;
   std::string parseError;
 };

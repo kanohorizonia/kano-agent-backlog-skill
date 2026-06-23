@@ -236,6 +236,7 @@ const char* kIndexHtml = R"HTML(
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Backboard - Kano Backlog</title>
   <style>
+    :root { --kob-accent: #1f4fa3; --kob-accent-soft: #f2f6ff; --kob-accent-border: #9fb5de; --kob-border: #cfd9ea; --kob-border-strong: #9eb3d7; --kob-surface: #fcfdff; --kob-surface-strong: #ffffff; --kob-shadow: rgba(30, 55, 95, 0.12); }
     body { font-family: "Segoe UI", sans-serif; margin: 0; padding: 16px; background: #f7f8fa; color: #1a1f2e; }
     .app-shell { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 12px; align-items: start; }
     .sidebar { position: sticky; top: 16px; }
@@ -255,9 +256,14 @@ const char* kIndexHtml = R"HTML(
     .page.active { display: block; }
     .kanban { display: grid; grid-template-columns: repeat(5, minmax(180px, 1fr)); gap: 10px; }
     .lane { background: #fff; border: 1px solid #dde3f0; border-radius: 10px; padding: 8px; min-height: 140px; }
-    .card { border: 1px solid #cfd9ea; border-radius: 8px; padding: 8px; margin-bottom: 8px; background: #fcfdff; }
+    .card { position: relative; border: 1px solid #cfd9ea; border-radius: 8px; padding: 8px; margin-bottom: 8px; background: #fcfdff; }
+    .card[data-selectable-item] { cursor: pointer; transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease; }
+    .card[data-selectable-item]:hover { border-color: var(--kob-accent-border); box-shadow: 0 4px 10px var(--kob-shadow); }
+    .card[data-selectable-item]:focus-visible { outline: 3px solid var(--kob-accent-border); outline-offset: 2px; }
+    .card.is-selected { border-color: var(--kob-accent); border-left-width: 6px; padding-left: 10px; background: var(--kob-surface-strong); box-shadow: 0 0 0 1px var(--kob-accent), 0 8px 18px var(--kob-shadow); transform: translateX(2px); }
     .review-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
     .review-lane { border: 1px solid #d8e1f0; border-radius: 8px; padding: 8px; background: #fff; min-height: 120px; }
+    .lane-items, .review-lane-items, .context-items, .command-items { margin-top: 8px; }
     .review-reason { margin-top: 6px; padding-top: 6px; border-top: 1px solid #edf1f7; }
     .evidence-row { display: grid; grid-template-columns: 130px 90px minmax(0, 1fr); gap: 8px; padding: 4px 0; border-bottom: 1px solid #edf1f7; }
     .pill { display: inline-block; border: 1px solid #cfd9ea; border-radius: 999px; padding: 2px 7px; font-size: 12px; background: #f8fbff; }
@@ -265,6 +271,9 @@ const char* kIndexHtml = R"HTML(
     .pill.failed { border-color: #db8a8a; background: #fff4f4; color: #8a2525; }
     .pill.blocked { border-color: #d5b15d; background: #fff9e8; color: #7a5610; }
     .pill.missing { border-color: #c5ccd9; background: #f4f6fa; color: #4f5a6e; }
+    .gate-strip { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+    .gate-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; letter-spacing: 0.01em; }
+    .gate-badge::before { content: attr(data-gate-symbol); font-size: 11px; line-height: 1; }
     .text-input-wide { width: min(760px, 100%); }
     .tree ul { list-style: none; padding-left: 18px; margin: 0; }
     .tree li { margin: 2px 0; }
@@ -302,7 +311,28 @@ const char* kIndexHtml = R"HTML(
     .modal { width: min(980px, 92vw); max-height: 88vh; overflow: auto; background: #fff; border-radius: 10px; border: 1px solid #d7dfef; }
     .modal-head { display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; border-bottom: 1px solid #e7edf8; }
     .modal-body { padding: 12px 14px; }
+    .shortcut-help .modal-body { display: grid; gap: 12px; }
+    .shortcut-grid { display: grid; grid-template-columns: minmax(72px, auto) minmax(0, 1fr); gap: 10px 12px; align-items: start; }
+    .kbd { display: inline-flex; align-items: center; justify-content: center; min-width: 42px; padding: 4px 8px; border-radius: 8px; border: 1px solid var(--kob-border-strong); background: var(--kob-accent-soft); font-size: 12px; font-weight: 700; }
+    .shortcut-callout { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
     .modal pre { white-space: pre-wrap; word-break: break-word; background: #f6f8fc; border: 1px solid #dfe6f3; border-radius: 8px; padding: 10px; }
+    .detail-shell { display: grid; gap: 12px; }
+    .detail-header { display: grid; gap: 10px; }
+    .detail-title-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .detail-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+    .detail-fact { border: 1px solid #dfe6f3; border-radius: 8px; padding: 8px; background: #fcfdff; min-width: 0; }
+    .detail-sections { display: grid; gap: 12px; }
+    .detail-stack { display: grid; gap: 8px; }
+    .detail-label { display: block; margin-bottom: 4px; color: #586074; font-size: 11px; text-transform: uppercase; font-weight: 700; letter-spacing: 0.03em; }
+    .detail-value { min-width: 0; word-break: break-word; }
+    .detail-links { display: flex; gap: 6px; flex-wrap: wrap; }
+    .detail-kv-list { display: grid; gap: 8px; }
+    .detail-kv { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 8px; align-items: start; }
+    .detail-toggle summary { cursor: pointer; }
+    .detail-toggle-summary { display: inline-flex; align-items: center; gap: 8px; }
+    .detail-toggle-summary::before { content: '▸'; color: #5a6d8f; }
+    .detail-toggle[open] .detail-toggle-summary::before { content: '▾'; }
+    .item-link.pill { text-decoration: none; }
     .md-view h1,.md-view h2,.md-view h3,.md-view h4 { margin: 14px 0 8px 0; }
     .md-view p { margin: 8px 0; }
     .md-view ul,.md-view ol { margin: 8px 0 8px 22px; }
@@ -357,10 +387,11 @@ const char* kIndexHtml = R"HTML(
   <div class="row panel">
     <label for="product">Scope:</label>
     <select id="product"></select>
-    <input id="search" placeholder="Search id/title/topic/content" />
+    <input id="search" placeholder="Search id/title/topic/content" aria-keyshortcuts="/" />
     <label for="limit">Limit:</label>
     <input id="limit" class="limit-input" type="number" min="1" max="1000" value="200" />
-    <button id="refresh">Refresh</button>
+    <button id="refresh" aria-keyshortcuts="r">Refresh</button>
+    <button id="shortcut-help-button" class="btn" type="button" aria-keyshortcuts="?" aria-controls="shortcut-help-backdrop" aria-expanded="false">Shortcuts ?</button>
     <span id="status-wrap" class="status-wrap" aria-live="polite">
       <span class="spinner" aria-hidden="true"></span>
       <span id="status" class="muted"></span>
@@ -407,6 +438,9 @@ const char* kIndexHtml = R"HTML(
       <button id="tab-command" class="tab-btn" data-tab="command">Command</button>
     </div>
   </div>
+
+)HTML"
+R"HTML(
 
   <div id="page-tree" class="panel tree page">
       <div class="row" style="margin: 0 0 8px 0;">
@@ -457,13 +491,35 @@ const char* kIndexHtml = R"HTML(
     </main>
   </div>
 
-  <div id="item-modal-backdrop" class="modal-backdrop">
-    <div class="modal">
+  <div id="item-modal-backdrop" class="modal-backdrop" aria-hidden="true">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="item-modal-title">
       <div class="modal-head">
         <strong id="item-modal-title">Item Detail</strong>
-        <button id="item-modal-close" class="btn">Close</button>
+        <button id="item-modal-close" class="btn" aria-keyshortcuts="Escape">Close</button>
       </div>
       <div id="item-modal-body" class="modal-body"></div>
+    </div>
+  </div>
+
+  <div id="shortcut-help-backdrop" class="modal-backdrop" aria-hidden="true">
+    <div class="modal shortcut-help" role="dialog" aria-modal="true" aria-labelledby="shortcut-help-title">
+      <div class="modal-head">
+        <strong id="shortcut-help-title">Backboard keyboard shortcuts</strong>
+        <button id="shortcut-help-close" class="btn" type="button" aria-keyshortcuts="Escape">Close</button>
+      </div>
+      <div class="modal-body">
+        <div class="shortcut-callout"><span class="pill">Visible help</span><span class="muted">Shortcuts stay inactive while you type in inputs, textareas, selects, or editable content.</span></div>
+        <div class="shortcut-grid">
+          <span class="kbd">/</span><div>Focus the backlog search field.</div>
+          <span class="kbd">j / k</span><div>Move selection to the next or previous visible item card.</div>
+          <span class="kbd">↑ / ↓</span><div>Move selection through the same visible card list with arrow keys.</div>
+          <span class="kbd">Enter</span><div>Open the currently selected item detail.</div>
+          <span class="kbd">Esc</span><div>Close shortcut help first, then item detail. If no dialog is open, close the raw markdown details panel when available.</div>
+          <span class="kbd">r</span><div>Refresh backlog data for the current scope.</div>
+          <span class="kbd">?</span><div>Open or close this shortcut overlay.</div>
+          <span class="kbd">Alt+1..9</span><div>Keep the existing workspace switch shortcuts.</div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -488,8 +544,12 @@ R"HTML(  <script src="/assets/kob-ui.js"></script>
       refreshAbort: null,
       refreshTimer: null,
       refreshTickTimer: null,
-      refreshCancelRequested: false,
-      lastRefreshDiagnostic: null
+        refreshCancelRequested: false,
+        lastRefreshDiagnostic: null,
+        selectedItemKey: '',
+        selectedItemId: '',
+        selectedItemProduct: '',
+        shortcutHelpOpen: false
     };
     const lanes = ['Backlog', 'Doing', 'Blocked', 'Review', 'Done'];
     const reviewQueueOrder = ['Needs Review', 'Done Candidate', 'False Done Suspect', 'Evidence Gap', 'Blocked/Dirty', 'Stale/Drift', 'Ready Frontier'];
@@ -1057,6 +1117,38 @@ R"HTML(
       return renderMarkdownBlocks(String(raw || '').split(/\r?\n/));
     }
 
+    function hydrateMarkdown(root) {
+      const container = typeof root === 'string'
+        ? document.querySelector(root)
+        : (root || document);
+      if (!container) return;
+      container.querySelectorAll('[data-kob-markdown]').forEach((node) => {
+        if (node.__kobMarkdownHydrated) return;
+        const source = node.querySelector('.kob-md-source');
+        const raw = source ? (source.value || source.textContent || '') : '';
+        node.innerHTML = renderMarkdownWithObsidian(raw || '(empty)');
+        node.__kobMarkdownHydrated = true;
+      });
+    }
+
+    function bindItemLinksWithin(root, fallbackProduct = '') {
+      const container = typeof root === 'string'
+        ? document.querySelector(root)
+        : root;
+      if (!container) return;
+      container.querySelectorAll('[data-item-id]').forEach((link) => {
+        if (link.__kobItemLinkBound) return;
+        link.__kobItemLinkBound = true;
+        link.addEventListener('click', async (event) => {
+          event.preventDefault();
+          const id = link.getAttribute('data-item-id');
+          const product = link.getAttribute('data-item-product') || fallbackProduct || '';
+          if (!id) return;
+          await openItemModal(id, product);
+        });
+      });
+    }
+
 )HTML"
 R"HTML(    function typeIcon(type) {
       const map = {
@@ -1080,8 +1172,49 @@ R"HTML(    function typeIcon(type) {
       return `<span class="pill ${cls}">${esc(value)}</span>`;
     }
 
+    function gateStateClass(status) {
+      const value = String(status || 'unknown');
+      return value === 'passed' ? 'passed' :
+        value === 'failed' ? 'failed' :
+        value === 'blocked' ? 'blocked' :
+        (value === 'not-run' || value === 'unknown' ? 'missing' : '');
+    }
+
+    function gateStateText(status) {
+      const value = String(status || 'unknown');
+      if (value === 'not-run') return 'not run';
+      return value;
+    }
+
+    function gateStateSymbol(status) {
+      const value = String(status || 'unknown');
+      if (value === 'passed') return '✓';
+      if (value === 'failed') return '!';
+      if (value === 'blocked') return '⛔';
+      return '?';
+    }
+
+    function renderGateBadge(label, gate) {
+      const stateValue = String(gate?.state || 'unknown');
+      const stateLabel = gateStateText(stateValue);
+      return `<span class="pill gate-badge ${gateStateClass(stateValue)}" data-gate-state="${escAttr(stateValue)}" data-gate-symbol="${escAttr(gateStateSymbol(stateValue))}" title="${escAttr(`${label} gate: ${stateLabel}`)}" aria-label="${escAttr(`${label} gate ${stateLabel}`)}">${esc(label)}</span>`;
+    }
+
+    function renderGateStrip(gateStatus) {
+      const gate = gateStatus || {};
+      return `<div class="gate-strip" role="list" aria-label="Gate status">${renderGateBadge('Ready', gate.ready)}${renderGateBadge('Review', gate.review)}${renderGateBadge('Done', gate.done)}</div>`;
+    }
+
+    function selectableItemAttrs(item) {
+      return `data-selectable-item="true" data-item-id="${escAttr(item.id || '')}" data-item-product="${escAttr(item.product || '')}" tabindex="-1" aria-selected="false" role="option"`;
+    }
+
+    function renderItemCardSummary(item) {
+      return `<div><code>${esc(item.id || '')}</code></div><div><a href="#" class="item-link" data-item-id="${escAttr(item.id || '')}" data-item-product="${escAttr(item.product || '')}">${esc(item.title || item.id || '')}</a></div>${renderGateStrip(item.gate_status)}<div class="muted">${esc(renderMeta(item))}</div>`;
+    }
+
     function renderItemCard(item) {
-      return `<div class="card"><div><code>${esc(item.id || '')}</code></div><div><a href="#" class="item-link" data-item-id="${escAttr(item.id || '')}" data-item-product="${escAttr(item.product || '')}">${esc(item.title || item.id || '')}</a></div><div class="muted">${esc(renderMeta(item))}</div></div>`;
+      return `<div class="card" ${selectableItemAttrs(item)}>${renderItemCardSummary(item)}</div>`;
     }
 
     function renderReviewCard(bundle, lane) {
@@ -1089,7 +1222,7 @@ R"HTML(    function typeIcon(type) {
       const reason = bundle?.review_reason || `Queued for ${lane || 'review'} review.`;
       const reasonCode = bundle?.reason_code ? `<code>${esc(bundle.reason_code)}</code> ` : '';
       const decision = bundle?.suggested_human_decision ? `<div class="muted">Suggested decision: ${esc(bundle.suggested_human_decision)}</div>` : '';
-      return `<div class="card"><div><code>${esc(item.id || '')}</code></div><div><a href="#" class="item-link" data-item-id="${escAttr(item.id || '')}" data-item-product="${escAttr(item.product || '')}">${esc(item.title || item.id || '')}</a></div><div class="muted">${esc(renderMeta(item))}</div><div class="muted review-reason"><strong>Why this needs review:</strong> ${reasonCode}${esc(reason)}${decision}</div></div>`;
+      return `<div class="card" ${selectableItemAttrs(item)}>${renderItemCardSummary(item)}<div class="muted review-reason"><strong>Why this needs review:</strong> ${reasonCode}${esc(reason)}${decision}</div></div>`;
     }
 
     function bindItemLinks(selector) {
@@ -1160,45 +1293,194 @@ R"HTML(    function typeIcon(type) {
     function openModal(title, bodyHtml) {
       document.getElementById('item-modal-title').textContent = title;
       document.getElementById('item-modal-body').innerHTML = bodyHtml;
-      document.getElementById('item-modal-backdrop').classList.add('open');
+      const backdrop = document.getElementById('item-modal-backdrop');
+      backdrop.classList.add('open');
+      backdrop.setAttribute('aria-hidden', 'false');
     }
 
     function closeModal() {
-      document.getElementById('item-modal-backdrop').classList.remove('open');
+      const backdrop = document.getElementById('item-modal-backdrop');
+      backdrop.classList.remove('open');
+      backdrop.setAttribute('aria-hidden', 'true');
     }
 
     async function openItemModal(itemId, product = '') {
       const productScope = product || (selectedProductValues().length === 1 ? selectedProductValues()[0] : 'all');
       openModal(itemId, '<div class="muted">Loading item detail...</div>');
-      let item = null;
       try {
-        const data = await getJson(`/api/items/${encodeURIComponent(itemId)}?product=${encodeURIComponent(productScope)}`);
-        item = data?.data?.item;
-        if (!item) {
-          openModal(itemId, '<div class="muted">Item not found.</div>');
-          return;
-        }
-        const evidenceResult = await getJson(`/api/review/evidence/${encodeURIComponent(itemId)}?product=${encodeURIComponent(item.product || productScope)}`);
-        const timelineResult = await getJson(`/api/review/timeline?item=${encodeURIComponent(itemId)}&product=${encodeURIComponent(item.product || productScope)}&limit=200`);
-        const evidence = evidenceResult?.data?.evidence || {};
-        const timeline = timelineResult?.data?.events || [];
-        const contentHtml = renderMarkdownWithObsidian(item.content || '(no content)');
-        const body = `<div class="row"><code>${esc(item.id)}</code><span class="muted">${esc(renderMeta(item))}</span></div><div class="muted" style="margin-bottom:8px;">${esc(item.path || '')}</div>${renderEvidenceMatrix(evidence)}${renderTimeline(timeline)}<div class="md-view">${contentHtml}</div>`;
-        openModal(item.title || item.id, body);
+        await window.KobUi.fetchPartial(
+          `/partials/item/${encodeURIComponent(itemId)}?product=${encodeURIComponent(productScope)}`,
+          { target: '#item-modal-body' },
+        );
+        hydrateMarkdown('#item-modal-body');
+        bindItemLinksWithin('#item-modal-body', productScope);
+        const titleSource = document.querySelector('#item-modal-body [data-item-title]');
+        document.getElementById('item-modal-title').textContent =
+          titleSource?.getAttribute('data-item-title') || itemId;
       } catch (error) {
         openModal(itemId, `<div class="muted">Unable to load item detail: ${esc(describeRefreshError(error))}</div>`);
-        return;
+      }
+    }
+
+    function isTypingContext(target) {
+      const element = target?.nodeType === Node.TEXT_NODE ? target.parentElement : target;
+      if (!element) return false;
+      if (element.isContentEditable) return true;
+      const editableParent = element.closest ? element.closest('[contenteditable="true"], [contenteditable=""]') : null;
+      if (editableParent) return true;
+      const tag = String(element.tagName || '').toUpperCase();
+      return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+    }
+
+    function itemSelectionKey(id, product) {
+      return `${String(product || '')}::${String(id || '')}`;
+    }
+
+    function itemSelectionKeyFromElement(element) {
+      if (!element) return '';
+      return itemSelectionKey(
+        element.getAttribute('data-item-id') || '',
+        element.getAttribute('data-item-product') || ''
+      );
+    }
+
+    function setSelectedItemState(id, product) {
+      state.selectedItemId = String(id || '');
+      state.selectedItemProduct = String(product || '');
+      state.selectedItemKey = state.selectedItemId ? itemSelectionKey(state.selectedItemId, state.selectedItemProduct) : '';
+    }
+
+    function activeSelectableCards() {
+      const activePage = document.querySelector('.page.active');
+      if (!activePage) return [];
+      return [...activePage.querySelectorAll('[data-selectable-item]')].filter((card) =>
+        card.getAttribute('data-item-id') && card.getClientRects().length > 0
+      );
+    }
+
+    function syncSelectableItems() {
+      const visibleCards = activeSelectableCards();
+      const visibleKeys = new Set(visibleCards.map((card) => itemSelectionKeyFromElement(card)));
+      if (!visibleCards.length) {
+        setSelectedItemState('', '');
+      } else if (!state.selectedItemKey || !visibleKeys.has(state.selectedItemKey)) {
+        const first = visibleCards[0];
+        setSelectedItemState(first.getAttribute('data-item-id') || '', first.getAttribute('data-item-product') || '');
       }
 
-      document.querySelectorAll('#item-modal-body .obs-wikilink[data-item-id]').forEach((link) => {
-        link.addEventListener('click', async (event) => {
-          event.preventDefault();
-          const target = link.getAttribute('data-item-id');
-          if (!target) return;
-          await openItemModal(target, item.product || product);
+      document.querySelectorAll('[data-selectable-item]').forEach((card) => {
+        const selected = state.selectedItemKey && itemSelectionKeyFromElement(card) === state.selectedItemKey && visibleKeys.has(state.selectedItemKey);
+        card.classList.toggle('is-selected', Boolean(selected));
+        card.setAttribute('aria-selected', selected ? 'true' : 'false');
+        card.setAttribute('tabindex', selected ? '0' : '-1');
+      });
+    }
+
+    function setSelectedCard(card, options = {}) {
+      if (!card) {
+        setSelectedItemState('', '');
+        syncSelectableItems();
+        return false;
+      }
+      setSelectedItemState(card.getAttribute('data-item-id') || '', card.getAttribute('data-item-product') || '');
+      syncSelectableItems();
+      if (options.scroll !== false) {
+        card.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      }
+      if (options.focus) {
+        card.focus({ preventScroll: true });
+      }
+      return true;
+    }
+
+    function bindSelectableCards(root) {
+      const container = typeof root === 'string' ? document.querySelector(root) : (root || document);
+      if (!container) return;
+      container.querySelectorAll('[data-selectable-item]').forEach((card) => {
+        if (card.__kobSelectableBound) return;
+        card.__kobSelectableBound = true;
+        card.addEventListener('click', (event) => {
+          setSelectedCard(card, { focus: false, scroll: false });
+          if (event.target?.closest?.('.item-link, button, input, select, textarea, summary')) {
+            return;
+          }
+        });
+        card.addEventListener('focus', () => {
+          setSelectedCard(card, { focus: false, scroll: false });
         });
       });
+      syncSelectableItems();
+    }
 
+    function selectItemByDelta(delta) {
+      const cards = activeSelectableCards();
+      if (!cards.length) return false;
+      const currentIndex = cards.findIndex((card) => itemSelectionKeyFromElement(card) === state.selectedItemKey);
+      const nextIndex = currentIndex >= 0
+        ? (currentIndex + delta + cards.length) % cards.length
+        : (delta >= 0 ? 0 : cards.length - 1);
+      return setSelectedCard(cards[nextIndex], { focus: true, scroll: true });
+    }
+
+    async function openSelectedItem() {
+      const cards = activeSelectableCards();
+      if (!cards.length) return false;
+      const selected = cards.find((card) => itemSelectionKeyFromElement(card) === state.selectedItemKey) || cards[0];
+      setSelectedCard(selected, { focus: false, scroll: false });
+      const itemId = selected.getAttribute('data-item-id') || '';
+      const product = selected.getAttribute('data-item-product') || '';
+      if (!itemId) return false;
+      await openItemModal(itemId, product);
+      return true;
+    }
+
+    function isShortcutHelpOpen() {
+      return state.shortcutHelpOpen;
+    }
+
+    function openShortcutHelp() {
+      state.shortcutHelpOpen = true;
+      const backdrop = document.getElementById('shortcut-help-backdrop');
+      backdrop.classList.add('open');
+      backdrop.setAttribute('aria-hidden', 'false');
+      document.getElementById('shortcut-help-button').setAttribute('aria-expanded', 'true');
+      document.getElementById('shortcut-help-close').focus({ preventScroll: true });
+    }
+
+    function closeShortcutHelp() {
+      if (!state.shortcutHelpOpen) return false;
+      state.shortcutHelpOpen = false;
+      const backdrop = document.getElementById('shortcut-help-backdrop');
+      backdrop.classList.remove('open');
+      backdrop.setAttribute('aria-hidden', 'true');
+      document.getElementById('shortcut-help-button').setAttribute('aria-expanded', 'false');
+      document.getElementById('shortcut-help-button').focus({ preventScroll: true });
+      return true;
+    }
+
+    function toggleShortcutHelp() {
+      if (isShortcutHelpOpen()) {
+        closeShortcutHelp();
+      } else {
+        openShortcutHelp();
+      }
+    }
+
+    function closeOpenDetailPanels() {
+      const openPanels = [...document.querySelectorAll('.detail-toggle[open]')];
+      if (!openPanels.length) return false;
+      openPanels[openPanels.length - 1].open = false;
+      return true;
+    }
+
+    function isItemModalOpen() {
+      return document.getElementById('item-modal-backdrop').classList.contains('open');
+    }
+
+    function focusSearchInput() {
+      const search = document.getElementById('search');
+      search.focus();
+      search.select();
     }
 
 )HTML"
@@ -1318,21 +1600,12 @@ R"HTML(
       const lanesData = result?.data?.lanes || {};
       const html = lanes.map((lane) => {
         const cards = (lanesData[lane] || [])
-          .map((item) =>
-          `<div class="card"><div><code>${esc(item.id)}</code></div><div><a href="#" class="item-link" data-item-id="${escAttr(item.id)}" data-item-product="${escAttr(item.product || '')}">${esc(item.title)}</a></div><div class="muted">${esc(renderMeta(item))}</div></div>`
-          ).join('');
-        return `<div class="lane"><strong>${lane}</strong>${cards || '<div class="muted">No items</div>'}</div>`;
+          .map((item) => renderItemCard(item)).join('');
+        return `<div class="lane"><strong>${lane}</strong><div class="lane-items" role="listbox" aria-label="${escAttr(`${lane} items`)}">${cards || '<div class="muted">No items</div>'}</div></div>`;
       }).join('');
       document.getElementById('kanban').innerHTML = html;
-      document.querySelectorAll('#kanban .item-link[data-item-id]').forEach((link) => {
-        link.addEventListener('click', async (event) => {
-          event.preventDefault();
-          const id = link.getAttribute('data-item-id');
-          const product = link.getAttribute('data-item-product') || '';
-          if (!id) return;
-          await openItemModal(id, product);
-        });
-      });
+      bindItemLinks('#kanban');
+      bindSelectableCards('#kanban');
     }
 
     async function loadContext(signal) {
@@ -1352,20 +1625,13 @@ R"HTML(
       document.getElementById('context-summary').textContent =
           `ADR: ${counts.ADR || 0} | Topic: ${counts.Topic || 0} | Workset: ${counts.Workset || 0}`;
 
-      const listHtml = contextItems.map((item) =>
-        `<div class="card"><div><code>${esc(item.id)}</code></div><div><a href="#" class="item-link" data-item-id="${escAttr(item.id)}" data-item-product="${escAttr(item.product || '')}">${esc(item.title)}</a></div><div class="muted">${esc(renderMeta(item))}</div></div>`
-      ).join('');
-      document.getElementById('context-list').innerHTML = listHtml || '<div class="muted">No context items</div>';
+      const listHtml = contextItems.map((item) => renderItemCard(item)).join('');
+      document.getElementById('context-list').innerHTML = listHtml
+        ? `<div class="context-items" role="listbox" aria-label="Context items">${listHtml}</div>`
+        : '<div class="muted">No context items</div>';
 
-      document.querySelectorAll('#context-list .item-link[data-item-id]').forEach((link) => {
-        link.addEventListener('click', async (event) => {
-          event.preventDefault();
-          const id = link.getAttribute('data-item-id');
-          const product = link.getAttribute('data-item-product') || '';
-          if (!id) return;
-          await openItemModal(id, product);
-        });
-      });
+      bindItemLinks('#context-list');
+      bindSelectableCards('#context-list');
     }
 
     async function loadReview(signal) {
@@ -1381,9 +1647,10 @@ R"HTML(
       document.getElementById('review-inbox').innerHTML = laneNames.map((lane) => {
         const bundles = lanesData[lane] || [];
         const cards = bundles.map((bundle) => renderReviewCard(bundle, lane)).join('');
-        return `<div class="review-lane"><strong>${esc(lane)}</strong><div class="muted">${bundles.length} item(s)</div>${cards || '<div class="muted">No items</div>'}</div>`;
+        return `<div class="review-lane"><strong>${esc(lane)}</strong><div class="muted">${bundles.length} item(s)</div><div class="review-lane-items" role="listbox" aria-label="${escAttr(`${lane} items`)}">${cards || '<div class="muted">No items</div>'}</div></div>`;
       }).join('') || '<div class="muted">No review queues for the current filters.</div>';
       bindItemLinks('#review-inbox');
+      bindSelectableCards('#review-inbox');
 
       document.querySelectorAll('#saved-views [data-saved-view]').forEach((button) => {
         button.addEventListener('click', async () => {
@@ -1391,8 +1658,9 @@ R"HTML(
           const result = await getJson(`/api/review/saved-views/${encodeURIComponent(viewId)}?${queryString()}`);
           const items = result?.data?.result?.items || [];
           document.getElementById('review-inbox').innerHTML =
-            `<div class="review-lane"><strong>${esc(result?.data?.view?.title || viewId)}</strong><div class="muted">${items.length} item(s)</div>${items.map(renderItemCard).join('') || '<div class="muted">No items</div>'}</div>`;
+            `<div class="review-lane"><strong>${esc(result?.data?.view?.title || viewId)}</strong><div class="muted">${items.length} item(s)</div><div class="review-lane-items" role="listbox" aria-label="${escAttr(`${result?.data?.view?.title || viewId} items`)}">${items.map(renderItemCard).join('') || '<div class="muted">No items</div>'}</div></div>`;
           bindItemLinks('#review-inbox');
+          bindSelectableCards('#review-inbox');
         });
       });
     }
@@ -1549,8 +1817,9 @@ R"HTML(
       const data = result.data || {};
       const items = data.preview?.items || [];
       document.getElementById('command-result').innerHTML =
-        `<div class="card"><strong>KOBQL</strong><div><code>${esc(data.generated_kobql || '')}</code></div><div class="muted">Read-only preview, ${items.length} visible item(s)</div></div>${items.map(renderItemCard).join('')}`;
+        `<div class="card"><strong>KOBQL</strong><div><code>${esc(data.generated_kobql || '')}</code></div><div class="muted">Read-only preview, ${items.length} visible item(s)</div></div><div class="command-items" role="listbox" aria-label="Command preview items">${items.map(renderItemCard).join('')}</div>`;
       bindItemLinks('#command-result');
+      bindSelectableCards('#command-result');
     }
 
     function setActiveTab(tab) {
@@ -1577,6 +1846,7 @@ R"HTML(
       document.getElementById('page-runs').classList.toggle('active', isRuns);
       document.getElementById('page-command').classList.toggle('active', isCommand);
       updateUrlState();
+      syncSelectableItems();
     }
 
 )HTML"
@@ -1737,6 +2007,72 @@ R"HTML(
       await switchWorkspace(target.path, true);
     });
 
+    document.addEventListener('keydown', async (event) => {
+      if (event.defaultPrevented) {
+        return;
+      }
+      if (event.ctrlKey || event.metaKey || event.altKey) {
+        return;
+      }
+      if (event.key === 'Escape') {
+        if (closeShortcutHelp()) {
+          event.preventDefault();
+          return;
+        }
+        if (isItemModalOpen()) {
+          event.preventDefault();
+          closeModal();
+          return;
+        }
+        if (closeOpenDetailPanels()) {
+          event.preventDefault();
+        }
+        return;
+      }
+      if (isTypingContext(event.target)) {
+        return;
+      }
+      if (event.key === '?') {
+        event.preventDefault();
+        toggleShortcutHelp();
+        return;
+      }
+      const interactiveTarget = event.target?.closest?.('button, a[href], summary');
+      if (interactiveTarget) {
+        return;
+      }
+      if (isShortcutHelpOpen() || isItemModalOpen()) {
+        return;
+      }
+      if (event.key === '/') {
+        event.preventDefault();
+        focusSearchInput();
+        return;
+      }
+      if (event.key === 'j' || event.key === 'ArrowDown') {
+        if (selectItemByDelta(1)) {
+          event.preventDefault();
+        }
+        return;
+      }
+      if (event.key === 'k' || event.key === 'ArrowUp') {
+        if (selectItemByDelta(-1)) {
+          event.preventDefault();
+        }
+        return;
+      }
+      if (event.key === 'Enter') {
+        if (await openSelectedItem()) {
+          event.preventDefault();
+        }
+        return;
+      }
+      if (event.key === 'r') {
+        event.preventDefault();
+        document.getElementById('refresh').click();
+      }
+    });
+
     document.querySelectorAll('.tab-btn[data-tab]').forEach((btn) => {
       btn.addEventListener('click', () => {
         setActiveTab(btn.getAttribute('data-tab') || 'tree');
@@ -1872,6 +2208,13 @@ R"HTML(
     document.getElementById('item-modal-backdrop').addEventListener('click', (event) => {
       if (event.target.id === 'item-modal-backdrop') {
         closeModal();
+      }
+    });
+    document.getElementById('shortcut-help-button').addEventListener('click', toggleShortcutHelp);
+    document.getElementById('shortcut-help-close').addEventListener('click', closeShortcutHelp);
+    document.getElementById('shortcut-help-backdrop').addEventListener('click', (event) => {
+      if (event.target.id === 'shortcut-help-backdrop') {
+        closeShortcutHelp();
       }
     });
 

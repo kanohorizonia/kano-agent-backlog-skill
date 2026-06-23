@@ -117,6 +117,8 @@ std::string HtmlEscape(const std::string& value) {
   return result;
 }
 
+std::string PillClass(const std::string& value);
+
 std::string RenderErrorPartial(const std::string& message) {
   return "<div class=\"card\" role=\"alert\"><strong>Unable to load partial</strong><div class=\"muted\">" +
          HtmlEscape(message) + "</div></div>";
@@ -150,11 +152,65 @@ std::string RenderItemLink(const Json::Value& item) {
          HtmlEscape(item.get("title", "").asString()) + "</a>";
 }
 
+std::string GateStateText(const std::string& state) {
+  const auto lowered = text::ToLower(Trim(state));
+  if (lowered == "not-run") {
+    return "not run";
+  }
+  return lowered.empty() ? "unknown" : lowered;
+}
+
+std::string GateStateSymbol(const std::string& state) {
+  const auto lowered = text::ToLower(Trim(state));
+  if (lowered == "passed") {
+    return "✓";
+  }
+  if (lowered == "failed") {
+    return "!";
+  }
+  if (lowered == "blocked") {
+    return "⛔";
+  }
+  return "?";
+}
+
+std::string RenderSelectableItemAttributes(const Json::Value& item) {
+  return "data-selectable-item=\"true\" data-item-id=\"" +
+         HtmlEscape(item.get("id", "").asString()) +
+         "\" data-item-product=\"" +
+         HtmlEscape(item.get("product", "").asString()) +
+         "\" tabindex=\"-1\" aria-selected=\"false\" role=\"option\"";
+}
+
+std::string RenderGateBadge(const std::string& label, const Json::Value& gate) {
+  const auto state = gate.get("state", "unknown").asString();
+  const auto stateText = GateStateText(state);
+  return "<span class=\"pill gate-badge " + PillClass(state) +
+         "\" data-gate-state=\"" + HtmlEscape(state.empty() ? "unknown" : state) +
+         "\" data-gate-symbol=\"" + HtmlEscape(GateStateSymbol(state)) +
+         "\" title=\"" + HtmlEscape(label + " gate: " + stateText) +
+         "\" aria-label=\"" + HtmlEscape(label + " gate " + stateText) +
+         "\">" + HtmlEscape(label) + "</span>";
+}
+
+std::string RenderGateStrip(const Json::Value& gateStatus) {
+  return "<div class=\"gate-strip\" role=\"list\" aria-label=\"Gate status\">" +
+         RenderGateBadge("Ready", gateStatus["ready"]) +
+         RenderGateBadge("Review", gateStatus["review"]) +
+         RenderGateBadge("Done", gateStatus["done"]) + "</div>";
+}
+
+std::string RenderItemCardSummary(const Json::Value& item) {
+  return "<div><code>" + HtmlEscape(item.get("id", "").asString()) +
+         "</code></div><div>" + RenderItemLink(item) + "</div>" +
+         RenderGateStrip(item["gate_status"]) +
+         "<div class=\"muted\">" + HtmlEscape(ItemMetaText(item)) +
+         "</div>";
+}
+
 std::string RenderItemCardPartial(const Json::Value& item) {
-  return "<div class=\"card\"><div><code>" +
-         HtmlEscape(item.get("id", "").asString()) + "</code></div><div>" +
-         RenderItemLink(item) + "</div><div class=\"muted\">" +
-         HtmlEscape(ItemMetaText(item)) + "</div></div>";
+  return "<div class=\"card\" " + RenderSelectableItemAttributes(item) + ">" +
+         RenderItemCardSummary(item) + "</div>";
 }
 
 std::string RenderTreeNodePartial(const Json::Value& node, int depth) {
@@ -204,7 +260,8 @@ std::string RenderEvidenceSummaryPartial(const Json::Value& evidence) {
 
 std::string RenderReviewBundlePartial(const Json::Value& bundle) {
   const auto& item = bundle["item"];
-  std::string html = RenderItemCardPartial(item);
+  std::string html = "<div class=\"card\" " + RenderSelectableItemAttributes(item) + ">" +
+                     RenderItemCardSummary(item);
   const auto reason = bundle.get("review_reason", "").asString();
   if (!reason.empty()) {
     const auto reasonCode = bundle.get("reason_code", "").asString();
@@ -219,6 +276,7 @@ std::string RenderReviewBundlePartial(const Json::Value& bundle) {
     html += "</div>";
   }
   html += RenderEvidenceSummaryPartial(bundle["evidence"]);
+  html += "</div>";
   return html;
 }
 
@@ -377,6 +435,77 @@ std::vector<std::string> ExtractFrontmatterList(const std::string& content,
       }
     }
   }
+  return result;
+}
+
+std::map<std::string, std::string> ExtractFrontmatterMap(
+    const std::string& content,
+    const std::string& key) {
+  std::map<std::string, std::string> result;
+  const auto lines = SplitLines(content);
+  if (lines.empty() || Trim(lines.front()) != "---") {
+    return result;
+  }
+
+  bool inMap = false;
+  for (size_t i = 1; i < lines.size(); ++i) {
+    const auto& raw = lines[i];
+    const auto trimmed = Trim(raw);
+    if (trimmed == "---") {
+      break;
+    }
+    if (trimmed.empty()) {
+      continue;
+    }
+
+    const auto firstNonSpace = raw.find_first_not_of(" \t");
+    const size_t indent =
+        firstNonSpace == std::string::npos ? 0 : firstNonSpace;
+    const auto colon = trimmed.find(':');
+    if (indent == 0 && colon != std::string::npos) {
+      const auto currentKey = Trim(trimmed.substr(0, colon));
+      inMap = currentKey == key;
+      if (!inMap) {
+        continue;
+      }
+
+      auto value = Trim(trimmed.substr(colon + 1));
+      if (value.empty() || value == "{}") {
+        continue;
+      }
+      if (value.size() >= 2 && value.front() == '{' && value.back() == '}') {
+        std::stringstream stream(value.substr(1, value.size() - 2));
+        std::string token;
+        while (std::getline(stream, token, ',')) {
+          const auto tokenTrimmed = Trim(token);
+          const auto tokenColon = tokenTrimmed.find(':');
+          if (tokenColon == std::string::npos) {
+            continue;
+          }
+          const auto nestedKey =
+              Trim(tokenTrimmed.substr(0, tokenColon));
+          const auto nestedValue = NormalizeNullToken(
+              Unquote(Trim(tokenTrimmed.substr(tokenColon + 1))));
+          if (!nestedKey.empty() && !nestedValue.empty()) {
+            result[nestedKey] = nestedValue;
+          }
+        }
+      }
+      continue;
+    }
+
+    if (!inMap || indent == 0 || colon == std::string::npos) {
+      continue;
+    }
+
+    const auto nestedKey = Trim(trimmed.substr(0, colon));
+    const auto nestedValue =
+        NormalizeNullToken(Unquote(Trim(trimmed.substr(colon + 1))));
+    if (!nestedKey.empty() && !nestedValue.empty()) {
+      result[nestedKey] = nestedValue;
+    }
+  }
+
   return result;
 }
 
@@ -613,6 +742,496 @@ Json::Value BuildEvidenceSummary(const Json::Value& item) {
   summary["validation_matrix"] = matrix;
 
   return summary;
+}
+
+Json::Value MakeArray(const std::vector<std::string>& values) {
+  Json::Value out(Json::arrayValue);
+  for (const auto& value : values) {
+    out.append(value);
+  }
+  return out;
+}
+
+Json::Value MakeEvidenceItem(const ItemRecord& item) {
+  Json::Value value(Json::objectValue);
+  value["id"] = item.id;
+  value["title"] = item.title;
+  value["state"] = item.state;
+  value["content"] = item.rawContent;
+  return value;
+}
+
+std::string NormalizeSectionName(const std::string& value) {
+  auto name = text::ToLower(Trim(value));
+  while (!name.empty() && name.back() == ':') {
+    name.pop_back();
+    name = Trim(name);
+  }
+  if (name == "risks / dependencies") {
+    return "risks";
+  }
+  return name;
+}
+
+std::string ExtractMarkdownBody(const std::string& content) {
+  const auto lines = SplitLines(content);
+  if (lines.empty() || Trim(lines.front()) != "---") {
+    return content;
+  }
+
+  size_t bodyStart = 0;
+  bool foundEnd = false;
+  for (size_t i = 1; i < lines.size(); ++i) {
+    if (Trim(lines[i]) == "---") {
+      bodyStart = i + 1;
+      foundEnd = true;
+      break;
+    }
+  }
+  if (!foundEnd || bodyStart >= lines.size()) {
+    return "";
+  }
+
+  std::ostringstream out;
+  for (size_t i = bodyStart; i < lines.size(); ++i) {
+    if (i > bodyStart) {
+      out << "\n";
+    }
+    out << lines[i];
+  }
+  return out.str();
+}
+
+struct ReviewSection {
+  std::string key;
+  std::string title;
+  std::string body;
+};
+
+std::vector<ReviewSection> ExtractReviewSections(const std::string& content) {
+  const std::set<std::string> wanted = {
+      "context", "goal", "acceptance criteria", "risks", "worklog"};
+
+  std::vector<ReviewSection> sections;
+  ReviewSection current;
+  bool capturing = false;
+  auto flush = [&]() {
+    if (!capturing) {
+      return;
+    }
+    current.body = Trim(current.body);
+    if (!current.body.empty()) {
+      sections.push_back(current);
+    }
+    current = ReviewSection{};
+    capturing = false;
+  };
+
+  for (const auto& line : SplitLines(ExtractMarkdownBody(content))) {
+    const auto trimmed = Trim(line);
+    if (StartsWith(trimmed, "#")) {
+      flush();
+      const auto titleStart = trimmed.find_first_not_of('#');
+      if (titleStart == std::string::npos) {
+        continue;
+      }
+      const auto title = Trim(trimmed.substr(titleStart));
+      const auto key = NormalizeSectionName(title);
+      if (wanted.count(key) > 0) {
+        current.key = key;
+        current.title = title;
+        current.body.clear();
+        capturing = true;
+      }
+      continue;
+    }
+    if (!capturing) {
+      continue;
+    }
+    if (!current.body.empty()) {
+      current.body += "\n";
+    }
+    current.body += line;
+  }
+  flush();
+  return sections;
+}
+
+std::string PillClass(const std::string& value) {
+  const auto lowered = text::ToLower(Trim(value));
+  if (lowered == "passed") {
+    return "passed";
+  }
+  if (lowered == "failed") {
+    return "failed";
+  }
+  if (lowered == "blocked") {
+    return "blocked";
+  }
+  if (lowered == "not-run" || lowered == "unknown") {
+    return "missing";
+  }
+  return "";
+}
+
+std::string RenderPill(const std::string& value) {
+  return "<span class=\"pill " + PillClass(value) + "\">" +
+         HtmlEscape(value.empty() ? "unknown" : value) + "</span>";
+}
+
+bool IsEmptyLikeString(const std::string& value) {
+  const auto lowered = text::ToLower(Trim(value));
+  return lowered.empty() || lowered == "~" || lowered == "null" ||
+         lowered == "none" || lowered == "{}" || lowered == "[]";
+}
+
+bool JsonHasMeaningfulContent(const Json::Value& value) {
+  if (value.isNull()) {
+    return false;
+  }
+  if (value.isString()) {
+    return !IsEmptyLikeString(value.asString());
+  }
+  if (value.isArray()) {
+    for (const auto& entry : value) {
+      if (JsonHasMeaningfulContent(entry)) {
+        return true;
+      }
+    }
+    return false;
+  }
+  if (value.isObject()) {
+    for (const auto& member : value.getMemberNames()) {
+      if (JsonHasMeaningfulContent(value[member])) {
+        return true;
+      }
+    }
+    return false;
+  }
+  return true;
+}
+
+std::string RenderDetailFact(const std::string& label,
+                             const std::string& value) {
+  return "<div class=\"detail-fact\"><span class=\"detail-label\">" +
+         HtmlEscape(label) +
+         "</span><div class=\"detail-value\">" + HtmlEscape(value) +
+         "</div></div>";
+}
+
+std::string RenderMarkdownRegion(const std::string& markdown) {
+  return "<div class=\"md-view\" data-kob-markdown=\"1\"><textarea class=\"kob-md-source\" hidden>" +
+         HtmlEscape(markdown) + "</textarea></div>";
+}
+
+std::string RenderSectionPanel(const ReviewSection& section) {
+  return "<section class=\"panel detail-section\"><h4>" +
+         HtmlEscape(section.title) + "</h4>" +
+         RenderMarkdownRegion(section.body) + "</section>";
+}
+
+std::pair<std::string, std::string> SplitReferenceProduct(
+    const std::string& rawRef,
+    const std::string& defaultProduct) {
+  const auto cleaned = CleanListToken(rawRef);
+  const auto colon = cleaned.find(':');
+  if (colon == std::string::npos) {
+    return {defaultProduct, cleaned};
+  }
+  return {Trim(cleaned.substr(0, colon)), Trim(cleaned.substr(colon + 1))};
+}
+
+std::string RenderReferenceChip(const std::string& rawRef,
+                                const std::string& defaultProduct) {
+  const auto cleaned = CleanListToken(rawRef);
+  if (cleaned.empty()) {
+    return "";
+  }
+  const auto [product, itemId] = SplitReferenceProduct(cleaned, defaultProduct);
+  if (itemId.empty()) {
+    return "";
+  }
+  return "<a href=\"#\" class=\"pill item-link\" data-item-id=\"" +
+         HtmlEscape(itemId) + "\" data-item-product=\"" +
+         HtmlEscape(product) + "\">" + HtmlEscape(cleaned) + "</a>";
+}
+
+std::string RenderTextChip(const std::string& value) {
+  const auto cleaned = CleanListToken(value);
+  if (cleaned.empty()) {
+    return "";
+  }
+  return "<span class=\"pill\">" + HtmlEscape(cleaned) + "</span>";
+}
+
+std::string RenderPillRow(const std::vector<std::string>& values,
+                          const std::function<std::string(const std::string&)>& renderer) {
+  std::string chips;
+  for (const auto& value : values) {
+    const auto chip = renderer(value);
+    if (!chip.empty()) {
+      chips += chip;
+    }
+  }
+  if (chips.empty()) {
+    return "";
+  }
+  return "<div class=\"detail-links\">" + chips + "</div>";
+}
+
+std::string RenderKeyValueRows(
+    const std::vector<std::pair<std::string, std::string>>& rows) {
+  std::string html;
+  for (const auto& [label, value] : rows) {
+    if (IsEmptyLikeString(value)) {
+      continue;
+    }
+    html += "<div class=\"detail-kv\"><div class=\"detail-label\">" +
+            HtmlEscape(label) + "</div><div class=\"detail-value\">" +
+            HtmlEscape(value) + "</div></div>";
+  }
+  if (html.empty()) {
+    return "";
+  }
+  return "<div class=\"detail-kv-list\">" + html + "</div>";
+}
+
+std::string RenderGateStatusCard(const Json::Value& gate) {
+  std::string html = "<div class=\"review-lane detail-gate\"><div class=\"detail-title-row\"><strong>" +
+                     HtmlEscape(gate.get("label", gate.get("name", "Gate")).asString()) +
+                     " gate</strong> " + RenderPill(gate.get("state", "unknown").asString()) +
+                     "</div>";
+  if (JsonHasMeaningfulContent(gate["blockers"])) {
+    html += "<div class=\"detail-stack\"><div class=\"detail-label\">Blockers</div><ul>";
+    for (const auto& blocker : gate["blockers"]) {
+      if (!IsEmptyLikeString(blocker.asString())) {
+        html += "<li>" + HtmlEscape(blocker.asString()) + "</li>";
+      }
+    }
+    html += "</ul></div>";
+  } else {
+    html += "<div class=\"muted\">No blockers.</div>";
+  }
+
+  html += "<div class=\"detail-stack\"><div class=\"detail-label\">Native checks</div>";
+  if (!JsonHasMeaningfulContent(gate["native_checks"])) {
+    html += "<div class=\"muted\">No native checks.</div>";
+  } else {
+    for (const auto& check : gate["native_checks"]) {
+      html += "<div class=\"evidence-row\"><strong>" +
+              HtmlEscape(check.get("name", "check").asString()) + "</strong>" +
+              RenderPill(check.get("status", "unknown").asString()) +
+              "<span class=\"muted\">" +
+              HtmlEscape(check.get("evidence", "").asString()) +
+              "</span></div>";
+    }
+  }
+
+  if (JsonHasMeaningfulContent(gate["source_fields"])) {
+    std::vector<std::string> fields;
+    for (const auto& field : gate["source_fields"]) {
+      if (!IsEmptyLikeString(field.asString())) {
+        fields.push_back(field.asString());
+      }
+    }
+    const auto fieldRow = RenderPillRow(fields, [](const std::string& value) {
+      return RenderTextChip(value);
+    });
+    if (!fieldRow.empty()) {
+      html += "<div class=\"detail-stack\"><div class=\"detail-label\">Source fields</div>" +
+              fieldRow + "</div>";
+    }
+  }
+
+  html += "</div>";
+  return html;
+}
+
+std::map<std::string, bool> ExtractSectionContentPresence(
+    const std::string& content,
+    const std::vector<std::string>& sectionNames) {
+  std::set<std::string> required;
+  for (const auto& sectionName : sectionNames) {
+    required.insert(NormalizeSectionName(sectionName));
+  }
+
+  std::map<std::string, bool> present;
+  for (const auto& sectionName : required) {
+    present[sectionName] = false;
+  }
+
+  std::string activeSection;
+  bool activeHasContent = false;
+  auto closeActiveSection = [&]() {
+    if (!activeSection.empty()) {
+      present[activeSection] = activeHasContent;
+      activeSection.clear();
+      activeHasContent = false;
+    }
+  };
+
+  for (const auto& line : SplitLines(content)) {
+    const auto trimmed = Trim(line);
+    if (StartsWith(trimmed, "#")) {
+      closeActiveSection();
+      const auto titleStart = trimmed.find_first_not_of('#');
+      if (titleStart == std::string::npos) {
+        continue;
+      }
+      const auto sectionName = NormalizeSectionName(trimmed.substr(titleStart));
+      if (required.count(sectionName) > 0) {
+        activeSection = sectionName;
+      }
+      continue;
+    }
+    if (!activeSection.empty() && !trimmed.empty()) {
+      activeHasContent = true;
+    }
+  }
+  closeActiveSection();
+  return present;
+}
+
+Json::Value MakeGateStatus(const std::string& name,
+                           const std::string& label,
+                           const std::string& state,
+                           const std::vector<std::string>& blockers,
+                           const Json::Value& nativeChecks,
+                           const std::vector<std::string>& sourceFields) {
+  Json::Value gate(Json::objectValue);
+  gate["name"] = name;
+  gate["label"] = label;
+  gate["state"] = state;
+  gate["blockers"] = MakeArray(blockers);
+  gate["native_checks"] = nativeChecks;
+  gate["source_fields"] = MakeArray(sourceFields);
+  return gate;
+}
+
+Json::Value BuildReadyGateStatus(const ItemRecord& item) {
+  Json::Value checks(Json::arrayValue);
+  const std::vector<std::string> sourceFields = {
+      "source_kind", "state", "content.sections.Context", "content.sections.Goal",
+      "content.sections.Acceptance Criteria", "content.sections.Risks",
+      "content.sections.Risks / Dependencies"};
+  if (item.sourceKind != "Item") {
+    checks.append(MakeValidationCheck("applicable_source_kind", "unknown",
+                                      "Ready gate applies only to backlog item Markdown."));
+    return MakeGateStatus("ready", "Ready", "unknown", {}, checks,
+                          {"source_kind"});
+  }
+
+  const auto state = text::ToLower(item.state);
+  if (state != "ready") {
+    checks.append(MakeValidationCheck("ready_state", "unknown",
+                                      "Item state is not Ready."));
+    return MakeGateStatus("ready", "Ready", "unknown", {}, checks,
+                          {"state"});
+  }
+
+  const std::vector<std::string> requiredSections = {
+      "Context", "Goal", "Acceptance Criteria", "Risks / Dependencies"};
+  const auto sectionPresence =
+      ExtractSectionContentPresence(item.rawContent, requiredSections);
+  std::vector<std::string> missing;
+  for (const auto& sectionName : requiredSections) {
+    const auto normalized = NormalizeSectionName(sectionName);
+    const auto found = sectionPresence.find(normalized);
+    if (found == sectionPresence.end() || !found->second) {
+      missing.push_back("missing section: " + sectionName);
+    }
+  }
+
+  checks.append(MakeValidationCheck(
+      "required_ready_sections", missing.empty() ? "passed" : "failed",
+      "Context, Goal, Acceptance Criteria, and Risks / Dependencies sections must contain content."));
+  return MakeGateStatus("ready", "Ready", missing.empty() ? "passed" : "failed",
+                        missing, checks, sourceFields);
+}
+
+std::vector<std::string> EvidenceMissingBlockers(const Json::Value& evidence) {
+  std::vector<std::string> blockers;
+  for (const auto& missing : evidence["missing"]) {
+    blockers.push_back("missing evidence: " + missing.asString());
+  }
+  if (blockers.empty()) {
+    blockers.push_back("missing sufficient evidence");
+  }
+  return blockers;
+}
+
+Json::Value BuildReviewGateStatus(const ItemRecord& item,
+                                  const Json::Value& evidence) {
+  Json::Value checks(Json::arrayValue);
+  if (item.sourceKind != "Item") {
+    checks.append(MakeValidationCheck("applicable_source_kind", "unknown",
+                                      "Review gate applies only to backlog item Markdown."));
+    return MakeGateStatus("review", "Review", "unknown", {}, checks,
+                          {"source_kind"});
+  }
+
+  const auto state = text::ToLower(item.state);
+  const bool evidenceComplete = evidence["complete"].asBool();
+  if (state == "review") {
+    checks.append(MakeValidationCheck("review_state", "passed",
+                                      "Item is in Review."));
+    checks.append(MakeValidationCheck("review_evidence", evidenceComplete ? "passed" : "failed",
+                                      "Review path requires sufficient evidence."));
+    return MakeGateStatus("review", "Review", evidenceComplete ? "passed" : "failed",
+                          evidenceComplete ? std::vector<std::string>{}
+                                           : EvidenceMissingBlockers(evidence),
+                          checks, {"state", "evidence.complete", "evidence.missing"});
+  }
+
+  if (state == "done" && !evidenceComplete) {
+    checks.append(MakeValidationCheck("review_done_path_evidence", "failed",
+                                      "Done path lacks sufficient review evidence."));
+    return MakeGateStatus("review", "Review", "failed",
+                          EvidenceMissingBlockers(evidence), checks,
+                          {"state", "evidence.complete", "evidence.missing"});
+  }
+
+  checks.append(MakeValidationCheck("review_applicability", "unknown",
+                                    "Item is not in Review and has no failed Done review evidence path."));
+  return MakeGateStatus("review", "Review", "unknown", {}, checks,
+                        {"state", "evidence.complete"});
+}
+
+Json::Value BuildDoneGateStatus(const ItemRecord& item,
+                                const Json::Value& evidence) {
+  Json::Value checks(Json::arrayValue);
+  if (item.sourceKind != "Item") {
+    checks.append(MakeValidationCheck("applicable_source_kind", "unknown",
+                                      "Done gate applies only to backlog item Markdown."));
+    return MakeGateStatus("done", "Done", "unknown", {}, checks,
+                          {"source_kind"});
+  }
+
+  const auto state = text::ToLower(item.state);
+  if (state != "done") {
+    checks.append(MakeValidationCheck("done_state", "unknown",
+                                      "Item state is not Done."));
+    return MakeGateStatus("done", "Done", "unknown", {}, checks,
+                          {"state"});
+  }
+
+  const bool evidenceComplete = evidence["complete"].asBool();
+  checks.append(MakeValidationCheck("done_state", "passed", "Item is in Done."));
+  checks.append(MakeValidationCheck("done_evidence", evidenceComplete ? "passed" : "failed",
+                                    "Done requires sufficient durable evidence."));
+  return MakeGateStatus("done", "Done", evidenceComplete ? "passed" : "failed",
+                        evidenceComplete ? std::vector<std::string>{}
+                                         : EvidenceMissingBlockers(evidence),
+                        checks, {"state", "evidence.complete", "evidence.missing"});
+}
+
+Json::Value BuildGateStatus(const ItemRecord& item) {
+  const auto evidence = BuildEvidenceSummary(MakeEvidenceItem(item));
+  Json::Value status(Json::objectValue);
+  status["ready"] = BuildReadyGateStatus(item);
+  status["review"] = BuildReviewGateStatus(item, evidence);
+  status["done"] = BuildDoneGateStatus(item, evidence);
+  return status;
 }
 
 Json::Value MakeReviewBundle(const Json::Value& item, const Json::Value& evidence) {
@@ -1048,12 +1667,19 @@ ItemRecord BacklogWebviewService::ParseItem(const std::filesystem::path& itemPat
   item.type = NormalizeTypeFromPath(itemPath, map["type"]);
   item.title = map["title"];
   item.state = map["state"];
+  item.priority = map["priority"];
   item.parent = map["parent"];
+  item.owner = map["owner"];
+  item.area = map["area"];
+  item.iteration = map["iteration"];
   item.created = map["created"];
   item.updated = map["updated"];
+  item.tags = ExtractFrontmatterList(content, "tags");
+  item.decisions = ExtractFrontmatterList(content, "decisions");
   item.relates = ExtractFrontmatterList(content, "relates");
   item.blocks = ExtractFrontmatterList(content, "blocks");
   item.blockedBy = ExtractFrontmatterList(content, "blocked_by");
+  item.external = ExtractFrontmatterMap(content, "external");
 
   if (item.id.empty()) {
     item.parseError = "Missing id";
@@ -1229,13 +1855,24 @@ Json::Value BacklogWebviewService::ItemToJson(const ItemRecord& item,
   value["source_kind"] = item.sourceKind;
   value["title"] = item.title;
   value["state"] = item.state;
+  value["priority"] = item.priority;
   value["parent"] = item.parent;
+  value["owner"] = item.owner;
+  value["area"] = item.area;
+  value["iteration"] = item.iteration;
   value["topic"] = item.topic.empty() ? Json::Value(Json::nullValue)
                                       : Json::Value(item.topic);
   value["created"] = item.created;
   value["updated"] = item.updated;
   value["path"] = item.relativePath;
   value["valid"] = item.valid;
+  value["gate_status"] = BuildGateStatus(item);
+  value["tags"] = MakeArray(item.tags);
+  value["decisions"] = MakeArray(item.decisions);
+  value["external"] = Json::objectValue;
+  for (const auto& [key, entry] : item.external) {
+    value["external"][key] = entry;
+  }
   value["links"]["relates"] = Json::arrayValue;
   value["links"]["blocks"] = Json::arrayValue;
   value["links"]["blocked_by"] = Json::arrayValue;
@@ -2622,7 +3259,9 @@ std::string BacklogWebviewService::RenderKanbanPartial(
                                           "Review", "Done"};
   std::string html;
   for (const auto& lane : lanes) {
-    html += "<div class=\"lane\"><strong>" + HtmlEscape(lane) + "</strong>";
+    html += "<div class=\"lane\"><strong>" + HtmlEscape(lane) +
+            "</strong><div class=\"lane-items\" role=\"listbox\" aria-label=\"" +
+            HtmlEscape(lane + " items") + "\">";
     const auto& items = kanban["lanes"][lane];
     if (items.empty()) {
       html += "<div class=\"muted\">No items</div>";
@@ -2631,7 +3270,7 @@ std::string BacklogWebviewService::RenderKanbanPartial(
         html += RenderItemCardPartial(item);
       }
     }
-    html += "</div>";
+    html += "</div></div>";
   }
   return html;
 }
@@ -2651,7 +3290,9 @@ std::string BacklogWebviewService::RenderReviewPartial(
     const auto& bundles = inbox["lanes"][lane];
     html += "<div class=\"review-lane\"><strong>" + HtmlEscape(lane) +
             "</strong><div class=\"muted\">" +
-            std::to_string(bundles.size()) + " item(s)</div>";
+            std::to_string(bundles.size()) +
+            " item(s)</div><div class=\"review-lane-items\" role=\"listbox\" aria-label=\"" +
+            HtmlEscape(lane + " items") + "\">";
     if (bundles.empty()) {
       html += "<div class=\"muted\">No items</div>";
     } else {
@@ -2659,7 +3300,7 @@ std::string BacklogWebviewService::RenderReviewPartial(
         html += RenderReviewBundlePartial(bundle);
       }
     }
-    html += "</div>";
+    html += "</div></div>";
   }
   return html.empty() ? "<div class=\"muted\">No review queues for the current filters.</div>"
                       : html;
@@ -2687,7 +3328,9 @@ std::string BacklogWebviewService::RenderContextPartial(
                      std::to_string(counts["ADR"]) + " | Topic: " +
                      std::to_string(counts["Topic"]) + " | Workset: " +
                      std::to_string(counts["Workset"]) + "</div>";
-  html += cards.empty() ? "<div class=\"muted\">No context items</div>" : cards;
+  html += cards.empty()
+              ? "<div class=\"muted\">No context items</div>"
+              : "<div class=\"context-items\" role=\"listbox\" aria-label=\"Context items\">" + cards + "</div>";
   return html;
 }
 
@@ -2736,32 +3379,167 @@ std::string BacklogWebviewService::RenderItemPartial(const std::string& product,
   }
 
   const auto& item = detail["item"];
-  std::string html = "<div class=\"row\"><code>" +
-                     HtmlEscape(item.get("id", "").asString()) +
-                     "</code><span class=\"muted\">" +
-                     HtmlEscape(ItemMetaText(item)) + "</span></div>";
-  html += "<div class=\"muted\" style=\"margin-bottom:8px;\">" +
-          HtmlEscape(item.get("path", "").asString()) + "</div>";
-  html += "<div class=\"panel\" style=\"margin:0 0 12px 0;\"><h4>Evidence</h4>" +
-          RenderEvidenceSummaryPartial(detail["evidence"]) + "</div>";
-  html += "<div class=\"panel\" style=\"margin:0 0 12px 0;\"><h4>Timeline</h4>";
+  const auto reviewSections = ExtractReviewSections(item.get("content", "").asString());
+
+  std::string html = "<section class=\"detail-shell\" data-item-title=\"" +
+                     HtmlEscape(item.get("title", item.get("id", "")).asString()) + "\">";
+  html += "<section class=\"panel detail-header\"><div class=\"detail-title-row\"><h3 style=\"margin:0;\">" +
+          HtmlEscape(item.get("title", item.get("id", "")).asString()) +
+          "</h3><span class=\"pill\"><code>" +
+          HtmlEscape(item.get("id", "").asString()) +
+          "</code></span></div><div class=\"muted\">" +
+          HtmlEscape(ItemMetaText(item)) + "</div><div class=\"detail-facts\">" +
+          RenderDetailFact("Product", item.get("product", "").asString().empty()
+                                          ? "all"
+                                          : item.get("product", "").asString()) +
+          RenderDetailFact("Type", item.get("type", "").asString()) +
+          RenderDetailFact("State", item.get("state", "").asString()) +
+          RenderDetailFact("Priority", item.get("priority", "").asString().empty()
+                                           ? "Unspecified"
+                                           : item.get("priority", "").asString()) +
+          RenderDetailFact("Updated", item.get("updated", "").asString().empty()
+                                          ? "Unknown"
+                                          : item.get("updated", "").asString()) +
+          RenderDetailFact("Path", item.get("path", "").asString().empty()
+                                       ? "Unknown"
+                                       : item.get("path", "").asString()) +
+          "</div></section>";
+
+  html += "<section class=\"panel detail-section\"><h4>Gate status</h4><div class=\"review-grid\">" +
+          RenderGateStatusCard(item["gate_status"]["ready"]) +
+          RenderGateStatusCard(item["gate_status"]["review"]) +
+          RenderGateStatusCard(item["gate_status"]["done"]) +
+          "</div></section>";
+
+  html += "<section class=\"panel detail-section\"><h4>Evidence</h4>" +
+          RenderEvidenceSummaryPartial(detail["evidence"]) + "</section>";
+
+  if (!reviewSections.empty()) {
+    html += "<div class=\"detail-sections\">";
+    for (const auto& section : reviewSections) {
+      html += RenderSectionPanel(section);
+    }
+    html += "</div>";
+  }
+
+  html += "<section class=\"panel detail-section\"><h4>Timeline</h4>";
   if (detail["worklog_events"].empty()) {
     html += "<div class=\"muted\">No worklog events</div>";
   } else {
     for (const auto& event : detail["worklog_events"]) {
       html += "<div class=\"card\"><div><code>" +
               HtmlEscape(event.get("timestamp", "").asString()) +
-              "</code> <span class=\"pill\">" +
-              HtmlEscape(event.get("kind", "worklog").asString()) +
-              "</span></div><div>" +
-              HtmlEscape(event.get("text", "").asString()) +
+              "</code> " + RenderPill(event.get("kind", "worklog").asString()) +
+              "</div><div>" + HtmlEscape(event.get("text", "").asString()) +
               "</div><div class=\"muted\">" +
               HtmlEscape(event.get("agent", "unknown").asString()) +
               "</div></div>";
     }
   }
-  html += "</div><pre>" +
-          HtmlEscape(item.get("content", "").asString()) + "</pre>";
+  html += "</section>";
+
+  std::vector<std::pair<std::string, std::string>> metadataRows = {
+      {"Owner", item.get("owner", "").asString()},
+      {"Area", item.get("area", "").asString()},
+      {"Iteration", item.get("iteration", "").asString()},
+      {"Parent", item.get("parent", "").asString()},
+      {"Topic", item.get("topic", "").asString()},
+      {"Created", item.get("created", "").asString()},
+      {"Source kind", item.get("source_kind", "").asString()}};
+  const auto metadataHtml = RenderKeyValueRows(metadataRows);
+
+  std::vector<std::pair<std::string, std::string>> externalRows;
+  for (const auto& key : item["external"].getMemberNames()) {
+    const auto value = item["external"][key].asString();
+    if (!IsEmptyLikeString(value)) {
+      externalRows.emplace_back(key, value);
+    }
+  }
+  const auto externalHtml = RenderKeyValueRows(externalRows);
+
+  const auto tagsHtml = RenderPillRow(
+      [&]() {
+        std::vector<std::string> values;
+        for (const auto& tag : item["tags"]) {
+          values.push_back(tag.asString());
+        }
+        return values;
+      }(),
+      [](const std::string& value) { return RenderTextChip(value); });
+  const auto decisionsHtml = RenderPillRow(
+      [&]() {
+        std::vector<std::string> values;
+        for (const auto& decision : item["decisions"]) {
+          values.push_back(decision.asString());
+        }
+        return values;
+      }(),
+      [](const std::string& value) { return RenderTextChip(value); });
+  const auto relatesHtml = RenderPillRow(
+      [&]() {
+        std::vector<std::string> values;
+        for (const auto& ref : item["links"]["relates"]) {
+          values.push_back(ref.asString());
+        }
+        return values;
+      }(),
+      [&](const std::string& value) {
+        return RenderReferenceChip(value, item.get("product", "").asString());
+      });
+  const auto blocksHtml = RenderPillRow(
+      [&]() {
+        std::vector<std::string> values;
+        for (const auto& ref : item["links"]["blocks"]) {
+          values.push_back(ref.asString());
+        }
+        return values;
+      }(),
+      [&](const std::string& value) {
+        return RenderReferenceChip(value, item.get("product", "").asString());
+      });
+  const auto blockedByHtml = RenderPillRow(
+      [&]() {
+        std::vector<std::string> values;
+        for (const auto& ref : item["links"]["blocked_by"]) {
+          values.push_back(ref.asString());
+        }
+        return values;
+      }(),
+      [&](const std::string& value) {
+        return RenderReferenceChip(value, item.get("product", "").asString());
+      });
+
+  if (!metadataHtml.empty() || !externalHtml.empty() || !tagsHtml.empty() ||
+      !decisionsHtml.empty() || !relatesHtml.empty() || !blocksHtml.empty() ||
+      !blockedByHtml.empty()) {
+    html += "<section class=\"panel detail-section\"><h4>Metadata &amp; relations</h4><div class=\"detail-stack\">";
+    if (!metadataHtml.empty()) {
+      html += "<div><div class=\"detail-label\">Metadata</div>" + metadataHtml + "</div>";
+    }
+    if (!externalHtml.empty()) {
+      html += "<div><div class=\"detail-label\">External</div>" + externalHtml + "</div>";
+    }
+    if (!tagsHtml.empty()) {
+      html += "<div><div class=\"detail-label\">Tags</div>" + tagsHtml + "</div>";
+    }
+    if (!decisionsHtml.empty()) {
+      html += "<div><div class=\"detail-label\">Decisions</div>" + decisionsHtml + "</div>";
+    }
+    if (!relatesHtml.empty()) {
+      html += "<div><div class=\"detail-label\">Relates</div>" + relatesHtml + "</div>";
+    }
+    if (!blocksHtml.empty()) {
+      html += "<div><div class=\"detail-label\">Blocks</div>" + blocksHtml + "</div>";
+    }
+    if (!blockedByHtml.empty()) {
+      html += "<div><div class=\"detail-label\">Blocked by</div>" + blockedByHtml + "</div>";
+    }
+    html += "</div></section>";
+  }
+
+  html += "<details class=\"panel detail-toggle\"><summary class=\"detail-toggle-summary\"><strong>Raw markdown / full file</strong></summary><pre>" +
+          HtmlEscape(item.get("content", "").asString()) + "</pre></details>";
+  html += "</section>";
   return html;
 }
 

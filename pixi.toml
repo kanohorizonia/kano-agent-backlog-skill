@@ -59,6 +59,7 @@ webview-docker-up-detached = "docker compose -f docker-compose.webview.yml up -d
 webview-docker-down = "docker compose -f docker-compose.webview.yml down"
 webview-docker-logs = "docker compose -f docker-compose.webview.yml logs -f webview"
 webview-docker-open = "bash src/shell/webview/open.sh"
+webview-smoke-artifacts = "bash src/shell/webview/smoke-artifacts.sh"
 
 # =============================================================================
 # Windows-specific (win-64)

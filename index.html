@@ -65,6 +65,16 @@ same local URL:</p>
 <figure data-rehype-pretty-code-figure><pre tabindex="0" data-language="bash" data-theme="github-light tokyo-night"><code data-language="bash" data-theme="github-light tokyo-night" style="display:grid;"><span data-line><span style="--shiki-light:#6F42C1;--shiki-dark:#C0CAF5;">pixi</span><span style="--shiki-light:#032F62;--shiki-dark:#9ECE6A;"> run</span><span style="--shiki-light:#032F62;--shiki-dark:#9ECE6A;"> webview-docker</span></span></code></pre></figure>
 <p>The CLI shortcut <code>kob gui</code> runs the same Docker path. Stop the container with
 <code>pixi run webview-docker-down</code>.</p>
+<p>For deterministic repo-local smoke evidence, run:</p>
+<figure data-rehype-pretty-code-figure><pre tabindex="0" data-language="bash" data-theme="github-light tokyo-night"><code data-language="bash" data-theme="github-light tokyo-night" style="display:grid;"><span data-line><span style="--shiki-light:#6F42C1;--shiki-dark:#C0CAF5;">pixi</span><span style="--shiki-light:#032F62;--shiki-dark:#9ECE6A;"> run</span><span style="--shiki-light:#032F62;--shiki-dark:#9ECE6A;"> webview-smoke-artifacts</span></span></code></pre></figure>
+<p>The command stores <code>_ws/test-output/webview-smoke/root.html</code>,
+<code>_ws/test-output/webview-smoke/healthz.txt</code>,
+<code>_ws/test-output/webview-smoke/items-all-limit-10.json</code>, and
+<code>_ws/test-output/webview-smoke/manifest.txt</code>. Set
+<code>KANO_WEBVIEW_SMOKE_BASE_URL=http://127.0.0.1:8799</code> to reuse an already running
+service; otherwise the script starts a local host with <code>KANO_WEBVIEW_OPEN=0</code>
+and shuts it down after capture. If <code>8799</code> is already occupied and should not be
+reused, set <code>KANO_WEBVIEW_SMOKE_PORT</code> to a free port first.</p>
 <p>The image below is a concept mock for a future review-console style workflow,
 not a current UI screenshot.</p>
 <p><img src="./assets/webview-review-console-concept.svg" alt="Conceptual human review console preview"/></p>

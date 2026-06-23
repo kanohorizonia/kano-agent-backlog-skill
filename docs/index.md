@@ -165,6 +165,7 @@ not a current UI screenshot.
 | Tokenizer adapters | [Quick start](guides/tokenizer-quickstart.md), [Overview](guides/tokenizer-adapters.md), [Configuration](guides/tokenizer-configuration.md), [CLI](guides/tokenizer-cli-reference.md), [Troubleshooting](guides/tokenizer-troubleshooting.md), [Performance](guides/tokenizer-performance.md) |
 | Maintainers | [Maintainer automation](automation/maintainer-automation.md), [Docs pipeline](automation/docs-pipeline.md), [Native CLI direction](guides/native-cli-direction.md), [Backboard IA](design/backboard-information-architecture.md), [Actor aliases](design/actor-alias-and-assignment-policy.md) |
 | Product Memory | [Product Map](design/product-map-projection-schema.md), [ADR lifecycle](design/adr-lifecycle-metadata.md), [Feature evolution](design/feature-evolution-event-model.md), [Design-history graph](design/design-history-graph-edge-semantics.md) |
+| Roadmap and recovery | [Version Goal Ledger](design/version-goal-ledger-schema.md), [Evidence quality](design/evidence-quality-classification-model.md), [Context recovery](design/context-recovery-summary-contract.md) |
 | Reference | [Schema reference](references/schema.md), [All references](references/) |
 
 ## Release and evidence notes

@@ -27,6 +27,9 @@ If you are reading the repository directly, start here instead of `docs/index.md
 - [ADR lifecycle metadata](design/adr-lifecycle-metadata.md)
 - [Feature evolution event model](design/feature-evolution-event-model.md)
 - [Design-history graph edge semantics](design/design-history-graph-edge-semantics.md)
+- [Version Goal Ledger schema](design/version-goal-ledger-schema.md)
+- [Evidence quality classification model](design/evidence-quality-classification-model.md)
+- [Context recovery summary contract](design/context-recovery-summary-contract.md)
 
 ## Release notes
 
@@ -43,6 +46,9 @@ If you are reading the repository directly, start here instead of `docs/index.md
 - [ADR lifecycle schema fixture](../references/adr-lifecycle-metadata.schema.json)
 - [Feature evolution schema fixture](../references/feature-evolution-event.schema.json)
 - [Design-history graph schema fixture](../references/design-history-graph.schema.json)
+- [Version Goal Ledger schema fixture](../references/version-goal-ledger.schema.json)
+- [Evidence quality schema fixture](../references/evidence-quality-classification.schema.json)
+- [Context recovery schema fixture](../references/context-recovery-summary.schema.json)
 
 ## Repo-local launcher behavior
 

@@ -261,7 +261,8 @@ This is a **required parameter** for auditability and worklog tracking. Commands
 **Example - ALL commands need --agent:**
 ```bash
 # ✅ Correct
-bash scripts/kob item create --type task --title "My task" --product my-app --agent kiro
+bash scripts/kob item create --type task --title "My task" --product my-app --agent kiro \
+  --duplicate-search-query "My task" --duplicate-search-scope my-app --duplicate-decision create
 
 # ❌ Wrong - missing --agent
 bash scripts/kob item create --type task --title "My task" --product my-app
@@ -277,7 +278,8 @@ bash scripts/kob item create --type task --title "My task" --product my-app
 
 ```powershell
 pixi run build-dev
-bash scripts/kob item create --type task --title "My task" --product my-app --agent kiro
+bash scripts/kob item create --type task --title "My task" --product my-app --agent kiro \
+  --duplicate-search-query "My task" --duplicate-search-scope my-app --duplicate-decision create
 ```
 
 **Why this happens:**
@@ -308,8 +310,9 @@ bash scripts/kob --help
 # ❌ Wrong - will fail
 bash scripts/kob item create --type task --title "My task" --product my-app
 
-# ✅ Correct - includes --agent
-bash scripts/kob item create --type task --title "My task" --product my-app --agent kiro
+# ✅ Correct - includes --agent and duplicate admission evidence
+bash scripts/kob item create --type task --title "My task" --product my-app --agent kiro \
+  --duplicate-search-query "My task" --duplicate-search-scope my-app --duplicate-decision create
 ```
 
 **Commands that require --agent:**
@@ -383,7 +386,8 @@ bash scripts/kob admin init --product <product> --agent <agent>
 ### Common Commands
 ```bash
 # Create item
-bash scripts/kob item create --type task --title "<title>" --product <product> --agent <agent>
+bash scripts/kob item create --type task --title "<title>" --product <product> --agent <agent> \
+  --duplicate-search-query "<title>" --duplicate-search-scope <product> --duplicate-decision create
 
 # List items
 bash scripts/kob item list --product <product>

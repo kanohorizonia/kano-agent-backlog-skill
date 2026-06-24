@@ -442,7 +442,10 @@ kob item create \
   --type task \
   --title "Your task title" \
   --agent <agent-id> \
-  --product <product>
+  --product <product> \
+  --duplicate-search-query "Your task title" \
+  --duplicate-search-scope <product> \
+  --duplicate-decision create
 
 # Output: OK: Created: KABSD-TSK-0336
 #         Path: KABSD-TSK-0336_your-task-title.md
@@ -688,7 +691,7 @@ Guideline: do not paste large `--help` output into chat; inspect it locally and 
   - `kob doctor`
   - `kob admin init --product <name> --agent <id>`
 - Daily workflow:
-  - `kob item create --type task --title "..." --agent <id> --product <name>`
+  - `kob item create --type task --title "..." --agent <id> --product <name> --duplicate-search-query "..." --duplicate-search-scope <name> --duplicate-decision create`
   - `kob workitem set-ready <item-id> --context "..." --goal "..." --approach "..." --acceptance-criteria "..." --risks "..." --product <name>`
   - `kob workitem check-ready <item-id> --product <name>`
   - `kob workitem update-state <item-ref> --state InProgress --product <name>`
@@ -711,7 +714,7 @@ such as `admin links normalize-ids`.
 
 For testing, prototyping, or demos without affecting production backlog:
 - Create: `kob sandbox init <sandbox-name> --product <source-product> --agent <id>`
-- Use: `kob item create --product <sandbox-name> ...` (same CLI, different product)
+- Use: `kob item create --product <sandbox-name> --duplicate-search-scope <sandbox-name> ...` (same CLI, different product)
 - Cleanup: `rm -rf _kano/backlog_sandbox/<sandbox-name>` (git will ignore this directory)
 - Rationale: Sandboxes mirror production structure but live in `_kano/backlog_sandbox/`, so changes never leak into `_kano/backlog/`.
 

@@ -1022,21 +1022,30 @@ kob admin init --product my-app --agent kiro
 # 2. Create Epic
 kob item create --type epic \
   --title "User Authentication System" \
-  --agent kiro --product my-app
+  --agent kiro --product my-app \
+  --duplicate-search-query "User Authentication System" \
+  --duplicate-search-scope my-app \
+  --duplicate-decision create
 # Output: Created MYAPP-EPC-0001
 
 # 3. Create Feature under Epic
 kob item create --type feature \
   --title "JWT Token Authentication" \
   --parent MYAPP-EPC-0001 \
-  --agent kiro --product my-app
+  --agent kiro --product my-app \
+  --duplicate-search-query "JWT Token Authentication" \
+  --duplicate-search-scope my-app \
+  --duplicate-decision create
 # Output: Created MYAPP-FTR-0001
 
 # 4. Create Task under Feature
 kob item create --type task \
   --title "Implement JWT token generation" \
   --parent MYAPP-FTR-0001 \
-  --agent kiro --product my-app
+  --agent kiro --product my-app \
+  --duplicate-search-query "Implement JWT token generation" \
+  --duplicate-search-scope my-app \
+  --duplicate-decision create
 # Output: Created MYAPP-TSK-0001
 
 # 5. Set Task to Ready (enforces required fields)
@@ -1102,7 +1111,10 @@ kob view refresh --product my-app --agent kiro
 # 1. Create bug report
 kob item create --type bug \
   --title "Login fails with special characters in password" \
-  --agent kiro --product my-app
+  --agent kiro --product my-app \
+  --duplicate-search-query "Login fails with special characters in password" \
+  --duplicate-search-scope my-app \
+  --duplicate-decision create
 # Output: Created MYAPP-BUG-0001
 
 # 2. Add initial investigation notes
@@ -1194,7 +1206,10 @@ kob topic export-context auth-refactor --format markdown \
 # Agent 1 (kiro) creates and plans work
 kob item create --type task \
   --title "Add rate limiting to API endpoints" \
-  --agent kiro --product my-app
+  --agent kiro --product my-app \
+  --duplicate-search-query "Add rate limiting to API endpoints" \
+  --duplicate-search-scope my-app \
+  --duplicate-decision create
 # Output: Created MYAPP-TSK-0010
 
 kob workitem set-ready MYAPP-TSK-0010 --product my-app \
@@ -1284,7 +1299,8 @@ kob embedding build --product my-app --force
 
 **Good:**
 ```bash
-kob item create --type task --title "..." --agent kiro --product my-app
+kob item create --type task --title "..." --agent kiro --product my-app \
+  --duplicate-search-query "..." --duplicate-search-scope my-app --duplicate-decision create
 ```
 
 **Bad:**
@@ -1298,7 +1314,8 @@ kob item create --type task --title "..." --product my-app
 **Good workflow:**
 ```bash
 # 1. Create task
-kob item create --type task --title "..." --agent kiro --product my-app
+kob item create --type task --title "..." --agent kiro --product my-app \
+  --duplicate-search-query "..." --duplicate-search-scope my-app --duplicate-decision create
 
 # 2. Set to Ready with all required fields
 kob workitem set-ready MYAPP-TSK-0001 --product my-app \
@@ -1312,7 +1329,8 @@ kob workitem update-state MYAPP-TSK-0001 --state InProgress --agent kiro --produ
 **Bad workflow:**
 ```bash
 # Skipping Ready gate - no context captured!
-kob item create --type task --title "..." --agent kiro --product my-app
+kob item create --type task --title "..." --agent kiro --product my-app \
+  --duplicate-search-query "..." --duplicate-search-scope my-app --duplicate-decision create
 kob workitem update-state MYAPP-TSK-0001 --state InProgress --agent kiro --product my-app
 ```
 
@@ -1456,7 +1474,8 @@ export KANO_BACKLOG_DEFAULT_PRODUCT=my-app
 export KANO_AGENT_ID=kiro
 
 # Commands use environment defaults
-kob item create --type task --title "..."
+kob item create --type task --title "..." \
+  --duplicate-search-query "..." --duplicate-search-scope my-app --duplicate-decision create
 # Automatically uses my-app as product and kiro as agent
 ```
 

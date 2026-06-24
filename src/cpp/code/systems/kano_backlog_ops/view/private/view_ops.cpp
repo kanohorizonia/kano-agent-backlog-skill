@@ -36,6 +36,7 @@ std::string group_for_state(ItemState state) {
             return "InProgress";
         case ItemState::Done:
         case ItemState::Dropped:
+        case ItemState::Duplicate:
             return "Done";
     }
     return "New";
@@ -113,6 +114,9 @@ std::string render_dashboard(
                 }
                 indicators.push_back(blocks.str());
             }
+            if (item.duplicate_of && !item.duplicate_of->empty()) {
+                indicators.push_back("Duplicate of: " + *item.duplicate_of);
+            }
             if (!indicators.empty()) {
                 ss << "- [" << description << " [";
                 for (size_t i = 0; i < indicators.size(); ++i) {
@@ -155,14 +159,16 @@ std::string ViewOps::render_table(const std::vector<IndexItem>& items) {
        << std::setw(20) << "ID" 
        << std::setw(15) << "Type" 
        << std::setw(15) << "State" 
+       << std::setw(20) << "Duplicate Of"
        << "Title" << "\n";
-    ss << std::string(80, '-') << "\n";
+    ss << std::string(100, '-') << "\n";
 
     for (const auto& item : items) {
         ss << std::left 
            << std::setw(20) << item.id 
            << std::setw(15) << to_string(item.type) 
            << std::setw(15) << to_string(item.state) 
+           << std::setw(20) << item.duplicate_of.value_or("")
            << item.title << "\n";
     }
 

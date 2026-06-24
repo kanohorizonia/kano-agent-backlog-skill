@@ -215,10 +215,25 @@ void BacklogIndex::initialize() {
         "  type TEXT NOT NULL,"
         "  title TEXT NOT NULL,"
         "  state TEXT NOT NULL,"
+        "  duplicate_of TEXT,"
         "  path TEXT NOT NULL,"
         "  updated TEXT NOT NULL"
         ")"
     );
+
+    bool has_duplicate_of = false;
+    {
+        Statement stmt(db_, "PRAGMA table_info(items)", "inspect items columns");
+        while (stmt.step() == SQLITE_ROW) {
+            if (column_text(stmt.get(), 1) == "duplicate_of") {
+                has_duplicate_of = true;
+                break;
+            }
+        }
+    }
+    if (!has_duplicate_of) {
+        execute("ALTER TABLE items ADD COLUMN duplicate_of TEXT");
+    }
 
     execute(
         "CREATE TABLE IF NOT EXISTS id_sequences ("
@@ -232,11 +247,11 @@ void BacklogIndex::initialize() {
 
 void BacklogIndex::index_item(const BacklogItem& item) {
     initialize();
-    const char* sql = "INSERT INTO items (id, uid, type, title, state, path, updated) "
-                      "VALUES (?, ?, ?, ?, ?, ?, ?) "
+    const char* sql = "INSERT INTO items (id, uid, type, title, state, duplicate_of, path, updated) "
+                      "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
                       "ON CONFLICT(id) DO UPDATE SET "
                       "uid=excluded.uid, type=excluded.type, title=excluded.title, "
-                      "state=excluded.state, path=excluded.path, updated=excluded.updated";
+                      "state=excluded.state, duplicate_of=excluded.duplicate_of, path=excluded.path, updated=excluded.updated";
 
     const std::string type_name = to_string(item.type);
     const std::string state_name = to_string(item.state);
@@ -248,8 +263,14 @@ void BacklogIndex::index_item(const BacklogItem& item) {
     stmt.bind_text(3, type_name);
     stmt.bind_text(4, item.title);
     stmt.bind_text(5, state_name);
-    stmt.bind_text(6, path_string);
-    stmt.bind_text(7, item.updated);
+    if (item.duplicate_of && !item.duplicate_of->empty()) {
+        stmt.bind_text(6, *item.duplicate_of);
+    } else {
+        const int rc = sqlite3_bind_null(stmt.get(), 6);
+        if (rc != SQLITE_OK) throw_sqlite(db_, "index item bind duplicate_of", rc);
+    }
+    stmt.bind_text(7, path_string);
+    stmt.bind_text(8, item.updated);
     stmt.step_done();
 }
 
@@ -399,7 +420,7 @@ void BacklogIndex::execute(const std::string& sql) {
 std::vector<IndexItem> BacklogIndex::query_items(std::optional<ItemType> type, std::optional<ItemState> state) {
     initialize();
     std::vector<IndexItem> results;
-    std::string sql = "SELECT id, uid, type, title, state, path, updated FROM items";
+    std::string sql = "SELECT id, uid, type, title, state, duplicate_of, path, updated FROM items";
     std::vector<std::string> params;
 
     bool has_where = false;
@@ -443,8 +464,10 @@ std::vector<IndexItem> BacklogIndex::query_items(std::optional<ItemType> type, s
         }
         ii.state = *state_opt;
 
-        ii.path = column_text(stmt.get(), 5);
-        ii.updated = column_text(stmt.get(), 6);
+        const auto duplicate_of = column_text(stmt.get(), 5);
+        if (!duplicate_of.empty()) ii.duplicate_of = duplicate_of;
+        ii.path = column_text(stmt.get(), 6);
+        ii.updated = column_text(stmt.get(), 7);
         results.push_back(ii);
     }
     return results;

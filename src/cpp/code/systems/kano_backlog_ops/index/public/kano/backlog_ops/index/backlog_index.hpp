@@ -15,6 +15,7 @@ struct IndexItem {
     kano::backlog_core::ItemType type;
     std::string title;
     kano::backlog_core::ItemState state;
+    std::optional<std::string> duplicate_of;
     std::string path;
     std::string updated;
 };

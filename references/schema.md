@@ -33,26 +33,36 @@ specified in config (built-in or custom) instead of hardcoding the list.
 ## Formal item types
 
 - Epic: milestone-scale container.
-- Feature: capability container under an Epic.
-- UserStory: user-facing outcome under a Feature.
+- Feature: capability container and/or release-facing highlight unit under an Epic.
+- UserStory: user-facing outcome under a Feature or directly under an Epic when no release-facing Feature boundary is useful.
 - Task: focused implementation, docs, test, or maintenance work.
 - Bug: confirmed defect or regression against existing intent.
 - Issue: pre-triage container for an unclear problem, risk, blocker, or runtime gap before it is clear whether follow-up work is a Task, Bug, Feature, or no change.
 
 Research, Decision, Spike, and Investigation are not formal item types. Treat them as activity metadata in worklogs, ADRs, topics, tags, artifacts, or follow-up Tasks/Bugs/Issues.
 
-## Parent rules (default)
+`Project` is not a hard formal item type in the current schema. The canonical
+design uses a Project-equivalent model: backlog product projection now, and a
+future vision-layer record when that feature lands. `SubTask` is not a hard item
+type in this schema; represent independently delegable subtask-role work as a
+child Task under a Task, or keep ordinary steps as a checklist or Worklog note.
+See [Canonical backlog taxonomy](../docs/design/canonical-backlog-taxonomy.md)
+and [Project model decision](../docs/design/project-model-decision.md).
 
-- Epic -> Feature
-- Feature -> UserStory
-- UserStory -> Task or Bug
-- Feature -> Bug (allowed)
-- Task -> Task (optional sub-task)
-- Issue may be standalone, linked through `links.*`, or parented under a Feature/UserStory when the scope is already known; split actionable remediation into Task/Bug follow-ups once triage is clear.
-- Epic has no parent
+## Parent rules (canonical design)
 
-These defaults align with built-in profiles; custom processes may define
-different parent relationships.
+- Project-equivalent -> Epic (currently stored as root Epic under product scope until vision refs exist)
+- Epic -> Feature, UserStory, Task, Bug, or Issue
+- Feature -> UserStory, Task, Bug, or Issue
+- UserStory -> Task
+- Task -> child Task only when it represents independently delegable SubTask-role work
+- Bug and Issue may attach to Task, Feature, Epic, or Project-equivalent scope; split actionable Issue remediation into Task/Bug follow-ups once triage is clear
+
+Release membership, topics, work orders, and execution dependencies are not
+parents. Use release scope, topic membership, work-order context, `blocks`,
+`blocked_by`, or `relates` instead. See
+[Hierarchy validation matrix](../docs/design/hierarchy-validation-matrix.md) for
+the design-level reparent diagnostics.
 
 ## Parent state sync (forward-only)
 

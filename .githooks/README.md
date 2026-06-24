@@ -26,7 +26,7 @@ git config core.hooksPath .githooks
 
    Recommended actions:
    1. Create a backlog item:
-      kob item create --type task --title "..."
+      kob item create --type task --title "..." --duplicate-search-query "..." --duplicate-search-scope <product> --duplicate-decision create
 
    2. Update commit message to include ticket ID:
       git commit --amend -m "KABSD-TSK-XXXX: your message"
@@ -67,7 +67,10 @@ Quick commands:
     --type task \
     --title "Feature implementation" \
     --product kano-agent-backlog-skill \
-    --agent $(whoami)
+    --agent $(whoami) \
+    --duplicate-search-query "Feature implementation" \
+    --duplicate-search-scope kano-agent-backlog-skill \
+    --duplicate-decision create
 
   # Or add to existing ticket
   kob worklog append KABSD-TSK-XXXX \
@@ -102,7 +105,7 @@ git commit -m "feat: add new feature"
 ⚠️  WARNING: No backlog item ID found in commit message
 
 # 3. Create ticket
-kob item create --type task --title "Add new feature"
+kob item create --type task --title "Add new feature" --duplicate-search-query "Add new feature" --duplicate-search-scope <product> --duplicate-decision create
 # Output: Created KABSD-TSK-0317
 
 # 4. Amend commit
@@ -123,7 +126,7 @@ git commit -m "fix: resolve crash on startup"
 💡 Suggested action: Create a BUG item
 
 # 3. Create bug ticket
-kob item create --type bug --title "Crash on startup"
+kob item create --type bug --title "Crash on startup" --duplicate-search-query "Crash on startup" --duplicate-search-scope <product> --duplicate-decision create
 # Output: Created KABSD-BUG-0042
 
 # 4. Amend commit
@@ -187,7 +190,7 @@ if 'security' in msg:
 
 ```bash
 # 1. Create ticket
-kob item create --type task --title "Add feature X"
+kob item create --type task --title "Add feature X" --duplicate-search-query "Add feature X" --duplicate-search-scope <product> --duplicate-decision create
 # Output: KABSD-TSK-0318
 
 # 2. Work on it
@@ -208,7 +211,7 @@ git commit -m "feat: add feature X"
 # Hook warns you
 
 # 2. Create ticket immediately
-kob item create --type task --title "Add feature X"
+kob item create --type task --title "Add feature X" --duplicate-search-query "Add feature X" --duplicate-search-scope <product> --duplicate-decision create
 
 # 3. Amend commit
 git commit --amend -m "KABSD-TSK-0318: add feature X"
@@ -221,7 +224,7 @@ git commit --amend -m "KABSD-TSK-0318: add feature X"
 git log --oneline --since="today" | grep -v "KABSD-"
 
 # Create tickets for each
-kob item create --type task --title "..."
+kob item create --type task --title "..." --duplicate-search-query "..." --duplicate-search-scope <product> --duplicate-decision create
 
 # Update commit messages
 git rebase -i HEAD~5  # Interactive rebase to update messages

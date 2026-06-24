@@ -78,6 +78,35 @@ KOA-TSK-0214 are not duplicates; they remain blocked downstream work. KOA-TSK-02
 and KOA-TSK-0216 are release/KCC inputs and are out of scope for this taxonomy
 implementation run.
 
+## Semantic Absorption Protocol
+
+Before changing a duplicate or superseded source item to `Duplicate`, `Dropped`,
+or another terminal/non-active state, the agent must inspect the source item and
+record one of these outcomes on the canonical target:
+
+- absorbed semantics with source item IDs;
+- no-new-semantics statement with evidence that the source was read;
+- rejected semantics with explicit rationale;
+- blocked downstream semantics that are not duplicates and must stay as separate
+  follow-up work.
+
+Absorption review must consider decisions, constraints, risks, examples,
+acceptance criteria, artifact links, and implementation scope. It must happen
+before state mutation, not as a cleanup note after the source item has already
+been hidden from active views.
+
+Suggested Worklog template for the canonical item:
+
+```text
+Semantic absorption: source=<ITEM_ID>[,<ITEM_ID>]; outcome=<absorbed|no-new-semantics|rejected|blocked-downstream>; absorbed_decisions=<summary>; absorbed_constraints=<summary>; absorbed_risks=<summary>; absorbed_examples=<summary>; absorbed_artifacts=<paths-or-none>; rejected_semantics=<summary-or-none>; rationale=<why>; follow_up=<items-or-none>
+```
+
+Suggested Worklog template for the source item:
+
+```text
+Duplicate reconciliation: canonical_target=<ITEM_ID>; absorption_recorded_on=<ITEM_ID>; outcome=<duplicate|superseded|blocked-downstream|not-duplicate>; summary=<what was absorbed or why none>; next=<state or follow-up>
+```
+
 ## Duplicate and Admission Follow-ups
 
 `KOB-TSK-0094`, `KOB-TSK-0095`, and `KOB-TSK-0096` are follow-up constraints under

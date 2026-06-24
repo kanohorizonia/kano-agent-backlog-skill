@@ -110,6 +110,7 @@ on:
 permissions:
   contents: read
   actions: read
+  pull-requests: read
   code-quality: write
 
 concurrency:
@@ -456,12 +457,33 @@ jobs:
           if-no-files-found: ignore
           retention-days: ${{ steps.artifact.outputs.retention_days }}
 
+      - name: Resolve Code Quality coverage file
+        id: code-quality-coverage
+        if: always() && inputs.publish_code_quality_coverage == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          coverage_file=""
+          if [[ -d _github-reports/coverage ]]; then
+            coverage_file="$(find _github-reports/coverage -type f -name '*.xml' | sort | sed -n '1p')"
+          fi
+          if [[ -z "$coverage_file" ]]; then
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::No Cobertura XML coverage file found under _github-reports/coverage"
+            exit 0
+          fi
+          echo "found=true" >> "$GITHUB_OUTPUT"
+          echo "file=$coverage_file" >> "$GITHUB_OUTPUT"
+
       - name: Upload Code Quality coverage
-        if: always() && inputs.publish_code_quality_coverage == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        if: always() && steps.code-quality-coverage.outputs.found == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
         continue-on-error: true
         uses: actions/upload-code-coverage@v1
         with:
-          files: _github-reports/coverage/**/*.xml
+          file: ${{ steps.code-quality-coverage.outputs.file }}
+          language: C++
+          label: code-coverage/kano-agent-backlog-skill-${{ inputs.platform || 'linux-x64' }}
+          fail-on-error: false
 
       - name: Package cloud artifact
         if: success()

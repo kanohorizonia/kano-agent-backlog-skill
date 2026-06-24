@@ -5381,6 +5381,7 @@ std::optional<int> try_run_workitem_create_fast_path(int argc, char** argv) {
     std::string parent;
     std::string owner;
     std::string reviewer;
+    DuplicateAdmissionEvidence duplicate_admission;
 
     const auto option_value = [&](int& index, const std::string& option) -> std::optional<std::string> {
         const std::string arg = argv[index];
@@ -5469,6 +5470,34 @@ std::optional<int> try_run_workitem_create_fast_path(int argc, char** argv) {
             reviewer = *value;
             continue;
         }
+        if (auto value = option_value(i, "--duplicate-search-query")) {
+            duplicate_admission.search_query = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--duplicate-search-scope")) {
+            duplicate_admission.search_scope = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--duplicate-candidate")) {
+            duplicate_admission.candidates.push_back(*value);
+            continue;
+        }
+        if (auto value = option_value(i, "--duplicate-candidate-read")) {
+            duplicate_admission.candidates_read.push_back(*value);
+            continue;
+        }
+        if (auto value = option_value(i, "--duplicate-decision")) {
+            duplicate_admission.decision = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--duplicate-rationale")) {
+            duplicate_admission.rationale = *value;
+            continue;
+        }
+        if (arg == "--duplicate-override") {
+            duplicate_admission.override_requested = true;
+            continue;
+        }
         return std::nullopt;
     }
 
@@ -5526,7 +5555,8 @@ std::optional<int> try_run_workitem_create_fast_path(int argc, char** argv) {
         effective_owner,
         effective_reviewer,
         owner_source,
-        reviewer_source
+        reviewer_source,
+        duplicate_admission
     );
 
     std::cout << "Created item: " << result.id << " (" << result.uid << ")\n";
@@ -5768,6 +5798,7 @@ std::optional<int> try_run_workitem_update_state_fast_path(int argc, char** argv
     std::string agent;
     std::string message;
     std::string message_file;
+    std::string duplicate_of;
     bool consume_input_files = false;
     bool force = false;
     bool refresh_views = false;
@@ -5847,6 +5878,10 @@ std::optional<int> try_run_workitem_update_state_fast_path(int argc, char** argv
             message_file = *value;
             continue;
         }
+        if (auto value = option_value(i, "--duplicate-of")) {
+            duplicate_of = *value;
+            continue;
+        }
         if (arg == "--consume-input-files") {
             consume_input_files = true;
             continue;
@@ -5904,6 +5939,7 @@ std::optional<int> try_run_workitem_update_state_fast_path(int argc, char** argv
         *state_opt,
         agent,
         message.empty() ? std::nullopt : std::optional<std::string>(message),
+        duplicate_of.empty() ? std::nullopt : std::optional<std::string>(duplicate_of),
         force,
         refresh_views
     );
@@ -8217,14 +8253,22 @@ int main(int InArgc, char* InArgv[]) {
         {
             auto* createCmd = workitemCmd->add_subcommand("create", "Create a new work item");
             std::string type_str, title, agent, parent, owner, reviewer;
+            auto duplicate_admission = std::make_shared<DuplicateAdmissionEvidence>();
             createCmd->add_option("-t,--type", type_str, "Item type (epic, feature, userstory, task, bug, issue)")->required();
             createCmd->add_option("--title", title, "Item title")->required();
             createCmd->add_option("--agent", agent, "Agent ID")->required();
             createCmd->add_option("--parent", parent, "Parent item ID");
             createCmd->add_option("--owner,--assignee", owner, "Explicit repo-visible owner/assignee alias");
             createCmd->add_option("--reviewer", reviewer, "Explicit repo-visible reviewer alias");
+            createCmd->add_option("--duplicate-search-query", duplicate_admission->search_query, "Duplicate search query used before item creation");
+            createCmd->add_option("--duplicate-search-scope", duplicate_admission->search_scope, "Duplicate search scope or product set inspected before item creation");
+            createCmd->add_option("--duplicate-candidate", duplicate_admission->candidates, "Candidate duplicate item ID found before creation; repeatable")->expected(1);
+            createCmd->add_option("--duplicate-candidate-read", duplicate_admission->candidates_read, "Candidate duplicate item ID actually read before creation; repeatable")->expected(1);
+            createCmd->add_option("--duplicate-decision", duplicate_admission->decision, "Duplicate admission decision, such as create, update, or continue");
+            createCmd->add_option("--duplicate-rationale", duplicate_admission->rationale, "Rationale for creating despite similar duplicate candidates");
+            createCmd->add_flag("--duplicate-override", duplicate_admission->override_requested, "Allow create when duplicate candidates were found and read");
 
-            createCmd->callback([&]() {
+            createCmd->callback([&, duplicate_admission]() {
                 auto ctx = resolve_ctx();
                 BacklogIndex index(ctx.backlog_root / ".cache" / "index" / "backlog.db");
                 index.initialize();
@@ -8269,7 +8313,8 @@ int main(int InArgc, char* InArgv[]) {
                     effective_owner,
                     effective_reviewer,
                     owner_source,
-                    reviewer_source
+                    reviewer_source,
+                    *duplicate_admission
                 );
 
                 std::cout << "Created item: " << result.id << " (" << result.uid << ")\n";
@@ -8280,7 +8325,7 @@ int main(int InArgc, char* InArgv[]) {
         // workitem update-state
         {
             auto* updateStateCmd = workitemCmd->add_subcommand("update-state", "Update item state");
-            std::string ref, state_str, state_opt_str, update_agent, update_msg, update_msg_file;
+            std::string ref, state_str, state_opt_str, update_agent, update_msg, update_msg_file, update_duplicate_of;
             bool update_consume_input_files = false;
             bool update_refresh_views = false;
             updateStateCmd->add_option("ref", ref, "Item ID or UID")->required();
@@ -8289,6 +8334,7 @@ int main(int InArgc, char* InArgv[]) {
             updateStateCmd->add_option("--agent", update_agent, "Agent ID")->required();
             updateStateCmd->add_option("-m,--message", update_msg, "Optional log message");
             updateStateCmd->add_option("--message-file", update_msg_file, "Read optional log message from file");
+            updateStateCmd->add_option("--duplicate-of", update_duplicate_of, "Canonical item ID or UID required when transitioning to Duplicate");
             updateStateCmd->add_flag("--consume-input-files", update_consume_input_files, "Delete input files after a successful update; files must be under ~/.kano/tmp/backlog or KANO_BACKLOG_TEXT_TMP");
             bool update_force = false;
             updateStateCmd->add_flag("-f,--force", update_force, "Bypass Ready gate validation");
@@ -8315,6 +8361,7 @@ int main(int InArgc, char* InArgv[]) {
                     *state_opt,
                     update_agent,
                     update_msg.empty() ? std::nullopt : std::optional<std::string>(update_msg),
+                    update_duplicate_of.empty() ? std::nullopt : std::optional<std::string>(update_duplicate_of),
                     update_force,
                     update_refresh_views
                 );

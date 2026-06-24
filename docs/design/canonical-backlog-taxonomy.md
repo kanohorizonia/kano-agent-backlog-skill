@@ -109,15 +109,16 @@ Duplicate reconciliation: canonical_target=<ITEM_ID>; absorption_recorded_on=<IT
 
 ## Duplicate and Admission Follow-ups
 
-`KOB-TSK-0094`, `KOB-TSK-0095`, and `KOB-TSK-0096` are follow-up constraints under
-this feature. This run references their design requirements but does not close
-them as Done.
+`KOB-TSK-0094` and `KOB-TSK-0095` implement the native Duplicate state and
+pre-create duplicate-search admission gate. `KOB-TSK-0096` remains the semantic
+absorption follow-up for richer reconciliation evidence.
 
-`Duplicate` must become semantically distinct from `Dropped`. A duplicate item
-must preserve a canonical target link such as `duplicate_of`, surface that link in
-views/search, and keep duplicate/canonical reporting available for reviewers.
+`Duplicate` is semantically distinct from `Dropped`. A duplicate item preserves a
+canonical target link in `duplicate_of`, surfaces that link in views/search, and
+keeps duplicate/canonical reporting available for reviewers. The Duplicate
+transition requires `--duplicate-of` and rejects self-references.
 
-The pre-create duplicate-search admission gate must record:
+The pre-create duplicate-search admission gate records:
 
 - search query;
 - searched product or scope;
@@ -125,6 +126,12 @@ The pre-create duplicate-search admission gate must record:
 - candidate IDs that were actually read;
 - create, update, or continue decision;
 - override rationale when creating despite similar candidates.
+
+Native create commands fail closed without search query, searched scope, and a
+decision. Candidate matches must also appear in the read-candidate list, and
+creating despite candidates requires explicit override plus rationale. Each
+accepted create appends Worklog evidence and writes a receipt under
+`_meta/duplicate-admission/<item-id>.json`.
 
 Semantic absorption must record absorbed source item IDs, accepted semantics,
 rejected semantics with rationale, and any downstream items left blocked rather

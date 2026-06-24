@@ -153,10 +153,19 @@ bash scripts/kob item create \
   --type task \
   --title "Implement user authentication" \
   --product my-app \
-  --agent kiro
+  --agent kiro \
+  --duplicate-search-query "Implement user authentication" \
+  --duplicate-search-scope my-app \
+  --duplicate-decision create
 
 # Output: Created task: MYAPP-TSK-0001
 ```
+
+`item create` and `workitem create` require duplicate-search admission evidence.
+If similar candidates were found, include `--duplicate-candidate <ID>` and
+`--duplicate-candidate-read <ID>` for each candidate you inspected. Creating
+despite similar candidates also requires `--duplicate-override` and a non-empty
+`--duplicate-rationale`.
 
 **Fill in required fields before starting work:**
 
@@ -195,6 +204,18 @@ bash scripts/kob workitem update-state MYAPP-TSK-0001 \
 # Complete work
 bash scripts/kob workitem update-state MYAPP-TSK-0001 \
   --state Done \
+  --product my-app
+```
+
+Use `Duplicate` only when this item is valid but canonical ownership belongs to
+another item. The transition requires the canonical target:
+
+```bash
+bash scripts/kob workitem update-state MYAPP-TSK-0002 \
+  --state Duplicate \
+  --duplicate-of MYAPP-TSK-0001 \
+  --message "Duplicate reconciliation: canonical_target=MYAPP-TSK-0001; outcome=duplicate" \
+  --agent kiro \
   --product my-app
 ```
 

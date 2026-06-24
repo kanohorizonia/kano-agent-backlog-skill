@@ -81,7 +81,10 @@ Create and manage work items (Epic, Feature, User Story, Task, Bug).
 ```bash
 kob item create --type epic \
   --title "User Authentication System" \
-  --agent kiro --product my-app
+  --agent kiro --product my-app \
+  --duplicate-search-query "User Authentication System" \
+  --duplicate-search-scope my-app \
+  --duplicate-decision create
 ```
 
 **Expected Output:**
@@ -127,7 +130,10 @@ updated: 2025-01-26T10:30:00Z
 kob item create --type feature \
   --title "JWT Token Authentication" \
   --parent MYAPP-EPC-0001 \
-  --agent kiro --product my-app
+  --agent kiro --product my-app \
+  --duplicate-search-query "JWT Token Authentication" \
+  --duplicate-search-scope my-app \
+  --duplicate-decision create
 ```
 
 **Expected Output:**
@@ -146,7 +152,10 @@ kob item create --type feature \
 kob item create --type task \
   --title "Implement JWT token generation" \
   --parent MYAPP-FTR-0001 \
-  --agent kiro --product my-app
+  --agent kiro --product my-app \
+  --duplicate-search-query "Implement JWT token generation" \
+  --duplicate-search-scope my-app \
+  --duplicate-decision create
 ```
 
 **Expected Output:**
@@ -164,7 +173,10 @@ kob item create --type task \
 ```bash
 kob item create --type bug \
   --title "Login fails with special characters in password" \
-  --agent kiro --product my-app
+  --agent kiro --product my-app \
+  --duplicate-search-query "Login fails with special characters in password" \
+  --duplicate-search-scope my-app \
+  --duplicate-decision create
 ```
 
 **Expected Output:**
@@ -176,6 +188,24 @@ kob item create --type bug \
 ```
 
 ### List Items
+
+`item create` and `workitem create` require duplicate-search admission evidence.
+Use `--duplicate-search-query`, `--duplicate-search-scope`, and
+`--duplicate-decision create` for ordinary creates. If candidates were found,
+include `--duplicate-candidate` plus `--duplicate-candidate-read` for each
+candidate inspected; creating anyway requires `--duplicate-override` and
+`--duplicate-rationale`.
+
+To mark a source item as a duplicate of a canonical item, use the terminal
+`Duplicate` state with `--duplicate-of`:
+
+```bash
+kob workitem update-state MYAPP-TSK-0002 \
+  --state Duplicate \
+  --duplicate-of MYAPP-TSK-0001 \
+  --message "Duplicate reconciliation: canonical_target=MYAPP-TSK-0001; outcome=duplicate" \
+  --agent kiro --product my-app
+```
 
 **Command:**
 ```bash

@@ -158,6 +158,7 @@ BacklogItem item_from_context(
 
         item.priority = parse_optional_string(ctx.metadata["priority"]);
         item.parent = parse_optional_string(ctx.metadata["parent"]);
+        item.duplicate_of = parse_optional_string(ctx.metadata["duplicate_of"]);
         item.owner = parse_optional_string(ctx.metadata["owner"]);
         item.area = parse_optional_string(ctx.metadata["area"]);
         item.iteration = parse_optional_string(ctx.metadata["iteration"]);
@@ -322,6 +323,7 @@ void CanonicalStore::write(BacklogItem& item) const {
     metadata["state"] = to_string(item.state);
     metadata["priority"] = item.priority ? YAML::Node(*item.priority) : YAML::Node(YAML::NodeType::Null);
     metadata["parent"] = item.parent ? YAML::Node(*item.parent) : YAML::Node(YAML::NodeType::Null);
+    metadata["duplicate_of"] = item.duplicate_of ? YAML::Node(*item.duplicate_of) : YAML::Node(YAML::NodeType::Null);
     metadata["owner"] = item.owner ? YAML::Node(*item.owner) : YAML::Node(YAML::NodeType::Null);
     metadata["area"] = item.area ? YAML::Node(*item.area) : YAML::Node(YAML::NodeType::Null);
     metadata["iteration"] = item.iteration ? YAML::Node(*item.iteration) : YAML::Node(YAML::NodeType::Null);

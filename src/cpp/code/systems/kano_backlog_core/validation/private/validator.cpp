@@ -70,6 +70,14 @@ std::vector<std::string> Validator::validate_schema(const BacklogItem& item) {
         errors.push_back("Invalid updated date format: " + item.updated + " (expected YYYY-MM-DD)");
     }
 
+    if (item.state == ItemState::Duplicate) {
+        if (!item.duplicate_of || item.duplicate_of->find_first_not_of(" \n\r\t") == std::string::npos) {
+            errors.push_back("Duplicate state requires duplicate_of canonical target");
+        } else if (*item.duplicate_of == item.id || *item.duplicate_of == item.uid) {
+            errors.push_back("Duplicate item cannot reference itself in duplicate_of");
+        }
+    }
+
     return errors;
 }
 

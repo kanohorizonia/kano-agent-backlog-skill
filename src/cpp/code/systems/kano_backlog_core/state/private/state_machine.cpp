@@ -37,7 +37,14 @@ const std::map<StateMachine::TransitionKey, ItemState>& StateMachine::get_transi
         {{ItemState::Ready, StateAction::Drop}, ItemState::Dropped},
         {{ItemState::InProgress, StateAction::Drop}, ItemState::Dropped},
         {{ItemState::Review, StateAction::Drop}, ItemState::Dropped},
-        {{ItemState::Blocked, StateAction::Drop}, ItemState::Dropped}
+        {{ItemState::Blocked, StateAction::Drop}, ItemState::Dropped},
+
+        {{ItemState::New, StateAction::Duplicate}, ItemState::Duplicate},
+        {{ItemState::Proposed, StateAction::Duplicate}, ItemState::Duplicate},
+        {{ItemState::Ready, StateAction::Duplicate}, ItemState::Duplicate},
+        {{ItemState::InProgress, StateAction::Duplicate}, ItemState::Duplicate},
+        {{ItemState::Review, StateAction::Duplicate}, ItemState::Duplicate},
+        {{ItemState::Blocked, StateAction::Duplicate}, ItemState::Duplicate}
     };
     return transitions;
 }

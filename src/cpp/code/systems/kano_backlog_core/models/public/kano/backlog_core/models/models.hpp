@@ -27,7 +27,8 @@ enum class ItemState {
     Review,
     Done,
     Blocked,
-    Dropped
+    Dropped,
+    Duplicate
 };
 
 enum class StateAction {
@@ -37,7 +38,8 @@ enum class StateAction {
     Review,
     Done,
     Block,
-    Drop
+    Drop,
+    Duplicate
 };
 
 struct WorklogEntry {
@@ -67,6 +69,7 @@ struct BacklogItem {
     
     std::optional<std::string> priority;
     std::optional<std::string> parent;
+    std::optional<std::string> duplicate_of;
     std::optional<std::string> owner;
     std::vector<std::string> tags;
     std::string created;

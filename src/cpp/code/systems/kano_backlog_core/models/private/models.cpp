@@ -60,6 +60,7 @@ std::string to_string(ItemState state) {
         case ItemState::Done: return "Done";
         case ItemState::Blocked: return "Blocked";
         case ItemState::Dropped: return "Dropped";
+        case ItemState::Duplicate: return "Duplicate";
         default: return "Unknown";
     }
 }
@@ -75,6 +76,7 @@ std::optional<ItemState> parse_item_state(const std::string& str) {
     if (normalized == "done") return ItemState::Done;
     if (normalized == "blocked") return ItemState::Blocked;
     if (normalized == "dropped") return ItemState::Dropped;
+    if (normalized == "duplicate") return ItemState::Duplicate;
     return std::nullopt;
 }
 
@@ -87,6 +89,7 @@ std::string to_string(StateAction action) {
         case StateAction::Done: return "done";
         case StateAction::Block: return "block";
         case StateAction::Drop: return "drop";
+        case StateAction::Duplicate: return "duplicate";
         default: return "unknown";
     }
 }
@@ -99,6 +102,7 @@ std::optional<StateAction> parse_state_action(const std::string& str) {
     if (str == "done") return StateAction::Done;
     if (str == "block") return StateAction::Block;
     if (str == "drop") return StateAction::Drop;
+    if (str == "duplicate") return StateAction::Duplicate;
     return std::nullopt;
 }
 

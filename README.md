@@ -85,7 +85,8 @@ From a cloned repository, build the native CLI and create one task:
 ```bash
 pixi run build-dev
 bash scripts/kob admin init --product my-app --agent local-agent
-bash scripts/kob item create --type task --title "Add login" --product my-app --agent local-agent
+bash scripts/kob item create --type task --title "Add login" --product my-app --agent local-agent \
+  --duplicate-search-query "Add login" --duplicate-search-scope my-app --duplicate-decision create
 ```
 
 Expected result:

@@ -60,10 +60,12 @@ _kano/backlog/_shared/logs
 ## 3. Create a task before coding
 
 ```bash
-bash scripts/kob item create --type task --title "Add authentication" --product my-app --agent my-agent
+bash scripts/kob item create --type task --title "Add authentication" --product my-app --agent my-agent \
+  --duplicate-search-query "Add authentication" --duplicate-search-scope my-app --duplicate-decision create
 ```
 
-This workflow is tickets first. Before implementation, create the work item that explains the change.
+This workflow is tickets first. Before implementation, search for existing work
+and create the work item with duplicate-search admission evidence.
 
 Use `--type issue` instead of `task` when the report is still pre-triage: an unclear problem, runtime gap, risk, or blocker that needs evidence before it can be split into a Task or Bug. Research, Decisions, and Spikes remain worklog, ADR, topic, tag, or artifact metadata rather than separate formal item types.
 

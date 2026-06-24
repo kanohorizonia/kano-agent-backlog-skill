@@ -501,7 +501,10 @@ The deterministic report is the SSOT; analysis is treated as a derived artifact.
 <span data-line><span style="--shiki-light:#005CC5;--shiki-dark:#E0AF68;">  --type</span><span style="--shiki-light:#032F62;--shiki-dark:#9ECE6A;"> task</span><span style="--shiki-light:#005CC5;--shiki-dark:#89DDFF;"> \</span></span>
 <span data-line><span style="--shiki-light:#005CC5;--shiki-dark:#E0AF68;">  --title</span><span style="--shiki-light:#032F62;--shiki-dark:#89DDFF;"> &quot;</span><span style="--shiki-light:#032F62;--shiki-dark:#9ECE6A;">Your task title</span><span style="--shiki-light:#032F62;--shiki-dark:#89DDFF;">&quot;</span><span style="--shiki-light:#005CC5;--shiki-dark:#89DDFF;"> \</span></span>
 <span data-line><span style="--shiki-light:#005CC5;--shiki-dark:#E0AF68;">  --agent</span><span style="--shiki-light:#D73A49;--shiki-dark:#89DDFF;"> &lt;</span><span style="--shiki-light:#032F62;--shiki-dark:#9ECE6A;">agent-i</span><span style="--shiki-light:#24292E;--shiki-dark:#A9B1D6;">d</span><span style="--shiki-light:#D73A49;--shiki-dark:#89DDFF;">></span><span style="--shiki-light:#005CC5;--shiki-dark:#89DDFF;"> \</span></span>
-<span data-line><span style="--shiki-light:#005CC5;--shiki-dark:#E0AF68;">  --product</span><span style="--shiki-light:#D73A49;--shiki-dark:#89DDFF;"> &lt;</span><span style="--shiki-light:#032F62;--shiki-dark:#9ECE6A;">produc</span><span style="--shiki-light:#24292E;--shiki-dark:#A9B1D6;">t</span><span style="--shiki-light:#D73A49;--shiki-dark:#89DDFF;">></span></span>
+<span data-line><span style="--shiki-light:#005CC5;--shiki-dark:#E0AF68;">  --product</span><span style="--shiki-light:#D73A49;--shiki-dark:#89DDFF;"> &lt;</span><span style="--shiki-light:#032F62;--shiki-dark:#9ECE6A;">produc</span><span style="--shiki-light:#24292E;--shiki-dark:#A9B1D6;">t</span><span style="--shiki-light:#D73A49;--shiki-dark:#89DDFF;">></span><span style="--shiki-light:#005CC5;--shiki-dark:#89DDFF;"> \</span></span>
+<span data-line><span style="--shiki-light:#005CC5;--shiki-dark:#E0AF68;">  --duplicate-search-query</span><span style="--shiki-light:#032F62;--shiki-dark:#89DDFF;"> &quot;</span><span style="--shiki-light:#032F62;--shiki-dark:#9ECE6A;">Your task title</span><span style="--shiki-light:#032F62;--shiki-dark:#89DDFF;">&quot;</span><span style="--shiki-light:#005CC5;--shiki-dark:#89DDFF;"> \</span></span>
+<span data-line><span style="--shiki-light:#005CC5;--shiki-dark:#E0AF68;">  --duplicate-search-scope</span><span style="--shiki-light:#D73A49;--shiki-dark:#89DDFF;"> &lt;</span><span style="--shiki-light:#032F62;--shiki-dark:#9ECE6A;">produc</span><span style="--shiki-light:#24292E;--shiki-dark:#A9B1D6;">t</span><span style="--shiki-light:#D73A49;--shiki-dark:#89DDFF;">></span><span style="--shiki-light:#005CC5;--shiki-dark:#89DDFF;"> \</span></span>
+<span data-line><span style="--shiki-light:#005CC5;--shiki-dark:#E0AF68;">  --duplicate-decision</span><span style="--shiki-light:#032F62;--shiki-dark:#9ECE6A;"> create</span></span>
 <span data-line> </span>
 <span data-line><span style="--shiki-light:#6A737D;--shiki-dark:#51597D;--shiki-light-font-style:inherit;--shiki-dark-font-style:italic;"># Output: OK: Created: KABSD-TSK-0336</span></span>
 <span data-line><span style="--shiki-light:#6A737D;--shiki-dark:#51597D;--shiki-light-font-style:inherit;--shiki-dark-font-style:italic;">#         Path: KABSD-TSK-0336_your-task-title.md</span></span></code></pre></figure>
@@ -761,7 +764,7 @@ native embedding provider) without editing the repo’s main <code>.kano/backlog
 </li>
 <li>Daily workflow:
 <ul>
-<li><code>kob item create --type task --title &quot;...&quot; --agent &lt;id> --product &lt;name></code></li>
+<li><code>kob item create --type task --title &quot;...&quot; --agent &lt;id> --product &lt;name> --duplicate-search-query &quot;...&quot; --duplicate-search-scope &lt;name> --duplicate-decision create</code></li>
 <li><code>kob workitem set-ready &lt;item-id> --context &quot;...&quot; --goal &quot;...&quot; --approach &quot;...&quot; --acceptance-criteria &quot;...&quot; --risks &quot;...&quot; --product &lt;name></code></li>
 <li><code>kob workitem check-ready &lt;item-id> --product &lt;name></code></li>
 <li><code>kob workitem update-state &lt;item-ref> --state InProgress --product &lt;name></code></li>
@@ -791,7 +794,7 @@ such as <code>admin links normalize-ids</code>.</p>
 <p>For testing, prototyping, or demos without affecting production backlog:</p>
 <ul>
 <li>Create: <code>kob sandbox init &lt;sandbox-name> --product &lt;source-product> --agent &lt;id></code></li>
-<li>Use: <code>kob item create --product &lt;sandbox-name> ...</code> (same CLI, different product)</li>
+<li>Use: <code>kob item create --product &lt;sandbox-name> --duplicate-search-scope &lt;sandbox-name> ...</code> (same CLI, different product)</li>
 <li>Cleanup: <code>rm -rf _kano/backlog_sandbox/&lt;sandbox-name></code> (git will ignore this directory)</li>
 <li>Rationale: Sandboxes mirror production structure but live in <code>_kano/backlog_sandbox/</code>, so changes never leak into <code>_kano/backlog/</code>.</li>
 </ul>

@@ -24,8 +24,27 @@ kano-backlog admin sync-sequences --product <product>
 3. Split into UserStories (user perspective).
 4. Split into Tasks/Bugs (single focused coding sessions).
 5. Use Issues only for pre-triage unclear problems, risks, blockers, or runtime gaps where the remediation type is not yet known.
-6. Fill Ready gate sections for each Task/Bug/Issue before active work.
-7. Append Worklog entry: "Created from discussion: ..." (scripts require `--agent`).
+6. Before creating an item, search for likely duplicates and pass the admission
+   evidence to `item create` or `workitem create`.
+7. Fill Ready gate sections for each Task/Bug/Issue before active work.
+8. Append Worklog entry: "Created from discussion: ..." (scripts require `--agent`).
+
+### Duplicate admission gate
+
+Native `item create` and `workitem create` fail closed unless duplicate-search
+admission evidence is present. The required evidence is:
+
+- `--duplicate-search-query <query>`: the search text used before creation.
+- `--duplicate-search-scope <scope>`: product, workset, or other searched scope.
+- `--duplicate-decision <create|update|continue>`: why creation is allowed.
+
+When similar candidates were found, pass each candidate with
+`--duplicate-candidate <ID>` and each actually-read candidate with
+`--duplicate-candidate-read <ID>`. Creating despite candidates also requires
+`--duplicate-override` and non-empty `--duplicate-rationale <reason>`.
+
+The command appends a Worklog summary and writes a durable receipt under
+`_meta/duplicate-admission/<item-id>.json`.
 
 ## B) Ready gate
 
@@ -93,6 +112,23 @@ Issues should not stay as a vague holding pen after triage. Once the problem is 
 - Do not rewrite a ticket into a different task.
 - Split into a new ticket and link via `links.relates`.
 - Append a Worklog entry explaining the split.
+
+## E.1) Duplicate reconciliation
+
+Use `Duplicate` for a valid source item whose canonical target is another item:
+
+```bash
+kano-backlog workitem update-state KABSD-TSK-0002 \
+  --state Duplicate \
+  --duplicate-of KABSD-TSK-0001 \
+  --message "Duplicate reconciliation: canonical_target=KABSD-TSK-0001; outcome=duplicate" \
+  --agent <agent> \
+  --product <product>
+```
+
+Do not use `Duplicate` for work that was abandoned or no longer desired; use
+`Dropped` for that case. The Duplicate transition requires `--duplicate-of` and
+rejects self-references.
 
 ## F) File operations
 

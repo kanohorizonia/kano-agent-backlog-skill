@@ -20,9 +20,10 @@ states = [
     "Review",
     "Blocked",
     "Done",
+    "Duplicate",
     "Dropped"
 ]
-terminal_states = ["Done", "Dropped"]
+terminal_states = ["Done", "Duplicate", "Dropped"]
 
 [[work_item_types]]
 type = "Epic"
@@ -49,13 +50,14 @@ type = "Issue"
 slug = "issue"
 
 [transitions]
-Proposed = ["Planned", "Dropped"]
-Planned = ["Ready", "Dropped"]
-Ready = ["InProgress", "Dropped"]
-InProgress = ["Review", "Blocked", "Dropped"]
+Proposed = ["Planned", "Duplicate", "Dropped"]
+Planned = ["Ready", "Duplicate", "Dropped"]
+Ready = ["InProgress", "Duplicate", "Dropped"]
+InProgress = ["Review", "Blocked", "Duplicate", "Dropped"]
 Review = ["Done", "InProgress"]
-Blocked = ["InProgress", "Dropped"]
+Blocked = ["InProgress", "Duplicate", "Dropped"]
 Done = []
+Duplicate = []
 Dropped = []
 ```
 
@@ -76,6 +78,9 @@ These semantics apply to built-ins that use the default KABSD state set:
 - Blocked: work started but blocked.
 - Review: work complete pending review/verification.
 - Done: work complete and accepted.
+- Duplicate: terminal state for valid work whose canonical ownership belongs to
+  another item. The item must carry `duplicate_of` pointing at the canonical
+  item ID or UID; it is distinct from Dropped.
 - Dropped: work intentionally stopped.
 
 ## Config selection

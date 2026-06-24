@@ -71,7 +71,19 @@ When a child item state changes, parents can auto-advance forward-only:
 - Never change child states based on parent edits.
 - Ready/Planned children advance parents to Planned (not Ready).
 - Any InProgress/Review/Blocked child advances parent to InProgress.
-- All Done => parent Done; all Dropped => parent Dropped; mix Done/Dropped => parent Done.
+- All Done => parent Done; all Dropped => parent Dropped; all Duplicate => parent Duplicate; mix Done/Dropped/Duplicate => parent Done.
+
+## Duplicate state
+
+`Duplicate` is a terminal state for a valid item whose canonical ownership lives
+on another backlog item. It is distinct from `Dropped`: Dropped means the work is
+intentionally abandoned, while Duplicate means the work was already represented
+elsewhere and this item should preserve traceability.
+
+When an item moves to `Duplicate`, frontmatter must include `duplicate_of` with
+`duplicate_of` and rejects self-references against the item's `id` or `uid`.
+List and dashboard views surface `duplicate_of` so reviewers can follow the
+canonical target.
 
 ## Ready gate (required, non-empty)
 
@@ -126,6 +138,7 @@ title: "Short title"
 state: Proposed
 priority: P2
 parent: KABSD-USR-0001
+duplicate_of: null
 area: general
 iteration: null
 tags: []
@@ -187,4 +200,3 @@ Baseline config lives at `_kano/backlog/_config/config.json` and defaults to:
 - Display IDs are human-friendly and stable for day-to-day work within a product.
 - Parent drives hierarchy and state propagation; limiting it to a product keeps behavior predictable.
 - Cross-product collisions are expected in a multi-product platform; disambiguated refs in links ensure correctness without sacrificing readability in the common case.
-

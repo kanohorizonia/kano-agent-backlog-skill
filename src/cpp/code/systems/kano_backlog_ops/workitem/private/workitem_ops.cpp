@@ -412,12 +412,23 @@ void write_duplicate_admission_receipt(
     const BacklogItem& item,
     const DuplicateAdmissionEvidence& evidence
 ) {
-    const auto receipt_dir = product_root / "_meta" / "duplicate-admission";
+    const auto canonical_product_root = std::filesystem::weakly_canonical(product_root);
+    const auto receipt_dir = std::filesystem::weakly_canonical(product_root / "_meta") / "duplicate-admission";
+    const auto relative_dir = receipt_dir.lexically_relative(canonical_product_root);
+    if (relative_dir.empty() || *relative_dir.begin() == "..") {
+        throw std::runtime_error("duplicate_admission.receipt_path_escape: duplicate admission receipt path escaped active product root");
+    }
     std::filesystem::create_directories(receipt_dir);
     const auto receipt_path = receipt_dir / (item.id + ".json");
-    std::ofstream out(receipt_path, std::ios::binary);
+    const auto canonical_receipt_parent = std::filesystem::weakly_canonical(receipt_path.parent_path());
+    const auto relative_receipt_parent = canonical_receipt_parent.lexically_relative(canonical_product_root);
+    if (relative_receipt_parent.empty() || *relative_receipt_parent.begin() == "..") {
+        throw std::runtime_error("duplicate_admission.receipt_path_escape: duplicate admission receipt path escaped active product root");
+    }
+    const auto temp_path = receipt_path.parent_path() / (item.id + ".json.tmp");
+    std::ofstream out(temp_path, std::ios::binary);
     if (!out.is_open()) {
-        throw std::runtime_error("duplicate_admission.receipt_write_failed: " + receipt_path.string());
+        throw std::runtime_error("duplicate_admission.receipt_write_failed: " + temp_path.string());
     }
     out << "{\n"
         << "  \"item_id\": \"" << json_escape(item.id) << "\",\n"
@@ -432,8 +443,10 @@ void write_duplicate_admission_receipt(
         << "  \"rationale\": \"" << json_escape(evidence.rationale) << "\"\n"
         << "}\n";
     if (!out.good()) {
-        throw std::runtime_error("duplicate_admission.receipt_write_failed: " + receipt_path.string());
+        throw std::runtime_error("duplicate_admission.receipt_write_failed: " + temp_path.string());
     }
+    out.close();
+    std::filesystem::rename(temp_path, receipt_path);
 }
 
 bool is_high_risk_item(const BacklogItem& item) {

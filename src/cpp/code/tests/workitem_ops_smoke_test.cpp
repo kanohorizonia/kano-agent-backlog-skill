@@ -103,6 +103,43 @@ kano::backlog_ops::DuplicateAdmissionEvidence duplicate_admission(
     return {std::move(query), "test-product", std::move(candidates), std::move(read), "create", std::move(rationale), override_requested};
 }
 
+kano::backlog_core::CreateItemResult create_item_with_admission(
+    kano::backlog_ops::BacklogIndex& index,
+    const std::filesystem::path& root,
+    const std::string& prefix,
+    kano::backlog_core::ItemType type,
+    const std::string& title,
+    const std::string& agent,
+    std::optional<std::string> parent = std::nullopt,
+    std::string priority = "P2",
+    std::vector<std::string> tags = {},
+    std::string area = "general",
+    std::string iteration = "backlog",
+    std::optional<std::string> owner = std::nullopt,
+    std::optional<std::string> reviewer = std::nullopt,
+    std::string owner_source = "",
+    std::string reviewer_source = ""
+) {
+    return kano::backlog_ops::WorkitemOps::create_item(
+        index,
+        root,
+        prefix,
+        type,
+        title,
+        agent,
+        std::move(parent),
+        std::move(priority),
+        std::move(tags),
+        std::move(area),
+        std::move(iteration),
+        std::move(owner),
+        std::move(reviewer),
+        std::move(owner_source),
+        std::move(reviewer_source),
+        duplicate_admission(title)
+    );
+}
+
 } // namespace
 
 int main() {
@@ -123,7 +160,7 @@ int main() {
             BacklogIndex index(root / ".cache" / "index" / "backlog.db");
             index.initialize();
 
-            auto created = WorkitemOps::create_item(index, root, "TST", ItemType::Task, "Native workitem smoke", "opencode");
+            auto created = create_item_with_admission(index, root, "TST", ItemType::Task, "Native workitem smoke", "opencode");
             expect(created.id.rfind("TST-TSK-", 0) == 0, "created id should use task prefix");
 
             auto loaded_path = index.get_path_by_id(created.id);
@@ -163,6 +200,25 @@ int main() {
             expect(std::filesystem::exists(root / "_meta" / "duplicate-admission" / (override_created.id + ".json")), "override create should write duplicate admission receipt");
             expect(read_text(override_created.path).find("Duplicate admission:") != std::string::npos, "override create should write duplicate admission worklog");
 
+            const auto symlink_root = make_temp_root();
+            const auto symlink_escape = symlink_root.parent_path() / (symlink_root.filename().string() + "-receipt-escape");
+            std::filesystem::remove_all(symlink_root / "_meta");
+            std::filesystem::create_directories(symlink_escape);
+            std::error_code symlink_error;
+            std::filesystem::create_directory_symlink(symlink_escape, symlink_root / "_meta", symlink_error);
+            if (!symlink_error) {
+                BacklogIndex symlink_index(symlink_root / ".cache" / "index" / "backlog.db");
+                symlink_index.initialize();
+                expect_throws_contains(
+                    [&]() {
+                        (void)create_item_with_admission(symlink_index, symlink_root, "TST", ItemType::Task, "Receipt symlink escape", "opencode");
+                    },
+                    "duplicate_admission.receipt_path_escape",
+                    "duplicate admission receipt should reject _meta symlink escape");
+            }
+            std::filesystem::remove_all(symlink_root);
+            std::filesystem::remove_all(symlink_escape);
+
             CanonicalStore store(root);
             auto exact_path = store.find_item_path_by_id(created.id);
             expect(exact_path.has_value(), "exact id lookup should resolve deterministic bucket path");
@@ -171,7 +227,7 @@ int main() {
             expect(metadata_only.id == created.id, "metadata-only read should preserve id");
             expect(metadata_only.worklog.empty(), "metadata-only read should not parse body worklog");
 
-            auto issue_created = WorkitemOps::create_item(
+            auto issue_created = create_item_with_admission(
                 index,
                 root,
                 "TST",
@@ -198,7 +254,7 @@ int main() {
             expect(duplicate_after.duplicate_of && *duplicate_after.duplicate_of == created.id, "Duplicate transition should persist duplicate_of");
             expect(read_text(root / "views" / "Dashboard_PlainMarkdown_Done.md").find("Duplicate of: " + created.id) != std::string::npos, "dashboard should show duplicate target");
 
-            auto assigned_bug_created = WorkitemOps::create_item(
+            auto assigned_bug_created = create_item_with_admission(
                 index,
                 root,
                 "TST",
@@ -253,7 +309,7 @@ int main() {
                 expect(issue_after_reopen.front().state == ItemState::InProgress, "issue query should preserve updated state");
             }
 
-            auto parent_created = WorkitemOps::create_item(
+            auto parent_created = create_item_with_admission(
                 index,
                 root,
                 "TST",
@@ -265,7 +321,7 @@ int main() {
             store.write(parent_item);
             index.index_item(parent_item);
 
-            auto child_created = WorkitemOps::create_item(
+            auto child_created = create_item_with_admission(
                 index,
                 root,
                 "TST",
@@ -278,7 +334,7 @@ int main() {
             store.write(child_item);
             index.index_item(child_item);
 
-            auto epic_created = WorkitemOps::create_item(
+            auto epic_created = create_item_with_admission(
                 index,
                 root,
                 "TST",
@@ -293,7 +349,7 @@ int main() {
             store.write(epic_item);
             index.index_item(epic_item);
 
-            auto feature_created = WorkitemOps::create_item(
+            auto feature_created = create_item_with_admission(
                 index,
                 root,
                 "TST",
@@ -309,7 +365,7 @@ int main() {
             store.write(feature_item);
             index.index_item(feature_item);
 
-            auto story_created = WorkitemOps::create_item(
+            auto story_created = create_item_with_admission(
                 index,
                 root,
                 "TST",
@@ -325,7 +381,7 @@ int main() {
             store.write(story_item);
             index.index_item(story_item);
 
-            auto stack_task_created = WorkitemOps::create_item(
+            auto stack_task_created = create_item_with_admission(
                 index,
                 root,
                 "TST",
@@ -360,7 +416,7 @@ int main() {
             const auto create_review_task = [&](const std::string& title,
                                                 const std::vector<std::string>& worklog,
                                                 std::optional<std::string> amendments = std::nullopt) {
-                auto convergence_created = WorkitemOps::create_item(
+                auto convergence_created = create_item_with_admission(
                     index,
                     root,
                     "TST",
@@ -527,7 +583,7 @@ int main() {
             shared_index.initialize();
             CanonicalStore shared_store(shared_product_root);
 
-            auto shared_parent_created = WorkitemOps::create_item(
+            auto shared_parent_created = create_item_with_admission(
                 shared_index,
                 shared_product_root,
                 "KOA",
@@ -539,7 +595,7 @@ int main() {
             shared_store.write(shared_parent);
             shared_index.index_item(shared_parent);
 
-            auto shared_child_created = WorkitemOps::create_item(
+            auto shared_child_created = create_item_with_admission(
                 shared_index,
                 shared_product_root,
                 "KOA",
@@ -584,7 +640,7 @@ int main() {
             CanonicalStore external_store(external_root);
             BacklogIndex external_index(external_root / ".cache" / "index" / "backlog.db");
             external_index.initialize();
-            auto external_created = WorkitemOps::create_item(
+            auto external_created = create_item_with_admission(
                 external_index,
                 external_root,
                 "EXT",
@@ -596,7 +652,7 @@ int main() {
             external_store.write(external_parent);
             external_index.index_item(external_parent);
 
-            auto outside_index_parent_created = WorkitemOps::create_item(
+            auto outside_index_parent_created = create_item_with_admission(
                 index,
                 root,
                 "TST",
@@ -612,7 +668,7 @@ int main() {
             stale_existing_external_path.file_path = external_created.path;
             index.index_item(stale_existing_external_path);
 
-            auto outside_index_child_created = WorkitemOps::create_item(
+            auto outside_index_child_created = create_item_with_admission(
                 index,
                 root,
                 "TST",
@@ -645,7 +701,7 @@ int main() {
                 external_parent_after_stale_index.state == ItemState::Proposed,
                 "existing outside-root indexed file should not be read or mutated");
 
-            auto path_parent_child_created = WorkitemOps::create_item(
+            auto path_parent_child_created = create_item_with_admission(
                 index,
                 root,
                 "TST",
@@ -695,7 +751,7 @@ int main() {
             stale_missing_parent_index.file_path = external_created.path;
             index.index_item(stale_missing_parent_index);
 
-            auto stale_missing_child_created = WorkitemOps::create_item(
+            auto stale_missing_child_created = create_item_with_admission(
                 index,
                 root,
                 "TST",
@@ -736,7 +792,7 @@ int main() {
             //    the original slug path, but the file is reachable under a new slug. The
             //    identity-scan fallback must resolve the parent without trusting the
             //    stale indexed path.
-            auto renamed_parent_created = WorkitemOps::create_item(
+            auto renamed_parent_created = create_item_with_admission(
                 index,
                 root,
                 "TST",
@@ -765,7 +821,7 @@ int main() {
             stale_renamed_item.file_path = renamed_parent_path;
             index.index_item(stale_renamed_item);
 
-            auto renamed_child_created = WorkitemOps::create_item(
+            auto renamed_child_created = create_item_with_admission(
                 index,
                 root,
                 "TST",
@@ -794,7 +850,7 @@ int main() {
             // 4. Truly missing parent: no indexed path, no identity match. The
             //    diagnostic must explicitly identify the parent as missing.
             auto missing_parent_ref = std::string("TST-FTR-9999");
-            auto missing_parent_child_created = WorkitemOps::create_item(
+            auto missing_parent_child_created = create_item_with_admission(
                 index,
                 root,
                 "TST",

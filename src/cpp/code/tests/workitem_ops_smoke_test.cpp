@@ -82,6 +82,27 @@ void expect_no_diagnostic_contains(
     expect(!diagnostics_contain(result, needle), message);
 }
 
+template <typename Fn>
+void expect_throws_contains(Fn&& fn, const std::string& needle, const std::string& message) {
+    try {
+        fn();
+    } catch (const std::exception& ex) {
+        if (std::string(ex.what()).find(needle) != std::string::npos) return;
+        throw std::runtime_error(message + " (unexpected diagnostic: " + ex.what() + ")");
+    }
+    throw std::runtime_error(message + " (operation unexpectedly succeeded)");
+}
+
+kano::backlog_ops::DuplicateAdmissionEvidence duplicate_admission(
+    std::string query,
+    std::vector<std::string> candidates = {},
+    std::vector<std::string> read = {},
+    bool override_requested = false,
+    std::string rationale = ""
+) {
+    return {std::move(query), "test-product", std::move(candidates), std::move(read), "create", std::move(rationale), override_requested};
+}
+
 } // namespace
 
 int main() {
@@ -114,6 +135,34 @@ int main() {
             auto queried = index.query_items(ItemType::Task, std::nullopt);
             expect(!queried.empty(), "task item should appear in index query");
 
+            expect_throws_contains(
+                [&]() {
+                    (void)WorkitemOps::create_item(index, root, "TST", ItemType::Task, "Missing duplicate admission", "opencode", std::nullopt, "P2", {}, "general", "backlog", std::nullopt, std::nullopt, "", "", {});
+                },
+                "duplicate_admission.search_query_required",
+                "create should fail closed without duplicate admission evidence");
+            expect_throws_contains(
+                [&]() {
+                    (void)WorkitemOps::create_item(index, root, "TST", ItemType::Task, "Unread duplicate candidate", "opencode", std::nullopt, "P2", {}, "general", "backlog", std::nullopt, std::nullopt, "", "", duplicate_admission("Unread duplicate candidate", {created.id}));
+                },
+                "duplicate_admission.candidate_unread",
+                "create should require candidate read evidence");
+            expect_throws_contains(
+                [&]() {
+                    (void)WorkitemOps::create_item(index, root, "TST", ItemType::Task, "Duplicate candidate without override", "opencode", std::nullopt, "P2", {}, "general", "backlog", std::nullopt, std::nullopt, "", "", duplicate_admission("Duplicate candidate without override", {created.id}, {created.id}));
+                },
+                "duplicate_admission.override_required",
+                "create should require override when duplicate candidates exist");
+            expect_throws_contains(
+                [&]() {
+                    (void)WorkitemOps::create_item(index, root, "TST", ItemType::Task, "Duplicate override without rationale", "opencode", std::nullopt, "P2", {}, "general", "backlog", std::nullopt, std::nullopt, "", "", duplicate_admission("Duplicate override without rationale", {created.id}, {created.id}, true));
+                },
+                "duplicate_admission.rationale_required",
+                "create override should require rationale");
+            auto override_created = WorkitemOps::create_item(index, root, "TST", ItemType::Task, "Duplicate override with rationale", "opencode", std::nullopt, "P2", {}, "general", "backlog", std::nullopt, std::nullopt, "", "", duplicate_admission("Duplicate override with rationale", {created.id}, {created.id}, true, "urgent minimal follow-up"));
+            expect(std::filesystem::exists(root / "_meta" / "duplicate-admission" / (override_created.id + ".json")), "override create should write duplicate admission receipt");
+            expect(read_text(override_created.path).find("Duplicate admission:") != std::string::npos, "override create should write duplicate admission worklog");
+
             CanonicalStore store(root);
             auto exact_path = store.find_item_path_by_id(created.id);
             expect(exact_path.has_value(), "exact id lookup should resolve deterministic bucket path");
@@ -136,6 +185,18 @@ int main() {
 
             auto issue_queried = index.query_items(ItemType::Issue, std::nullopt);
             expect(!issue_queried.empty(), "issue item should appear in index query");
+
+            expect_throws_contains(
+                [&]() {
+                    (void)WorkitemOps::update_state(index, root, override_created.id, ItemState::Duplicate, "opencode", std::string("duplicate without target"));
+                },
+                "requires --duplicate-of",
+                "Duplicate transition should require duplicate_of");
+            auto duplicate_update = WorkitemOps::update_state(index, root, override_created.id, ItemState::Duplicate, "opencode", std::string("duplicate with canonical target"), created.id, false, true);
+            expect(duplicate_update.new_state == ItemState::Duplicate, "Duplicate transition should return Duplicate state");
+            auto duplicate_after = store.read(override_created.path);
+            expect(duplicate_after.duplicate_of && *duplicate_after.duplicate_of == created.id, "Duplicate transition should persist duplicate_of");
+            expect(read_text(root / "views" / "Dashboard_PlainMarkdown_Done.md").find("Duplicate of: " + created.id) != std::string::npos, "dashboard should show duplicate target");
 
             auto assigned_bug_created = WorkitemOps::create_item(
                 index,

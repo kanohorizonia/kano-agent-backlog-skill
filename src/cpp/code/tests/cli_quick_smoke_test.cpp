@@ -100,6 +100,16 @@ void write_text(const std::filesystem::path& path, const std::string& text) {
     out << text;
 }
 
+std::vector<std::string> with_duplicate_admission(std::vector<std::string> args, const std::string& query) {
+    args.push_back("--duplicate-search-query");
+    args.push_back(query);
+    args.push_back("--duplicate-search-scope");
+    args.push_back("quick-smoke-product");
+    args.push_back("--duplicate-decision");
+    args.push_back("create");
+    return args;
+}
+
 std::filesystem::path find_binary(const std::filesystem::path& repo_root, const std::filesystem::path& executable_path) {
     const std::string exe_suffix =
 #ifdef _WIN32
@@ -158,8 +168,12 @@ int main(int argc, char** argv) {
             "admin init command failed");
         expect(run_command(binary, {"-P", "quick-smoke-product", "admin", "sync-sequences"}) == 0,
             "sync-sequences failed");
-        expect(run_command(binary, {"-P", "quick-smoke-product", "workitem", "create", "-t", "task", "--title", "Quick smoke task", "--agent", "tester"}) == 0,
+        expect(run_command(binary, {"-P", "quick-smoke-product", "workitem", "create", "-t", "task", "--title", "Missing duplicate admission", "--agent", "tester"}) != 0,
+            "workitem create without duplicate admission should fail");
+        expect(run_command(binary, with_duplicate_admission({"-P", "quick-smoke-product", "workitem", "create", "-t", "task", "--title", "Quick smoke task", "--agent", "tester"}, "Quick smoke task")) == 0,
             "workitem create failed");
+        const auto task_receipt_path = temp_root / "_kano" / "backlog" / "products" / "quick-smoke-product" / "_meta" / "duplicate-admission" / "QS-TSK-0001.json";
+        expect(std::filesystem::exists(task_receipt_path), "workitem create should write duplicate admission receipt");
 
         const auto text_root = temp_root / "ready-fields";
         write_text(text_root / "context.md", "Quick smoke context.\n");
@@ -186,6 +200,7 @@ int main(int argc, char** argv) {
         expect(task_text.find("Quick smoke non-goal.") != std::string::npos, "set-ready task should persist non-goals text");
         expect(task_text.find("# Intent Amendments") != std::string::npos, "set-ready task should render Intent Amendments heading");
         expect(task_text.find("2026-06-20: Quick smoke amendment.") != std::string::npos, "set-ready task should persist intent amendments text");
+        expect(task_text.find("Duplicate admission:") != std::string::npos, "create should record duplicate admission worklog evidence");
 
         const auto ready_transition_output = temp_root / "transition-ready.txt";
         expect_command_capture_success(
@@ -243,7 +258,7 @@ int main(int argc, char** argv) {
         expect(read_text(done_transition_output).find("Intent warning: Review->Done intent alignment") != std::string::npos,
             "done transition should warn about unresolved drift evidence");
 
-        expect(run_command(binary, {"-P", "quick-smoke-product", "workitem", "create", "-t", "issue", "--title", "Quick smoke issue", "--agent", "tester"}) == 0,
+        expect(run_command(binary, with_duplicate_admission({"-P", "quick-smoke-product", "item", "create", "-t", "issue", "--title", "Quick smoke issue", "--agent", "tester"}, "Quick smoke issue")) == 0,
             "workitem create issue failed");
         const auto issue_path = temp_root / "_kano" / "backlog" / "products" / "quick-smoke-product" / "items" / "issue" / "0000" / "QS-ISS-0001_quick-smoke-issue.md";
         expect(std::filesystem::exists(issue_path), "workitem create did not create expected issue file");
@@ -281,7 +296,7 @@ int main(int argc, char** argv) {
         expect(issue_text.find("state: InProgress") != std::string::npos, "issue file did not record InProgress state");
         expect(issue_text.find("Issue worklog smoke") != std::string::npos, "issue file did not record worklog");
 
-        expect(run_command(binary, {"-P", "quick-smoke-product", "workitem", "create", "-t", "feature", "--title", "Quick smoke parent feature", "--agent", "tester"}) == 0,
+        expect(run_command(binary, with_duplicate_admission({"-P", "quick-smoke-product", "workitem", "create", "-t", "feature", "--title", "Quick smoke parent feature", "--agent", "tester"}, "Quick smoke parent feature")) == 0,
             "workitem create parent feature failed");
         expect(run_command(binary, {"-P", "quick-smoke-product", "workitem", "set-ready", "QS-FTR-0001",
             "--context", "Parent feature context.",
@@ -291,7 +306,7 @@ int main(int argc, char** argv) {
             "--intent-amendments", "2026-06-20: Parent feature amendment.",
             "--agent", "tester"}) == 0,
             "parent feature set-ready failed");
-        expect(run_command(binary, {"-P", "quick-smoke-product", "workitem", "create", "-t", "task", "--title", "Quick smoke child task", "--parent", "QS-FTR-0001", "--agent", "tester"}) == 0,
+        expect(run_command(binary, with_duplicate_admission({"-P", "quick-smoke-product", "workitem", "create", "-t", "task", "--title", "Quick smoke child task", "--parent", "QS-FTR-0001", "--agent", "tester"}, "Quick smoke child task")) == 0,
             "workitem create child task failed");
 
         const auto intent_stack_json_output = temp_root / "intent-stack.json";

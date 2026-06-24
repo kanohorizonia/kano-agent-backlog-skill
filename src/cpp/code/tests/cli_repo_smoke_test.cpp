@@ -81,6 +81,16 @@ std::string read_text(const std::filesystem::path& path) {
     return buffer.str();
 }
 
+std::vector<std::string> with_duplicate_admission(std::vector<std::string> args, const std::string& query) {
+    args.push_back("--duplicate-search-query");
+    args.push_back(query);
+    args.push_back("--duplicate-search-scope");
+    args.push_back("kano-ai-3d-asset-skill");
+    args.push_back("--duplicate-decision");
+    args.push_back("create");
+    return args;
+}
+
 void expect_command_capture_success(
     int rc,
     const std::filesystem::path& output_path,
@@ -630,27 +640,27 @@ int main(int argc, char** argv) {
         std::filesystem::create_directories(text_tmp);
         set_env_var("KANO_BACKLOG_TEXT_TMP", text_tmp.string());
 
-        expect(run_command(binary, {"-P", "kano-ai-3d-asset-skill", "workitem", "create", "-t", "task", "--title", "Long text input smoke", "--agent", "tester"}) == 0, "workitem create failed");
-        const auto long_text_item_path = product_root / "items" / "task" / "0000" / "KA-TSK-0001_long-text-input-smoke.md";
+        expect(run_command(binary, with_duplicate_admission({"-P", "kano-ai-3d-asset-skill", "workitem", "create", "-t", "task", "--title", "Long text input smoke", "--agent", "tester"}, "Long text input smoke")) == 0, "workitem create failed");
+        const auto long_text_item_path = product_root / "items" / "task" / "0000" / "KAI-TSK-0001_long-text-input-smoke.md";
         expect(std::filesystem::exists(long_text_item_path), "workitem create did not create expected task file");
 
-        expect(run_command(binary, {"-P", "kano-ai-3d-asset-skill", "workitem", "create", "-t", "epic", "--title", "Parent smoke", "--agent", "tester"}) == 0, "workitem create parent epic failed");
+        expect(run_command(binary, with_duplicate_admission({"-P", "kano-ai-3d-asset-skill", "workitem", "create", "-t", "epic", "--title", "Parent smoke", "--agent", "tester"}, "Parent smoke")) == 0, "workitem create parent epic failed");
         const auto set_parent_dry_run_output = temp_root / "admin-set-parent-dry-run.json";
         expect(run_command_capture(binary, {
-            "admin", "items", "set-parent", "KA-TSK-0001",
-            "--parent", "KA-EPIC-0001",
+            "admin", "items", "set-parent", "KAI-TSK-0001",
+            "--parent", "KAI-EPIC-0001",
             "--product", "kano-ai-3d-asset-skill",
             "--backlog-root", backlog_root.string(),
             "--agent", "tester",
             "--format", "json"
         }, set_parent_dry_run_output) == 0, "admin items set-parent dry-run failed");
         expect(read_text(set_parent_dry_run_output).find("\"status\" : \"dry-run\"") != std::string::npos, "admin items set-parent dry-run did not emit dry-run status");
-        expect(read_text(long_text_item_path).find("parent: KA-EPIC-0001") == std::string::npos, "admin items set-parent dry-run changed the item");
+        expect(read_text(long_text_item_path).find("parent: KAI-EPIC-0001") == std::string::npos, "admin items set-parent dry-run changed the item");
 
         const auto set_parent_apply_output = temp_root / "admin-set-parent-apply.json";
         expect(run_command_capture(binary, {
-            "admin", "items", "set-parent", "KA-TSK-0001",
-            "--parent", "KA-EPIC-0001",
+            "admin", "items", "set-parent", "KAI-TSK-0001",
+            "--parent", "KAI-EPIC-0001",
             "--product", "kano-ai-3d-asset-skill",
             "--backlog-root", backlog_root.string(),
             "--agent", "tester",
@@ -658,14 +668,14 @@ int main(int argc, char** argv) {
             "--format", "json"
         }, set_parent_apply_output) == 0, "admin items set-parent apply failed");
         expect(read_text(set_parent_apply_output).find("\"status\" : \"updated\"") != std::string::npos, "admin items set-parent apply did not emit updated status");
-        expect(read_text(long_text_item_path).find("parent: KA-EPIC-0001") != std::string::npos, "admin items set-parent apply did not update parent");
+        expect(read_text(long_text_item_path).find("parent: KAI-EPIC-0001") != std::string::npos, "admin items set-parent apply did not update parent");
 
-        expect(run_command(binary, {"-P", "kano-ai-3d-asset-skill", "workitem", "create", "-t", "task", "--title", "Trash smoke", "--agent", "tester"}) == 0, "workitem create trash target failed");
-        const auto trash_item_path = product_root / "items" / "task" / "0000" / "KA-TSK-0002_trash-smoke.md";
+        expect(run_command(binary, with_duplicate_admission({"-P", "kano-ai-3d-asset-skill", "workitem", "create", "-t", "task", "--title", "Trash smoke", "--agent", "tester"}, "Trash smoke")) == 0, "workitem create trash target failed");
+        const auto trash_item_path = product_root / "items" / "task" / "0000" / "KAI-TSK-0002_trash-smoke.md";
         expect(std::filesystem::exists(trash_item_path), "workitem create did not create expected trash target file");
         const auto trash_dry_run_output = temp_root / "admin-trash-dry-run.json";
         expect(run_command_capture(binary, {
-            "admin", "items", "trash", "KA-TSK-0002",
+            "admin", "items", "trash", "KAI-TSK-0002",
             "--product", "kano-ai-3d-asset-skill",
             "--backlog-root", backlog_root.string(),
             "--agent", "tester",
@@ -677,7 +687,7 @@ int main(int argc, char** argv) {
 
         const auto trash_apply_output = temp_root / "admin-trash-apply.json";
         expect(run_command_capture(binary, {
-            "admin", "items", "trash", "KA-TSK-0002",
+            "admin", "items", "trash", "KAI-TSK-0002",
             "--product", "kano-ai-3d-asset-skill",
             "--backlog-root", backlog_root.string(),
             "--agent", "tester",
@@ -738,7 +748,7 @@ int main(int argc, char** argv) {
 
         expect(run_command(binary, {
             "-P", "kano-ai-3d-asset-skill",
-            "workitem", "set-ready", "KA-TSK-0001",
+            "workitem", "set-ready", "KAI-TSK-0001",
             "--context-file", context_file.string(),
             "--goal-file", goal_file.string(),
             "--approach-file", approach_file.string(),
@@ -762,7 +772,7 @@ int main(int argc, char** argv) {
         write_text(worklog_file, "Worklog line one\nWorklog line two\n");
         expect(run_command(binary, {
             "-P", "kano-ai-3d-asset-skill",
-            "worklog", "append", "KA-TSK-0001",
+            "worklog", "append", "KAI-TSK-0001",
             "--message-file", worklog_file.string(),
             "--agent", "tester",
             "--consume-input-files"
@@ -771,12 +781,12 @@ int main(int argc, char** argv) {
         long_text_item = read_text(long_text_item_path);
         expect(long_text_item.find("Worklog line two") != std::string::npos, "worklog append did not write message file text");
 
-        expect(run_command(binary, {"-P", "kano-ai-3d-asset-skill", "workitem", "create", "-t", "issue", "--title", "Pre triage runtime gap", "--agent", "tester"}) == 0, "workitem create issue failed");
-        const auto issue_item_path = product_root / "items" / "issue" / "0000" / "KA-ISS-0001_pre-triage-runtime-gap.md";
+        expect(run_command(binary, with_duplicate_admission({"-P", "kano-ai-3d-asset-skill", "workitem", "create", "-t", "issue", "--title", "Pre triage runtime gap", "--agent", "tester"}, "Pre triage runtime gap")) == 0, "workitem create issue failed");
+        const auto issue_item_path = product_root / "items" / "issue" / "0000" / "KAI-ISS-0001_pre-triage-runtime-gap.md";
         expect(std::filesystem::exists(issue_item_path), "workitem create did not create expected issue file");
         expect(run_command(binary, {
             "-P", "kano-ai-3d-asset-skill",
-            "workitem", "set-ready", "KA-ISS-0001",
+            "workitem", "set-ready", "KAI-ISS-0001",
             "--context", "Pre-triage issue context for an unclear runtime gap.",
             "--goal", "Capture blocker and risk evidence before deciding task or bug remediation.",
             "--approach", "Triage the report, then split follow-up implementation work once clear.",
@@ -784,11 +794,11 @@ int main(int argc, char** argv) {
             "--risks", "Premature classification could hide the blocker.",
             "--agent", "tester"
         }) == 0, "issue set-ready failed");
-        expect(run_command(binary, {"-P", "kano-ai-3d-asset-skill", "workitem", "check-ready", "KA-ISS-0001"}) == 0, "issue check-ready failed");
-        expect(run_command(binary, {"-P", "kano-ai-3d-asset-skill", "worklog", "append", "KA-ISS-0001", "Issue worklog evidence", "--agent", "tester"}) == 0, "issue worklog append failed");
+        expect(run_command(binary, {"-P", "kano-ai-3d-asset-skill", "workitem", "check-ready", "KAI-ISS-0001"}) == 0, "issue check-ready failed");
+        expect(run_command(binary, {"-P", "kano-ai-3d-asset-skill", "worklog", "append", "KAI-ISS-0001", "Issue worklog evidence", "--agent", "tester"}) == 0, "issue worklog append failed");
         expect(run_command(binary, {
             "-P", "kano-ai-3d-asset-skill",
-            "workitem", "update-state", "KA-ISS-0001",
+            "workitem", "update-state", "KAI-ISS-0001",
             "--state", "InProgress",
             "--agent", "tester",
             "--message", "Issue triage started"
@@ -799,7 +809,7 @@ int main(int argc, char** argv) {
             "workitem", "list",
             "--type", "issue"
         }, issue_list_output) == 0, "issue list failed");
-        expect(read_text(issue_list_output).find("KA-ISS-0001") != std::string::npos, "issue list did not include created issue");
+        expect(read_text(issue_list_output).find("KAI-ISS-0001") != std::string::npos, "issue list did not include created issue");
         const auto issue_text = read_text(issue_item_path);
         expect(issue_text.find("type: Issue") != std::string::npos, "issue file did not preserve Issue type");
         expect(issue_text.find("state: InProgress") != std::string::npos, "issue state update did not persist");
@@ -818,7 +828,7 @@ int main(int argc, char** argv) {
         const auto attach_artifact_output = temp_root / "attach-artifact.json";
         expect(run_command_capture(binary, {
             "-P", "kano-ai-3d-asset-skill",
-            "workitem", "attach-artifact", "KA-TSK-0001",
+            "workitem", "attach-artifact", "KAI-TSK-0001",
             "--path", artifact_source.string(),
             "--no-shared",
             "--agent", "tester",
@@ -828,19 +838,19 @@ int main(int argc, char** argv) {
             "--format", "json"
         }, attach_artifact_output) == 0, "workitem attach-artifact failed");
         expect(read_text(attach_artifact_output).find("\"worklog_appended\":true") != std::string::npos, "attach-artifact did not emit JSON worklog flag");
-        expect(std::filesystem::exists(product_root / "artifacts" / "KA-TSK-0001" / "artifact-note.md"), "attach-artifact did not copy artifact to product-local store");
+        expect(std::filesystem::exists(product_root / "artifacts" / "KAI-TSK-0001" / "artifact-note.md"), "attach-artifact did not copy artifact to product-local store");
         long_text_item = read_text(long_text_item_path);
         expect(long_text_item.find("Artifact attached: [artifact-note.md]") != std::string::npos, "attach-artifact did not append worklog link");
 
-        expect(run_command(binary, {"-P", "kano-ai-3d-asset-skill", "workitem", "create", "-t", "task", "--title", "Link target smoke", "--agent", "tester"}) == 0, "workitem create link target failed");
-        const auto link_target_item_path = product_root / "items" / "task" / "0000" / "KA-TSK-0003_link-target-smoke.md";
+        expect(run_command(binary, with_duplicate_admission({"-P", "kano-ai-3d-asset-skill", "workitem", "create", "-t", "task", "--title", "Link target smoke", "--agent", "tester"}, "Link target smoke")) == 0, "workitem create link target failed");
+        const auto link_target_item_path = product_root / "items" / "task" / "0000" / "KAI-TSK-0003_link-target-smoke.md";
         expect(std::filesystem::exists(link_target_item_path), "workitem create did not create expected link target file");
 
         const auto link_source_path = product_root / "_meta" / "link-source.md";
         write_text(link_source_path,
             "# Link Source\n\n"
-            "[target](KA-TSK-0003)\n"
-            "[[KA-TSK-0003|Target Alias]]\n");
+            "[target](KAI-TSK-0003)\n"
+            "[[KAI-TSK-0003|Target Alias]]\n");
         const auto links_fix_dry_run = temp_root / "links-fix-dry-run.json";
         expect(run_command_capture(binary, {
             "links", "fix",
@@ -850,7 +860,7 @@ int main(int argc, char** argv) {
             "--format", "json"
         }, links_fix_dry_run) == 0, "links fix dry-run failed");
         expect(read_text(links_fix_dry_run).find("\"updated_files\" : 1") != std::string::npos, "links fix dry-run did not plan update");
-        expect(read_text(link_source_path).find("[target](KA-TSK-0003)") != std::string::npos, "links fix dry-run modified file");
+        expect(read_text(link_source_path).find("[target](KAI-TSK-0003)") != std::string::npos, "links fix dry-run modified file");
 
         const auto links_fix_apply = temp_root / "links-fix-apply.json";
         expect(run_command_capture(binary, {
@@ -862,41 +872,41 @@ int main(int argc, char** argv) {
             "--format", "json"
         }, links_fix_apply) == 0, "links fix apply failed");
         const auto fixed_link_source = read_text(link_source_path);
-        expect(fixed_link_source.find("../items/task/0000/KA-TSK-0003_link-target-smoke.md") != std::string::npos, "links fix apply did not resolve ID target");
-        expect(fixed_link_source.find("[[../items/task/0000/KA-TSK-0003_link-target-smoke.md|Target Alias]]") != std::string::npos, "links fix apply did not resolve wikilink target");
+        expect(fixed_link_source.find("../items/task/0000/KAI-TSK-0003_link-target-smoke.md") != std::string::npos, "links fix apply did not resolve ID target");
+        expect(fixed_link_source.find("[[../items/task/0000/KAI-TSK-0003_link-target-smoke.md|Target Alias]]") != std::string::npos, "links fix apply did not resolve wikilink target");
 
         const auto replace_id_path = product_root / "_meta" / "replace-id.md";
         write_text(replace_id_path,
             "# Replace ID\n\n"
-            "Parent KA-TSK-0003 should change.\n\n"
+            "Parent KAI-TSK-0003 should change.\n\n"
             "# Worklog\n"
-            "KA-TSK-0003 should stay in worklog by default.\n");
+            "KAI-TSK-0003 should stay in worklog by default.\n");
         const auto replace_id_output = temp_root / "links-replace-id.json";
         expect(run_command_capture(binary, {
-            "links", "replace-id", "KA-TSK-0003", "KA-TSK-0099",
+            "links", "replace-id", "KAI-TSK-0003", "KAI-TSK-0099",
             "--path", replace_id_path.string(),
             "--apply",
             "--format", "json"
         }, replace_id_output) == 0, "links replace-id apply failed");
         const auto replace_id_text = read_text(replace_id_path);
-        expect(replace_id_text.find("Parent KA-TSK-0099 should change.") != std::string::npos, "links replace-id did not update non-worklog text");
-        expect(replace_id_text.find("KA-TSK-0003 should stay in worklog by default.") != std::string::npos, "links replace-id updated worklog despite default skip");
+        expect(replace_id_text.find("Parent KAI-TSK-0099 should change.") != std::string::npos, "links replace-id did not update non-worklog text");
+        expect(replace_id_text.find("KAI-TSK-0003 should stay in worklog by default.") != std::string::npos, "links replace-id updated worklog despite default skip");
 
         const auto replace_target_path = product_root / "_meta" / "replace-target.md";
         write_text(replace_target_path,
             "# Replace Target\n\n"
-            "[target](KA-TSK-0003)\n"
-            "[[KA-TSK-0003|Target Alias]]\n");
+            "[target](KAI-TSK-0003)\n"
+            "[[KAI-TSK-0003|Target Alias]]\n");
         const auto replace_target_output = temp_root / "links-replace-target.json";
         expect(run_command_capture(binary, {
-            "links", "replace-target", "KA-TSK-0003", link_target_item_path.string(),
+            "links", "replace-target", "KAI-TSK-0003", link_target_item_path.string(),
             "--path", replace_target_path.string(),
             "--apply",
             "--format", "json"
         }, replace_target_output) == 0, "links replace-target apply failed");
         const auto replace_target_text = read_text(replace_target_path);
-        expect(replace_target_text.find("../items/task/0000/KA-TSK-0003_link-target-smoke.md") != std::string::npos, "links replace-target did not write relative markdown target");
-        expect(replace_target_text.find("[[KA-TSK-0003_link-target-smoke|Target Alias]]") != std::string::npos, "links replace-target did not rewrite wikilink target");
+        expect(replace_target_text.find("../items/task/0000/KAI-TSK-0003_link-target-smoke.md") != std::string::npos, "links replace-target did not write relative markdown target");
+        expect(replace_target_text.find("[[KAI-TSK-0003_link-target-smoke|Target Alias]]") != std::string::npos, "links replace-target did not rewrite wikilink target");
 
         const auto restore_probe_path = product_root / "_meta" / "restore-probe.md";
         write_text(restore_probe_path, "# Restore Probe\n\n[missing](missing-target.md)\n");
@@ -1029,12 +1039,12 @@ int main(int argc, char** argv) {
         expect(run_command(binary, {
             "-P", "kano-ai-3d-asset-skill",
             "topic", "add", "native-topic-smoke",
-            "--item", "KA-TSK-0001"
+            "--item", "KAI-TSK-0001"
         }) == 0, "topic add first item failed");
         expect(run_command(binary, {
             "-P", "kano-ai-3d-asset-skill",
             "topic", "add", "native-topic-smoke",
-            "--item", "KA-TSK-0003"
+            "--item", "KAI-TSK-0003"
         }) == 0, "topic add second item failed");
         const auto topic_manifest_after_add = read_text(topic_path / "manifest.json");
         const auto topic_seed_one = extract_json_array_string(topic_manifest_after_add, "seed_items", 0);
@@ -1398,21 +1408,21 @@ int main(int argc, char** argv) {
         expect(run_command(binary, {
             "-P", "kano-ai-3d-asset-skill",
             "evidence", "add",
-            "--item", "KA-TSK-0001",
+            "--item", "KAI-TSK-0001",
             "--claim-id", "claim-ready",
             "--source", "cli-smoke",
             "--content", "Evidence content line",
             "--evidence-id", "ev-smoke",
             "--backlog-root", backlog_root.string()
         }) == 0, "evidence add failed");
-        const auto evidence_store = backlog_root / ".cache" / "worksets" / "items" / "KA-TSK-0001" / "evidence.json";
+        const auto evidence_store = backlog_root / ".cache" / "worksets" / "items" / "KAI-TSK-0001" / "evidence.json";
         expect(read_text(evidence_store).find("ev-smoke") != std::string::npos, "evidence add did not write evidence store");
 
         const auto evidence_list_output = temp_root / "evidence-list.json";
         expect(run_command_capture(binary, {
             "-P", "kano-ai-3d-asset-skill",
             "evidence", "list",
-            "--item", "KA-TSK-0001",
+            "--item", "KAI-TSK-0001",
             "--backlog-root", backlog_root.string(),
             "--format", "json"
         }, evidence_list_output) == 0, "evidence list failed");
@@ -1421,21 +1431,21 @@ int main(int argc, char** argv) {
         expect(run_command(binary, {
             "-P", "kano-ai-3d-asset-skill",
             "evidence", "get",
-            "--item", "KA-TSK-0001",
+            "--item", "KAI-TSK-0001",
             "--evidence-id", "ev-smoke",
             "--backlog-root", backlog_root.string()
         }) == 0, "evidence get failed");
         expect(run_command(binary, {
             "-P", "kano-ai-3d-asset-skill",
             "evidence", "summary",
-            "--item", "KA-TSK-0001",
+            "--item", "KAI-TSK-0001",
             "--backlog-root", backlog_root.string()
         }) == 0, "evidence summary failed");
 
         const auto assumptions_output = temp_root / "assumptions.json";
         expect(run_command_capture(binary, {
             "assumptions", "list",
-            "--item", "KA-TSK-0001",
+            "--item", "KAI-TSK-0001",
             "--backlog-root", backlog_root.string(),
             "--format", "json"
         }, assumptions_output) == 0, "assumptions list failed");
@@ -1458,7 +1468,7 @@ int main(int argc, char** argv) {
             "--backlog-root", backlog_root.string(),
             "--format", "json"
         }, chunks_query_output) == 0, "chunks query failed");
-        expect(read_text(chunks_query_output).find("KA-TSK-0001") != std::string::npos, "chunks query did not find native marker item");
+        expect(read_text(chunks_query_output).find("KAI-TSK-0001") != std::string::npos, "chunks query did not find native marker item");
 
         const auto search_output = temp_root / "search.json";
         expect(run_command_capture(binary, {
@@ -1476,7 +1486,7 @@ int main(int argc, char** argv) {
             "--backlog-root", backlog_root.string(),
             "--format", "json"
         }, issue_search_output) == 0, "issue search query failed");
-        expect(read_text(issue_search_output).find("KA-ISS-0001") != std::string::npos, "issue search did not find created issue");
+        expect(read_text(issue_search_output).find("KAI-ISS-0001") != std::string::npos, "issue search did not find created issue");
 
         const auto embedding_status_output = temp_root / "embedding-status.json";
         expect(run_command_capture(binary, {
@@ -1510,7 +1520,7 @@ int main(int argc, char** argv) {
         const auto inspect_output = temp_root / "inspect-health.json";
         expect(run_command_capture(binary, {
             "inspect", "health",
-            "--item", "KA-TSK-0001",
+            "--item", "KAI-TSK-0001",
             "--backlog-root", backlog_root.string(),
             "--format", "json"
         }, inspect_output) == 0, "inspect health failed");
@@ -1705,7 +1715,7 @@ int main(int argc, char** argv) {
         expect(run_command(binary, {
             "-P", "kano-ai-3d-asset-skill",
             "evidence", "delete",
-            "--item", "KA-TSK-0001",
+            "--item", "KAI-TSK-0001",
             "--evidence-id", "ev-smoke",
             "--backlog-root", backlog_root.string()
         }) == 0, "evidence delete failed");

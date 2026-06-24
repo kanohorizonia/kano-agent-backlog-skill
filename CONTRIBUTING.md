@@ -59,7 +59,8 @@ after backlog mutations.
 Examples:
 
 ```bash
-scripts/kob item create --type task --title "Implement native flow" --agent <agent-id> --product kano-agent-backlog-skill
+scripts/kob item create --type task --title "Implement native flow" --agent <agent-id> --product kano-agent-backlog-skill \
+  --duplicate-search-query "Implement native flow" --duplicate-search-scope kano-agent-backlog-skill --duplicate-decision create
 scripts/kob workitem update-state <item-id> --state InProgress --agent <agent-id> --product kano-agent-backlog-skill
 scripts/kob view refresh --agent <agent-id> --product kano-agent-backlog-skill
 ```

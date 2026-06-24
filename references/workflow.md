@@ -142,7 +142,8 @@ rejects self-references.
 **Correct**:
 ```bash
 # Let the system allocate the next ID
-kano-backlog item create --type task --title "..." --agent <agent> --product <product>
+kano-backlog item create --type task --title "..." --agent <agent> --product <product> \
+  --duplicate-search-query "..." --duplicate-search-scope <product> --duplicate-decision create
 # Output: OK: Created: KABSD-TSK-0340
 ```
 

@@ -21,6 +21,16 @@ struct IntentStackResult {
     std::vector<std::string> evidence_refs;
 };
 
+struct DuplicateAdmissionEvidence {
+    std::string search_query;
+    std::string search_scope;
+    std::vector<std::string> candidates;
+    std::vector<std::string> candidates_read;
+    std::string decision;
+    std::string rationale;
+    bool override_requested = false;
+};
+
 class WorkitemOps {
 public:
     /**
@@ -41,7 +51,16 @@ public:
         std::optional<std::string> owner = std::nullopt,
         std::optional<std::string> reviewer = std::nullopt,
         std::string owner_source = "",
-        std::string reviewer_source = ""
+        std::string reviewer_source = "",
+        DuplicateAdmissionEvidence duplicate_admission = {
+            "internal api create",
+            "internal-api",
+            {},
+            {},
+            "create",
+            "",
+            false
+        }
     );
 
     /**
@@ -54,6 +73,7 @@ public:
         kano::backlog_core::ItemState new_state,
         const std::string& agent,
         std::optional<std::string> message = std::nullopt,
+        std::optional<std::string> duplicate_of = std::nullopt,
         bool force = false,
         bool refresh_views = false
     );

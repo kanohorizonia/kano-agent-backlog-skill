@@ -10,6 +10,7 @@
 #include <fstream>
 #include <iomanip>
 #include <chrono>
+#include <ctime>
 #include <sstream>
 #include <cctype>
 #include <set>
@@ -297,6 +298,144 @@ bool has_parent_ref(const BacklogItem& item) {
     return !parent.empty() && parent != "~" && parent != "null";
 }
 
+std::vector<std::string> trimmed_nonempty_values(const std::vector<std::string>& values) {
+    std::vector<std::string> result;
+    for (const auto& value : values) {
+        auto trimmed = trim_text(value);
+        if (!trimmed.empty()) result.push_back(trimmed);
+    }
+    return result;
+}
+
+bool contains_value(const std::vector<std::string>& values, const std::string& needle) {
+    return std::find(values.begin(), values.end(), needle) != values.end();
+}
+
+std::string join_values(const std::vector<std::string>& values, const std::string& separator = ",") {
+    std::ostringstream out;
+    for (std::size_t i = 0; i < values.size(); ++i) {
+        if (i > 0) out << separator;
+        out << values[i];
+    }
+    return out.str();
+}
+
+std::string json_escape(const std::string& value) {
+    std::ostringstream out;
+    for (const unsigned char ch : value) {
+        switch (ch) {
+            case '"': out << "\\\""; break;
+            case '\\': out << "\\\\"; break;
+            case '\n': out << "\\n"; break;
+            case '\r': out << "\\r"; break;
+            case '\t': out << "\\t"; break;
+            default: out << static_cast<char>(ch); break;
+        }
+    }
+    return out.str();
+}
+
+std::string json_array(const std::vector<std::string>& values) {
+    std::ostringstream out;
+    out << "[";
+    for (std::size_t i = 0; i < values.size(); ++i) {
+        if (i > 0) out << ",";
+        out << "\"" << json_escape(values[i]) << "\"";
+    }
+    out << "]";
+    return out.str();
+}
+
+std::string current_utc_timestamp() {
+    const auto now = std::chrono::system_clock::now();
+    const std::time_t time = std::chrono::system_clock::to_time_t(now);
+    std::tm utc{};
+#ifdef _WIN32
+    gmtime_s(&utc, &time);
+#else
+    gmtime_r(&time, &utc);
+#endif
+    std::ostringstream out;
+    out << std::put_time(&utc, "%Y-%m-%dT%H:%M:%SZ");
+    return out.str();
+}
+
+DuplicateAdmissionEvidence normalize_duplicate_admission(DuplicateAdmissionEvidence evidence) {
+    evidence.search_query = trim_text(evidence.search_query);
+    evidence.search_scope = trim_text(evidence.search_scope);
+    evidence.decision = trim_text(evidence.decision);
+    evidence.rationale = trim_text(evidence.rationale);
+    evidence.candidates = trimmed_nonempty_values(evidence.candidates);
+    evidence.candidates_read = trimmed_nonempty_values(evidence.candidates_read);
+    return evidence;
+}
+
+void validate_duplicate_admission(const DuplicateAdmissionEvidence& evidence) {
+    if (evidence.search_query.empty()) {
+        throw std::runtime_error("duplicate_admission.search_query_required: pass --duplicate-search-query before creating a work item");
+    }
+    if (evidence.search_scope.empty()) {
+        throw std::runtime_error("duplicate_admission.search_scope_required: pass --duplicate-search-scope before creating a work item");
+    }
+    if (evidence.decision.empty()) {
+        throw std::runtime_error("duplicate_admission.decision_required: pass --duplicate-decision before creating a work item");
+    }
+    for (const auto& candidate : evidence.candidates) {
+        if (!contains_value(evidence.candidates_read, candidate)) {
+            throw std::runtime_error("duplicate_admission.candidate_unread: mark every --duplicate-candidate as read with --duplicate-candidate-read before creating");
+        }
+    }
+    if (!evidence.candidates.empty()) {
+        if (!evidence.override_requested) {
+            throw std::runtime_error("duplicate_admission.override_required: pass --duplicate-override to create despite duplicate candidates");
+        }
+        if (evidence.rationale.empty()) {
+            throw std::runtime_error("duplicate_admission.rationale_required: pass --duplicate-rationale when overriding duplicate candidates");
+        }
+    }
+}
+
+std::string duplicate_admission_worklog(const DuplicateAdmissionEvidence& evidence) {
+    std::ostringstream out;
+    out << "Duplicate admission: query=" << evidence.search_query
+        << "; scope=" << evidence.search_scope
+        << "; candidates=" << (evidence.candidates.empty() ? "none" : join_values(evidence.candidates))
+        << "; read=" << (evidence.candidates_read.empty() ? "none" : join_values(evidence.candidates_read))
+        << "; decision=" << evidence.decision
+        << "; override=" << (evidence.override_requested ? "true" : "false");
+    if (!evidence.rationale.empty()) out << "; rationale=" << evidence.rationale;
+    return out.str();
+}
+
+void write_duplicate_admission_receipt(
+    const std::filesystem::path& product_root,
+    const BacklogItem& item,
+    const DuplicateAdmissionEvidence& evidence
+) {
+    const auto receipt_dir = product_root / "_meta" / "duplicate-admission";
+    std::filesystem::create_directories(receipt_dir);
+    const auto receipt_path = receipt_dir / (item.id + ".json");
+    std::ofstream out(receipt_path, std::ios::binary);
+    if (!out.is_open()) {
+        throw std::runtime_error("duplicate_admission.receipt_write_failed: " + receipt_path.string());
+    }
+    out << "{\n"
+        << "  \"item_id\": \"" << json_escape(item.id) << "\",\n"
+        << "  \"item_uid\": \"" << json_escape(item.uid) << "\",\n"
+        << "  \"recorded_at\": \"" << current_utc_timestamp() << "\",\n"
+        << "  \"search_query\": \"" << json_escape(evidence.search_query) << "\",\n"
+        << "  \"search_scope\": \"" << json_escape(evidence.search_scope) << "\",\n"
+        << "  \"candidates\": " << json_array(evidence.candidates) << ",\n"
+        << "  \"candidates_read\": " << json_array(evidence.candidates_read) << ",\n"
+        << "  \"decision\": \"" << json_escape(evidence.decision) << "\",\n"
+        << "  \"override_requested\": " << (evidence.override_requested ? "true" : "false") << ",\n"
+        << "  \"rationale\": \"" << json_escape(evidence.rationale) << "\"\n"
+        << "}\n";
+    if (!out.good()) {
+        throw std::runtime_error("duplicate_admission.receipt_write_failed: " + receipt_path.string());
+    }
+}
+
 bool is_high_risk_item(const BacklogItem& item) {
     if (item.type == ItemType::Bug || item.type == ItemType::Issue) {
         return true;
@@ -545,10 +684,13 @@ CreateItemResult WorkitemOps::create_item(
     std::optional<std::string> owner,
     std::optional<std::string> reviewer,
     std::string owner_source,
-    std::string reviewer_source
+    std::string reviewer_source,
+    DuplicateAdmissionEvidence duplicate_admission
 ) {
     diagnostics::ScopedMutationSpan total_span("workitem.create_item.total", title);
     CanonicalStore store(backlog_root);
+    auto normalized_duplicate_admission = normalize_duplicate_admission(std::move(duplicate_admission));
+    validate_duplicate_admission(normalized_duplicate_admission);
     
     // 1. Generate ID and UID
     std::string type_code;
@@ -595,7 +737,7 @@ CreateItemResult WorkitemOps::create_item(
     std::string content;
     {
         diagnostics::ScopedMutationSpan span("workitem.create_item.render_template", item.id);
-        content = TemplateOps::render_item_body(item, agent, "Created item");
+        content = TemplateOps::render_item_body(item, agent, "Created item; " + duplicate_admission_worklog(normalized_duplicate_admission));
     }
     
     // 4. Calculate path and write file
@@ -609,6 +751,7 @@ CreateItemResult WorkitemOps::create_item(
         ofs << content;
         ofs.close();
     }
+    write_duplicate_admission_receipt(backlog_root, item, normalized_duplicate_admission);
     
     // 5. Update index
     item.file_path = item_path;
@@ -627,6 +770,7 @@ UpdateStateResult WorkitemOps::update_state(
     ItemState new_state,
     const std::string& agent,
     std::optional<std::string> message,
+    std::optional<std::string> duplicate_of,
     bool force,
     bool refresh_views
 ) {
@@ -644,6 +788,20 @@ UpdateStateResult WorkitemOps::update_state(
     ItemState old_state = item.state;
     if (old_state == new_state) {
         return {item.id, old_state, new_state, false, false, false, {}};
+    }
+
+    if (new_state == ItemState::Duplicate) {
+        if (!duplicate_of || trim_text(*duplicate_of).empty()) {
+            throw std::runtime_error("Transition to Duplicate requires --duplicate-of <canonical-item-ref>");
+        }
+        RefResolver resolver(store);
+        const BacklogItem canonical_item = resolver.resolve(trim_text(*duplicate_of));
+        if (canonical_item.id == item.id || canonical_item.uid == item.uid) {
+            throw std::runtime_error("Duplicate item cannot point duplicate_of at itself: " + item.id);
+        }
+        item.duplicate_of = canonical_item.id;
+    } else if (duplicate_of && !trim_text(*duplicate_of).empty()) {
+        throw std::runtime_error("--duplicate-of is only valid when transitioning to Duplicate");
     }
 
     std::vector<std::string> intent_diagnostics;
@@ -692,12 +850,17 @@ UpdateStateResult WorkitemOps::update_state(
         case ItemState::Done: action = StateAction::Done; break;
         case ItemState::Blocked: action = StateAction::Block; break;
         case ItemState::Dropped: action = StateAction::Drop; break;
-        default: action = StateAction::Propose; break; // Fallback
+        case ItemState::Duplicate: action = StateAction::Duplicate; break;
+        case ItemState::New:
+            throw std::runtime_error("Cannot update item state to New");
     }
 
     std::string final_msg = message.value_or("State update: " + to_string(old_state) + " -> " + to_string(new_state));
     if (new_state == ItemState::InProgress) {
         final_msg += force ? " [Ready gate bypassed via --force]" : " [Ready gate validated]";
+    }
+    if (new_state == ItemState::Duplicate && item.duplicate_of) {
+        final_msg += " [duplicate_of=" + *item.duplicate_of + "]";
     }
 
     // 6. Transition via StateMachine

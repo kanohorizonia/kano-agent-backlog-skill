@@ -1,0 +1,154 @@
+{
+  "schema": "kob.release.notes.evidence_bundle.v1",
+  "release_id": "kano-agent-backlog-skill-v0.1.0-draft",
+  "version_label": "v0.1.0",
+  "product": "kano-agent-backlog-skill",
+  "source_inputs": {
+    "included_items": [
+      {
+        "product": "kano-agent-backlog-skill",
+        "item_id": "KOB-TSK-0089",
+        "reason": "Release record schema contract included in the draft release scope."
+      },
+      {
+        "product": "kano-agent-backlog-skill",
+        "item_id": "KOB-TSK-0090",
+        "reason": "Release workspace contract included in the draft release scope."
+      }
+    ],
+    "commit_refs": [
+      {
+        "product": "kano-agent-backlog-skill",
+        "commit_sha": "06db6b5",
+        "reason": "Example source commit for release workspace fixture linkage."
+      }
+    ],
+    "validation_refs": [
+      {
+        "product": "kano-agent-backlog-skill",
+        "evidence_id": "ev-release-workspace-schema-review-v0-1-0",
+        "repo_relpath": "_kano/backlog/releases/v0.1.0/evidence/schema-review.md",
+        "reason": "Schema review evidence supports release-notes claims about the draft release workspace."
+      }
+    ],
+    "dogfood_refs": [
+      {
+        "product": "kano-agent-backlog-skill",
+        "evidence_id": "ev-dogfood-backboard-release-review-v0-1-0",
+        "reason": "Internal-only dogfood evidence for the release draft."
+      }
+    ],
+    "limitations": [
+      {
+        "summary": "No live public artifact publication is claimed by this draft bundle.",
+        "source_refs": [
+          {
+            "product": "kano-agent-backlog-skill",
+            "artifact_id": "release-packet-draft-v0-1-0",
+            "reason": "Draft packet lineage is internal evidence only."
+          }
+        ],
+        "release_note_instruction": "Mention public availability only after the publication handoff passes."
+      }
+    ],
+    "public_docs_targets": [
+      {
+        "doc_id": "public-release-notes-v0.1.0-draft",
+        "channel_id": "github-releases",
+        "repo_relpath": "_kano/backlog/releases/v0.1.0/public-output/github-release-notes.md",
+        "publication_state": "draft",
+        "reason": "Planned public output shape only, pending KOB-TSK-0093 handoff."
+      }
+    ]
+  },
+  "missing_evidence": [
+    {
+      "evidence_id": "missing-public-download-artifacts-v0-1-0",
+      "claim": "Release notes can say downloadable public packages are available.",
+      "required_source": "Published GitHub Release artifact index and human publication marker.",
+      "reason": "The fixture is a non-public draft and must not invent package availability.",
+      "owner_or_follow_up": "KOB-TSK-0093"
+    }
+  ],
+  "draft_release_notes": {
+    "artifact_id": "draft-release-notes-v0-1-0",
+    "repo_relpath": "_kano/backlog/releases/v0.1.0/notes-drafts/release-notes.md",
+    "generation_boundary": "AI may summarize only cited source_inputs and must preserve missing_evidence entries as omissions or review notes.",
+    "sections": [
+      {
+        "section_id": "highlights",
+        "title": "Highlights",
+        "status": "supported",
+        "body": "Draft release notes may describe the release record and workspace contracts as evidence-backed draft release infrastructure.",
+        "source_refs": [
+          {
+            "product": "kano-agent-backlog-skill",
+            "item_id": "KOB-TSK-0089",
+            "reason": "Release record schema source item."
+          },
+          {
+            "product": "kano-agent-backlog-skill",
+            "item_id": "KOB-TSK-0090",
+            "reason": "Release workspace source item."
+          }
+        ]
+      },
+      {
+        "section_id": "public-availability",
+        "title": "Public Availability",
+        "status": "omitted_missing_evidence",
+        "body": "Public package availability is intentionally omitted until publication evidence exists.",
+        "missing_evidence_refs": [
+          "missing-public-download-artifacts-v0-1-0"
+        ]
+      }
+    ]
+  },
+  "human_verification": {
+    "status": "in_review",
+    "required_before_publication": true,
+    "markers": [
+      {
+        "marker_id": "release-notes-source-review-v0-1-0",
+        "marker_type": "source_review",
+        "status": "passed",
+        "verification_refs": [
+          {
+            "product": "kano-agent-backlog-skill",
+            "evidence_id": "ev-release-workspace-schema-review-v0-1-0",
+            "repo_relpath": "_kano/backlog/releases/v0.1.0/evidence/schema-review.md"
+          }
+        ],
+        "reason": "Source refs were checked for the draft fixture."
+      },
+      {
+        "marker_id": "release-notes-human-approval-v0-1-0",
+        "marker_type": "notes_review",
+        "status": "pending",
+        "verification_refs": [
+          {
+            "product": "kano-agent-backlog-skill",
+            "doc_id": "release-notes-draft-v0.1.0",
+            "repo_relpath": "_kano/backlog/releases/v0.1.0/notes-drafts/release-notes.md"
+          }
+        ],
+        "reason": "Human review has not approved the draft notes for public use."
+      }
+    ],
+    "review_summary": "Draft release notes are evidence-derived and not approved for public publication."
+  },
+  "publication_boundary": {
+    "live_publication_claimed": false,
+    "handoff_owner": "KOB-TSK-0093",
+    "public_output_refs": [
+      {
+        "doc_id": "public-release-notes-v0.1.0-draft",
+        "channel_id": "github-releases",
+        "repo_relpath": "_kano/backlog/releases/v0.1.0/public-output/github-release-notes.md",
+        "publication_state": "draft",
+        "reason": "Public docs handoff remains pending."
+      }
+    ],
+    "reason": "KOB-TSK-0091 defines draft evidence collection; KOB-TSK-0093 owns public publishing handoff."
+  }
+}

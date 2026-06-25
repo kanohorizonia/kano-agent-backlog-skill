@@ -1712,12 +1712,12 @@ Json::Value ReviewActionsForLane(const std::string& lane) {
     actions.append(ReviewAction("defer_ready_item", "Defer Ready Item",
                                 "defer_ready_item", "", false));
   } else if (lane == "Done Candidate") {
-    actions.append(ReviewAction("confirm_done", "Confirm Done",
-                                "confirm_done", "Done", true));
-    actions.append(ReviewAction("request_more_evidence", "Request More Evidence",
-                                "request_more_evidence", "", false));
-    actions.append(ReviewAction("keep_in_review", "Keep In Review",
-                                "keep_in_review", "Review", false));
+    actions.append(ReviewAction("mark_done", "Mark Done",
+                                "mark_done", "Done", true));
+    actions.append(ReviewAction("move_to_review", "Move to Review",
+                                "move_to_review", "Review", false));
+    actions.append(ReviewAction("reject_completion", "Reject Completion",
+                                "reject_completion", "Review", false));
   } else if (lane == "Needs Review") {
     actions.append(ReviewAction("request_evidence", "Request Evidence",
                                 "request_evidence", "", false));
@@ -1726,10 +1726,10 @@ Json::Value ReviewActionsForLane(const std::string& lane) {
     actions.append(ReviewAction("defer_review", "Defer",
                                 "defer_review", "", false));
   } else if (lane == "False Done Suspect") {
-    actions.append(ReviewAction("reopen_done", "Reopen",
-                                "reopen_done", "Review", true));
-    actions.append(ReviewAction("dismiss_false_positive", "Dismiss False Positive",
-                                "dismiss_false_positive", "", false));
+    actions.append(ReviewAction("reopen_from_done", "Reopen from Done",
+                                "reopen_from_done", "Review", true));
+    actions.append(ReviewAction("dismiss", "Dismiss",
+                                "dismiss", "", false));
     actions.append(ReviewAction("request_evidence", "Request Evidence",
                                 "request_evidence", "", false));
   } else if (lane == "Evidence Gap") {
@@ -1749,8 +1749,8 @@ Json::Value ReviewActionsForLane(const std::string& lane) {
   } else if (lane == "Stale/Drift") {
     actions.append(ReviewAction("revalidate_intent", "Revalidate Intent",
                                 "revalidate_intent", "", false));
-    actions.append(ReviewAction("mark_obsolete", "Mark Obsolete",
-                                "mark_obsolete", "Dropped", true));
+    actions.append(ReviewAction("drop", "Drop",
+                                "drop", "Dropped", true));
     actions.append(ReviewAction("defer_stale_drift", "Defer",
                                 "defer_stale_drift", "", false));
   }

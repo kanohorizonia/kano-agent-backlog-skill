@@ -1248,9 +1248,11 @@ R"HTML(    function typeIcon(type) {
       const draft = bundle?.review_draft || {};
       const draftText = draft.exists ? (draft.rationale || '') : '';
       const draftStatus = draft.exists ? `Draft saved for ${esc(draft.actor_alias || state.reviewActorAlias)}.` : 'No saved draft.';
-      const actions = (bundle?.actions || []).map((action) =>
-        `<button class="btn review-action" data-review-action="submit" data-human-decision="${escAttr(action.human_decision || action.id || '')}" data-target-state="${escAttr(action.target_state || '')}" data-requires-confirmation="${action.requires_confirmation ? 'true' : 'false'}">${esc(action.label || action.id || 'Submit decision')}</button>`
-      ).join(' ');
+      const actions = (bundle?.actions || []).map((action) => {
+        const targetState = action.target_state || '';
+        const resultLabel = targetState ? `<span class="muted">Resulting state: ${esc(targetState)}</span>` : '';
+        return `<span class="review-action-wrap" style="display:inline-flex;align-items:center;gap:4px;"><button class="btn review-action" data-review-action="submit" data-human-decision="${escAttr(action.human_decision || action.id || '')}" data-target-state="${escAttr(targetState)}" data-requires-confirmation="${action.requires_confirmation ? 'true' : 'false'}">${esc(action.label || action.id || 'Submit decision')}</button>${resultLabel}</span>`;
+      }).join(' ');
       return `<div class="card" data-review-card="true" data-review-lane="${escAttr(lane || '')}" data-review-reason-code="${escAttr(bundle?.reason_code || '')}" data-review-suggested-decision="${escAttr(bundle?.suggested_decision || bundle?.suggested_human_decision || '')}" data-review-source-detector="${escAttr(bundle?.diagnostic_status || 'backboard-review-inbox')}" data-review-draft-exists="${draft.exists ? 'true' : 'false'}" ${selectableItemAttrs(item)}>${renderItemCardSummary(item)}<div class="muted review-reason"><strong>Why this needs review:</strong> ${reasonCode}${esc(reason)}${decision}</div><label class="muted" style="display:block;margin-top:8px;">Draft review note<textarea data-review-draft-note="true" rows="3" style="width:100%;box-sizing:border-box;margin-top:4px;" placeholder="Write rationale or instructions before submitting">${esc(draftText)}</textarea></label><div class="muted" data-review-draft-state="true" style="margin-top:4px;">${draftStatus}</div><div class="review-actions" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;"><button class="btn" data-review-action="save-draft">Save Draft</button><button class="btn" data-review-action="discard-draft">Discard Draft</button>${actions}</div><div class="muted" data-review-status style="margin-top:6px;"></div></div>`;
     }
 
@@ -1305,8 +1307,9 @@ R"HTML(    function typeIcon(type) {
               return;
             }
             const needsConfirmation = button.getAttribute('data-requires-confirmation') === 'true';
+            const targetState = button.getAttribute('data-target-state') || '';
             const confirmed = needsConfirmation
-              ? window.confirm('This is a high-risk review action. Submit only after explicit human confirmation.')
+              ? window.confirm(`This is a high-risk review action. Resulting state: ${targetState || 'no state change'}. Submit only after explicit human confirmation.`)
               : false;
             if (needsConfirmation && !confirmed) {
               setReviewStatus(card, 'Submission cancelled before confirmation.');

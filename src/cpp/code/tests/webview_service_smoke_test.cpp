@@ -509,14 +509,17 @@ int main() {
                                  "Blocked/Dirty", "Stale/Drift", "Ready Frontier"}) {
             expect(inbox["lanes"].isMember(lane), std::string("review inbox should expose queue: ") + lane);
         }
-        auto lane_has_action = [&](const std::string& lane,
+        auto lane_has_policy = [&](const std::string& lane,
                                    const std::string& label,
-                                   std::optional<bool> requiresConfirmation = std::nullopt) {
+                                   const std::string& humanDecision,
+                                   const std::string& targetState,
+                                   bool requiresConfirmation) {
             for (const auto& bundle : inbox["lanes"][lane]) {
                 for (const auto& action : bundle["actions"]) {
                     if (action["label"].asString() == label &&
-                        (!requiresConfirmation.has_value() ||
-                         action["requires_confirmation"].asBool() == *requiresConfirmation)) {
+                        action["human_decision"].asString() == humanDecision &&
+                        action["target_state"].asString() == targetState &&
+                        action["requires_confirmation"].asBool() == requiresConfirmation) {
                         return true;
                     }
                 }
@@ -548,16 +551,26 @@ int main() {
         }
         expect(inbox["lanes"]["Ready Frontier"][0]["actions"][0]["label"].asString() == "Approve Ready Boundary",
                "ready frontier action should use lane-specific Approve Ready Boundary label");
-        expect(lane_has_action("Needs Review", "Request Evidence"),
-               "needs review action should use lane-specific Request Evidence label");
-        expect(lane_has_action("Done Candidate", "Confirm Done", true),
-               "done candidate action should use lane-specific Confirm Done label");
-        expect(lane_has_action("False Done Suspect", "Reopen", true),
-               "false done suspect action should use lane-specific Reopen label");
-        expect(lane_has_action("Blocked/Dirty", "Accept Risk", true),
-               "blocked dirty action should expose confirm-gated Accept Risk label");
-        expect(lane_has_action("Stale/Drift", "Mark Obsolete", true),
-               "stale drift action should expose Mark Obsolete label");
+        expect(lane_has_policy("Needs Review", "Request Evidence", "request_evidence", "", false),
+               "needs review action should use single-click Request Evidence policy");
+        expect(lane_has_policy("Done Candidate", "Mark Done", "mark_done", "Done", true),
+               "done candidate action should use confirm-gated Mark Done policy");
+        expect(lane_has_policy("Done Candidate", "Move to Review", "move_to_review", "Review", false),
+               "done candidate action should expose single-click Move to Review policy");
+        expect(lane_has_policy("Done Candidate", "Reject Completion", "reject_completion", "Review", false),
+               "done candidate action should expose single-click Reject Completion policy");
+        expect(lane_has_policy("False Done Suspect", "Reopen from Done", "reopen_from_done", "Review", true),
+               "false done suspect action should use confirm-gated Reopen from Done policy");
+        expect(lane_has_policy("False Done Suspect", "Dismiss", "dismiss", "", false),
+               "false done suspect action should expose single-click Dismiss policy");
+        expect(lane_has_policy("False Done Suspect", "Request Evidence", "request_evidence", "", false),
+               "false done suspect action should expose single-click Request Evidence policy");
+        expect(lane_has_policy("Evidence Gap", "Request Evidence", "request_evidence", "", false),
+               "evidence gap action should expose single-click Request Evidence policy");
+        expect(lane_has_policy("Blocked/Dirty", "Accept Risk", "accept_risk", "", true),
+               "blocked dirty action should expose confirm-gated Accept Risk policy");
+        expect(lane_has_policy("Stale/Drift", "Drop", "drop", "Dropped", true),
+               "stale drift action should expose confirm-gated Drop policy");
 
         auto evidence = service.GetEvidenceDetail("product-alpha", "PRA-TSK-0001");
         expect(evidence["evidence"]["signals"]["artifact"].asBool(), "evidence detail should detect artifact signal");
@@ -852,8 +865,8 @@ int main() {
         highRisk["item_id"] = "PRA-TSK-0004";
         highRisk["lane"] = "Done Candidate";
         highRisk["reason_code"] = "review_state";
-        highRisk["suggested_decision"] = "confirm_done";
-        highRisk["human_decision"] = "confirm_done";
+        highRisk["suggested_decision"] = "mark_done";
+        highRisk["human_decision"] = "mark_done";
         highRisk["rationale"] = "Human accepted evidence chain.";
         highRisk["actor_alias"] = "reviewer-alias";
         highRisk["target_state"] = "Done";
@@ -904,8 +917,8 @@ int main() {
         reopenDone["item_id"] = "PRB-BUG-0003";
         reopenDone["lane"] = "False Done Suspect";
         reopenDone["reason_code"] = "done_without_evidence";
-        reopenDone["suggested_decision"] = "reopen_done";
-        reopenDone["human_decision"] = "reopen_done";
+        reopenDone["suggested_decision"] = "reopen_from_done";
+        reopenDone["human_decision"] = "reopen_from_done";
         reopenDone["rationale"] = "Human wants Done reopened for review.";
         reopenDone["actor_alias"] = "reviewer-alias";
         reopenDone["target_state"] = "Review";
@@ -943,8 +956,8 @@ int main() {
         writeFailureTransition["item_id"] = "PRB-BUG-0001";
         writeFailureTransition["lane"] = "Done Candidate";
         writeFailureTransition["reason_code"] = "validation_seen_in_progress";
-        writeFailureTransition["suggested_decision"] = "keep_in_review";
-        writeFailureTransition["human_decision"] = "keep_in_review";
+        writeFailureTransition["suggested_decision"] = "move_to_review";
+        writeFailureTransition["human_decision"] = "move_to_review";
         writeFailureTransition["rationale"] = "Human wants review before Done.";
         writeFailureTransition["actor_alias"] = "reviewer-alias";
         writeFailureTransition["target_state"] = "Review";
@@ -968,8 +981,8 @@ int main() {
         reviewTransition["item_id"] = "PRB-BUG-0001";
         reviewTransition["lane"] = "Done Candidate";
         reviewTransition["reason_code"] = "validation_seen_in_progress";
-        reviewTransition["suggested_decision"] = "keep_in_review";
-        reviewTransition["human_decision"] = "keep_in_review";
+        reviewTransition["suggested_decision"] = "reject_completion";
+        reviewTransition["human_decision"] = "reject_completion";
         reviewTransition["rationale"] = "Human wants review before Done.";
         reviewTransition["actor_alias"] = "reviewer-alias";
         reviewTransition["target_state"] = "Review";
@@ -988,6 +1001,8 @@ int main() {
                "main source should expose editable review draft note controls");
         expect(mainSource.find("data-review-action") != std::string::npos,
                "main source should expose review action controls");
+        expect(mainSource.find("Resulting state:") != std::string::npos,
+               "main source should show resulting state before submit");
 
         std::cout << "webview_service_smoke_test: PASS\n";
         std::filesystem::remove_all(root);

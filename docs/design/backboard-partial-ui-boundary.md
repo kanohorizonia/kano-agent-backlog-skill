@@ -100,6 +100,9 @@ If htmx is vendored, keep the asset local and explicit:
 The same local/embedded asset rule applies to any browser library used by
 Backboard.
 
+For the broader DOM-first versus optional visualization-island split, see
+`webview-technology-boundary.md`.
+
 ## Release And Test Expectations
 
 - `pixi run quick-test` remains green.
@@ -107,4 +110,3 @@ Backboard.
 - Browser console output must not rely on CDN resources.
 - Partial route smoke coverage should prove useful failure states, not only
   happy-path HTML.
-

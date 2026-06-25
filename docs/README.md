@@ -24,6 +24,7 @@ If you are reading the repository directly, start here instead of `docs/index.md
 - [Backboard information architecture](design/backboard-information-architecture.md)
 - [Backboard Review Inbox model](design/backboard-review-inbox-model.md)
 - [Backboard partial UI boundary](design/backboard-partial-ui-boundary.md)
+- [KOB Webview technology boundary](design/webview-technology-boundary.md)
 - [Actor alias and assignment policy](design/actor-alias-and-assignment-policy.md)
 - [Canonical backlog taxonomy](design/canonical-backlog-taxonomy.md)
 - [Project model decision](design/project-model-decision.md)

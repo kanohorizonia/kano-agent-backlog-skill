@@ -10,6 +10,7 @@ Design contracts:
 - [`docs/design/backboard-information-architecture.md`](../../../../../docs/design/backboard-information-architecture.md)
 - [`docs/design/backboard-review-inbox-model.md`](../../../../../docs/design/backboard-review-inbox-model.md)
 - [`docs/design/backboard-partial-ui-boundary.md`](../../../../../docs/design/backboard-partial-ui-boundary.md)
+- [`docs/design/webview-technology-boundary.md`](../../../../../docs/design/webview-technology-boundary.md)
 
 ## Scope (MVP)
 

@@ -85,8 +85,9 @@ Those fields become the human-reviewable contract for the agent.
 
 ## Backboard preview
 
-Backboard is the local read-only review surface for backlog state. The host path
-builds the native KOB Webview runtime and serves Backboard on the workstation:
+Backboard is the local read-mostly review surface for backlog state. The host
+path builds the native KOB Webview runtime and serves Backboard on the
+workstation:
 
 ```bash
 pixi run webview
@@ -164,7 +165,7 @@ not a current UI screenshot.
 | Release line | `0.0.4` native C++ release target |
 | Public release source | [GitHub Releases](https://github.com/kanohorizonia/kano-agent-backlog-skill/releases) |
 | Public reports | [Latest test report](reports/latest/test-report/) and [latest coverage report](reports/latest/coverage-report/) |
-| Backboard | Local read-only review surface through the KOB Webview runtime; review-console image above is conceptual |
+| Backboard | Local read-mostly review surface through the KOB Webview runtime, with limited local review-decision draft/submission mutations; review-console image above is conceptual |
 | Package channels | Manual artifacts are release-gated; winget, Homebrew, and apt are not live unless release metadata says so |
 | Retired runtime | Python runtime and Python package publishing are retired for this milestone |
 | Stability | Pre-1.0; schema, CLI details, and docs can still change |

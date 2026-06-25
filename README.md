@@ -123,8 +123,9 @@ intent, scope, acceptance, risk, decisions, and evidence across agent sessions.
 
 ## Backboard
 
-Backboard is the local read-only review surface for backlog state. The host path
-builds the native KOB Webview runtime and serves Backboard on the workstation:
+Backboard is the local read-mostly review surface for backlog state. The host
+path builds the native KOB Webview runtime and serves Backboard on the
+workstation:
 
 ```bash
 pixi run webview
@@ -171,7 +172,7 @@ not a current UI screenshot.
 | Development marker | `0.0.5` is the current development marker for the Intent Engineering feature wave |
 | Native release target | `0.0.4` is accepted only when `v0.0.4` has public downloadable artifacts and integrity metadata |
 | Previous tagged OSS release | `0.0.2` |
-| Backboard | Local read-only review surface exists through the KOB Webview runtime; review-console visual above is conceptual |
+| Backboard | Local read-mostly review surface exists through the KOB Webview runtime, with limited local review-decision draft/submission mutations; review-console visual above is conceptual |
 | Package manager channels | winget, Homebrew, and apt are planned/status-tracked channels, not live unless release metadata says so |
 | Python runtime | Retired for this milestone; repo-local CLI usage is native C++ only |
 | Stability | Pre-1.0; schema, CLI details, and docs can still change |

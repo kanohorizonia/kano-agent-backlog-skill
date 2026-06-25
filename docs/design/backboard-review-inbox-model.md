@@ -41,6 +41,49 @@ The UI must display at least the human-readable reason and the stable
 `reason_code`. Diagnostics should remain visible enough that reviewers can
 challenge the classifier.
 
+Detector output is advisory only. `suggested_human_decision` and
+`suggested_decision` describe the classifier's recommendation; they are not a
+submitted human decision and must not mutate KOB state by themselves.
+
+## Human Review Decision Records
+
+Backboard review actions create KOB-native `review_decision` JSON records under
+the product `_meta/review-decisions/` tree.
+
+Draft records live under `_meta/review-decisions/drafts/` and may be edited
+before submission. Saving a draft updates the same draft file for the same item
+and actor alias.
+
+Submitted records live under `_meta/review-decisions/submitted/<item-id>/`.
+Submitted records are append-only: later changes create a new submitted record
+with `supersedes` pointing at the earlier record instead of rewriting it.
+
+Each submitted record includes:
+
+| Field | Meaning |
+| --- | --- |
+| `lane` | Review Inbox lane where the decision was made. |
+| `reason_code` | Stable machine-readable detector reason. |
+| `suggested_decision` | Detector suggestion copied for audit context only. |
+| `human_decision` | Human-selected lane-specific action. |
+| `rationale` | Human rationale or instruction text. |
+| `actor_alias` | Human or operator alias submitting the decision. |
+| `target_state` | Optional KOB target state requested by the action. |
+| `created_at` / `submitted_at` | UTC decision timestamps. |
+| `source_detector` | Detector or UI source that surfaced the lane. |
+| `supersedes` | Optional prior submitted decision record path. |
+| `transition` | Result of the KOB policy transition when `target_state` is requested. |
+
+Lane actions use explicit names such as `Send To Review`, `Request More
+Evidence`, `Approve Done With Evidence`, `Accept Evidence Risk`, and `Reopen
+Done For Review` instead of generic Accept/Reject labels where possible.
+
+High-risk actions, including moving to Done, dropping work, accepting evidence
+risk, or reopening Done, require explicit confirmation before any KOB state
+transition is attempted. Confirmed actions call the existing KOB transition
+policy; Backboard must not bypass transition validation and must not start
+agents or dispatch work.
+
 ## Current Reason Codes
 
 | Code | Lane |

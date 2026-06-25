@@ -103,6 +103,18 @@
       "evidence_id": "release-notes-evidence-bundle-v0-1-0",
       "repo_relpath": "_kano/backlog/releases/v0.1.0/evidence/release-notes-evidence-bundle.json",
       "reason": "KOB-TSK-0091 bundle that collects source refs and missing evidence before drafting notes."
+    },
+    {
+      "product": "kano-agent-backlog-skill",
+      "evidence_id": "release-readiness-gate-v0-1-0",
+      "repo_relpath": "_kano/backlog/releases/v0.1.0/evidence/release-readiness-gate.json",
+      "reason": "KOB-TSK-0092 readiness gate report that marks missing evidence and blockers."
+    },
+    {
+      "product": "kano-agent-backlog-skill",
+      "evidence_id": "public-docs-publishing-handoff-v0-1-0",
+      "repo_relpath": "_kano/backlog/releases/v0.1.0/evidence/public-docs-publishing-handoff.json",
+      "reason": "KOB-TSK-0093 handoff report for draft docs, human approval, and publication refs."
     }
   ],
   "source_artifact_refs": [

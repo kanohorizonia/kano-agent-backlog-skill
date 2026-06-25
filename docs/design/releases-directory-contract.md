@@ -31,7 +31,7 @@ Each workspace manifest includes:
 | `goals` | Release goals and optional links to Version Goal Ledger goals. |
 | `included_items` | Items intentionally included in the release scope view. |
 | `deferred_items` | Items reviewed for the release but moved out of scope. |
-| `evidence_refs` | Evidence refs used to support release state, scope claims, and release-note draft claims. |
+| `evidence_refs` | Evidence refs used to support release state, scope claims, release-note draft claims, readiness gates, and publishing handoff reviews. |
 | `source_artifact_refs` | Repo-relative source artifact refs, such as CI indexes or packet drafts. |
 | `notes_draft_refs` | Draft release note refs generated from release-notes evidence bundles; they remain non-public until human review passes. |
 | `public_output_refs` | Planned public output refs. These stay draft or planned until publication review passes. |
@@ -84,6 +84,33 @@ before draft notes are used as public-facing release notes. `KOB-TSK-0093` owns
 the public docs publishing handoff; this contract only defines evidence
 collection and draft lineage.
 
+## Release Readiness Review
+
+The release workspace can store a readiness gate report under `evidence/`. The
+report is described by
+[release-readiness-gate.schema.json](../../references/release-readiness-gate.schema.json)
+and should be linked through `evidence_refs`.
+
+The readiness report evaluates included item state, validation evidence, dogfood
+evidence, release notes evidence, public docs drafts, known limitations,
+unresolved blockers, and human approval. Missing evidence must remain visible as
+missing evidence, category action items, or blockers. Early dogfood releases may
+defer or cut scope with rationale, but the gate must still block unverified
+release claims.
+
+## Public Docs Publishing Handoff
+
+The release workspace can store a public docs handoff report under `evidence/`.
+The report is described by
+[public-docs-publishing-handoff.schema.json](../../references/public-docs-publishing-handoff.schema.json)
+and should be linked through `evidence_refs`.
+
+The handoff records movement from evidence bundle to draft outputs to human
+approval to publication refs. It covers README, docs site, package metadata,
+marketplace/listing text, official release page, and announcement copy where
+applicable. Planned or draft public-output refs are not live publication
+evidence.
+
 ## Rules
 
 - The release workspace is not a parent axis. Included or deferred items keep
@@ -104,6 +131,11 @@ collection and draft lineage.
 - `notes_draft_refs` must trace back to release-notes evidence bundles. Missing
   evidence should remain visible in drafts instead of being converted into
   unsupported release claims.
+- Readiness gate reports must block or fail categories with missing evidence;
+  they must not infer release readiness from child item state alone.
+- Publishing handoff reports must record approval and publication refs before
+  public availability is claimed. Rollback and follow-up refs stay in evidence
+  instead of deleting the original handoff record.
 - KOA-TSK-0215 packet concepts are useful lineage inputs, but this contract does
   not migrate HorizonPlugin, create live public content, or start a publishing
   workflow.
@@ -117,5 +149,9 @@ The schema and example fixture live in:
 - [releases-directory-contract.schema.json](../../references/releases-directory-contract.schema.json)
 - [release-notes-evidence-bundle.schema.json](../../references/release-notes-evidence-bundle.schema.json)
 - [release-notes-evidence-bundle.fixture.json](../../references/release-notes-evidence-bundle.fixture.json)
+- [release-readiness-gate.schema.json](../../references/release-readiness-gate.schema.json)
+- [release-readiness-gate.fixture.json](../../references/release-readiness-gate.fixture.json)
+- [public-docs-publishing-handoff.schema.json](../../references/public-docs-publishing-handoff.schema.json)
+- [public-docs-publishing-handoff.fixture.json](../../references/public-docs-publishing-handoff.fixture.json)
 - [releases-directory-contract.fixture.json](../../references/releases-directory-contract.fixture.json)
 - [releases-directory-contract-v0.2.0.fixture.json](../../references/releases-directory-contract-v0.2.0.fixture.json)

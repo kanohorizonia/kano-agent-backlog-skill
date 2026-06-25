@@ -1,0 +1,173 @@
+{
+  "schema": "kob.release.workspace.v1",
+  "workspace_root": "_kano/backlog/releases/v0.1.0",
+  "release_id": "kano-agent-backlog-skill-v0.1.0-draft",
+  "version_label": "v0.1.0",
+  "product": "kano-agent-backlog-skill",
+  "lifecycle_state": "validating",
+  "summary": "Non-public draft workspace example for the v0.1.0 release line.",
+  "release_record_refs": [
+    {
+      "product": "kano-agent-backlog-skill",
+      "release_id": "kano-agent-backlog-skill-v0.1.0-draft",
+      "doc_id": "release-record-v0.1.0",
+      "reason": "Workspace metadata aligns with the draft release record semantics."
+    }
+  ],
+  "workspace_entries": {
+    "metadata_file": {
+      "entry_kind": "file",
+      "repo_relpath": "_kano/backlog/releases/v0.1.0/release.json"
+    },
+    "goals_file": {
+      "entry_kind": "file",
+      "repo_relpath": "_kano/backlog/releases/v0.1.0/goals.md"
+    },
+    "included_items_file": {
+      "entry_kind": "file",
+      "repo_relpath": "_kano/backlog/releases/v0.1.0/included-items.md"
+    },
+    "deferred_items_file": {
+      "entry_kind": "file",
+      "repo_relpath": "_kano/backlog/releases/v0.1.0/deferred-items.md"
+    },
+    "evidence_dir": {
+      "entry_kind": "directory",
+      "repo_relpath": "_kano/backlog/releases/v0.1.0/evidence/"
+    },
+    "source_artifacts_dir": {
+      "entry_kind": "directory",
+      "repo_relpath": "_kano/backlog/releases/v0.1.0/source-artifacts/"
+    },
+    "notes_drafts_dir": {
+      "entry_kind": "directory",
+      "repo_relpath": "_kano/backlog/releases/v0.1.0/notes-drafts/"
+    },
+    "public_output_dir": {
+      "entry_kind": "directory",
+      "repo_relpath": "_kano/backlog/releases/v0.1.0/public-output/"
+    },
+    "verification_dir": {
+      "entry_kind": "directory",
+      "repo_relpath": "_kano/backlog/releases/v0.1.0/verification/"
+    }
+  },
+  "goals": [
+    {
+      "goal_id": "release-workspace-foundation",
+      "summary": "Define a bounded release workspace contract without reparenting backlog items.",
+      "ledger_goal_refs": [
+        {
+          "product": "kano-agent-backlog-skill",
+          "item_id": "KOB-TSK-0065",
+          "reason": "Version Goal Ledger example linkage."
+        }
+      ],
+      "linked_refs": [
+        {
+          "product": "kano-agent-backlog-skill",
+          "item_id": "KOB-TSK-0090"
+        }
+      ],
+      "reason": "The draft workspace shows release scope as a sibling axis to products and topics."
+    }
+  ],
+  "included_items": [
+    {
+      "product": "kano-agent-backlog-skill",
+      "item_id": "KOB-TSK-0089",
+      "reason": "Release record schema work remains in draft release scope."
+    },
+    {
+      "product": "kano-agent-backlog-skill",
+      "item_id": "KOB-TSK-0090",
+      "reason": "Adds the releases directory workspace contract."
+    }
+  ],
+  "deferred_items": [
+    {
+      "product": "kano-agent-backlog-skill",
+      "item_id": "KOB-TSK-0105",
+      "reason": "Public publishing workflow remains out of scope for this draft example."
+    }
+  ],
+  "evidence_refs": [
+    {
+      "product": "kano-agent-backlog-skill",
+      "evidence_id": "ev-release-workspace-schema-review-v0-1-0",
+      "repo_relpath": "_kano/backlog/releases/v0.1.0/evidence/schema-review.md",
+      "reason": "Draft schema review evidence only."
+    }
+  ],
+  "source_artifact_refs": [
+    {
+      "product": "kano-agent-backlog-skill",
+      "artifact_id": "release-packet-draft-v0-1-0",
+      "repo_relpath": "_kano/backlog/releases/v0.1.0/source-artifacts/release-packet-index.json",
+      "reason": "KOA-TSK-0215 style packet lineage, kept as a non-public source artifact ref."
+    }
+  ],
+  "notes_draft_refs": [
+    {
+      "product": "kano-agent-backlog-skill",
+      "doc_id": "release-notes-draft-v0.1.0",
+      "repo_relpath": "_kano/backlog/releases/v0.1.0/notes-drafts/release-notes.md",
+      "reason": "Draft notes only, not live public release content."
+    }
+  ],
+  "public_output_refs": [
+    {
+      "product": "kano-agent-backlog-skill",
+      "doc_id": "public-release-notes-v0.1.0-draft",
+      "channel_id": "github-releases",
+      "repo_relpath": "_kano/backlog/releases/v0.1.0/public-output/github-release-notes.md",
+      "publication_state": "draft",
+      "reason": "Planned public output shape only, pending human publication review."
+    }
+  ],
+  "human_verification": {
+    "status": "in_review",
+    "markers": [
+      {
+        "marker_id": "scope-review-v0.1.0",
+        "marker_type": "scope_review",
+        "status": "passed",
+        "verification_refs": [
+          {
+            "product": "kano-agent-backlog-skill",
+            "evidence_id": "ev-release-workspace-schema-review-v0-1-0",
+            "repo_relpath": "_kano/backlog/releases/v0.1.0/evidence/schema-review.md"
+          }
+        ],
+        "reason": "Included and deferred scope was reviewed as a draft."
+      },
+      {
+        "marker_id": "evidence-review-v0.1.0",
+        "marker_type": "evidence_review",
+        "status": "pending",
+        "verification_refs": [
+          {
+            "product": "kano-agent-backlog-skill",
+            "artifact_id": "release-packet-draft-v0-1-0",
+            "repo_relpath": "_kano/backlog/releases/v0.1.0/source-artifacts/release-packet-index.json"
+          }
+        ],
+        "reason": "Evidence packet remains draft."
+      },
+      {
+        "marker_id": "publication-review-v0.1.0",
+        "marker_type": "publication_review",
+        "status": "pending",
+        "verification_refs": [
+          {
+            "product": "kano-agent-backlog-skill",
+            "doc_id": "public-release-notes-v0.1.0-draft",
+            "repo_relpath": "_kano/backlog/releases/v0.1.0/public-output/github-release-notes.md"
+          }
+        ],
+        "reason": "Public output remains a non-public draft until a human passes the publication gate."
+      }
+    ],
+    "review_summary": "Draft release workspace only. No live public publication is claimed."
+  }
+}

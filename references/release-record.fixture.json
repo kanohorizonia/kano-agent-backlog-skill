@@ -1,0 +1,99 @@
+{
+  "schema": "kob.release.record.v1",
+  "release_id": "kano-agent-backlog-skill-v0.1.0-draft",
+  "version_label": "v0.1.0",
+  "summary": "Non-public draft example release record for early KOB release packet planning.",
+  "lifecycle_state": "validating",
+  "target_products": [
+    {
+      "product": "kano-agent-backlog-skill",
+      "doc_id": "release-line-v0.1.0",
+      "reason": "Example product scope only, not a live public release."
+    }
+  ],
+  "goals": [
+    {
+      "goal_id": "release-record-foundation",
+      "summary": "Record bounded release scope and evidence without replacing the Version Goal Ledger.",
+      "ledger_goal_refs": [
+        {
+          "product": "kano-agent-backlog-skill",
+          "item_id": "KOB-TSK-0065",
+          "reason": "Version Goal Ledger integration example."
+        }
+      ],
+      "linked_refs": [
+        {
+          "product": "kano-agent-backlog-skill",
+          "item_id": "KOB-TSK-0089"
+        }
+      ],
+      "reason": "Example release goals can point at ledger goals while the ledger remains the roadmap contract."
+    }
+  ],
+  "included_items": [
+    {
+      "product": "kano-agent-backlog-skill",
+      "item_id": "KOB-TSK-0065",
+      "reason": "Included for release evidence alignment only. Membership does not reparent the task."
+    },
+    {
+      "product": "kano-agent-backlog-skill",
+      "item_id": "KOB-TSK-0089",
+      "reason": "Adds the initial release record schema contract."
+    }
+  ],
+  "deferred_items": [
+    {
+      "product": "kano-agent-backlog-skill",
+      "item_id": "KOB-TSK-0091",
+      "reason": "Example follow-up workflow automation stays out of the draft release scope."
+    }
+  ],
+  "validation_refs": [
+    {
+      "product": "kano-agent-backlog-skill",
+      "evidence_id": "ev-release-draft-v0-1-0-schema-review",
+      "reason": "Schema and fixture reviewed as draft examples."
+    },
+    {
+      "product": "kano-agent-backlog-skill",
+      "artifact_id": "release-packet-draft-v0-1-0",
+      "reason": "KOA-TSK-0215 release packet lineage example."
+    }
+  ],
+  "dogfood_refs": [
+    {
+      "product": "kano-agent-backlog-skill",
+      "evidence_id": "ev-dogfood-backboard-release-review-v0-1-0",
+      "reason": "Internal draft Backboard review only."
+    }
+  ],
+  "limitations": [
+    {
+      "summary": "Example only, no live public artifact publication is claimed.",
+      "reason": "Human publication gate from KOA-TSK-0216 is intentionally not crossed.",
+      "linked_refs": [
+        {
+          "product": "kano-agent-backlog-skill",
+          "item_id": "KOB-TSK-0089"
+        }
+      ]
+    }
+  ],
+  "release_notes_artifact_refs": [
+    {
+      "product": "kano-agent-backlog-skill",
+      "artifact_id": "draft-release-notes-v0-1-0",
+      "reason": "Non-public draft release notes artifact."
+    }
+  ],
+  "public_docs_refs": [
+    {
+      "product": "kano-agent-backlog-skill",
+      "doc_id": "draft-release-doc-v0-1-0",
+      "public_url": "https://example.invalid/kano-agent-backlog-skill/releases/v0.1.0-draft",
+      "reason": "Placeholder URL shape only, not a live public page."
+    }
+  ]
+}

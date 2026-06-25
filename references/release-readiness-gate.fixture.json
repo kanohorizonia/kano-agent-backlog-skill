@@ -1,0 +1,240 @@
+{
+  "schema": "kob.release.readiness_gate.v1",
+  "gate_id": "release-readiness-gate-v0-1-0",
+  "release_id": "kano-agent-backlog-skill-v0.1.0-draft",
+  "version_label": "v0.1.0",
+  "product": "kano-agent-backlog-skill",
+  "source_refs": {
+    "release_record_ref": {
+      "product": "kano-agent-backlog-skill",
+      "release_id": "kano-agent-backlog-skill-v0.1.0-draft",
+      "reason": "Release record supplies scope, lifecycle, limitations, and public-doc refs."
+    },
+    "workspace_manifest_ref": {
+      "product": "kano-agent-backlog-skill",
+      "repo_relpath": "_kano/backlog/releases/v0.1.0/release.json",
+      "reason": "Release workspace manifest supplies bounded evidence and draft-output refs."
+    },
+    "evidence_bundle_refs": [
+      {
+        "product": "kano-agent-backlog-skill",
+        "artifact_id": "release-notes-evidence-bundle-v0-1-0",
+        "repo_relpath": "_kano/backlog/releases/v0.1.0/evidence/release-notes-evidence-bundle.json",
+        "reason": "Release notes evidence bundle supplies supported claims and missing evidence."
+      }
+    ],
+    "validation_refs": [
+      {
+        "product": "kano-agent-backlog-skill",
+        "evidence_id": "ev-release-workspace-schema-review-v0-1-0",
+        "repo_relpath": "_kano/backlog/releases/v0.1.0/evidence/schema-review.md",
+        "reason": "Draft validation evidence for schema and workspace contracts."
+      }
+    ],
+    "dogfood_refs": [
+      {
+        "product": "kano-agent-backlog-skill",
+        "evidence_id": "ev-dogfood-backboard-release-review-v0-1-0",
+        "reason": "Internal dogfood review evidence for the draft release."
+      }
+    ],
+    "public_docs_refs": [
+      {
+        "product": "kano-agent-backlog-skill",
+        "doc_id": "public-release-notes-v0.1.0-draft",
+        "repo_relpath": "_kano/backlog/releases/v0.1.0/public-output/github-release-notes.md",
+        "reason": "Draft public-output target only, not publication evidence."
+      }
+    ]
+  },
+  "category_results": [
+    {
+      "category_id": "included_item_state",
+      "status": "pass",
+      "summary": "Included items are explicitly scoped and do not reparent backlog hierarchy.",
+      "source_refs": [
+        {
+          "product": "kano-agent-backlog-skill",
+          "item_id": "KOB-TSK-0089",
+          "reason": "Release record schema is in the draft release scope."
+        },
+        {
+          "product": "kano-agent-backlog-skill",
+          "item_id": "KOB-TSK-0090",
+          "reason": "Releases directory contract is in the draft release scope."
+        }
+      ],
+      "missing_evidence_refs": [],
+      "action_items": []
+    },
+    {
+      "category_id": "validation_evidence",
+      "status": "pass",
+      "summary": "Schema and workspace validation evidence exists for the draft release contracts.",
+      "source_refs": [
+        {
+          "product": "kano-agent-backlog-skill",
+          "evidence_id": "ev-release-workspace-schema-review-v0-1-0",
+          "repo_relpath": "_kano/backlog/releases/v0.1.0/evidence/schema-review.md"
+        }
+      ],
+      "missing_evidence_refs": [],
+      "action_items": []
+    },
+    {
+      "category_id": "dogfood_evidence",
+      "status": "pass",
+      "summary": "Internal dogfood evidence is present for draft review scope.",
+      "source_refs": [
+        {
+          "product": "kano-agent-backlog-skill",
+          "evidence_id": "ev-dogfood-backboard-release-review-v0-1-0"
+        }
+      ],
+      "missing_evidence_refs": [],
+      "action_items": []
+    },
+    {
+      "category_id": "release_notes_evidence",
+      "status": "pass",
+      "summary": "Draft release notes trace to a bounded evidence bundle with missing evidence preserved.",
+      "source_refs": [
+        {
+          "product": "kano-agent-backlog-skill",
+          "artifact_id": "release-notes-evidence-bundle-v0-1-0",
+          "repo_relpath": "_kano/backlog/releases/v0.1.0/evidence/release-notes-evidence-bundle.json"
+        }
+      ],
+      "missing_evidence_refs": [
+        "missing-public-download-artifacts-v0-1-0"
+      ],
+      "action_items": []
+    },
+    {
+      "category_id": "public_docs_draft",
+      "status": "blocked",
+      "summary": "Public docs refs are drafts only and cannot support live public availability claims.",
+      "source_refs": [
+        {
+          "product": "kano-agent-backlog-skill",
+          "doc_id": "public-release-notes-v0.1.0-draft",
+          "repo_relpath": "_kano/backlog/releases/v0.1.0/public-output/github-release-notes.md"
+        }
+      ],
+      "missing_evidence_refs": [
+        "missing-public-download-artifacts-v0-1-0",
+        "missing-public-docs-human-approval-v0-1-0"
+      ],
+      "action_items": [
+        {
+          "summary": "Run the public docs publishing handoff and record publication refs before public availability claims.",
+          "owner_or_follow_up": "KOB-TSK-0093"
+        }
+      ]
+    },
+    {
+      "category_id": "known_limitations",
+      "status": "pass",
+      "summary": "Known limitations explicitly state that no live public artifact publication is claimed.",
+      "source_refs": [
+        {
+          "product": "kano-agent-backlog-skill",
+          "artifact_id": "release-packet-draft-v0-1-0",
+          "reason": "Draft packet lineage remains internal evidence only."
+        }
+      ],
+      "missing_evidence_refs": [],
+      "action_items": []
+    },
+    {
+      "category_id": "unresolved_blockers",
+      "status": "blocked",
+      "summary": "Public artifact and human publication approval evidence are still missing.",
+      "source_refs": [],
+      "missing_evidence_refs": [
+        "missing-public-download-artifacts-v0-1-0",
+        "missing-public-docs-human-approval-v0-1-0"
+      ],
+      "action_items": [
+        {
+          "summary": "Resolve publication evidence or keep public availability omitted.",
+          "owner_or_follow_up": "KOB-TSK-0093"
+        }
+      ]
+    },
+    {
+      "category_id": "human_approval",
+      "status": "blocked",
+      "summary": "Human publication approval is pending and required before public-facing release claims.",
+      "source_refs": [
+        {
+          "product": "kano-agent-backlog-skill",
+          "doc_id": "release-notes-draft-v0.1.0",
+          "repo_relpath": "_kano/backlog/releases/v0.1.0/notes-drafts/release-notes.md"
+        }
+      ],
+      "missing_evidence_refs": [
+        "missing-public-docs-human-approval-v0-1-0"
+      ],
+      "action_items": [
+        {
+          "summary": "Record human approval marker after draft review.",
+          "owner_or_follow_up": "release-owner"
+        }
+      ]
+    }
+  ],
+  "missing_evidence": [
+    {
+      "evidence_id": "missing-public-download-artifacts-v0-1-0",
+      "claim": "Downloadable public release packages are available.",
+      "required_source": "Published GitHub Release artifact index, package refs, and integrity metadata.",
+      "reason": "The example release remains a non-public draft.",
+      "owner_or_follow_up": "KOB-TSK-0093"
+    },
+    {
+      "evidence_id": "missing-public-docs-human-approval-v0-1-0",
+      "claim": "Public release docs are approved for publication.",
+      "required_source": "Human publication-review marker and publication refs.",
+      "reason": "Draft notes have not passed human publication review.",
+      "owner_or_follow_up": "release-owner"
+    }
+  ],
+  "scope_adjustments": [
+    {
+      "adjustment_id": "dogfood-public-artifacts-deferred-v0-1-0",
+      "category_id": "public_docs_draft",
+      "decision": "defer",
+      "rationale": "The early dogfood draft may proceed as internal review evidence while public package availability remains omitted.",
+      "source_refs": [
+        {
+          "product": "kano-agent-backlog-skill",
+          "artifact_id": "release-packet-draft-v0-1-0"
+        }
+      ]
+    }
+  ],
+  "claim_guard": {
+    "unverified_release_claims_allowed": false,
+    "released_state_requires_all_blockers_resolved": true,
+    "public_availability_requires_publication_evidence": true,
+    "reason": "Draft evidence can support internal readiness review, but not public availability claims."
+  },
+  "human_approval": {
+    "status": "pending",
+    "required_before_release": true,
+    "review_refs": [
+      {
+        "product": "kano-agent-backlog-skill",
+        "doc_id": "release-notes-draft-v0.1.0",
+        "repo_relpath": "_kano/backlog/releases/v0.1.0/notes-drafts/release-notes.md"
+      }
+    ],
+    "reason": "Human approval has not passed for public-facing release claims."
+  },
+  "summary": {
+    "overall_status": "blocked",
+    "decision": "Internal draft readiness evidence may continue; public release claims are blocked.",
+    "reason": "Public docs and publication evidence remain missing and actionable."
+  }
+}

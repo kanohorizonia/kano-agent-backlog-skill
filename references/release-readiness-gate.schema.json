@@ -1,0 +1,231 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentskill-backlog.kanohorizonia.com/references/release-readiness-gate.schema.json",
+  "title": "KOB Release Readiness Gate",
+  "type": "object",
+  "required": [
+    "schema",
+    "gate_id",
+    "release_id",
+    "version_label",
+    "product",
+    "source_refs",
+    "category_results",
+    "missing_evidence",
+    "scope_adjustments",
+    "claim_guard",
+    "human_approval",
+    "summary"
+  ],
+  "properties": {
+    "schema": { "const": "kob.release.readiness_gate.v1" },
+    "gate_id": { "$ref": "#/$defs/non_empty_string" },
+    "release_id": { "$ref": "#/$defs/non_empty_string" },
+    "version_label": { "$ref": "#/$defs/non_empty_string" },
+    "product": { "$ref": "#/$defs/non_empty_string" },
+    "source_refs": { "$ref": "#/$defs/source_refs" },
+    "category_results": {
+      "type": "array",
+      "minItems": 8,
+      "items": { "$ref": "#/$defs/category_result" },
+      "allOf": [
+        { "contains": { "type": "object", "required": ["category_id"], "properties": { "category_id": { "const": "included_item_state" } } } },
+        { "contains": { "type": "object", "required": ["category_id"], "properties": { "category_id": { "const": "validation_evidence" } } } },
+        { "contains": { "type": "object", "required": ["category_id"], "properties": { "category_id": { "const": "dogfood_evidence" } } } },
+        { "contains": { "type": "object", "required": ["category_id"], "properties": { "category_id": { "const": "release_notes_evidence" } } } },
+        { "contains": { "type": "object", "required": ["category_id"], "properties": { "category_id": { "const": "public_docs_draft" } } } },
+        { "contains": { "type": "object", "required": ["category_id"], "properties": { "category_id": { "const": "known_limitations" } } } },
+        { "contains": { "type": "object", "required": ["category_id"], "properties": { "category_id": { "const": "unresolved_blockers" } } } },
+        { "contains": { "type": "object", "required": ["category_id"], "properties": { "category_id": { "const": "human_approval" } } } }
+      ]
+    },
+    "missing_evidence": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/missing_evidence" }
+    },
+    "scope_adjustments": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/scope_adjustment" }
+    },
+    "claim_guard": { "$ref": "#/$defs/claim_guard" },
+    "human_approval": { "$ref": "#/$defs/human_approval" },
+    "summary": { "$ref": "#/$defs/gate_summary" }
+  },
+  "$defs": {
+    "non_empty_string": {
+      "type": "string",
+      "minLength": 1
+    },
+    "repo_relpath": {
+      "type": "string",
+      "pattern": "^(?![A-Za-z]:)(?!/)(?!\\\\)(?!.*\\.\\.)([A-Za-z0-9._-]+/)*[A-Za-z0-9._-]+/?$"
+    },
+    "bounded_ref": {
+      "type": "object",
+      "required": ["product"],
+      "properties": {
+        "product": { "$ref": "#/$defs/non_empty_string" },
+        "item_id": { "$ref": "#/$defs/non_empty_string" },
+        "uid": { "$ref": "#/$defs/non_empty_string" },
+        "commit_sha": { "type": "string", "pattern": "^[0-9a-fA-F]{7,40}$" },
+        "evidence_id": { "$ref": "#/$defs/non_empty_string" },
+        "artifact_id": { "$ref": "#/$defs/non_empty_string" },
+        "doc_id": { "$ref": "#/$defs/non_empty_string" },
+        "release_id": { "$ref": "#/$defs/non_empty_string" },
+        "goal_id": { "$ref": "#/$defs/non_empty_string" },
+        "repo_relpath": { "$ref": "#/$defs/repo_relpath" },
+        "reason": { "$ref": "#/$defs/non_empty_string" }
+      },
+      "anyOf": [
+        { "required": ["item_id"] },
+        { "required": ["uid"] },
+        { "required": ["commit_sha"] },
+        { "required": ["evidence_id"] },
+        { "required": ["artifact_id"] },
+        { "required": ["doc_id"] },
+        { "required": ["release_id"] },
+        { "required": ["goal_id"] },
+        { "required": ["repo_relpath"] }
+      ],
+      "additionalProperties": false
+    },
+    "source_refs": {
+      "type": "object",
+      "required": ["release_record_ref", "workspace_manifest_ref", "evidence_bundle_refs"],
+      "properties": {
+        "release_record_ref": { "$ref": "#/$defs/bounded_ref" },
+        "workspace_manifest_ref": { "$ref": "#/$defs/bounded_ref" },
+        "evidence_bundle_refs": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/bounded_ref" }
+        },
+        "validation_refs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/bounded_ref" }
+        },
+        "dogfood_refs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/bounded_ref" }
+        },
+        "public_docs_refs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/bounded_ref" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "category_result": {
+      "type": "object",
+      "required": ["category_id", "status", "summary", "source_refs", "action_items"],
+      "properties": {
+        "category_id": {
+          "enum": [
+            "included_item_state",
+            "validation_evidence",
+            "dogfood_evidence",
+            "release_notes_evidence",
+            "public_docs_draft",
+            "known_limitations",
+            "unresolved_blockers",
+            "human_approval"
+          ]
+        },
+        "status": { "enum": ["pass", "fail", "blocked", "unknown"] },
+        "summary": { "$ref": "#/$defs/non_empty_string" },
+        "source_refs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/bounded_ref" }
+        },
+        "missing_evidence_refs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/non_empty_string" }
+        },
+        "action_items": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/action_item" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "action_item": {
+      "type": "object",
+      "required": ["summary", "owner_or_follow_up"],
+      "properties": {
+        "summary": { "$ref": "#/$defs/non_empty_string" },
+        "owner_or_follow_up": { "$ref": "#/$defs/non_empty_string" }
+      },
+      "additionalProperties": false
+    },
+    "missing_evidence": {
+      "type": "object",
+      "required": ["evidence_id", "claim", "required_source", "reason", "owner_or_follow_up"],
+      "properties": {
+        "evidence_id": { "$ref": "#/$defs/non_empty_string" },
+        "claim": { "$ref": "#/$defs/non_empty_string" },
+        "required_source": { "$ref": "#/$defs/non_empty_string" },
+        "reason": { "$ref": "#/$defs/non_empty_string" },
+        "owner_or_follow_up": { "$ref": "#/$defs/non_empty_string" }
+      },
+      "additionalProperties": false
+    },
+    "scope_adjustment": {
+      "type": "object",
+      "required": ["adjustment_id", "category_id", "decision", "rationale", "source_refs"],
+      "properties": {
+        "adjustment_id": { "$ref": "#/$defs/non_empty_string" },
+        "category_id": {
+          "enum": ["dogfood_evidence", "validation_evidence", "public_docs_draft", "known_limitations", "unresolved_blockers"]
+        },
+        "decision": { "enum": ["defer", "cut_scope", "keep_scope"] },
+        "rationale": { "$ref": "#/$defs/non_empty_string" },
+        "source_refs": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/bounded_ref" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "claim_guard": {
+      "type": "object",
+      "required": [
+        "unverified_release_claims_allowed",
+        "released_state_requires_all_blockers_resolved",
+        "public_availability_requires_publication_evidence"
+      ],
+      "properties": {
+        "unverified_release_claims_allowed": { "const": false },
+        "released_state_requires_all_blockers_resolved": { "const": true },
+        "public_availability_requires_publication_evidence": { "const": true },
+        "reason": { "$ref": "#/$defs/non_empty_string" }
+      },
+      "additionalProperties": false
+    },
+    "human_approval": {
+      "type": "object",
+      "required": ["status", "required_before_release", "review_refs"],
+      "properties": {
+        "status": { "enum": ["pending", "approved", "rejected"] },
+        "required_before_release": { "const": true },
+        "review_refs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/bounded_ref" }
+        },
+        "reason": { "$ref": "#/$defs/non_empty_string" }
+      },
+      "additionalProperties": false
+    },
+    "gate_summary": {
+      "type": "object",
+      "required": ["overall_status", "decision", "reason"],
+      "properties": {
+        "overall_status": { "enum": ["pass", "fail", "blocked", "unknown"] },
+        "decision": { "$ref": "#/$defs/non_empty_string" },
+        "reason": { "$ref": "#/$defs/non_empty_string" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

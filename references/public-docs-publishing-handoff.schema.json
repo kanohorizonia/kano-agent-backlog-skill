@@ -1,0 +1,243 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentskill-backlog.kanohorizonia.com/references/public-docs-publishing-handoff.schema.json",
+  "title": "KOB Public Docs Publishing Handoff",
+  "type": "object",
+  "required": [
+    "schema",
+    "handoff_id",
+    "release_id",
+    "version_label",
+    "product",
+    "source_evidence_bundle_ref",
+    "draft_outputs",
+    "approval_flow",
+    "destination_surfaces",
+    "publication_refs",
+    "no_overclaim_rules",
+    "rollback_follow_up",
+    "known_limitations",
+    "publication_boundary",
+    "summary"
+  ],
+  "properties": {
+    "schema": { "const": "kob.release.public_docs_handoff.v1" },
+    "handoff_id": { "$ref": "#/$defs/non_empty_string" },
+    "release_id": { "$ref": "#/$defs/non_empty_string" },
+    "version_label": { "$ref": "#/$defs/non_empty_string" },
+    "product": { "$ref": "#/$defs/non_empty_string" },
+    "source_evidence_bundle_ref": { "$ref": "#/$defs/bounded_ref" },
+    "draft_outputs": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/draft_output" }
+    },
+    "approval_flow": { "$ref": "#/$defs/approval_flow" },
+    "destination_surfaces": {
+      "type": "array",
+      "minItems": 6,
+      "items": { "$ref": "#/$defs/destination_surface" },
+      "allOf": [
+        { "contains": { "type": "object", "required": ["surface_id"], "properties": { "surface_id": { "const": "readme" } } } },
+        { "contains": { "type": "object", "required": ["surface_id"], "properties": { "surface_id": { "const": "docs_site" } } } },
+        { "contains": { "type": "object", "required": ["surface_id"], "properties": { "surface_id": { "const": "package_metadata" } } } },
+        { "contains": { "type": "object", "required": ["surface_id"], "properties": { "surface_id": { "const": "marketplace_listing" } } } },
+        { "contains": { "type": "object", "required": ["surface_id"], "properties": { "surface_id": { "const": "official_release_page" } } } },
+        { "contains": { "type": "object", "required": ["surface_id"], "properties": { "surface_id": { "const": "announcement_copy" } } } }
+      ]
+    },
+    "publication_refs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/publication_ref" }
+    },
+    "no_overclaim_rules": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/non_empty_string" }
+    },
+    "rollback_follow_up": { "$ref": "#/$defs/rollback_follow_up" },
+    "known_limitations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/known_limitation" }
+    },
+    "publication_boundary": { "$ref": "#/$defs/publication_boundary" },
+    "summary": { "$ref": "#/$defs/handoff_summary" }
+  },
+  "$defs": {
+    "non_empty_string": {
+      "type": "string",
+      "minLength": 1
+    },
+    "repo_relpath": {
+      "type": "string",
+      "pattern": "^(?![A-Za-z]:)(?!/)(?!\\\\)(?!.*\\.\\.)([A-Za-z0-9._-]+/)*[A-Za-z0-9._-]+/?$"
+    },
+    "bounded_ref": {
+      "type": "object",
+      "required": ["product"],
+      "properties": {
+        "product": { "$ref": "#/$defs/non_empty_string" },
+        "item_id": { "$ref": "#/$defs/non_empty_string" },
+        "uid": { "$ref": "#/$defs/non_empty_string" },
+        "commit_sha": { "type": "string", "pattern": "^[0-9a-fA-F]{7,40}$" },
+        "evidence_id": { "$ref": "#/$defs/non_empty_string" },
+        "artifact_id": { "$ref": "#/$defs/non_empty_string" },
+        "doc_id": { "$ref": "#/$defs/non_empty_string" },
+        "release_id": { "$ref": "#/$defs/non_empty_string" },
+        "repo_relpath": { "$ref": "#/$defs/repo_relpath" },
+        "public_url": { "$ref": "#/$defs/non_empty_string" },
+        "reason": { "$ref": "#/$defs/non_empty_string" }
+      },
+      "anyOf": [
+        { "required": ["item_id"] },
+        { "required": ["uid"] },
+        { "required": ["commit_sha"] },
+        { "required": ["evidence_id"] },
+        { "required": ["artifact_id"] },
+        { "required": ["doc_id"] },
+        { "required": ["release_id"] },
+        { "required": ["repo_relpath"] },
+        { "required": ["public_url"] }
+      ],
+      "additionalProperties": false
+    },
+    "draft_output": {
+      "type": "object",
+      "required": ["doc_id", "surface_id", "repo_relpath", "status", "source_refs"],
+      "properties": {
+        "doc_id": { "$ref": "#/$defs/non_empty_string" },
+        "surface_id": { "$ref": "#/$defs/surface_id" },
+        "repo_relpath": { "$ref": "#/$defs/repo_relpath" },
+        "status": { "enum": ["planned", "draft", "ready_for_review", "approved"] },
+        "source_refs": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/bounded_ref" }
+        },
+        "missing_evidence_refs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/non_empty_string" }
+        },
+        "reason": { "$ref": "#/$defs/non_empty_string" }
+      },
+      "additionalProperties": false
+    },
+    "approval_flow": {
+      "type": "object",
+      "required": ["status", "human_approval_required", "checkpoints"],
+      "properties": {
+        "status": { "enum": ["not_started", "in_review", "approved", "rejected"] },
+        "human_approval_required": { "const": true },
+        "checkpoints": {
+          "type": "array",
+          "minItems": 3,
+          "items": { "$ref": "#/$defs/approval_checkpoint" },
+          "allOf": [
+            { "contains": { "type": "object", "required": ["checkpoint_type"], "properties": { "checkpoint_type": { "const": "source_review" } } } },
+            { "contains": { "type": "object", "required": ["checkpoint_type"], "properties": { "checkpoint_type": { "const": "draft_review" } } } },
+            { "contains": { "type": "object", "required": ["checkpoint_type"], "properties": { "checkpoint_type": { "const": "publication_review" } } } }
+          ]
+        },
+        "reason": { "$ref": "#/$defs/non_empty_string" }
+      },
+      "additionalProperties": false
+    },
+    "approval_checkpoint": {
+      "type": "object",
+      "required": ["checkpoint_id", "checkpoint_type", "status", "reason"],
+      "properties": {
+        "checkpoint_id": { "$ref": "#/$defs/non_empty_string" },
+        "checkpoint_type": { "enum": ["source_review", "draft_review", "publication_review"] },
+        "status": { "enum": ["pending", "passed", "rejected"] },
+        "verification_refs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/bounded_ref" }
+        },
+        "reason": { "$ref": "#/$defs/non_empty_string" }
+      },
+      "additionalProperties": false
+    },
+    "surface_id": {
+      "enum": ["readme", "docs_site", "package_metadata", "marketplace_listing", "official_release_page", "announcement_copy"]
+    },
+    "destination_surface": {
+      "type": "object",
+      "required": ["surface_id", "applicability", "state", "no_overclaim_note"],
+      "properties": {
+        "surface_id": { "$ref": "#/$defs/surface_id" },
+        "applicability": { "enum": ["required", "optional", "not_applicable", "deferred"] },
+        "state": { "enum": ["planned", "draft", "ready_for_review", "approved", "published", "rolled_back", "not_applicable", "deferred"] },
+        "draft_ref": { "$ref": "#/$defs/bounded_ref" },
+        "publication_ref": { "$ref": "#/$defs/bounded_ref" },
+        "no_overclaim_note": { "$ref": "#/$defs/non_empty_string" },
+        "reason": { "$ref": "#/$defs/non_empty_string" }
+      },
+      "additionalProperties": false
+    },
+    "publication_ref": {
+      "type": "object",
+      "required": ["surface_id", "publication_state", "evidence_ref", "reason"],
+      "properties": {
+        "surface_id": { "$ref": "#/$defs/surface_id" },
+        "publication_state": { "enum": ["planned", "draft", "approved", "published", "rolled_back"] },
+        "evidence_ref": { "$ref": "#/$defs/bounded_ref" },
+        "public_ref": { "$ref": "#/$defs/bounded_ref" },
+        "reason": { "$ref": "#/$defs/non_empty_string" }
+      },
+      "additionalProperties": false
+    },
+    "rollback_follow_up": {
+      "type": "object",
+      "required": ["rollback_triggers", "follow_up_policy"],
+      "properties": {
+        "rollback_triggers": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/non_empty_string" }
+        },
+        "follow_up_policy": { "$ref": "#/$defs/non_empty_string" },
+        "follow_up_refs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/bounded_ref" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "known_limitation": {
+      "type": "object",
+      "required": ["summary", "source_refs", "public_copy_instruction"],
+      "properties": {
+        "summary": { "$ref": "#/$defs/non_empty_string" },
+        "source_refs": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/bounded_ref" }
+        },
+        "public_copy_instruction": { "$ref": "#/$defs/non_empty_string" }
+      },
+      "additionalProperties": false
+    },
+    "publication_boundary": {
+      "type": "object",
+      "required": ["live_publication_claimed", "public_availability_claimed", "requires_human_approval"],
+      "properties": {
+        "live_publication_claimed": { "const": false },
+        "public_availability_claimed": { "const": false },
+        "requires_human_approval": { "const": true },
+        "reason": { "$ref": "#/$defs/non_empty_string" }
+      },
+      "additionalProperties": false
+    },
+    "handoff_summary": {
+      "type": "object",
+      "required": ["overall_status", "decision", "reason"],
+      "properties": {
+        "overall_status": { "enum": ["planned", "in_review", "approved", "blocked", "published", "rolled_back"] },
+        "decision": { "$ref": "#/$defs/non_empty_string" },
+        "reason": { "$ref": "#/$defs/non_empty_string" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

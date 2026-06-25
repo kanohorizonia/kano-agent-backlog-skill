@@ -1244,10 +1244,13 @@ R"HTML(    function typeIcon(type) {
       const reason = bundle?.review_reason || `Queued for ${lane || 'review'} review.`;
       const reasonCode = bundle?.reason_code ? `<code>${esc(bundle.reason_code)}</code> ` : '';
       const decision = bundle?.suggested_human_decision ? `<div class="muted">Suggested decision: ${esc(bundle.suggested_human_decision)}</div>` : '';
+      const draft = bundle?.review_draft || {};
+      const draftText = draft.exists ? (draft.rationale || '') : '';
+      const draftStatus = draft.exists ? `Draft saved for ${esc(draft.actor_alias || state.reviewActorAlias)}.` : 'No saved draft.';
       const actions = (bundle?.actions || []).map((action) =>
         `<button class="btn review-action" data-review-action="submit" data-human-decision="${escAttr(action.human_decision || action.id || '')}" data-target-state="${escAttr(action.target_state || '')}" data-requires-confirmation="${action.requires_confirmation ? 'true' : 'false'}">${esc(action.label || action.id || 'Submit decision')}</button>`
       ).join(' ');
-      return `<div class="card" data-review-card="true" data-review-lane="${escAttr(lane || '')}" data-review-reason-code="${escAttr(bundle?.reason_code || '')}" data-review-suggested-decision="${escAttr(bundle?.suggested_decision || bundle?.suggested_human_decision || '')}" data-review-source-detector="${escAttr(bundle?.diagnostic_status || 'backboard-review-inbox')}" ${selectableItemAttrs(item)}>${renderItemCardSummary(item)}<div class="muted review-reason"><strong>Why this needs review:</strong> ${reasonCode}${esc(reason)}${decision}</div><label class="muted" style="display:block;margin-top:8px;">Draft review note<textarea data-review-draft-note="true" rows="3" style="width:100%;box-sizing:border-box;margin-top:4px;" placeholder="Write rationale or instructions before submitting"></textarea></label><div class="review-actions" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;"><button class="btn" data-review-action="save-draft">Save Draft</button>${actions}</div><div class="muted" data-review-status style="margin-top:6px;"></div></div>`;
+      return `<div class="card" data-review-card="true" data-review-lane="${escAttr(lane || '')}" data-review-reason-code="${escAttr(bundle?.reason_code || '')}" data-review-suggested-decision="${escAttr(bundle?.suggested_decision || bundle?.suggested_human_decision || '')}" data-review-source-detector="${escAttr(bundle?.diagnostic_status || 'backboard-review-inbox')}" data-review-draft-exists="${draft.exists ? 'true' : 'false'}" ${selectableItemAttrs(item)}>${renderItemCardSummary(item)}<div class="muted review-reason"><strong>Why this needs review:</strong> ${reasonCode}${esc(reason)}${decision}</div><label class="muted" style="display:block;margin-top:8px;">Draft review note<textarea data-review-draft-note="true" rows="3" style="width:100%;box-sizing:border-box;margin-top:4px;" placeholder="Write rationale or instructions before submitting">${esc(draftText)}</textarea></label><div class="muted" data-review-draft-state="true" style="margin-top:4px;">${draftStatus}</div><div class="review-actions" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;"><button class="btn" data-review-action="save-draft">Save Draft</button><button class="btn" data-review-action="discard-draft">Discard Draft</button>${actions}</div><div class="muted" data-review-status style="margin-top:6px;"></div></div>`;
     }
 
     function reviewPayloadFromCard(card, button, confirmed = false) {
@@ -1285,6 +1288,19 @@ R"HTML(    function typeIcon(type) {
             if (button.getAttribute('data-review-action') === 'save-draft') {
               await postJson('/api/review/decision/draft', reviewPayloadFromCard(card, null));
               setReviewStatus(card, 'Draft saved.');
+              card.setAttribute('data-review-draft-exists', 'true');
+              const draftState = card.querySelector('[data-review-draft-state]');
+              if (draftState) draftState.textContent = `Draft saved for ${state.reviewActorAlias}.`;
+              return;
+            }
+            if (button.getAttribute('data-review-action') === 'discard-draft') {
+              await postJson('/api/review/decision/draft/discard', reviewPayloadFromCard(card, null));
+              const note = card.querySelector('[data-review-draft-note]');
+              if (note) note.value = '';
+              card.setAttribute('data-review-draft-exists', 'false');
+              const draftState = card.querySelector('[data-review-draft-state]');
+              if (draftState) draftState.textContent = 'No saved draft.';
+              setReviewStatus(card, 'Draft discarded.');
               return;
             }
             const needsConfirmation = button.getAttribute('data-requires-confirmation') === 'true';

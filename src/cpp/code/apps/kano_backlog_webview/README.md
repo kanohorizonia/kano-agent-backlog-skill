@@ -25,6 +25,7 @@ Design contracts:
   - `GET /api/kanban?product=all|<name>[&products=a,b][&q=...][&state=...][&type=...][&limit=...]`
   - `GET /api/refresh[?product=all|<name>][&products=a,b]`
   - `POST /api/review/decision/draft`
+  - `POST /api/review/decision/draft/discard`
   - `POST /api/review/decision/submit`
 - Server-rendered partials:
   - `GET /partials/tree?...`

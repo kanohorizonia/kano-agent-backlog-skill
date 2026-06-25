@@ -108,5 +108,19 @@
       "public_url": "https://example.invalid/kano-agent-backlog-skill/releases/v0.2.0-draft",
       "reason": "Placeholder URL shape only, not a live public page."
     }
+  ],
+  "readiness_gate_refs": [
+    {
+      "product": "kano-agent-backlog-skill",
+      "artifact_id": "release-readiness-gate-v0-2-0",
+      "reason": "KOB-TSK-0092 readiness gate report for release state and evidence review."
+    }
+  ],
+  "public_docs_handoff_refs": [
+    {
+      "product": "kano-agent-backlog-skill",
+      "artifact_id": "public-docs-publishing-handoff-v0-2-0",
+      "reason": "KOB-TSK-0093 handoff report for public docs approval and publication refs."
+    }
   ]
 }

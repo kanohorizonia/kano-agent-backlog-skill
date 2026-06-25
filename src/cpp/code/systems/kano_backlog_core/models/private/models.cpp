@@ -28,6 +28,7 @@ std::string normalize_token(std::string value) {
 
 std::string to_string(ItemType type) {
     switch (type) {
+        case ItemType::Initiative: return "Initiative";
         case ItemType::Epic: return "Epic";
         case ItemType::Feature: return "Feature";
         case ItemType::UserStory: return "UserStory";
@@ -40,6 +41,7 @@ std::string to_string(ItemType type) {
 
 std::optional<ItemType> parse_item_type(const std::string& str) {
     const std::string normalized = normalize_token(str);
+    if (normalized == "initiative") return ItemType::Initiative;
     if (normalized == "epic") return ItemType::Epic;
     if (normalized == "feature") return ItemType::Feature;
     if (normalized == "userstory") return ItemType::UserStory;

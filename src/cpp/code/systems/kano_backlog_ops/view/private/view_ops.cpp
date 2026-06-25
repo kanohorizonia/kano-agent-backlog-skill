@@ -56,12 +56,13 @@ std::string filename_for_group(const std::string& group) {
 
 int type_rank(ItemType type) {
     switch (type) {
-        case ItemType::Epic: return 0;
-        case ItemType::Feature: return 1;
-        case ItemType::UserStory: return 2;
-        case ItemType::Task: return 3;
-        case ItemType::Bug: return 4;
-        case ItemType::Issue: return 5;
+        case ItemType::Initiative: return 0;
+        case ItemType::Epic: return 1;
+        case ItemType::Feature: return 2;
+        case ItemType::UserStory: return 3;
+        case ItemType::Task: return 4;
+        case ItemType::Bug: return 5;
+        case ItemType::Issue: return 6;
     }
     return 99;
 }

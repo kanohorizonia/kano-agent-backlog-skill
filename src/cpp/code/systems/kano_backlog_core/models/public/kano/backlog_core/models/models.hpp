@@ -10,6 +10,7 @@
 namespace kano::backlog_core {
 
 enum class ItemType {
+    Initiative,
     Epic,
     Feature,
     UserStory,

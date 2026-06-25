@@ -112,7 +112,8 @@ std::optional<std::pair<ItemType, int>> parse_display_id_type_and_number(const s
     }
 
     std::optional<ItemType> type;
-    if (type_code == "EPIC") type = ItemType::Epic;
+    if (type_code == "INIT") type = ItemType::Initiative;
+    else if (type_code == "EPIC") type = ItemType::Epic;
     else if (type_code == "FTR") type = ItemType::Feature;
     else if (type_code == "USR") type = ItemType::UserStory;
     else if (type_code == "TSK") type = ItemType::Task;
@@ -127,6 +128,7 @@ std::optional<std::pair<ItemType, int>> parse_display_id_type_and_number(const s
 
 std::string item_type_directory(ItemType type) {
     switch (type) {
+        case ItemType::Initiative: return "initiative";
         case ItemType::Epic: return "epic";
         case ItemType::Feature: return "feature";
         case ItemType::UserStory: return "userstory";
@@ -393,6 +395,7 @@ BacklogItem CanonicalStore::create(const std::string& prefix, ItemType type, con
     std::string abbrev;
     std::string type_dir;
     switch(type) {
+        case ItemType::Initiative: abbrev = "INIT"; type_dir = "initiative"; break;
         case ItemType::Epic: abbrev = "EPIC"; type_dir = "epic"; break;
         case ItemType::Feature: abbrev = "FTR"; type_dir = "feature"; break;
         case ItemType::UserStory: abbrev = "USR"; type_dir = "userstory"; break;
@@ -450,6 +453,7 @@ std::vector<std::filesystem::path> CanonicalStore::list_items(std::optional<Item
     if (type) {
         std::string type_dir;
         switch(*type) {
+            case ItemType::Initiative: type_dir = "initiative"; break;
             case ItemType::Epic: type_dir = "epic"; break;
             case ItemType::Feature: type_dir = "feature"; break;
             case ItemType::UserStory: type_dir = "userstory"; break;

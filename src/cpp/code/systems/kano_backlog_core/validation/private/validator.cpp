@@ -13,6 +13,7 @@ std::pair<bool, std::vector<std::string>> Validator::is_ready(const BacklogItem&
     };
 
     switch (item.type) {
+        case ItemType::Initiative:
         case ItemType::Epic:
             check_field(item.context, "Context");
             check_field(item.goal, "Goal");
@@ -48,10 +49,10 @@ std::vector<std::string> Validator::validate_schema(const BacklogItem& item) {
     if (item.updated.empty()) errors.push_back("Missing required field: updated");
 
     // 2. Validate ID format
-    // Pattern: ^[A-Z][A-Z0-9]{1,15}-(EPIC|FTR|USR|TSK|BUG|ISS)-\d{4}$
-    static const std::regex id_regex(R"(^[A-Z][A-Z0-9]{1,15}-(EPIC|FTR|USR|TSK|BUG|ISS)-\d{4}$)");
+    // Pattern: ^[A-Z][A-Z0-9]{1,15}-(INIT|EPIC|FTR|USR|TSK|BUG|ISS)-\d{4}$
+    static const std::regex id_regex(R"(^[A-Z][A-Z0-9]{1,15}-(INIT|EPIC|FTR|USR|TSK|BUG|ISS)-\d{4}$)");
     if (!item.id.empty() && !std::regex_match(item.id, id_regex)) {
-        errors.push_back("Invalid id format: " + item.id + " (expected <PREFIX>-(EPIC|FTR|USR|TSK|BUG|ISS)-<NNNN>)");
+        errors.push_back("Invalid id format: " + item.id + " (expected <PREFIX>-(INIT|EPIC|FTR|USR|TSK|BUG|ISS)-<NNNN>)");
     }
 
     // 3. Validate UID format (strict UUIDv7)

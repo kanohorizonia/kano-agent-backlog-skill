@@ -479,7 +479,7 @@ std::vector<std::filesystem::path> list_item_markdown_paths(const std::filesyste
 }
 
 std::optional<std::string> item_id_from_path(const std::filesystem::path& path) {
-    static const std::regex id_pattern(R"(([A-Z][A-Z0-9]{1,15}-(?:EPIC|FTR|USR|TSK|BUG|ISS)-\d{4}))");
+    static const std::regex id_pattern(R"(([A-Z][A-Z0-9]{1,15}-(?:INIT|EPIC|FTR|USR|TSK|BUG|ISS)-\d{4}))");
     std::smatch match;
     const std::string stem = path.stem().string();
     if (std::regex_search(stem, match, id_pattern)) {
@@ -7493,12 +7493,14 @@ std::optional<int> try_run_meta_ticketing_fast_path(int argc, char** argv) {
     } else {
         const char* guidance =
             "## Ticket type selection\n\n"
+            "- Initiative: independently releasable component, module, or product narrative layer above Epic/Feature.\n"
             "- Epic: multi-release or multi-team milestone spanning multiple Features.\n"
             "- Feature: a new capability that delivers multiple UserStories.\n"
             "- UserStory: a single user-facing outcome that requires multiple Tasks.\n"
             "- Task: a single focused implementation or doc change (typically one session).\n"
             "- Issue: a pre-triage unclear problem, blocker risk, or cross-cutting concern before classification.\n"
-            "- Example: \"End-to-end embedding pipeline\" = Epic; \"Pluggable vector backend\" = Feature; \"MVP chunking pipeline\" = UserStory; \"Implement tokenizer adapter\" = Task.\n";
+            "- Product Line/Portfolio membership above Initiative is separate catalog work, not an item type.\n"
+            "- Example: \"Asset platform\" = Initiative; \"End-to-end embedding pipeline\" = Epic; \"Pluggable vector backend\" = Feature; \"MVP chunking pipeline\" = UserStory; \"Implement tokenizer adapter\" = Task.\n";
 
         std::string updated = content;
         while (!updated.empty() && std::isspace(static_cast<unsigned char>(updated.back()))) {
@@ -8254,7 +8256,7 @@ int main(int InArgc, char* InArgv[]) {
             auto* createCmd = workitemCmd->add_subcommand("create", "Create a new work item");
             std::string type_str, title, agent, parent, owner, reviewer;
             auto duplicate_admission = std::make_shared<DuplicateAdmissionEvidence>();
-            createCmd->add_option("-t,--type", type_str, "Item type (epic, feature, userstory, task, bug, issue)")->required();
+            createCmd->add_option("-t,--type", type_str, "Item type (initiative, epic, feature, userstory, task, bug, issue)")->required();
             createCmd->add_option("--title", title, "Item title")->required();
             createCmd->add_option("--agent", agent, "Agent ID")->required();
             createCmd->add_option("--parent", parent, "Parent item ID");
@@ -9137,7 +9139,7 @@ int main(int InArgc, char* InArgv[]) {
                 std::string filter_state_str;
             };
             auto state = std::make_shared<ListCommandState>();
-            listCmd->add_option("--type", state->filter_type_str, "Filter by type (epic, feature, userstory, task, bug, issue)");
+            listCmd->add_option("--type", state->filter_type_str, "Filter by type (initiative, epic, feature, userstory, task, bug, issue)");
             listCmd->add_option("--state", state->filter_state_str, "Filter by state");
             listCmd->callback([&, state]() {
                 auto ctx = resolve_ctx();
@@ -20578,12 +20580,19 @@ int main(int InArgc, char* InArgv[]) {
                         for (auto& item : done_items) {
                             by_type[item.type].push_back(&item);
                         }
-                        const char* type_names[] = {"Epic", "Feature", "UserStory", "Task", "Bug", "Issue"};
-                        for (int t = 0; t < 6; ++t) {
-                            ItemType type = static_cast<ItemType>(t);
+                        const std::vector<ItemType> type_order = {
+                            ItemType::Initiative,
+                            ItemType::Epic,
+                            ItemType::Feature,
+                            ItemType::UserStory,
+                            ItemType::Task,
+                            ItemType::Bug,
+                            ItemType::Issue,
+                        };
+                        for (const auto type : type_order) {
                             auto it = by_type.find(type);
                             if (it == by_type.end()) continue;
-                            out << "### " << type_names[t] << "s\n\n";
+                            out << "### " << kano::backlog_core::to_string(type) << "s\n\n";
                             for (auto* item : it->second) {
                                 out << "- " << item->id << " " << item->title << " (" << kano::backlog_core::to_string(item->state) << ")\n";
                             }
@@ -20834,7 +20843,7 @@ int main(int InArgc, char* InArgv[]) {
                     std::vector<std::tuple<std::string, std::string, std::string>> trivial;
                     std::vector<std::tuple<std::string, std::string, std::string, std::string>> with_tickets;
 
-                    std::regex ticket_pattern("KABSD-(FTR|TSK|BUG|ISS|USR|EPC)-\\d+", std::regex_constants::icase);
+                    std::regex ticket_pattern("KABSD-(INIT|EPIC|FTR|TSK|BUG|ISS|USR|EPC)-\\d+", std::regex_constants::icase);
                     std::regex trivial_patterns[] = {
                         std::regex("^(docs|chore|style|typo|format):", std::regex_constants::icase),
                         std::regex("^Merge ", std::regex_constants::icase),
@@ -20972,7 +20981,7 @@ int main(int InArgc, char* InArgv[]) {
                         _pclose(files_pipe);
                     }
 
-                    std::regex ticket_pattern("KABSD-(FTR|TSK|BUG|ISS|USR|EPC)-\\d+", std::regex_constants::icase);
+                    std::regex ticket_pattern("KABSD-(INIT|EPIC|FTR|TSK|BUG|ISS|USR|EPC)-\\d+", std::regex_constants::icase);
                     std::smatch m;
                     if (std::regex_search(message, m, ticket_pattern)) {
                         std::cout << "Commit already has ticket: " << m.str(0) << "\n";
@@ -21143,11 +21152,14 @@ int main(int InArgc, char* InArgv[]) {
                 } else {
                     const char* guidance =
                         "## Ticket type selection\n\n"
+                        "- Initiative: independently releasable component, module, or product narrative layer above Epic/Feature.\n"
                         "- Epic: multi-release or multi-team milestone spanning multiple Features.\n"
                         "- Feature: a new capability that delivers multiple UserStories.\n"
                         "- UserStory: a single user-facing outcome that requires multiple Tasks.\n"
                         "- Task: a single focused implementation or doc change (typically one session).\n"
-                        "- Example: \"End-to-end embedding pipeline\" = Epic; \"Pluggable vector backend\" = Feature; \"MVP chunking pipeline\" = UserStory; \"Implement tokenizer adapter\" = Task.\n";
+                        "- Issue: a pre-triage unclear problem, blocker risk, or cross-cutting concern before classification.\n"
+                        "- Product Line/Portfolio membership above Initiative is separate catalog work, not an item type.\n"
+                        "- Example: \"Asset platform\" = Initiative; \"End-to-end embedding pipeline\" = Epic; \"Pluggable vector backend\" = Feature; \"MVP chunking pipeline\" = UserStory; \"Implement tokenizer adapter\" = Task.\n";
 
                     std::string updated = content;
                     while (!updated.empty() && std::isspace(static_cast<unsigned char>(updated.back()))) {

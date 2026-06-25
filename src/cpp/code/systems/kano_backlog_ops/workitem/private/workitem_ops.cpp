@@ -510,6 +510,7 @@ std::vector<std::string> intent_transition_diagnostics(
 
 std::string intent_stack_role_for_type(ItemType type) {
     switch (type) {
+        case ItemType::Initiative: return "initiative";
         case ItemType::Epic: return "epic";
         case ItemType::Feature: return "feature";
         case ItemType::UserStory: return "story";
@@ -708,6 +709,7 @@ CreateItemResult WorkitemOps::create_item(
     // 1. Generate ID and UID
     std::string type_code;
     switch (type) {
+        case ItemType::Initiative: type_code = "INIT"; break;
         case ItemType::Epic: type_code = "EPIC"; break;
         case ItemType::Feature: type_code = "FTR"; break;
         case ItemType::UserStory: type_code = "USR"; break;

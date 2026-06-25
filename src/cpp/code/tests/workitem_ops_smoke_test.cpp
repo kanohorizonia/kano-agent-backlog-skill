@@ -227,6 +227,22 @@ int main() {
             expect(metadata_only.id == created.id, "metadata-only read should preserve id");
             expect(metadata_only.worklog.empty(), "metadata-only read should not parse body worklog");
 
+            auto initiative_created = create_item_with_admission(
+                index,
+                root,
+                "TST",
+                ItemType::Initiative,
+                "Initiative component smoke",
+                "opencode");
+            expect(initiative_created.id.rfind("TST-INIT-", 0) == 0, "created initiative should use INIT prefix");
+            expect(
+                initiative_created.path.parent_path().parent_path().filename().string() == "initiative",
+                "created initiative should be stored under items/initiative");
+            auto initiative_exact_path = store.find_item_path_by_id(initiative_created.id);
+            expect(initiative_exact_path.has_value(), "initiative exact id lookup should resolve deterministic bucket path");
+            auto initiative_queried = index.query_items(ItemType::Initiative, std::nullopt);
+            expect(!initiative_queried.empty(), "initiative item should appear in index query");
+
             auto issue_created = create_item_with_admission(
                 index,
                 root,

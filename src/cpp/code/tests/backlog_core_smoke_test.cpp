@@ -176,6 +176,31 @@ int main() {
         expect(parse_item_type("issue").value_or(ItemType::Task) == ItemType::Issue, "issue type should parse");
         expect(parse_item_type("Issue").value_or(ItemType::Task) == ItemType::Issue, "Issue type should parse case-insensitively");
 
+        BacklogItem initiative = item;
+        initiative.id = "GT-INIT-0001";
+        initiative.uid = "019cdf6a-0000-7000-8000-000000000003";
+        initiative.type = ItemType::Initiative;
+        initiative.title = "Native Initiative smoke";
+        initiative.context = "Initiative captures an independently releasable component narrative.";
+        initiative.goal = "Validate Initiative as a hard formal item type.";
+        initiative.approach.reset();
+        initiative.acceptance_criteria.reset();
+        initiative.risks.reset();
+        auto initiative_schema_errors = Validator::validate_schema(initiative);
+        expect(initiative_schema_errors.empty(), "initiative item should satisfy schema validation");
+        auto [initiative_ready_ok, initiative_ready_gaps] = Validator::is_ready(initiative);
+        expect(initiative_ready_ok, "initiative item should satisfy the light ready gate");
+        expect(initiative_ready_gaps.empty(), "initiative item should not need task ready fields");
+        expect(to_string(ItemType::Initiative) == "Initiative", "initiative type should stringify");
+        expect(parse_item_type("initiative").value_or(ItemType::Task) == ItemType::Initiative, "initiative type should parse");
+        expect(parse_item_type("Initiative").value_or(ItemType::Task) == ItemType::Initiative, "Initiative type should parse case-insensitively");
+
+        BacklogItem incomplete_initiative = initiative;
+        incomplete_initiative.goal.reset();
+        auto [incomplete_initiative_ready, incomplete_initiative_gaps] = Validator::is_ready(incomplete_initiative);
+        expect(!incomplete_initiative_ready, "initiative missing Goal should fail ready gate");
+        expect(!incomplete_initiative_gaps.empty(), "initiative missing Goal should report a gap");
+
         const auto config_root = std::filesystem::temp_directory_path() / "kano-backlog-core-config-defaults-smoke";
         std::filesystem::remove_all(config_root);
         write_text(

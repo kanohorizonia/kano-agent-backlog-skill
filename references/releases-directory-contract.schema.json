@@ -1,0 +1,401 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentskill-backlog.kanohorizonia.com/references/releases-directory-contract.schema.json",
+  "title": "KOB Release Workspace Manifest",
+  "type": "object",
+  "required": [
+    "schema",
+    "workspace_root",
+    "release_id",
+    "version_label",
+    "product",
+    "lifecycle_state",
+    "summary",
+    "release_record_refs",
+    "workspace_entries",
+    "goals",
+    "included_items",
+    "deferred_items",
+    "evidence_refs",
+    "source_artifact_refs",
+    "notes_draft_refs",
+    "public_output_refs",
+    "human_verification"
+  ],
+  "properties": {
+    "schema": { "const": "kob.release.workspace.v1" },
+    "workspace_root": {
+      "type": "string",
+      "pattern": "^_kano/backlog/releases/[^/]+$"
+    },
+    "release_id": { "$ref": "#/$defs/non_empty_string" },
+    "version_label": {
+      "type": "string",
+      "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+(?:[A-Za-z0-9._-]+)?$"
+    },
+    "product": { "$ref": "#/$defs/non_empty_string" },
+    "lifecycle_state": {
+      "enum": ["planned", "assembling", "validating", "released", "archived"]
+    },
+    "summary": { "$ref": "#/$defs/non_empty_string" },
+    "release_record_refs": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/bounded_ref" }
+    },
+    "workspace_entries": {
+      "type": "object",
+      "required": [
+        "metadata_file",
+        "goals_file",
+        "included_items_file",
+        "deferred_items_file",
+        "evidence_dir",
+        "source_artifacts_dir",
+        "notes_drafts_dir",
+        "public_output_dir",
+        "verification_dir"
+      ],
+      "properties": {
+        "metadata_file": { "$ref": "#/$defs/metadata_file_entry" },
+        "goals_file": { "$ref": "#/$defs/goals_file_entry" },
+        "included_items_file": { "$ref": "#/$defs/included_items_file_entry" },
+        "deferred_items_file": { "$ref": "#/$defs/deferred_items_file_entry" },
+        "evidence_dir": { "$ref": "#/$defs/evidence_dir_entry" },
+        "source_artifacts_dir": { "$ref": "#/$defs/source_artifacts_dir_entry" },
+        "notes_drafts_dir": { "$ref": "#/$defs/notes_drafts_dir_entry" },
+        "public_output_dir": { "$ref": "#/$defs/public_output_dir_entry" },
+        "verification_dir": { "$ref": "#/$defs/verification_dir_entry" }
+      },
+      "additionalProperties": false
+    },
+    "goals": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/goal" }
+    },
+    "included_items": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/item_ref" }
+    },
+    "deferred_items": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/deferred_item" }
+    },
+    "evidence_refs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/evidence_ref" }
+    },
+    "source_artifact_refs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/source_artifact_ref" }
+    },
+    "notes_draft_refs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/draft_doc_ref" }
+    },
+    "public_output_refs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/public_output_ref" }
+    },
+    "human_verification": { "$ref": "#/$defs/human_verification" }
+  },
+  "$defs": {
+    "non_empty_string": {
+      "type": "string",
+      "minLength": 1
+    },
+    "repo_relpath": {
+      "type": "string",
+      "pattern": "^(?![A-Za-z]:)(?!/)(?!\\\\)(?!.*\\.\\.)([A-Za-z0-9._-]+/)*[A-Za-z0-9._-]+/?$"
+    },
+    "bounded_ref": {
+      "type": "object",
+      "required": ["product"],
+      "properties": {
+        "product": { "$ref": "#/$defs/non_empty_string" },
+        "item_id": { "$ref": "#/$defs/non_empty_string" },
+        "uid": { "$ref": "#/$defs/non_empty_string" },
+        "topic_id": { "$ref": "#/$defs/non_empty_string" },
+        "adr_id": { "$ref": "#/$defs/non_empty_string" },
+        "evidence_id": { "$ref": "#/$defs/non_empty_string" },
+        "artifact_id": { "$ref": "#/$defs/non_empty_string" },
+        "doc_id": { "$ref": "#/$defs/non_empty_string" },
+        "release_id": { "$ref": "#/$defs/non_empty_string" },
+        "goal_id": { "$ref": "#/$defs/non_empty_string" },
+        "repo_relpath": { "$ref": "#/$defs/repo_relpath" },
+        "reason": { "$ref": "#/$defs/non_empty_string" }
+      },
+      "anyOf": [
+        { "required": ["item_id"] },
+        { "required": ["uid"] },
+        { "required": ["topic_id"] },
+        { "required": ["adr_id"] },
+        { "required": ["evidence_id"] },
+        { "required": ["artifact_id"] },
+        { "required": ["doc_id"] },
+        { "required": ["release_id"] },
+        { "required": ["goal_id"] },
+        { "required": ["repo_relpath"] }
+      ],
+      "additionalProperties": false
+    },
+    "goal": {
+      "type": "object",
+      "required": ["goal_id", "summary"],
+      "properties": {
+        "goal_id": { "$ref": "#/$defs/non_empty_string" },
+        "summary": { "$ref": "#/$defs/non_empty_string" },
+        "ledger_goal_refs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/bounded_ref" }
+        },
+        "linked_refs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/bounded_ref" }
+        },
+        "reason": { "$ref": "#/$defs/non_empty_string" }
+      },
+      "additionalProperties": false
+    },
+    "item_ref": {
+      "type": "object",
+      "required": ["product", "item_id"],
+      "properties": {
+        "product": { "$ref": "#/$defs/non_empty_string" },
+        "item_id": { "$ref": "#/$defs/non_empty_string" },
+        "uid": { "$ref": "#/$defs/non_empty_string" },
+        "reason": { "$ref": "#/$defs/non_empty_string" }
+      },
+      "additionalProperties": false
+    },
+    "deferred_item": {
+      "type": "object",
+      "required": ["product", "item_id", "reason"],
+      "properties": {
+        "product": { "$ref": "#/$defs/non_empty_string" },
+        "item_id": { "$ref": "#/$defs/non_empty_string" },
+        "uid": { "$ref": "#/$defs/non_empty_string" },
+        "reason": { "$ref": "#/$defs/non_empty_string" }
+      },
+      "additionalProperties": false
+    },
+    "workspace_entry": {
+      "type": "object",
+      "required": ["entry_kind", "repo_relpath"],
+      "properties": {
+        "entry_kind": { "enum": ["file", "directory"] },
+        "repo_relpath": { "$ref": "#/$defs/repo_relpath" }
+      },
+      "additionalProperties": false
+    },
+    "metadata_file_entry": {
+      "allOf": [
+        { "$ref": "#/$defs/workspace_entry" },
+        {
+          "properties": {
+            "entry_kind": { "const": "file" },
+            "repo_relpath": {
+              "pattern": "^_kano/backlog/releases/[^/]+/release\\.json$"
+            }
+          }
+        }
+      ]
+    },
+    "goals_file_entry": {
+      "allOf": [
+        { "$ref": "#/$defs/workspace_entry" },
+        {
+          "properties": {
+            "entry_kind": { "const": "file" },
+            "repo_relpath": {
+              "pattern": "^_kano/backlog/releases/[^/]+/goals\\.md$"
+            }
+          }
+        }
+      ]
+    },
+    "included_items_file_entry": {
+      "allOf": [
+        { "$ref": "#/$defs/workspace_entry" },
+        {
+          "properties": {
+            "entry_kind": { "const": "file" },
+            "repo_relpath": {
+              "pattern": "^_kano/backlog/releases/[^/]+/included-items\\.md$"
+            }
+          }
+        }
+      ]
+    },
+    "deferred_items_file_entry": {
+      "allOf": [
+        { "$ref": "#/$defs/workspace_entry" },
+        {
+          "properties": {
+            "entry_kind": { "const": "file" },
+            "repo_relpath": {
+              "pattern": "^_kano/backlog/releases/[^/]+/deferred-items\\.md$"
+            }
+          }
+        }
+      ]
+    },
+    "evidence_dir_entry": {
+      "allOf": [
+        { "$ref": "#/$defs/workspace_entry" },
+        {
+          "properties": {
+            "entry_kind": { "const": "directory" },
+            "repo_relpath": {
+              "pattern": "^_kano/backlog/releases/[^/]+/evidence/$"
+            }
+          }
+        }
+      ]
+    },
+    "source_artifacts_dir_entry": {
+      "allOf": [
+        { "$ref": "#/$defs/workspace_entry" },
+        {
+          "properties": {
+            "entry_kind": { "const": "directory" },
+            "repo_relpath": {
+              "pattern": "^_kano/backlog/releases/[^/]+/source-artifacts/$"
+            }
+          }
+        }
+      ]
+    },
+    "notes_drafts_dir_entry": {
+      "allOf": [
+        { "$ref": "#/$defs/workspace_entry" },
+        {
+          "properties": {
+            "entry_kind": { "const": "directory" },
+            "repo_relpath": {
+              "pattern": "^_kano/backlog/releases/[^/]+/notes-drafts/$"
+            }
+          }
+        }
+      ]
+    },
+    "public_output_dir_entry": {
+      "allOf": [
+        { "$ref": "#/$defs/workspace_entry" },
+        {
+          "properties": {
+            "entry_kind": { "const": "directory" },
+            "repo_relpath": {
+              "pattern": "^_kano/backlog/releases/[^/]+/public-output/$"
+            }
+          }
+        }
+      ]
+    },
+    "verification_dir_entry": {
+      "allOf": [
+        { "$ref": "#/$defs/workspace_entry" },
+        {
+          "properties": {
+            "entry_kind": { "const": "directory" },
+            "repo_relpath": {
+              "pattern": "^_kano/backlog/releases/[^/]+/verification/$"
+            }
+          }
+        }
+      ]
+    },
+    "evidence_ref": {
+      "allOf": [
+        { "$ref": "#/$defs/bounded_ref" },
+        {
+          "required": ["evidence_id", "repo_relpath"],
+          "properties": {
+            "repo_relpath": {
+              "pattern": "^_kano/backlog/releases/[^/]+/evidence/[A-Za-z0-9._/-]+$"
+            }
+          }
+        }
+      ]
+    },
+    "source_artifact_ref": {
+      "allOf": [
+        { "$ref": "#/$defs/bounded_ref" },
+        {
+          "required": ["artifact_id", "repo_relpath"],
+          "properties": {
+            "repo_relpath": {
+              "pattern": "^_kano/backlog/releases/[^/]+/source-artifacts/[A-Za-z0-9._/-]+$"
+            }
+          }
+        }
+      ]
+    },
+    "draft_doc_ref": {
+      "allOf": [
+        { "$ref": "#/$defs/bounded_ref" },
+        {
+          "required": ["doc_id", "repo_relpath"],
+          "properties": {
+            "repo_relpath": {
+              "pattern": "^_kano/backlog/releases/[^/]+/notes-drafts/[A-Za-z0-9._/-]+$"
+            }
+          }
+        }
+      ]
+    },
+    "public_output_ref": {
+      "type": "object",
+      "required": ["product", "doc_id", "repo_relpath", "publication_state"],
+      "properties": {
+        "product": { "$ref": "#/$defs/non_empty_string" },
+        "doc_id": { "$ref": "#/$defs/non_empty_string" },
+        "artifact_id": { "$ref": "#/$defs/non_empty_string" },
+        "channel_id": { "$ref": "#/$defs/non_empty_string" },
+        "repo_relpath": {
+          "type": "string",
+          "pattern": "^_kano/backlog/releases/[^/]+/public-output/[A-Za-z0-9._/-]+$"
+        },
+        "publication_state": {
+          "enum": ["planned", "draft", "ready_for_review", "approved_for_publication"]
+        },
+        "reason": { "$ref": "#/$defs/non_empty_string" }
+      },
+      "additionalProperties": false
+    },
+    "human_verification": {
+      "type": "object",
+      "required": ["status", "markers"],
+      "properties": {
+        "status": {
+          "enum": ["not_started", "in_review", "verified_internal", "approved_for_publication"]
+        },
+        "markers": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/verification_marker" }
+        },
+        "review_summary": { "$ref": "#/$defs/non_empty_string" }
+      },
+      "additionalProperties": false
+    },
+    "verification_marker": {
+      "type": "object",
+      "required": ["marker_id", "marker_type", "status"],
+      "properties": {
+        "marker_id": { "$ref": "#/$defs/non_empty_string" },
+        "marker_type": {
+          "enum": ["scope_review", "evidence_review", "publication_review"]
+        },
+        "status": { "enum": ["pending", "passed", "rejected"] },
+        "verification_refs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/bounded_ref" }
+        },
+        "reason": { "$ref": "#/$defs/non_empty_string" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

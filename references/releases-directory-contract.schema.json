@@ -26,7 +26,7 @@
     "schema": { "const": "kob.release.workspace.v1" },
     "workspace_root": {
       "type": "string",
-      "pattern": "^_kano/backlog/releases/[^/]+$"
+      "pattern": "^_kano/backlog/releases/(?!\\.\\.?$)[A-Za-z0-9._-]+$"
     },
     "release_id": { "$ref": "#/$defs/non_empty_string" },
     "version_label": {
@@ -195,7 +195,7 @@
           "properties": {
             "entry_kind": { "const": "file" },
             "repo_relpath": {
-              "pattern": "^_kano/backlog/releases/[^/]+/release\\.json$"
+              "pattern": "^_kano/backlog/releases/(?!\\.\\.?/)[A-Za-z0-9._-]+/release\\.json$"
             }
           }
         }
@@ -208,7 +208,7 @@
           "properties": {
             "entry_kind": { "const": "file" },
             "repo_relpath": {
-              "pattern": "^_kano/backlog/releases/[^/]+/goals\\.md$"
+              "pattern": "^_kano/backlog/releases/(?!\\.\\.?/)[A-Za-z0-9._-]+/goals\\.md$"
             }
           }
         }
@@ -221,7 +221,7 @@
           "properties": {
             "entry_kind": { "const": "file" },
             "repo_relpath": {
-              "pattern": "^_kano/backlog/releases/[^/]+/included-items\\.md$"
+              "pattern": "^_kano/backlog/releases/(?!\\.\\.?/)[A-Za-z0-9._-]+/included-items\\.md$"
             }
           }
         }
@@ -234,7 +234,7 @@
           "properties": {
             "entry_kind": { "const": "file" },
             "repo_relpath": {
-              "pattern": "^_kano/backlog/releases/[^/]+/deferred-items\\.md$"
+              "pattern": "^_kano/backlog/releases/(?!\\.\\.?/)[A-Za-z0-9._-]+/deferred-items\\.md$"
             }
           }
         }
@@ -247,7 +247,7 @@
           "properties": {
             "entry_kind": { "const": "directory" },
             "repo_relpath": {
-              "pattern": "^_kano/backlog/releases/[^/]+/evidence/$"
+              "pattern": "^_kano/backlog/releases/(?!\\.\\.?/)[A-Za-z0-9._-]+/evidence/$"
             }
           }
         }
@@ -260,7 +260,7 @@
           "properties": {
             "entry_kind": { "const": "directory" },
             "repo_relpath": {
-              "pattern": "^_kano/backlog/releases/[^/]+/source-artifacts/$"
+              "pattern": "^_kano/backlog/releases/(?!\\.\\.?/)[A-Za-z0-9._-]+/source-artifacts/$"
             }
           }
         }
@@ -273,7 +273,7 @@
           "properties": {
             "entry_kind": { "const": "directory" },
             "repo_relpath": {
-              "pattern": "^_kano/backlog/releases/[^/]+/notes-drafts/$"
+              "pattern": "^_kano/backlog/releases/(?!\\.\\.?/)[A-Za-z0-9._-]+/notes-drafts/$"
             }
           }
         }
@@ -286,7 +286,7 @@
           "properties": {
             "entry_kind": { "const": "directory" },
             "repo_relpath": {
-              "pattern": "^_kano/backlog/releases/[^/]+/public-output/$"
+              "pattern": "^_kano/backlog/releases/(?!\\.\\.?/)[A-Za-z0-9._-]+/public-output/$"
             }
           }
         }
@@ -299,7 +299,7 @@
           "properties": {
             "entry_kind": { "const": "directory" },
             "repo_relpath": {
-              "pattern": "^_kano/backlog/releases/[^/]+/verification/$"
+              "pattern": "^_kano/backlog/releases/(?!\\.\\.?/)[A-Za-z0-9._-]+/verification/$"
             }
           }
         }
@@ -312,7 +312,7 @@
           "required": ["evidence_id", "repo_relpath"],
           "properties": {
             "repo_relpath": {
-              "pattern": "^_kano/backlog/releases/[^/]+/evidence/[A-Za-z0-9._/-]+$"
+              "pattern": "^_kano/backlog/releases/(?!\\.\\.?/)[A-Za-z0-9._-]+/evidence/(?!.*\\.\\.)([A-Za-z0-9._-]+/)*[A-Za-z0-9._-]+$"
             }
           }
         }
@@ -325,7 +325,7 @@
           "required": ["artifact_id", "repo_relpath"],
           "properties": {
             "repo_relpath": {
-              "pattern": "^_kano/backlog/releases/[^/]+/source-artifacts/[A-Za-z0-9._/-]+$"
+              "pattern": "^_kano/backlog/releases/(?!\\.\\.?/)[A-Za-z0-9._-]+/source-artifacts/(?!.*\\.\\.)([A-Za-z0-9._-]+/)*[A-Za-z0-9._-]+$"
             }
           }
         }
@@ -338,7 +338,7 @@
           "required": ["doc_id", "repo_relpath"],
           "properties": {
             "repo_relpath": {
-              "pattern": "^_kano/backlog/releases/[^/]+/notes-drafts/[A-Za-z0-9._/-]+$"
+              "pattern": "^_kano/backlog/releases/(?!\\.\\.?/)[A-Za-z0-9._-]+/notes-drafts/(?!.*\\.\\.)([A-Za-z0-9._-]+/)*[A-Za-z0-9._-]+$"
             }
           }
         }
@@ -354,7 +354,7 @@
         "channel_id": { "$ref": "#/$defs/non_empty_string" },
         "repo_relpath": {
           "type": "string",
-          "pattern": "^_kano/backlog/releases/[^/]+/public-output/[A-Za-z0-9._/-]+$"
+          "pattern": "^_kano/backlog/releases/(?!\\.\\.?/)[A-Za-z0-9._-]+/public-output/(?!.*\\.\\.)([A-Za-z0-9._-]+/)*[A-Za-z0-9._-]+$"
         },
         "publication_state": {
           "enum": ["planned", "draft", "ready_for_review", "approved_for_publication"]

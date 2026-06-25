@@ -86,3 +86,4 @@ The schema and example fixture live in:
 
 - [releases-directory-contract.schema.json](../../references/releases-directory-contract.schema.json)
 - [releases-directory-contract.fixture.json](../../references/releases-directory-contract.fixture.json)
+- [releases-directory-contract-v0.2.0.fixture.json](../../references/releases-directory-contract-v0.2.0.fixture.json)

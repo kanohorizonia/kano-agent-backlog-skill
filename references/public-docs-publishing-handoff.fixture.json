@@ -1,0 +1,197 @@
+{
+  "schema": "kob.release.public_docs_handoff.v1",
+  "handoff_id": "public-docs-publishing-handoff-v0-1-0",
+  "release_id": "kano-agent-backlog-skill-v0.1.0-draft",
+  "version_label": "v0.1.0",
+  "product": "kano-agent-backlog-skill",
+  "source_evidence_bundle_ref": {
+    "product": "kano-agent-backlog-skill",
+    "artifact_id": "release-notes-evidence-bundle-v0-1-0",
+    "repo_relpath": "_kano/backlog/releases/v0.1.0/evidence/release-notes-evidence-bundle.json",
+    "reason": "The handoff can draft public copy only from bounded release-notes evidence."
+  },
+  "draft_outputs": [
+    {
+      "doc_id": "public-release-notes-v0.1.0-draft",
+      "surface_id": "official_release_page",
+      "repo_relpath": "_kano/backlog/releases/v0.1.0/public-output/github-release-notes.md",
+      "status": "draft",
+      "source_refs": [
+        {
+          "product": "kano-agent-backlog-skill",
+          "artifact_id": "release-notes-evidence-bundle-v0-1-0",
+          "repo_relpath": "_kano/backlog/releases/v0.1.0/evidence/release-notes-evidence-bundle.json"
+        }
+      ],
+      "missing_evidence_refs": [
+        "missing-public-download-artifacts-v0-1-0"
+      ],
+      "reason": "Draft release notes must omit public download claims until publication evidence exists."
+    },
+    {
+      "doc_id": "public-installation-snippet-v0.1.0-draft",
+      "surface_id": "docs_site",
+      "repo_relpath": "_kano/backlog/releases/v0.1.0/public-output/installation-snippet.md",
+      "status": "planned",
+      "source_refs": [
+        {
+          "product": "kano-agent-backlog-skill",
+          "artifact_id": "release-notes-evidence-bundle-v0-1-0"
+        }
+      ],
+      "missing_evidence_refs": [
+        "missing-public-download-artifacts-v0-1-0"
+      ],
+      "reason": "Installation copy remains planned until artifact refs exist."
+    }
+  ],
+  "approval_flow": {
+    "status": "in_review",
+    "human_approval_required": true,
+    "checkpoints": [
+      {
+        "checkpoint_id": "source-review-v0-1-0",
+        "checkpoint_type": "source_review",
+        "status": "passed",
+        "verification_refs": [
+          {
+            "product": "kano-agent-backlog-skill",
+            "artifact_id": "release-notes-evidence-bundle-v0-1-0",
+            "repo_relpath": "_kano/backlog/releases/v0.1.0/evidence/release-notes-evidence-bundle.json"
+          }
+        ],
+        "reason": "Draft source refs were collected."
+      },
+      {
+        "checkpoint_id": "draft-review-v0-1-0",
+        "checkpoint_type": "draft_review",
+        "status": "pending",
+        "verification_refs": [
+          {
+            "product": "kano-agent-backlog-skill",
+            "doc_id": "public-release-notes-v0.1.0-draft",
+            "repo_relpath": "_kano/backlog/releases/v0.1.0/public-output/github-release-notes.md"
+          }
+        ],
+        "reason": "Human draft review has not passed."
+      },
+      {
+        "checkpoint_id": "publication-review-v0-1-0",
+        "checkpoint_type": "publication_review",
+        "status": "pending",
+        "verification_refs": [],
+        "reason": "No publication refs have been recorded."
+      }
+    ],
+    "reason": "Human approval remains required before any public release claim."
+  },
+  "destination_surfaces": [
+    {
+      "surface_id": "readme",
+      "applicability": "required",
+      "state": "deferred",
+      "no_overclaim_note": "README release claims must wait for public artifact and publication evidence.",
+      "reason": "This fixture does not edit live README content."
+    },
+    {
+      "surface_id": "docs_site",
+      "applicability": "required",
+      "state": "planned",
+      "draft_ref": {
+        "product": "kano-agent-backlog-skill",
+        "doc_id": "public-installation-snippet-v0.1.0-draft",
+        "repo_relpath": "_kano/backlog/releases/v0.1.0/public-output/installation-snippet.md"
+      },
+      "no_overclaim_note": "Docs-site installation copy must not say package channels are live without channel evidence."
+    },
+    {
+      "surface_id": "package_metadata",
+      "applicability": "required",
+      "state": "deferred",
+      "no_overclaim_note": "Package metadata requires channel-specific publication refs before availability claims.",
+      "reason": "Package-manager channels are planned only in this draft."
+    },
+    {
+      "surface_id": "marketplace_listing",
+      "applicability": "optional",
+      "state": "deferred",
+      "no_overclaim_note": "Marketplace/listing text must preserve limitations and publication status.",
+      "reason": "No marketplace publication is part of this draft."
+    },
+    {
+      "surface_id": "official_release_page",
+      "applicability": "required",
+      "state": "draft",
+      "draft_ref": {
+        "product": "kano-agent-backlog-skill",
+        "doc_id": "public-release-notes-v0.1.0-draft",
+        "repo_relpath": "_kano/backlog/releases/v0.1.0/public-output/github-release-notes.md"
+      },
+      "no_overclaim_note": "Official release page copy must omit downloadable artifact claims until artifact evidence exists."
+    },
+    {
+      "surface_id": "announcement_copy",
+      "applicability": "optional",
+      "state": "planned",
+      "no_overclaim_note": "Announcement copy must cite approved release notes and known limitations.",
+      "reason": "Announcement copy is planned only after release notes approval."
+    }
+  ],
+  "publication_refs": [
+    {
+      "surface_id": "official_release_page",
+      "publication_state": "draft",
+      "evidence_ref": {
+        "product": "kano-agent-backlog-skill",
+        "doc_id": "public-release-notes-v0.1.0-draft",
+        "repo_relpath": "_kano/backlog/releases/v0.1.0/public-output/github-release-notes.md"
+      },
+      "reason": "Draft ref only; no public publication is claimed."
+    }
+  ],
+  "no_overclaim_rules": [
+    "Do not claim downloadable artifacts until public artifact refs and integrity metadata exist.",
+    "Do not claim package-manager availability until the specific channel metadata is published and verified.",
+    "Do not turn missing evidence into weaker marketing language.",
+    "Do not remove known limitations from public copy unless newer evidence resolves them.",
+    "Do not treat draft public-output refs as live publication evidence."
+  ],
+  "rollback_follow_up": {
+    "rollback_triggers": [
+      "Published copy claims artifacts that are not present.",
+      "Published copy omits a known limitation that remains true.",
+      "Published copy references a package channel without channel evidence."
+    ],
+    "follow_up_policy": "Record rollback or correction refs in the release workspace and create follow-up work for unresolved publication gaps.",
+    "follow_up_refs": [
+      {
+        "product": "kano-agent-backlog-skill",
+        "item_id": "KOB-TSK-0093",
+        "reason": "Publishing handoff owns follow-up policy for public docs gaps."
+      }
+    ]
+  },
+  "known_limitations": [
+    {
+      "summary": "No live public artifact publication is claimed by this draft handoff.",
+      "source_refs": [
+        {
+          "product": "kano-agent-backlog-skill",
+          "artifact_id": "release-notes-evidence-bundle-v0-1-0"
+        }
+      ],
+      "public_copy_instruction": "Omit public availability or state that publication evidence is pending."
+    }
+  ],
+  "publication_boundary": {
+    "live_publication_claimed": false,
+    "public_availability_claimed": false,
+    "requires_human_approval": true,
+    "reason": "This handoff fixture defines draft movement only and does not publish live public docs."
+  },
+  "summary": {
+    "overall_status": "blocked",
+    "decision": "Draft outputs are allowed; public publication remains blocked pending approval and publication evidence.",
+    "reason": "The required human publication review and artifact publication refs are missing."
+  }
+}

@@ -658,6 +658,7 @@ int main() {
         expect(!draftOne.isMember("error"), "review decision draft save should succeed");
         const auto draftPath = products / "product-alpha" / draftOne["path"].asString();
         expect(std::filesystem::exists(draftPath), "review decision draft should persist to _meta");
+        expect(!draftOne["empty"].asBool(), "non-empty draft should report explicit non-empty state");
         draft["rationale"] = "Edited draft note before submit.";
         auto draftTwo = service.SaveReviewDecisionDraft(draft);
         expect(!draftTwo.isMember("error"), "review decision draft edit should succeed");
@@ -669,6 +670,40 @@ int main() {
                "draft edit should overwrite draft rationale before submit");
         expect(editedDraftText.find("First editable draft note.") == std::string::npos,
                "draft edit should not append stale draft text");
+        const auto submittedDraftOnlyDir = products / "product-alpha" / "_meta" /
+            "review-decisions" / "submitted" / "PRA-TSK-0001";
+        expect(count_regular_files(submittedDraftOnlyDir) == 0,
+               "saving and editing drafts must not create submitted decision records");
+        expect(read_text(products / "product-alpha" / "items" / "task" / "0001" / "PRA-TSK-0001.md").find("Edited draft note before submit.") == std::string::npos,
+               "draft notes must not be written to item worklog before submit");
+
+        auto reviewInboxWithDraft = service.BuildReviewInbox({});
+        bool foundDraftInInbox = false;
+        for (const auto& lane : reviewInboxWithDraft["lane_order"]) {
+            for (const auto& bundle : reviewInboxWithDraft["lanes"][lane.asString()]) {
+                if (bundle["item"]["id"].asString() == "PRA-TSK-0001") {
+                    foundDraftInInbox = foundDraftInInbox ||
+                        (bundle["review_draft"]["exists"].asBool() &&
+                         bundle["review_draft"]["rationale"].asString() == "Edited draft note before submit.");
+                }
+            }
+        }
+        expect(foundDraftInInbox, "review inbox bundle should preserve saved draft across refresh");
+
+        auto discardDraft = service.DiscardReviewDecisionDraft(draft);
+        expect(!discardDraft.isMember("error"), "review decision draft discard should succeed");
+        expect(discardDraft["discarded_existing"].asBool(), "discard should report removed existing draft");
+        expect(!std::filesystem::exists(draftPath), "discard should remove draft file");
+        auto discardMissingDraft = service.DiscardReviewDecisionDraft(draft);
+        expect(!discardMissingDraft.isMember("error"), "discarding missing draft should be non-fatal");
+        expect(!discardMissingDraft["discarded_existing"].asBool(), "missing draft discard should be explicit");
+        draft["rationale"] = "";
+        auto emptyDraft = service.SaveReviewDecisionDraft(draft);
+        expect(!emptyDraft.isMember("error"), "empty review draft save should be non-fatal");
+        expect(emptyDraft["empty"].asBool(), "empty review draft state should be explicit");
+        draft["rationale"] = "Edited draft note before submit.";
+        auto draftAfterDiscard = service.SaveReviewDecisionDraft(draft);
+        expect(!draftAfterDiscard.isMember("error"), "draft should be saveable again after discard");
 
         Json::Value submit = draft;
         submit["human_decision"] = "approve_ready_boundary";

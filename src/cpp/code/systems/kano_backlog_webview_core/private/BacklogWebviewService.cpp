@@ -22,6 +22,8 @@ namespace kano::backlog::webview {
 
 namespace {
 
+constexpr const char* kDefaultReviewActorAlias = "human-reviewer";
+
 std::string Trim(const std::string& value) {
   const auto first = value.find_first_not_of(" \t\r\n");
   if (first == std::string::npos) {
@@ -314,6 +316,8 @@ bool JsonBoolField(const Json::Value& value, const std::string& key) {
   return value.isObject() && value.isMember(key) && value[key].asBool();
 }
 
+bool ReadJsonFile(const std::filesystem::path& path, Json::Value& value);
+
 Json::Value MakeError(const std::string& code, const std::string& message) {
   Json::Value out(Json::objectValue);
   out["error"] = message;
@@ -338,6 +342,67 @@ std::string SafeFileToken(const std::string& value) {
     out.pop_back();
   }
   return out.empty() ? "unknown" : out;
+}
+
+std::filesystem::path ReviewDecisionDraftPath(const std::filesystem::path& productRoot,
+                                             const std::string& itemId,
+                                             const std::string& actorAlias) {
+  return productRoot / "_meta" / "review-decisions" / "drafts" /
+      (SafeFileToken(itemId) + "-" + SafeFileToken(actorAlias) + ".json");
+}
+
+Json::Value MissingReviewDecisionDraft(const std::string& product,
+                                       const std::string& itemId,
+                                       const std::string& actorAlias) {
+  Json::Value draft(Json::objectValue);
+  draft["status"] = "missing";
+  draft["exists"] = false;
+  draft["empty"] = true;
+  draft["product"] = product;
+  draft["item_id"] = itemId;
+  draft["actor_alias"] = actorAlias;
+  draft["rationale"] = "";
+  return draft;
+}
+
+Json::Value LoadReviewDecisionDraft(const std::filesystem::path& productRoot,
+                                    const std::string& product,
+                                    const std::string& itemId,
+                                    const std::string& actorAlias) {
+  auto draftPath = ReviewDecisionDraftPath(productRoot, itemId, actorAlias);
+  if (!std::filesystem::exists(draftPath)) {
+    const auto draftDir = productRoot / "_meta" / "review-decisions" / "drafts";
+    const auto prefix = SafeFileToken(itemId) + "-";
+    std::optional<std::filesystem::path> latestDraft;
+    std::filesystem::file_time_type latestTime{};
+    if (std::filesystem::exists(draftDir)) {
+      for (const auto& entry : std::filesystem::directory_iterator(draftDir)) {
+        if (!entry.is_regular_file()) {
+          continue;
+        }
+        const auto filename = entry.path().filename().string();
+        if (!StartsWith(filename, prefix) || entry.path().extension() != ".json") {
+          continue;
+        }
+        const auto writeTime = entry.last_write_time();
+        if (!latestDraft || writeTime > latestTime) {
+          latestDraft = entry.path();
+          latestTime = writeTime;
+        }
+      }
+    }
+    if (latestDraft) {
+      draftPath = *latestDraft;
+    }
+  }
+  Json::Value draft(Json::objectValue);
+  if (!ReadJsonFile(draftPath, draft) || !draft.isObject()) {
+    return MissingReviewDecisionDraft(product, itemId, actorAlias);
+  }
+  draft["exists"] = true;
+  draft["empty"] = JsonStringField(draft, "rationale").empty();
+  draft["path"] = std::filesystem::relative(draftPath, productRoot).generic_string();
+  return draft;
 }
 
 std::string ReviewTimestampText(std::chrono::system_clock::time_point now) {
@@ -2936,9 +3001,14 @@ Json::Value BacklogWebviewService::BuildReviewInbox(const ItemQueryOptions& opti
                            const std::string& suggestedDecision,
                            const std::string& diagnosticStatus = "deterministic",
                            const std::string& confidence = "high") {
-      response["lanes"][lane].append(MakeReviewQueueBundle(
+      auto queued = MakeReviewQueueBundle(
           bundle, lane, reasonCode, reason, sourceFields, suggestedDecision,
-          diagnosticStatus, confidence));
+          diagnosticStatus, confidence);
+      const auto itemProduct = item["product"].asString();
+      queued["review_draft"] = LoadReviewDecisionDraft(
+          ProductRoot(itemProduct), itemProduct, item["id"].asString(),
+          kDefaultReviewActorAlias);
+      response["lanes"][lane].append(queued);
     };
 
     if (state == "ready") {
@@ -3036,8 +3106,7 @@ Json::Value BacklogWebviewService::SaveReviewDecisionDraft(
     const auto now = std::chrono::system_clock::now();
     const auto nowText = ReviewTimestampText(now);
     const auto productRoot = ProductRoot(product);
-    const auto draftPath = productRoot / "_meta" / "review-decisions" / "drafts" /
-        (SafeFileToken(itemId) + "-" + SafeFileToken(actorAlias) + ".json");
+    const auto draftPath = ReviewDecisionDraftPath(productRoot, itemId, actorAlias);
 
     Json::Value existing(Json::objectValue);
     const bool hadExisting = ReadJsonFile(draftPath, existing) && existing.isObject();
@@ -3061,6 +3130,7 @@ Json::Value BacklogWebviewService::SaveReviewDecisionDraft(
         ? "backboard-review-inbox"
         : JsonStringField(request, "source_detector");
     record["supersedes"] = JsonStringField(request, "supersedes");
+    record["empty"] = record["rationale"].asString().empty();
     record["draft_created_at"] = hadExisting && existing.isMember("draft_created_at")
         ? existing["draft_created_at"].asString()
         : nowText;
@@ -3075,11 +3145,53 @@ Json::Value BacklogWebviewService::SaveReviewDecisionDraft(
     out["record"] = record;
     out["path"] = std::filesystem::relative(draftPath, productRoot).generic_string();
     out["updated_existing"] = hadExisting;
+    out["empty"] = record["empty"].asBool();
     out["agent_started"] = false;
     out["dispatch_started"] = false;
     return out;
   } catch (const std::exception& e) {
     return MakeError("review_decision.draft_failed", e.what());
+  }
+}
+
+Json::Value BacklogWebviewService::DiscardReviewDecisionDraft(
+    const Json::Value& request) {
+  try {
+    const auto product = JsonStringField(request, "product");
+    const auto itemId = JsonStringField(request, "item_id");
+    const auto actorAlias = JsonStringField(request, "actor_alias");
+    if (product.empty() || product == "all" || !IsValidProductName(product)) {
+      return MakeError("review_decision.product_required", "pass a single valid product for discarded review decision drafts");
+    }
+    if (itemId.empty()) {
+      return MakeError("review_decision.item_required", "pass item_id for discarded review decision drafts");
+    }
+    if (actorAlias.empty()) {
+      return MakeError("review_decision.actor_required", "pass actor_alias for discarded review decision drafts");
+    }
+
+    auto item = GetItem(product, itemId, true);
+    if (item.isMember("error")) {
+      return item;
+    }
+
+    const auto productRoot = ProductRoot(product);
+    const auto draftPath = ReviewDecisionDraftPath(productRoot, itemId, actorAlias);
+    const bool hadExisting = std::filesystem::exists(draftPath);
+    if (hadExisting) {
+      std::filesystem::remove(draftPath);
+    }
+
+    Json::Value out(Json::objectValue);
+    out["status"] = "discarded";
+    out["discarded_existing"] = hadExisting;
+    out["path"] = std::filesystem::relative(draftPath, productRoot).generic_string();
+    out["record"] = MissingReviewDecisionDraft(product, itemId, actorAlias);
+    out["agent_started"] = false;
+    out["dispatch_started"] = false;
+    return out;
+  } catch (const std::exception& e) {
+    return MakeError("review_decision.discard_failed", e.what());
   }
 }
 
@@ -4464,6 +4576,21 @@ void RegisterBacklogWebviewRoutes(
         }
         reviewDecisionResponse(request, std::move(callback),
                                service.SaveReviewDecisionDraft(*payload));
+      },
+      {Post});
+
+  app().registerHandler(
+      "/api/review/decision/draft/discard",
+      [reviewDecisionResponse, &service](const HttpRequestPtr& request,
+          std::function<void(const HttpResponsePtr&)>&& callback) {
+        const auto payload = request->getJsonObject();
+        if (!payload) {
+          reviewDecisionResponse(request, std::move(callback),
+                                 MakeError("review_decision.invalid_json", "POST a JSON review decision draft discard payload"));
+          return;
+        }
+        reviewDecisionResponse(request, std::move(callback),
+                               service.DiscardReviewDecisionDraft(*payload));
       },
       {Post});
 

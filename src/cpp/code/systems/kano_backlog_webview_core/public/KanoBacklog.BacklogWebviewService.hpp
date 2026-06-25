@@ -73,6 +73,7 @@ class BacklogWebviewService {
                               const ItemQueryOptions& options);
   Json::Value BuildReviewInbox(const ItemQueryOptions& options);
   Json::Value SaveReviewDecisionDraft(const Json::Value& request);
+  Json::Value DiscardReviewDecisionDraft(const Json::Value& request);
   Json::Value SubmitReviewDecision(const Json::Value& request);
   Json::Value GetEvidenceDetail(const std::string& product,
                                  const std::string& id,

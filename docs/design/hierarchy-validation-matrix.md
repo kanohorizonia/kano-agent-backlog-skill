@@ -1,11 +1,14 @@
 # Hierarchy Validation Matrix
 
-Status: accepted design contract for `KOB-TSK-0087` under `KOB-FTR-0030`.
+Status: accepted design contract for `KOB-TSK-0087` under `KOB-FTR-0030`, with
+top-layer amendments from `KOB-TSK-0097` and `KOB-TSK-0098`.
 
 This matrix defines how reparenting should be validated once hierarchy checks are
-implemented or tightened. `KOB-TSK-0097` adds the hard Initiative item type; this
-matrix remains a design contract for future parent validation and does not add
-KOA contracts or Product Line / Portfolio membership.
+implemented or tightened. `KOB-TSK-0097` adds the hard Initiative item type.
+`KOB-TSK-0098` defines Product Line / Portfolio membership as catalog metadata,
+not a parent edge. This matrix remains a design contract for future parent
+validation and does not add KOA contracts, metadata storage, or runtime
+membership implementation.
 
 ## Edge Semantics
 
@@ -14,6 +17,8 @@ KOA contracts or Product Line / Portfolio membership.
 - `blocks` / `blocked_by` remains execution dependency. `A blocks B` means
   `A -> B`; `B blocked_by A` is the inverse.
 - `relates` remains a non-blocking reference.
+- Product Line / Portfolio membership is catalog grouping over Initiatives and
+  must be represented by future membership metadata, not `parent`.
 - Release membership, topics, and work orders are separate axes and must never be
   accepted as structural parents.
   Release scope is defined by [Release Record Schema](release-record-schema.md)
@@ -33,6 +38,7 @@ KOA contracts or Product Line / Portfolio membership.
 
 | Child | Valid parent | Warning | Invalid or unsupported |
 | --- | --- | --- | --- |
+| Product Line / Portfolio | none | Future catalog record outside item hierarchy may group Initiatives through membership metadata. | Hard `type: ProductLine`, hard `type: Portfolio`, `items/product-line/`, `items/portfolio/`, or parent edges are unsupported. |
 | Project-equivalent | none | Product projection, future vision-layer ref, or Product Line / Portfolio catalog should be explicit outside item parentage. | Hard `type: Project` item is unsupported. |
 | Initiative | Project-equivalent | Current storage keeps Initiative root-scoped under product projection. | Project hard type, UserStory, Task, Topic, Work Order, Release. |
 | Epic | Initiative | Existing root Epics may remain while migrating to Initiative roots. | Feature, UserStory, Task, Bug, Issue, Topic, Work Order, Release. |
@@ -50,6 +56,8 @@ KOA contracts or Product Line / Portfolio membership.
 | `hierarchy.parent_unresolved` | Invalid | Parent ref must resolve uniquely in the active product. |
 | `hierarchy.parent_cycle` | Invalid | Parent change would create a cycle. |
 | `hierarchy.project_hard_type_unsupported` | Unsupported | `Project` is Project-equivalent only; do not create or parent to a hard Project item until a later implementation ticket accepts schema scope. |
+| `hierarchy.product_line_as_parent_invalid` | Invalid | Product Line / Portfolio membership is catalog grouping, not structural hierarchy. Use future membership metadata, docs, or report grouping instead of `parent`. |
+| `hierarchy.product_line_hard_type_unsupported` | Unsupported | Hard Product Line / Portfolio item storage is not implemented in this run. Do not create ProductLine or Portfolio enums, prefixes, or item folders. |
 | `hierarchy.subtask_parent_invalid` | Invalid | SubTask-role work must be under a Task and independently delegable; checklist fragments stay in the parent Task body or Worklog. |
 | `hierarchy.subtask_hard_type_unsupported` | Unsupported | Hard `SubTask` item storage is not implemented in this run. Use a child Task or checklist. |
 | `hierarchy.release_as_parent_invalid` | Invalid | Release membership is release scope, not structural hierarchy. Use release inclusion metadata or links. |
@@ -83,3 +91,8 @@ release or narrative ownership. Existing Task-to-Task relationships should be
 reviewed as SubTask-role work: keep them only when they are independently
 delegable and validated; move ordinary step lists back into the parent Task body
 or Worklog.
+
+Product Line / Portfolio changes are catalog migration, not hierarchy migration.
+Future tools should update or report membership metadata when a Product Line
+splits, merges, renames, or regroups Initiatives. They should not mutate
+Initiative parent refs or move Initiative files to reflect market packaging.

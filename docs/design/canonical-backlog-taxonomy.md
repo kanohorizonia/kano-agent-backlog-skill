@@ -1,15 +1,18 @@
 # Canonical Backlog Taxonomy
 
 Status: accepted design contract for `KOB-FTR-0030`, `KOB-TSK-0086`, the
-semantic-absorption amendment from `KOB-TSK-0096`, and the hard Initiative
-amendment from `KOB-TSK-0097`.
+semantic-absorption amendment from `KOB-TSK-0096`, the hard Initiative amendment
+from `KOB-TSK-0097`, and the Product Line / Portfolio membership definition from
+`KOB-TSK-0098`.
 
 ## Scope
 
 This contract defines KOB taxonomy semantics and the intended structural parent
-model. `KOB-TSK-0097` adds the hard `Initiative` item type only. It does not
-implement hard `Project` or `SubTask` types, Product Line / Portfolio membership,
-release records, KOA contract changes, HorizonPlugin migration, or Backboard
+model. `KOB-TSK-0097` adds the hard `Initiative` item type only.
+`KOB-TSK-0098` defines Product Line / Portfolio as catalog membership above
+Initiative. These decisions do not implement hard `Project`, `SubTask`, Product
+Line, or Portfolio item types; Product Line storage/schema/CLI/reporting;
+release records; KOA contract changes; HorizonPlugin migration; or Backboard
 mutation behavior.
 
 Current hard formal item types are `Initiative`, `Epic`, `Feature`, `UserStory`,
@@ -27,6 +30,7 @@ explicitly accepted.
 | `parent` / child | Structural ownership and intent inheritance. | Execution order or release scope. |
 | `blocks` / `blocked_by` | Execution dependency. `A blocks B` means `A -> B`. | Product hierarchy. |
 | `relates` | Non-blocking reference or context link. | Dependency or ownership. |
+| Product Line / Portfolio membership | Catalog or market-packaging grouping over Initiatives. | Structural ownership or backlog history. |
 | Release membership | Version or publication scope. | Parent hierarchy. |
 | Topic | Horizontal execution context and material bundle. | Vertical product hierarchy. |
 | Work order | Execution or handoff context. | Durable structural parent. |
@@ -35,6 +39,7 @@ explicitly accepted.
 
 | Type or role | Canonical meaning | Admission rule |
 | --- | --- | --- |
+| Product Line / Portfolio | Catalog, market-packaging, or bundle grouping above Initiative. | Use future membership metadata over Initiatives. Do not create hard Product Line or Portfolio items, folders, enums, or parent refs. |
 | Project-equivalent | Product-scale or vision-layer planning scope above Initiative. | Use backlog product projection now; use vision-layer records when implemented. Do not create hard `Project` items. |
 | Initiative | Independently releasable component, module, or product narrative layer. | Use when a durable line can be released, maintained, presented, and explained independently across multiple Epics or Features. |
 | Epic | Durable release/campaign story under an Initiative. | Use when multiple capabilities, stories, tasks, or fixes share a coherent outcome boundary. Epic remains optional for early or MVP apps. |
@@ -49,7 +54,8 @@ explicitly accepted.
 
 | Child | Model parent | Current storage rule |
 | --- | --- | --- |
-| Project-equivalent | none | Product projection, future vision-layer record, or Product Line / Portfolio catalog outside item hierarchy. No `type: Project` item. |
+| Product Line / Portfolio | none | Future catalog outside item hierarchy. No `type: ProductLine`, `type: Portfolio`, `items/product-line/`, or `items/portfolio/`. |
+| Project-equivalent | none | Product projection or future vision-layer record outside item hierarchy. No `type: Project` item. |
 | Initiative | Project-equivalent | Root Initiative under product scope. Store as `items/initiative` with `INIT` display IDs. |
 | Epic | Initiative | `parent` points to an Initiative; existing root Epics may remain during migration. |
 | Feature | Initiative or Epic | `parent` points to the closest useful Initiative or Epic boundary. |
@@ -61,6 +67,51 @@ explicitly accepted.
 
 Parent links must remain intra-product structural refs. Do not use release ids,
 topic ids, work-order ids, raw paths, or product names as parent refs.
+
+## Product Line / Portfolio Membership
+
+`KOB-TSK-0098` defines Product Line / Portfolio as catalog membership over
+Initiatives, not another durable work-item parent. A Product Line may group one
+or more Initiatives for market packaging, roadmap reporting, commercial bundles,
+documentation navigation, or release-family communication. An Initiative keeps
+its own identity, parentage, worklog, children, validation history, and release
+narrative even when the Product Line grouping changes.
+
+The selected model is membership metadata, not structural reparenting:
+
+- The durable edge is `product_line_or_portfolio -> Initiative` membership, not
+  `Initiative.parent = product_line`.
+- Product Line changes may add, remove, rename, split, merge, or time-bound
+  membership edges without moving Initiative item files or rewriting Initiative
+  ancestry.
+- A single Initiative may appear in more than one catalog view only when future
+  metadata explicitly supports multi-membership roles, such as primary,
+  secondary, bundle, or deprecated membership.
+- Historical reports should evaluate membership as of the report date when
+  time-bounded membership metadata exists; otherwise they should state that the
+  current catalog view is being projected over stable Initiative history.
+
+Future implementation may choose one of these schema surfaces, but this ticket
+does not implement any of them:
+
+- product-map projection nodes with stable Product Line / Portfolio ids;
+- catalog records under a non-item metadata namespace, such as `_meta`;
+- explicit membership edge records containing catalog id, Initiative id,
+  membership role, status, effective dates, rationale, and optional release or
+  bundle references.
+
+View and report behavior should derive grouping from membership metadata when it
+exists. Backlog item tree views should continue to render Initiative as the
+structural root below product or vision scope. Product Line views may group
+Initiatives, show unassigned Initiatives, and aggregate release/bundle summaries,
+but must not imply that catalog movement changes backlog ownership.
+
+Split and merge scenarios are catalog operations. Splitting a Product Line should
+create new catalog groupings and move membership edges, not split Initiative
+history. Merging Product Lines should consolidate membership edges and keep
+Initiative ids stable. If a component itself needs independent evolution,
+release identity, and backlog ownership, model it as an Initiative rather than
+as a hidden child of a Product Line.
 
 ## Semantic Absorption
 
@@ -153,7 +204,8 @@ than duplicated.
 - No hard `Project` item type.
 - No hard `SubTask` item type.
 - No `items/project/` or `items/subtask/` directories.
-- No Product Line / Portfolio hard item type or membership implementation.
+- No Product Line / Portfolio hard item type, storage, CLI/API, or runtime
+  membership implementation.
 - No Release Record, `releases/` directory, or KCC publication gate work.
 - No KOA contract/view update or HorizonPlugin migration.
 - No Backboard mutation behavior.

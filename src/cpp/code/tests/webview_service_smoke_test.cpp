@@ -692,29 +692,47 @@ int main() {
                          "Raw markdown / full file"},
                         "review-first sections should appear before the raw markdown toggle");
 
-        const auto mainSource = read_text(
-            locate_repo_file(std::filesystem::path("src") / "cpp" / "code" /
-                             "apps" / "kano_backlog_webview" / "main.cpp"));
-        expect(mainSource.find("data-selectable-item") != std::string::npos,
-               "main source should embed selectable card markup hooks");
-        expect(mainSource.find("Shortcuts ?") != std::string::npos,
-               "main source should expose the visible shortcut help affordance");
-        expect(mainSource.find("aria-keyshortcuts=\"?\"") != std::string::npos,
-               "main source should expose shortcut help aria-keyshortcuts");
-        expect(mainSource.find("aria-keyshortcuts=\"/\"") != std::string::npos,
-               "main source should expose search aria-keyshortcuts");
-        expect(mainSource.find("function isTypingContext") != std::string::npos,
-               "main source should keep the typing-context shortcut guard");
-        expect(mainSource.find("function selectItemByDelta") != std::string::npos,
-               "main source should keep keyboard selection helpers");
-        expect(mainSource.find("selectedItemVisibleIndex") != std::string::npos,
-               "main source should keep a single roving-tabindex card selection index");
-        expect(mainSource.find("card === selectedCard") != std::string::npos,
-               "main source should select one visible card instance even when item keys repeat");
-        expect(mainSource.find("function openSelectedItem") != std::string::npos,
-               "main source should keep keyboard open helper");
-        expect(mainSource.find("Focus the backlog search field") != std::string::npos,
-               "main source should document slash-search help text");
+        const auto webviewAppRoot = locate_repo_file(
+            std::filesystem::path("src") / "cpp" / "code" /
+            "apps" / "kano_backlog_webview");
+        const auto indexHtmlSource = read_text(
+            webviewAppRoot / "assets" / "index_html.hpp");
+        const auto indexCssSource = read_text(
+            webviewAppRoot / "assets" / "backboard_css.hpp");
+        const auto indexAppJsSource = read_text(
+            webviewAppRoot / "assets" / "backboard_app_js.hpp");
+        const auto kobUiJsSource = read_text(
+            webviewAppRoot / "assets" / "kob_ui_js.hpp");
+        const auto assetSource =
+            indexHtmlSource + "\n" + indexCssSource + "\n" +
+            indexAppJsSource + "\n" + kobUiJsSource;
+
+        expect(indexHtmlSource.find("<script src=\"/assets/kob-ui.js\"></script>") != std::string::npos,
+               "index html asset should keep the first-party kob-ui runtime script tag");
+        expect(indexHtmlSource.find("BackboardAppJs()") != std::string::npos,
+               "index html asset should compose the dedicated page app javascript module");
+        expect(indexHtmlSource.find("BackboardCss()") != std::string::npos,
+               "index html asset should compose the dedicated css module");
+        expect(assetSource.find("data-selectable-item") != std::string::npos,
+               "embedded webview assets should expose selectable card markup hooks");
+        expect(assetSource.find("Shortcuts ?") != std::string::npos,
+               "embedded webview assets should expose the visible shortcut help affordance");
+        expect(assetSource.find("aria-keyshortcuts=\"?\"") != std::string::npos,
+               "embedded webview assets should expose shortcut help aria-keyshortcuts");
+        expect(assetSource.find("aria-keyshortcuts=\"/\"") != std::string::npos,
+               "embedded webview assets should expose search aria-keyshortcuts");
+        expect(assetSource.find("function isTypingContext") != std::string::npos,
+               "embedded webview assets should keep the typing-context shortcut guard");
+        expect(assetSource.find("function selectItemByDelta") != std::string::npos,
+               "embedded webview assets should keep keyboard selection helpers");
+        expect(assetSource.find("selectedItemVisibleIndex") != std::string::npos,
+               "embedded webview assets should keep a single roving-tabindex card selection index");
+        expect(assetSource.find("card === selectedCard") != std::string::npos,
+               "embedded webview assets should select one visible card instance even when item keys repeat");
+        expect(assetSource.find("function openSelectedItem") != std::string::npos,
+               "embedded webview assets should keep keyboard open helper");
+        expect(assetSource.find("Focus the backlog search field") != std::string::npos,
+               "embedded webview assets should document slash-search help text");
 
         const auto smokeScript = read_text(
             locate_repo_file(std::filesystem::path("src") / "shell" / "webview" /
@@ -997,12 +1015,12 @@ int main() {
         expect(!reviewTransitionResult["record"]["agent_started"].asBool(), "review transition should not start agents");
         expect(!reviewTransitionResult["record"]["dispatch_started"].asBool(), "review transition should not dispatch work");
 
-        expect(mainSource.find("data-review-draft-note") != std::string::npos,
-               "main source should expose editable review draft note controls");
-        expect(mainSource.find("data-review-action") != std::string::npos,
-               "main source should expose review action controls");
-        expect(mainSource.find("Resulting state:") != std::string::npos,
-               "main source should show resulting state before submit");
+        expect(assetSource.find("data-review-draft-note") != std::string::npos,
+               "embedded webview assets should expose editable review draft note controls");
+        expect(assetSource.find("data-review-action") != std::string::npos,
+               "embedded webview assets should expose review action controls");
+        expect(assetSource.find("Resulting state:") != std::string::npos,
+               "embedded webview assets should show resulting state before submit");
 
         std::cout << "webview_service_smoke_test: PASS\n";
         std::filesystem::remove_all(root);

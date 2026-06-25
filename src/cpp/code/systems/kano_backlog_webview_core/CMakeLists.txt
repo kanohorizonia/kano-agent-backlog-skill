@@ -21,6 +21,7 @@ target_include_directories(kano_backlog_webview_core
 target_link_libraries(kano_backlog_webview_core
   PUBLIC
     drogon
+    kano::backlog_core
 )
 
 add_library(kano::kano_backlog_webview_core ALIAS kano_backlog_webview_core)

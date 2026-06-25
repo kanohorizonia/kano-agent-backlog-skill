@@ -123,6 +123,19 @@ bool has_edge(const Json::Value& edges,
     return false;
 }
 
+std::size_t count_regular_files(const std::filesystem::path& root) {
+    if (!std::filesystem::exists(root)) {
+        return 0;
+    }
+    std::size_t count = 0;
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(root)) {
+        if (entry.is_regular_file()) {
+            ++count;
+        }
+    }
+    return count;
+}
+
 void expect_in_order(const std::string& text,
                      const std::vector<std::string>& markers,
                      const std::string& message) {
@@ -450,6 +463,17 @@ int main() {
                "review inbox bundles should expose deterministic reason codes");
         expect(inbox["lanes"]["Ready Frontier"][0]["source_fields"].size() >= 1,
                "review inbox bundles should expose source fields");
+        expect(inbox["lanes"]["Ready Frontier"][0]["suggested_decision"].asString() ==
+                   inbox["lanes"]["Ready Frontier"][0]["suggested_human_decision"].asString(),
+               "review inbox should expose detector output as suggested_decision only");
+        expect(inbox["lanes"]["Ready Frontier"][0]["actions"].size() >= 1,
+               "review inbox bundles should expose lane-specific human actions");
+        expect(inbox["lanes"]["Ready Frontier"][0]["actions"][0]["label"].asString() != "Accept",
+               "review action labels should avoid generic Accept where lane-specific naming exists");
+        expect(inbox["lanes"]["Ready Frontier"][0]["actions"][0]["label"].asString() == "Approve Ready Boundary",
+               "ready frontier action should use lane-specific Approve Ready Boundary label");
+        expect(inbox["lanes"]["False Done Suspect"][0]["actions"][0]["label"].asString() == "Reopen Done For Review",
+               "false done suspect action should use lane-specific Reopen Done For Review label");
 
         auto evidence = service.GetEvidenceDetail("product-alpha", "PRA-TSK-0001");
         expect(evidence["evidence"]["signals"]["artifact"].asBool(), "evidence detail should detect artifact signal");
@@ -621,6 +645,183 @@ int main() {
                "docs index should document the smoke artifact command");
         expect(docsIndex.find("_ws/test-output/webview-smoke") != std::string::npos,
                "docs index should document the deterministic smoke artifact path");
+
+        Json::Value draft(Json::objectValue);
+        draft["product"] = "product-alpha";
+        draft["item_id"] = "PRA-TSK-0001";
+        draft["lane"] = "Ready Frontier";
+        draft["reason_code"] = "ready_frontier_candidate";
+        draft["suggested_decision"] = "approve_ready_boundary";
+        draft["actor_alias"] = "reviewer-alias";
+        draft["rationale"] = "First editable draft note.";
+        auto draftOne = service.SaveReviewDecisionDraft(draft);
+        expect(!draftOne.isMember("error"), "review decision draft save should succeed");
+        const auto draftPath = products / "product-alpha" / draftOne["path"].asString();
+        expect(std::filesystem::exists(draftPath), "review decision draft should persist to _meta");
+        draft["rationale"] = "Edited draft note before submit.";
+        auto draftTwo = service.SaveReviewDecisionDraft(draft);
+        expect(!draftTwo.isMember("error"), "review decision draft edit should succeed");
+        expect(draftTwo["path"].asString() == draftOne["path"].asString(),
+               "editing a draft should update the same draft file before submit");
+        expect(draftTwo["updated_existing"].asBool(), "second draft save should report existing draft update");
+        const auto editedDraftText = read_text(draftPath);
+        expect(editedDraftText.find("Edited draft note before submit.") != std::string::npos,
+               "draft edit should overwrite draft rationale before submit");
+        expect(editedDraftText.find("First editable draft note.") == std::string::npos,
+               "draft edit should not append stale draft text");
+
+        Json::Value submit = draft;
+        submit["human_decision"] = "approve_ready_boundary";
+        submit["rationale"] = "Need validation evidence before closure.";
+        auto submittedOne = service.SubmitReviewDecision(submit);
+        expect(!submittedOne.isMember("error"), "submitted review decision should succeed");
+        const auto submittedOnePath = products / "product-alpha" / submittedOne["path"].asString();
+        expect(std::filesystem::exists(submittedOnePath), "submitted review decision should persist append-only record");
+        expect(!submittedOne["record"]["agent_started"].asBool(), "review decision submit should not start agents");
+        expect(!submittedOne["record"]["dispatch_started"].asBool(), "review decision submit should not dispatch work");
+
+        Json::Value superseding = submit;
+        superseding["rationale"] = "Superseding instruction after human correction.";
+        superseding["supersedes"] = submittedOne["path"].asString();
+        auto submittedTwo = service.SubmitReviewDecision(superseding);
+        expect(!submittedTwo.isMember("error"), "superseding review decision should succeed");
+        const auto submittedTwoPath = products / "product-alpha" / submittedTwo["path"].asString();
+        expect(std::filesystem::exists(submittedTwoPath), "superseding review decision should persist a new record");
+        expect(submittedTwo["path"].asString() != submittedOne["path"].asString(),
+               "superseding a submitted decision must create a new append-only record");
+        expect(std::filesystem::exists(submittedOnePath), "superseding must not rewrite or remove prior submitted decision");
+        expect(read_text(submittedTwoPath).find(submittedOne["path"].asString()) != std::string::npos,
+               "superseding record should reference the superseded decision");
+
+        Json::Value highRisk(Json::objectValue);
+        highRisk["product"] = "product-alpha";
+        highRisk["item_id"] = "PRA-TSK-0004";
+        highRisk["lane"] = "Needs Review";
+        highRisk["reason_code"] = "review_state";
+        highRisk["suggested_decision"] = "approve_done_with_evidence";
+        highRisk["human_decision"] = "approve_done_with_evidence";
+        highRisk["rationale"] = "Human accepted evidence chain.";
+        highRisk["actor_alias"] = "reviewer-alias";
+        highRisk["target_state"] = "Done";
+        auto highRiskBlocked = service.SubmitReviewDecision(highRisk);
+        expect(highRiskBlocked["error_code"].asString() == "review_decision.confirmation_required",
+               "high-risk Done action should require explicit confirmation before transition");
+        expect(read_text(products / "product-alpha" / "items" / "task" / "0004" / "PRA-TSK-0004.md").find("state: Ready") != std::string::npos,
+               "unconfirmed high-risk action must not mutate state");
+        highRisk["confirmed"] = true;
+        auto highRiskSubmitted = service.SubmitReviewDecision(highRisk);
+        expect(!highRiskSubmitted.isMember("error"), "confirmed high-risk review decision should submit");
+        expect(highRiskSubmitted["record"]["high_risk"].asBool(), "confirmed Done action should be marked high risk");
+        expect(highRiskSubmitted["record"]["transition"]["attempted"].asBool(),
+               "confirmed target-state action should call KOB state transition policy");
+        expect(!highRiskSubmitted["record"]["agent_started"].asBool(), "confirmed review action should not start agents");
+        expect(!highRiskSubmitted["record"]["dispatch_started"].asBool(), "confirmed review action should not dispatch work");
+        expect(read_text(products / "product-alpha" / "items" / "task" / "0004" / "PRA-TSK-0004.md").find("state: Done") != std::string::npos,
+               "confirmed high-risk action should use existing KOB state transition policy");
+
+        Json::Value acceptRisk(Json::objectValue);
+        acceptRisk["product"] = "product-beta";
+        acceptRisk["item_id"] = "PRB-BUG-0003";
+        acceptRisk["lane"] = "False Done Suspect";
+        acceptRisk["reason_code"] = "done_without_evidence";
+        acceptRisk["suggested_decision"] = "reopen_done_for_review";
+        acceptRisk["human_decision"] = "accept_evidence_risk";
+        acceptRisk["rationale"] = "Human accepts the evidence risk for now.";
+        acceptRisk["actor_alias"] = "reviewer-alias";
+        auto acceptRiskBlocked = service.SubmitReviewDecision(acceptRisk);
+        expect(acceptRiskBlocked["error_code"].asString() == "review_decision.confirmation_required",
+               "Accept Evidence Risk should require explicit confirmation before submit");
+        acceptRisk["confirmed"] = true;
+        auto acceptRiskSubmitted = service.SubmitReviewDecision(acceptRisk);
+        expect(!acceptRiskSubmitted.isMember("error"), "confirmed Accept Evidence Risk should submit");
+        expect(acceptRiskSubmitted["record"]["high_risk"].asBool(),
+               "Accept Evidence Risk should be marked high risk");
+        expect(!acceptRiskSubmitted["record"]["transition"]["attempted"].asBool(),
+               "Accept Evidence Risk should not mutate state without a target state");
+
+        Json::Value reopenDone(Json::objectValue);
+        reopenDone["product"] = "product-beta";
+        reopenDone["item_id"] = "PRB-BUG-0003";
+        reopenDone["lane"] = "False Done Suspect";
+        reopenDone["reason_code"] = "done_without_evidence";
+        reopenDone["suggested_decision"] = "reopen_done_for_review";
+        reopenDone["human_decision"] = "reopen_done_for_review";
+        reopenDone["rationale"] = "Human wants Done reopened for review.";
+        reopenDone["actor_alias"] = "reviewer-alias";
+        reopenDone["target_state"] = "Review";
+        auto reopenBlocked = service.SubmitReviewDecision(reopenDone);
+        expect(reopenBlocked["error_code"].asString() == "review_decision.confirmation_required",
+               "reopening Done should require explicit confirmation before policy check");
+        reopenDone["confirmed"] = true;
+        auto reopenSubmitted = service.SubmitReviewDecision(reopenDone);
+        expect(!reopenSubmitted.isMember("error"),
+               "confirmed reopen decision should preserve an audit record even if policy rejects transition");
+        expect(reopenSubmitted["record"]["transition"]["attempted"].asBool(),
+               "confirmed reopen decision should call transition policy");
+        expect(reopenSubmitted["record"]["transition"]["policy_status"].asString() == "rejected",
+               "unsupported Done to Review transition should be reported as policy rejection");
+        expect(!reopenSubmitted["record"]["transition"]["applied"].asBool(),
+               "policy-rejected reopen must not mutate markdown state");
+        expect(std::filesystem::exists(products / "product-beta" / reopenSubmitted["path"].asString()),
+               "policy-rejected reopen should still persist submitted decision record");
+        expect(read_text(products / "product-beta" / "items" / "bug" / "0003" / "PRB-BUG-0003.md").find("state: Done") != std::string::npos,
+               "policy-rejected reopen must leave Done item unchanged");
+
+        const auto transitionSubmittedDir = products / "product-beta" / "_meta" /
+            "review-decisions" / "submitted" / "PRB-BUG-0001";
+        const auto transitionRecordCountBefore = count_regular_files(transitionSubmittedDir);
+        const auto transitionItemPath = products / "product-beta" / "items" / "bug" / "0001" / "PRB-BUG-0001.md";
+        std::filesystem::permissions(
+            transitionItemPath,
+            std::filesystem::perms::owner_read | std::filesystem::perms::group_read |
+                std::filesystem::perms::others_read,
+            std::filesystem::perm_options::replace);
+        Json::Value writeFailureTransition(Json::objectValue);
+        writeFailureTransition["product"] = "product-beta";
+        writeFailureTransition["item_id"] = "PRB-BUG-0001";
+        writeFailureTransition["lane"] = "Done Candidate";
+        writeFailureTransition["reason_code"] = "validation_seen_in_progress";
+        writeFailureTransition["suggested_decision"] = "review_for_completion";
+        writeFailureTransition["human_decision"] = "send_to_review";
+        writeFailureTransition["rationale"] = "Human wants review before Done.";
+        writeFailureTransition["actor_alias"] = "reviewer-alias";
+        writeFailureTransition["target_state"] = "Review";
+        auto writeFailureResult = service.SubmitReviewDecision(writeFailureTransition);
+        std::filesystem::permissions(
+            transitionItemPath,
+            std::filesystem::perms::owner_all | std::filesystem::perms::group_read |
+                std::filesystem::perms::others_read,
+            std::filesystem::perm_options::replace);
+        expect(writeFailureResult["error_code"].asString() == "review_decision.submit_failed",
+               "markdown apply failure after accepted policy should report submit failure");
+        expect(count_regular_files(transitionSubmittedDir) == transitionRecordCountBefore + 1,
+               "submitted audit record should survive markdown apply failure");
+        expect(read_text(transitionItemPath).find("state: InProgress") != std::string::npos,
+               "markdown apply failure should leave original item state unchanged");
+
+        Json::Value reviewTransition(Json::objectValue);
+        reviewTransition["product"] = "product-beta";
+        reviewTransition["item_id"] = "PRB-BUG-0001";
+        reviewTransition["lane"] = "Done Candidate";
+        reviewTransition["reason_code"] = "validation_seen_in_progress";
+        reviewTransition["suggested_decision"] = "review_for_completion";
+        reviewTransition["human_decision"] = "send_to_review";
+        reviewTransition["rationale"] = "Human wants review before Done.";
+        reviewTransition["actor_alias"] = "reviewer-alias";
+        reviewTransition["target_state"] = "Review";
+        auto reviewTransitionResult = service.SubmitReviewDecision(reviewTransition);
+        expect(!reviewTransitionResult.isMember("error"), "non-high-risk review action should submit");
+        expect(reviewTransitionResult["record"]["transition"]["attempted"].asBool(),
+               "target-state review action should call transition policy");
+        expect(reviewTransitionResult["record"]["transition"]["new_state"].asString() == "Review",
+               "review action should transition through KOB policy to Review");
+        expect(!reviewTransitionResult["record"]["agent_started"].asBool(), "review transition should not start agents");
+        expect(!reviewTransitionResult["record"]["dispatch_started"].asBool(), "review transition should not dispatch work");
+
+        expect(mainSource.find("data-review-draft-note") != std::string::npos,
+               "main source should expose editable review draft note controls");
+        expect(mainSource.find("data-review-action") != std::string::npos,
+               "main source should expose review action controls");
 
         std::cout << "webview_service_smoke_test: PASS\n";
         std::filesystem::remove_all(root);

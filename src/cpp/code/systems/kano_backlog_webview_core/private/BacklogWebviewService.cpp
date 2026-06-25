@@ -1,10 +1,14 @@
 #include "KanoBacklog.BacklogWebviewService.hpp"
 
+#include "kano/backlog_core/models/models.hpp"
+#include "kano/backlog_core/state/state_machine.hpp"
+
 #include <algorithm>
 #include <chrono>
 #include <cctype>
 #include <fstream>
 #include <functional>
+#include <iomanip>
 #include <map>
 #include <optional>
 #include <regex>
@@ -297,6 +301,212 @@ std::string JoinStrings(const std::vector<std::string>& values,
     out << values[i];
   }
   return out.str();
+}
+
+std::string JsonStringField(const Json::Value& value, const std::string& key) {
+  if (!value.isObject() || !value.isMember(key) || value[key].isNull()) {
+    return "";
+  }
+  return Trim(value[key].asString());
+}
+
+bool JsonBoolField(const Json::Value& value, const std::string& key) {
+  return value.isObject() && value.isMember(key) && value[key].asBool();
+}
+
+Json::Value MakeError(const std::string& code, const std::string& message) {
+  Json::Value out(Json::objectValue);
+  out["error"] = message;
+  out["error_code"] = code;
+  return out;
+}
+
+std::string SafeFileToken(const std::string& value) {
+  std::string out;
+  out.reserve(value.size());
+  for (const unsigned char ch : value) {
+    if (std::isalnum(ch) || ch == '-' || ch == '_' || ch == '.') {
+      out.push_back(static_cast<char>(ch));
+    } else {
+      out.push_back('-');
+    }
+  }
+  while (!out.empty() && out.front() == '-') {
+    out.erase(out.begin());
+  }
+  while (!out.empty() && out.back() == '-') {
+    out.pop_back();
+  }
+  return out.empty() ? "unknown" : out;
+}
+
+std::string ReviewTimestampText(std::chrono::system_clock::time_point now) {
+  const auto now_time = std::chrono::system_clock::to_time_t(now);
+  std::tm tm_buf{};
+#ifdef _WIN32
+  gmtime_s(&tm_buf, &now_time);
+#else
+  gmtime_r(&now_time, &tm_buf);
+#endif
+  std::ostringstream out;
+  out << std::put_time(&tm_buf, "%Y-%m-%dT%H:%M:%SZ");
+  return out.str();
+}
+
+std::string ReviewTimestampFileToken(std::chrono::system_clock::time_point now) {
+  const auto now_time = std::chrono::system_clock::to_time_t(now);
+  std::tm tm_buf{};
+#ifdef _WIN32
+  gmtime_s(&tm_buf, &now_time);
+#else
+  gmtime_r(&now_time, &tm_buf);
+#endif
+  const auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(
+      now.time_since_epoch()).count() % 1000;
+  std::ostringstream out;
+  out << std::put_time(&tm_buf, "%Y%m%dT%H%M%S") << "-"
+      << std::setw(3) << std::setfill('0') << millis << "Z";
+  return out.str();
+}
+
+bool ReadJsonFile(const std::filesystem::path& path, Json::Value& value) {
+  std::ifstream input(path);
+  if (!input.is_open()) {
+    return false;
+  }
+  Json::CharReaderBuilder builder;
+  std::string errors;
+  return Json::parseFromStream(builder, input, &value, &errors);
+}
+
+void WriteJsonFile(const std::filesystem::path& path, const Json::Value& value) {
+  std::filesystem::create_directories(path.parent_path());
+  Json::StreamWriterBuilder builder;
+  builder["indentation"] = "  ";
+  std::ofstream out(path, std::ios::binary);
+  if (!out.is_open()) {
+    throw std::runtime_error("failed to open review decision file for write: " + path.generic_string());
+  }
+  out << Json::writeString(builder, value) << "\n";
+}
+
+void WriteTextFile(const std::filesystem::path& path, const std::string& value) {
+  std::ofstream out(path, std::ios::binary);
+  if (!out.is_open()) {
+    throw std::runtime_error("failed to open file for write: " + path.generic_string());
+  }
+  out << value;
+}
+
+std::string UpsertFrontmatterScalar(std::string text,
+                                    const std::string& key,
+                                    const std::string& value) {
+  const auto first = text.find("---");
+  if (first != 0) {
+    return text;
+  }
+  const auto end = text.find("\n---", 3);
+  if (end == std::string::npos) {
+    return text;
+  }
+  const auto keyPrefix = key + ":";
+  auto lineStart = text.find('\n', first + 3);
+  while (lineStart != std::string::npos && lineStart < end) {
+    const auto contentStart = lineStart + 1;
+    const auto lineEnd = text.find('\n', contentStart);
+    if (contentStart < end && text.compare(contentStart, keyPrefix.size(), keyPrefix) == 0) {
+      const auto replaceEnd = lineEnd == std::string::npos ? text.size() : lineEnd;
+      text.replace(contentStart, replaceEnd - contentStart, keyPrefix + " " + value);
+      return text;
+    }
+    lineStart = lineEnd;
+  }
+  text.insert(end + 1, keyPrefix + " " + value + "\n");
+  return text;
+}
+
+std::string AppendWorklogLine(std::string text, const std::string& line) {
+  const auto heading = text.find("\n# Worklog");
+  if (heading == std::string::npos) {
+    if (!text.empty() && text.back() != '\n') {
+      text.push_back('\n');
+    }
+    text += "\n# Worklog\n\n" + line + "\n";
+    return text;
+  }
+  const auto nextHeading = text.find("\n# ", heading + 1);
+  const auto insertion = nextHeading == std::string::npos ? text.size() : nextHeading;
+  const auto prefix = insertion > 0 && text[insertion - 1] == '\n' ? "" : "\n";
+  text.insert(insertion, prefix + line + "\n");
+  return text;
+}
+
+std::optional<kano::backlog_core::StateAction> ReviewActionForTargetState(
+    kano::backlog_core::ItemState state) {
+  using kano::backlog_core::ItemState;
+  using kano::backlog_core::StateAction;
+  switch (state) {
+    case ItemState::Proposed:
+      return StateAction::Propose;
+    case ItemState::Planned:
+    case ItemState::Ready:
+      return StateAction::Ready;
+    case ItemState::InProgress:
+      return StateAction::Start;
+    case ItemState::Review:
+      return StateAction::Review;
+    case ItemState::Done:
+      return StateAction::Done;
+    case ItemState::Blocked:
+      return StateAction::Block;
+    case ItemState::Dropped:
+      return StateAction::Drop;
+    case ItemState::Duplicate:
+    case ItemState::New:
+      return std::nullopt;
+  }
+  return std::nullopt;
+}
+
+void ApplyTransitionToMarkdown(
+    const std::filesystem::path& productRoot,
+    const Json::Value& item,
+    const kano::backlog_core::BacklogItem& transitioned) {
+  const auto relativePath = item.get("path", "").asString();
+  if (relativePath.empty()) {
+    throw std::runtime_error("review decision item path is missing");
+  }
+  const auto itemPath = productRoot / relativePath;
+  bool ok = false;
+  std::string error;
+  auto text = ReadTextFile(itemPath, ok, error);
+  if (!ok) {
+    throw std::runtime_error("failed to read item for review transition: " +
+                             itemPath.generic_string());
+  }
+  text = UpsertFrontmatterScalar(
+      std::move(text), "state", kano::backlog_core::to_string(transitioned.state));
+  text = UpsertFrontmatterScalar(std::move(text), "updated", transitioned.updated);
+  if (!transitioned.worklog.empty()) {
+    text = AppendWorklogLine(std::move(text), transitioned.worklog.back());
+  }
+  WriteTextFile(itemPath, text);
+}
+
+std::filesystem::path UniqueJsonPath(std::filesystem::path path) {
+  if (!std::filesystem::exists(path)) {
+    return path;
+  }
+  const auto parent = path.parent_path();
+  const auto stem = path.stem().string();
+  const auto ext = path.extension().string();
+  for (int i = 2; i < 1000; ++i) {
+    auto candidate = parent / (stem + "-" + std::to_string(i) + ext);
+    if (!std::filesystem::exists(candidate)) {
+      return candidate;
+    }
+  }
+  throw std::runtime_error("failed to allocate unique review decision path: " + path.generic_string());
 }
 
 bool ContainsToken(const std::vector<std::string>& tokens,
@@ -1272,6 +1482,78 @@ Json::Value ReviewLaneDefinition(const std::string& id,
   return lane;
 }
 
+Json::Value ReviewAction(const std::string& id,
+                         const std::string& label,
+                         const std::string& humanDecision,
+                         const std::string& targetState,
+                         bool requiresConfirmation) {
+  Json::Value action(Json::objectValue);
+  action["id"] = id;
+  action["label"] = label;
+  action["human_decision"] = humanDecision;
+  action["target_state"] = targetState;
+  action["requires_confirmation"] = requiresConfirmation;
+  action["starts_agent"] = false;
+  action["dispatches_work"] = false;
+  if (requiresConfirmation) {
+    action["confirmation_label"] = "Explicit human confirmation required";
+  }
+  return action;
+}
+
+Json::Value ReviewActionsForLane(const std::string& lane) {
+  Json::Value actions(Json::arrayValue);
+  if (lane == "Ready Frontier") {
+    actions.append(ReviewAction("approve_ready_boundary", "Approve Ready Boundary",
+                                "approve_ready_boundary", "", false));
+    actions.append(ReviewAction("defer_ready_item", "Defer Ready Item",
+                                "defer_ready_item", "", false));
+  } else if (lane == "Done Candidate") {
+    actions.append(ReviewAction("send_to_review", "Send To Review",
+                                "send_to_review", "Review", false));
+    actions.append(ReviewAction("defer_completion_review", "Defer Completion Review",
+                                "defer_completion_review", "", false));
+  } else if (lane == "Needs Review") {
+    actions.append(ReviewAction("approve_done_with_evidence", "Approve Done With Evidence",
+                                "approve_done_with_evidence", "Done", true));
+    actions.append(ReviewAction("request_more_evidence", "Request More Evidence",
+                                "request_more_evidence", "", false));
+    actions.append(ReviewAction("request_changes", "Request Changes",
+                                "request_changes", "", false));
+  } else if (lane == "False Done Suspect") {
+    actions.append(ReviewAction("reopen_done_for_review", "Reopen Done For Review",
+                                "reopen_done_for_review", "Review", true));
+    actions.append(ReviewAction("accept_evidence_risk", "Accept Evidence Risk",
+                                "accept_evidence_risk", "", true));
+  } else if (lane == "Evidence Gap") {
+    actions.append(ReviewAction("request_more_evidence", "Request More Evidence",
+                                "request_more_evidence", "", false));
+    actions.append(ReviewAction("accept_evidence_risk", "Accept Evidence Risk",
+                                "accept_evidence_risk", "", true));
+  } else if (lane == "Blocked/Dirty") {
+    actions.append(ReviewAction("request_reconciliation", "Request Reconciliation",
+                                "request_reconciliation", "", false));
+    actions.append(ReviewAction("confirm_blocked", "Confirm Blocked",
+                                "confirm_blocked", "", false));
+  } else if (lane == "Stale/Drift") {
+    actions.append(ReviewAction("refresh_intent", "Refresh Intent",
+                                "refresh_intent", "", false));
+    actions.append(ReviewAction("split_followup", "Split Follow-up",
+                                "split_followup", "", false));
+  }
+  return actions;
+}
+
+std::optional<Json::Value> FindReviewAction(const std::string& lane,
+                                            const std::string& humanDecision) {
+  for (const auto& action : ReviewActionsForLane(lane)) {
+    if (action.get("human_decision", "").asString() == humanDecision) {
+      return action;
+    }
+  }
+  return std::nullopt;
+}
+
 const std::vector<std::string>& ReviewLaneOrder() {
   static const std::vector<std::string> order = {
       "Needs Review", "Done Candidate", "False Done Suspect",
@@ -1343,7 +1625,9 @@ Json::Value MakeReviewQueueBundle(
   out["source_fields"] = sourceFields;
   out["confidence"] = confidence;
   out["diagnostic_status"] = diagnosticStatus;
+  out["suggested_decision"] = suggestedDecision;
   out["suggested_human_decision"] = suggestedDecision;
+  out["actions"] = ReviewActionsForLane(queue);
   return out;
 }
 
@@ -2434,7 +2718,8 @@ Json::Value BacklogWebviewService::ListSavedViews() {
   for (const auto& view : SavedViews()) {
     response["views"].append(SavedViewToJson(view));
   }
-  response["read_only"] = true;
+  response["read_only"] = false;
+  response["review_decisions_enabled"] = true;
   return response;
 }
 
@@ -2722,8 +3007,236 @@ Json::Value BacklogWebviewService::BuildReviewInbox(const ItemQueryOptions& opti
   return response;
 }
 
+Json::Value BacklogWebviewService::SaveReviewDecisionDraft(
+    const Json::Value& request) {
+  try {
+    const auto product = JsonStringField(request, "product");
+    const auto itemId = JsonStringField(request, "item_id");
+    const auto actorAlias = JsonStringField(request, "actor_alias");
+    const auto lane = JsonStringField(request, "lane");
+    const auto reasonCode = JsonStringField(request, "reason_code");
+    if (product.empty() || product == "all" || !IsValidProductName(product)) {
+      return MakeError("review_decision.product_required", "pass a single valid product for review decision drafts");
+    }
+    if (itemId.empty()) {
+      return MakeError("review_decision.item_required", "pass item_id for review decision drafts");
+    }
+    if (actorAlias.empty()) {
+      return MakeError("review_decision.actor_required", "pass actor_alias for review decision drafts");
+    }
+    if (lane.empty() || reasonCode.empty()) {
+      return MakeError("review_decision.context_required", "pass lane and reason_code for review decision drafts");
+    }
+
+    auto item = GetItem(product, itemId, true);
+    if (item.isMember("error")) {
+      return item;
+    }
+
+    const auto now = std::chrono::system_clock::now();
+    const auto nowText = ReviewTimestampText(now);
+    const auto productRoot = ProductRoot(product);
+    const auto draftPath = productRoot / "_meta" / "review-decisions" / "drafts" /
+        (SafeFileToken(itemId) + "-" + SafeFileToken(actorAlias) + ".json");
+
+    Json::Value existing(Json::objectValue);
+    const bool hadExisting = ReadJsonFile(draftPath, existing) && existing.isObject();
+
+    Json::Value record(Json::objectValue);
+    record["status"] = "draft";
+    record["product"] = product;
+    record["item_id"] = itemId;
+    record["lane"] = lane;
+    record["reason_code"] = reasonCode;
+    auto suggestedDecision = JsonStringField(request, "suggested_decision");
+    if (suggestedDecision.empty()) {
+      suggestedDecision = JsonStringField(request, "suggested_human_decision");
+    }
+    record["suggested_decision"] = suggestedDecision;
+    record["human_decision"] = JsonStringField(request, "human_decision");
+    record["rationale"] = JsonStringField(request, "rationale");
+    record["actor_alias"] = actorAlias;
+    record["target_state"] = JsonStringField(request, "target_state");
+    record["source_detector"] = JsonStringField(request, "source_detector").empty()
+        ? "backboard-review-inbox"
+        : JsonStringField(request, "source_detector");
+    record["supersedes"] = JsonStringField(request, "supersedes");
+    record["draft_created_at"] = hadExisting && existing.isMember("draft_created_at")
+        ? existing["draft_created_at"].asString()
+        : nowText;
+    record["draft_updated_at"] = nowText;
+    record["agent_started"] = false;
+    record["dispatch_started"] = false;
+
+    WriteJsonFile(draftPath, record);
+
+    Json::Value out(Json::objectValue);
+    out["status"] = "draft";
+    out["record"] = record;
+    out["path"] = std::filesystem::relative(draftPath, productRoot).generic_string();
+    out["updated_existing"] = hadExisting;
+    out["agent_started"] = false;
+    out["dispatch_started"] = false;
+    return out;
+  } catch (const std::exception& e) {
+    return MakeError("review_decision.draft_failed", e.what());
+  }
+}
+
+Json::Value BacklogWebviewService::SubmitReviewDecision(
+    const Json::Value& request) {
+  try {
+    const auto product = JsonStringField(request, "product");
+    const auto itemId = JsonStringField(request, "item_id");
+    const auto actorAlias = JsonStringField(request, "actor_alias");
+    const auto lane = JsonStringField(request, "lane");
+    const auto reasonCode = JsonStringField(request, "reason_code");
+    const auto humanDecision = JsonStringField(request, "human_decision");
+    if (product.empty() || product == "all" || !IsValidProductName(product)) {
+      return MakeError("review_decision.product_required", "pass a single valid product for submitted review decisions");
+    }
+    if (itemId.empty()) {
+      return MakeError("review_decision.item_required", "pass item_id for submitted review decisions");
+    }
+    if (actorAlias.empty()) {
+      return MakeError("review_decision.actor_required", "pass actor_alias for submitted review decisions");
+    }
+    if (lane.empty() || reasonCode.empty() || humanDecision.empty()) {
+      return MakeError("review_decision.record_required", "pass lane, reason_code, and human_decision before submitting review decisions");
+    }
+
+    auto itemDetail = GetItem(product, itemId, true);
+    if (itemDetail.isMember("error")) {
+      return itemDetail;
+    }
+    const auto item = itemDetail["item"];
+    const auto requestedAction = FindReviewAction(lane, humanDecision);
+    if (!requestedAction) {
+      return MakeError("review_decision.action_invalid", "human_decision is not valid for the requested review lane");
+    }
+    const auto actionTargetState = JsonStringField(*requestedAction, "target_state");
+    const auto requestedTargetState = JsonStringField(request, "target_state");
+    if (!requestedTargetState.empty() && requestedTargetState != actionTargetState) {
+      return MakeError("review_decision.target_state_mismatch", "target_state does not match the selected review lane action");
+    }
+    const auto targetState = actionTargetState;
+    const auto humanDecisionLower = text::ToLower(humanDecision);
+    const auto targetStateLower = text::ToLower(targetState);
+    const auto currentStateLower = text::ToLower(item.get("state", "").asString());
+    const bool highRisk = JsonBoolField(*requestedAction, "requires_confirmation") ||
+        targetStateLower == "done" || targetStateLower == "dropped" ||
+        humanDecisionLower.find("accept_evidence_risk") != std::string::npos ||
+        humanDecisionLower.find("accept_risk") != std::string::npos ||
+        humanDecisionLower.find("accept risk") != std::string::npos ||
+        humanDecisionLower.find("reopen") != std::string::npos ||
+        (currentStateLower == "done" && !targetState.empty() && targetStateLower != "done");
+    if (highRisk && !JsonBoolField(request, "confirmed")) {
+      return MakeError("review_decision.confirmation_required", "explicit confirmation is required before submitting this high-risk review action");
+    }
+
+    const auto now = std::chrono::system_clock::now();
+    const auto nowText = ReviewTimestampText(now);
+    const auto productRoot = ProductRoot(product);
+    const auto submittedDir = productRoot / "_meta" / "review-decisions" /
+        "submitted" / SafeFileToken(itemId);
+    const auto recordPath = UniqueJsonPath(submittedDir /
+        (ReviewTimestampFileToken(now) + "-" + SafeFileToken(humanDecision) + ".json"));
+
+    Json::Value transition(Json::objectValue);
+    transition["attempted"] = false;
+    transition["applied"] = false;
+    transition["parent_synced"] = false;
+    transition["dashboards_refreshed"] = false;
+    transition["diagnostics"] = Json::arrayValue;
+    std::optional<kano::backlog_core::BacklogItem> transitionItem;
+    if (!targetState.empty()) {
+      auto parsedState = kano::backlog_core::parse_item_state(targetState);
+      if (!parsedState) {
+        return MakeError("review_decision.target_state_invalid", "target_state is not a recognized KOB item state: " + targetState);
+      }
+      auto action = ReviewActionForTargetState(*parsedState);
+      if (!action) {
+        return MakeError("review_decision.target_state_invalid", "target_state cannot be requested by a review decision: " + targetState);
+      }
+      transition["attempted"] = true;
+      auto currentState = kano::backlog_core::parse_item_state(item.get("state", "").asString());
+      if (!currentState) {
+        return MakeError("review_decision.current_state_invalid", "current item state is not a recognized KOB item state");
+      }
+      transitionItem = kano::backlog_core::BacklogItem{};
+      transitionItem->id = itemId;
+      transitionItem->state = *currentState;
+      transitionItem->updated = item.get("updated", "").asString();
+      const auto oldState = transitionItem->state;
+      transition["old_state"] = kano::backlog_core::to_string(oldState);
+      const auto message = "Human review decision: " + humanDecision +
+          (JsonStringField(request, "rationale").empty() ? "" : "; " + JsonStringField(request, "rationale"));
+      try {
+        kano::backlog_core::StateMachine::transition(
+            *transitionItem, *action, std::optional<std::string>(actorAlias),
+            std::optional<std::string>(message));
+        transition["policy_status"] = "accepted";
+        transition["new_state"] = kano::backlog_core::to_string(transitionItem->state);
+      } catch (const std::exception& e) {
+        transitionItem = std::nullopt;
+        transition["policy_status"] = "rejected";
+        transition["new_state"] = targetState;
+        transition["error"] = e.what();
+        transition["diagnostics"].append(e.what());
+      }
+    }
+
+    Json::Value record(Json::objectValue);
+    record["status"] = "submitted";
+    record["product"] = product;
+    record["item_id"] = itemId;
+    record["lane"] = lane;
+    record["reason_code"] = reasonCode;
+    auto suggestedDecision = JsonStringField(request, "suggested_decision");
+    if (suggestedDecision.empty()) {
+      suggestedDecision = JsonStringField(request, "suggested_human_decision");
+    }
+    record["suggested_decision"] = suggestedDecision;
+    record["human_decision"] = humanDecision;
+    record["rationale"] = JsonStringField(request, "rationale");
+    record["actor_alias"] = actorAlias;
+    record["target_state"] = targetState;
+    record["created_at"] = nowText;
+    record["submitted_at"] = nowText;
+    record["source_detector"] = JsonStringField(request, "source_detector").empty()
+        ? "backboard-review-inbox"
+        : JsonStringField(request, "source_detector");
+    record["supersedes"] = JsonStringField(request, "supersedes");
+    record["confirmed"] = JsonBoolField(request, "confirmed");
+    record["high_risk"] = highRisk;
+    record["transition"] = transition;
+    record["agent_started"] = false;
+    record["dispatch_started"] = false;
+
+    WriteJsonFile(recordPath, record);
+
+    if (transitionItem) {
+      ApplyTransitionToMarkdown(productRoot, item, *transitionItem);
+      transition["applied"] = true;
+      record["transition"] = transition;
+      WriteJsonFile(recordPath, record);
+      cacheByProduct.erase(product);
+    }
+
+    Json::Value out(Json::objectValue);
+    out["status"] = "submitted";
+    out["record"] = record;
+    out["path"] = std::filesystem::relative(recordPath, productRoot).generic_string();
+    out["agent_started"] = false;
+    out["dispatch_started"] = false;
+    return out;
+  } catch (const std::exception& e) {
+    return MakeError("review_decision.submit_failed", e.what());
+  }
+}
+
 Json::Value BacklogWebviewService::GetEvidenceDetail(const std::string& product,
-                                                     const std::string& id,
+                                                      const std::string& id,
                                                      bool forceRefresh) {
   Json::Value response(Json::objectValue);
   auto detail = GetItem(product, id, forceRefresh);
@@ -3923,6 +4436,51 @@ void RegisterBacklogWebviewRoutes(
         callback(response);
       },
       {Get});
+
+  auto reviewDecisionResponse = [metaAppender](
+      const HttpRequestPtr& request,
+      std::function<void(const HttpResponsePtr&)>&& callback,
+      Json::Value data) {
+    Json::Value body(Json::objectValue);
+    body["ok"] = !data.isMember("error");
+    body["data"] = data;
+    metaAppender(request, body);
+    auto response = HttpResponse::newHttpJsonResponse(body);
+    if (!body["ok"].asBool()) {
+      response->setStatusCode(k400BadRequest);
+    }
+    callback(response);
+  };
+
+  app().registerHandler(
+      "/api/review/decision/draft",
+      [reviewDecisionResponse, &service](const HttpRequestPtr& request,
+          std::function<void(const HttpResponsePtr&)>&& callback) {
+        const auto payload = request->getJsonObject();
+        if (!payload) {
+          reviewDecisionResponse(request, std::move(callback),
+                                 MakeError("review_decision.invalid_json", "POST a JSON review decision draft payload"));
+          return;
+        }
+        reviewDecisionResponse(request, std::move(callback),
+                               service.SaveReviewDecisionDraft(*payload));
+      },
+      {Post});
+
+  app().registerHandler(
+      "/api/review/decision/submit",
+      [reviewDecisionResponse, &service](const HttpRequestPtr& request,
+          std::function<void(const HttpResponsePtr&)>&& callback) {
+        const auto payload = request->getJsonObject();
+        if (!payload) {
+          reviewDecisionResponse(request, std::move(callback),
+                                 MakeError("review_decision.invalid_json", "POST a JSON submitted review decision payload"));
+          return;
+        }
+        reviewDecisionResponse(request, std::move(callback),
+                               service.SubmitReviewDecision(*payload));
+      },
+      {Post});
 
   app().registerHandler(
       "/api/review/evidence/{1}",

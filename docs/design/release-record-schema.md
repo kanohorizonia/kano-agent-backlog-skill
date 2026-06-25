@@ -66,3 +66,4 @@ The schema and example fixture live in:
 
 - [release-record.schema.json](../../references/release-record.schema.json)
 - [release-record.fixture.json](../../references/release-record.fixture.json)
+- [release-record-v0.2.0.fixture.json](../../references/release-record-v0.2.0.fixture.json)

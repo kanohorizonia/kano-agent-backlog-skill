@@ -16,7 +16,7 @@ Design contracts:
 - Read canonical markdown backlog files under `_kano/backlog/products/*/items/`
 - Default to an all-products view, with explicit single-product and multi-product filters.
 - Expose item metadata needed for review scans: product, type, state, source kind, UID, and topic membership when a topic manifest references the item.
-- Read-only APIs:
+- Read-mostly APIs:
   - `GET /healthz`
   - `GET /api/products`
   - `GET /api/items?product=all|<name>[&products=a,b][&q=...][&state=Ready,Doing][&type=task,feature][&limit=200][&offset=0]`
@@ -24,6 +24,8 @@ Design contracts:
   - `GET /api/tree?product=all|<name>[&products=a,b][&q=...][&state=...][&type=...][&limit=...]`
   - `GET /api/kanban?product=all|<name>[&products=a,b][&q=...][&state=...][&type=...][&limit=...]`
   - `GET /api/refresh[?product=all|<name>][&products=a,b]`
+  - `POST /api/review/decision/draft`
+  - `POST /api/review/decision/submit`
 - Server-rendered partials:
   - `GET /partials/tree?...`
   - `GET /partials/kanban?...`
@@ -44,7 +46,9 @@ bounded error rendering without npm or a frontend build step.
 
 - Binds to `127.0.0.1` only
 - Product path constrained to configured products root
-- No mutation endpoints
+- Mutation endpoints are limited to local KOB review-decision drafts/submissions;
+  confirmed target-state actions call existing KOB transition policy and never
+  start agents or dispatch work.
 
 ## Build (Linux)
 

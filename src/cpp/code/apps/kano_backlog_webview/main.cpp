@@ -550,7 +550,8 @@ R"HTML(  <script src="/assets/kob-ui.js"></script>
         selectedItemId: '',
         selectedItemProduct: '',
         selectedItemVisibleIndex: -1,
-        shortcutHelpOpen: false
+        shortcutHelpOpen: false,
+        reviewActorAlias: 'human-reviewer'
     };
     const lanes = ['Backlog', 'Doing', 'Blocked', 'Review', 'Done'];
     const reviewQueueOrder = ['Needs Review', 'Done Candidate', 'False Done Suspect', 'Evidence Gap', 'Blocked/Dirty', 'Stale/Drift', 'Ready Frontier'];
@@ -587,6 +588,26 @@ R"HTML(  <script src="/assets/kob-ui.js"></script>
 
     async function getJson(url, options = {}) {
       const resp = await fetch(url, { signal: options.signal });
+      let body = null;
+      try {
+        body = await resp.json();
+      } catch (_e) {
+        body = {};
+      }
+      if (!resp.ok || body?.ok === false) {
+        const detail = body?.data?.error || body?.error || `HTTP ${resp.status}`;
+        throw new Error(detail);
+      }
+      return body;
+    }
+
+    async function postJson(url, payload, options = {}) {
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload || {}),
+        signal: options.signal
+      });
       let body = null;
       try {
         body = await resp.json();
@@ -1223,9 +1244,68 @@ R"HTML(    function typeIcon(type) {
       const reason = bundle?.review_reason || `Queued for ${lane || 'review'} review.`;
       const reasonCode = bundle?.reason_code ? `<code>${esc(bundle.reason_code)}</code> ` : '';
       const decision = bundle?.suggested_human_decision ? `<div class="muted">Suggested decision: ${esc(bundle.suggested_human_decision)}</div>` : '';
-      return `<div class="card" ${selectableItemAttrs(item)}>${renderItemCardSummary(item)}<div class="muted review-reason"><strong>Why this needs review:</strong> ${reasonCode}${esc(reason)}${decision}</div></div>`;
+      const actions = (bundle?.actions || []).map((action) =>
+        `<button class="btn review-action" data-review-action="submit" data-human-decision="${escAttr(action.human_decision || action.id || '')}" data-target-state="${escAttr(action.target_state || '')}" data-requires-confirmation="${action.requires_confirmation ? 'true' : 'false'}">${esc(action.label || action.id || 'Submit decision')}</button>`
+      ).join(' ');
+      return `<div class="card" data-review-card="true" data-review-lane="${escAttr(lane || '')}" data-review-reason-code="${escAttr(bundle?.reason_code || '')}" data-review-suggested-decision="${escAttr(bundle?.suggested_decision || bundle?.suggested_human_decision || '')}" data-review-source-detector="${escAttr(bundle?.diagnostic_status || 'backboard-review-inbox')}" ${selectableItemAttrs(item)}>${renderItemCardSummary(item)}<div class="muted review-reason"><strong>Why this needs review:</strong> ${reasonCode}${esc(reason)}${decision}</div><label class="muted" style="display:block;margin-top:8px;">Draft review note<textarea data-review-draft-note="true" rows="3" style="width:100%;box-sizing:border-box;margin-top:4px;" placeholder="Write rationale or instructions before submitting"></textarea></label><div class="review-actions" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;"><button class="btn" data-review-action="save-draft">Save Draft</button>${actions}</div><div class="muted" data-review-status style="margin-top:6px;"></div></div>`;
     }
 
+    function reviewPayloadFromCard(card, button, confirmed = false) {
+      const note = card.querySelector('[data-review-draft-note]')?.value || '';
+      return {
+        product: card.getAttribute('data-item-product') || '',
+        item_id: card.getAttribute('data-item-id') || '',
+        lane: card.getAttribute('data-review-lane') || '',
+        reason_code: card.getAttribute('data-review-reason-code') || '',
+        suggested_decision: card.getAttribute('data-review-suggested-decision') || '',
+        human_decision: button?.getAttribute('data-human-decision') || '',
+        rationale: note,
+        actor_alias: state.reviewActorAlias,
+        target_state: button?.getAttribute('data-target-state') || '',
+        source_detector: card.getAttribute('data-review-source-detector') || 'backboard-review-inbox',
+        confirmed
+      };
+    }
+
+    function setReviewStatus(card, text, isError = false) {
+      const status = card.querySelector('[data-review-status]');
+      if (!status) return;
+      status.textContent = text;
+      status.style.color = isError ? '#b42318' : '';
+    }
+
+    function bindReviewActions(selector) {
+      document.querySelectorAll(`${selector} [data-review-action]`).forEach((button) => {
+        button.addEventListener('click', async (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const card = button.closest('[data-review-card]');
+          if (!card) return;
+          try {
+            if (button.getAttribute('data-review-action') === 'save-draft') {
+              await postJson('/api/review/decision/draft', reviewPayloadFromCard(card, null));
+              setReviewStatus(card, 'Draft saved.');
+              return;
+            }
+            const needsConfirmation = button.getAttribute('data-requires-confirmation') === 'true';
+            const confirmed = needsConfirmation
+              ? window.confirm('This is a high-risk review action. Submit only after explicit human confirmation.')
+              : false;
+            if (needsConfirmation && !confirmed) {
+              setReviewStatus(card, 'Submission cancelled before confirmation.');
+              return;
+            }
+            const result = await postJson('/api/review/decision/submit', reviewPayloadFromCard(card, button, confirmed));
+            setReviewStatus(card, `Decision submitted: ${result?.data?.path || 'recorded'}.`);
+          } catch (error) {
+            setReviewStatus(card, error.message || String(error), true);
+          }
+        });
+      });
+    }
+
+)HTML"
+R"HTML(
     function bindItemLinks(selector) {
       document.querySelectorAll(`${selector} .item-link[data-item-id]`).forEach((link) => {
         link.addEventListener('click', async (event) => {
@@ -1672,6 +1752,7 @@ R"HTML(
       }).join('') || '<div class="muted">No review queues for the current filters.</div>';
       bindItemLinks('#review-inbox');
       bindSelectableCards('#review-inbox');
+      bindReviewActions('#review-inbox');
 
       document.querySelectorAll('#saved-views [data-saved-view]').forEach((button) => {
         button.addEventListener('click', async () => {

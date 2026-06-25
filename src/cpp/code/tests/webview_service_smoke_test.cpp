@@ -775,6 +775,39 @@ int main() {
         expect(read_text(submittedTwoPath).find(submittedOne["path"].asString()) != std::string::npos,
                "superseding record should reference the superseded decision");
 
+        auto historyDetail = service.GetEvidenceDetail("product-alpha", "PRA-TSK-0001");
+        expect(!historyDetail["review_decision_history"]["empty"].asBool(),
+               "review decision history should not be empty after submitted decisions");
+        expect(historyDetail["review_decision_history"]["entries"].size() >= 2,
+               "review decision history should include multiple submitted entries");
+        expect(historyDetail["review_decision_history"]["entries"][0]["superseded"].asBool(),
+               "review decision history should mark superseded decisions");
+        expect(historyDetail["review_decision_history"]["entries"][1]["supersedes"].asString() == submittedOne["path"].asString(),
+               "review decision history should expose supersede chains");
+        auto historyPartial = service.RenderItemPartial("product-alpha", "PRA-TSK-0001");
+        expect(historyPartial.find("Review decision history") != std::string::npos,
+               "item detail should render review decision history panel");
+        expect(historyPartial.find("Superseding instruction after human correction.") != std::string::npos,
+               "history panel should show rationale text");
+        expect(historyPartial.find("reviewer-alias") != std::string::npos,
+               "history panel should show actor alias");
+        expect(historyPartial.find("skipped") != std::string::npos,
+               "history panel should show transition outcome");
+        expect(historyPartial.find("Raw review decision metadata") != std::string::npos,
+               "history panel should keep raw metadata behind details toggle");
+
+        Json::Value longRationaleSubmit = submit;
+        longRationaleSubmit["rationale"] = std::string(240, 'x');
+        auto longRationaleRecord = service.SubmitReviewDecision(longRationaleSubmit);
+        expect(!longRationaleRecord.isMember("error"), "long rationale review decision should submit");
+        auto compactHistoryPartial = service.RenderItemPartial("product-alpha", "PRA-TSK-0001");
+        expect(compactHistoryPartial.find(std::string(180, 'x') + "...") != std::string::npos,
+               "history panel should truncate long rationale in compact display");
+
+        auto emptyHistoryPartial = service.RenderItemPartial("product-beta", "PRB-BUG-0002");
+        expect(emptyHistoryPartial.find("No review decisions recorded.") != std::string::npos,
+               "history panel should show explicit empty state");
+
         Json::Value highRisk(Json::objectValue);
         highRisk["product"] = "product-alpha";
         highRisk["item_id"] = "PRA-TSK-0004";

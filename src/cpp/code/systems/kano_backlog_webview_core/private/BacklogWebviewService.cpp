@@ -243,6 +243,11 @@ std::string RenderTreeNodePartial(const Json::Value& node, int depth) {
   return html;
 }
 
+std::string JsonCompactString(const Json::Value& value);
+std::string RenderReviewDecisionHistoryPartial(const Json::Value& history);
+std::string RenderPill(const std::string& value);
+std::string TruncateForReviewHistory(const std::string& value);
+
 std::string RenderEvidenceSummaryPartial(const Json::Value& evidence) {
   const auto score = evidence.get("score", 0);
   std::ostringstream scoreText;
@@ -261,6 +266,50 @@ std::string RenderEvidenceSummaryPartial(const Json::Value& evidence) {
     }
     html += "</div>";
   }
+  return html;
+}
+
+std::string RenderReviewDecisionHistoryPartial(const Json::Value& history) {
+  std::string html = "<section class=\"panel detail-section\"><h4>Review decision history</h4>";
+  if (history.get("empty", true).asBool() || history["entries"].empty()) {
+    html += "<div class=\"muted\">No review decisions recorded.</div></section>";
+    return html;
+  }
+
+  for (const auto& entry : history["entries"]) {
+    const auto humanDecision = entry.get("human_decision", "").asString();
+    const auto lane = entry.get("lane", "").asString();
+    const auto reasonCode = entry.get("reason_code", "").asString();
+    const auto actor = entry.get("actor_alias", "unknown").asString();
+    const auto timestamp = entry.get("submitted_at", entry.get("created_at", "unknown")).asString();
+    const auto rationale = entry.get("rationale", "").asString();
+    const auto suggested = entry.get("suggested_decision", "").asString();
+    const auto source = entry.get("source_detector", "").asString();
+    const auto outcome = entry["transition"].get("outcome", "skipped").asString();
+    html += "<div class=\"card\"><div><strong>" +
+            HtmlEscape(humanDecision.empty() ? "Review decision" : humanDecision) +
+            "</strong> " + RenderPill(outcome) +
+            (entry.get("superseded", false).asBool() ? " <span class=\"pill missing\">superseded</span>" : "") +
+            "</div><div class=\"muted\">" + HtmlEscape(lane) +
+            (reasonCode.empty() ? "" : " / " + HtmlEscape(reasonCode)) +
+            " | " + HtmlEscape(actor) + " | " + HtmlEscape(timestamp) + "</div>";
+    if (!suggested.empty() || !source.empty()) {
+      html += "<div class=\"muted\">Detector suggestion: " +
+              HtmlEscape(suggested.empty() ? "unknown" : suggested) +
+              (source.empty() ? "" : " from " + HtmlEscape(source)) + "</div>";
+    }
+    if (!rationale.empty()) {
+      html += "<div>" + HtmlEscape(TruncateForReviewHistory(rationale)) + "</div>";
+    }
+    const auto supersedes = entry.get("supersedes", "").asString();
+    if (!supersedes.empty()) {
+      html += "<div class=\"muted\">Supersedes: <code>" + HtmlEscape(supersedes) + "</code></div>";
+    }
+    html += "<details><summary>Raw review decision metadata</summary><pre>" +
+            HtmlEscape(entry.get("raw_metadata", JsonCompactString(entry)).asString()) +
+            "</pre></details></div>";
+  }
+  html += "</section>";
   return html;
 }
 
@@ -442,6 +491,74 @@ bool ReadJsonFile(const std::filesystem::path& path, Json::Value& value) {
   Json::CharReaderBuilder builder;
   std::string errors;
   return Json::parseFromStream(builder, input, &value, &errors);
+}
+
+std::string JsonCompactString(const Json::Value& value) {
+  Json::StreamWriterBuilder builder;
+  builder["indentation"] = "";
+  return Json::writeString(builder, value);
+}
+
+std::string TruncateForReviewHistory(const std::string& value) {
+  constexpr size_t maxLength = 180;
+  if (value.size() <= maxLength) {
+    return value;
+  }
+  return value.substr(0, maxLength) + "...";
+}
+
+Json::Value BuildReviewDecisionHistory(const std::filesystem::path& productRoot,
+                                       const std::string& product,
+                                       const std::string& itemId) {
+  Json::Value history(Json::objectValue);
+  history["product"] = product;
+  history["item_id"] = itemId;
+  history["entries"] = Json::arrayValue;
+  history["empty"] = true;
+
+  const auto submittedDir = productRoot / "_meta" / "review-decisions" /
+      "submitted" / SafeFileToken(itemId);
+  if (!std::filesystem::exists(submittedDir)) {
+    return history;
+  }
+
+  std::vector<Json::Value> entries;
+  for (const auto& entry : std::filesystem::directory_iterator(submittedDir)) {
+    if (!entry.is_regular_file() || entry.path().extension() != ".json") {
+      continue;
+    }
+    Json::Value record(Json::objectValue);
+    if (!ReadJsonFile(entry.path(), record) || !record.isObject()) {
+      continue;
+    }
+    record["path"] = std::filesystem::relative(entry.path(), productRoot).generic_string();
+    record["raw_metadata"] = JsonCompactString(record);
+    entries.push_back(record);
+  }
+
+  std::sort(entries.begin(), entries.end(), [](const Json::Value& lhs, const Json::Value& rhs) {
+    const auto lhsTime = lhs.get("submitted_at", lhs.get("created_at", "")).asString();
+    const auto rhsTime = rhs.get("submitted_at", rhs.get("created_at", "")).asString();
+    if (lhsTime == rhsTime) {
+      return lhs.get("path", "").asString() < rhs.get("path", "").asString();
+    }
+    return lhsTime < rhsTime;
+  });
+
+  std::set<std::string> supersededPaths;
+  for (const auto& entry : entries) {
+    const auto supersedes = entry.get("supersedes", "").asString();
+    if (!supersedes.empty()) {
+      supersededPaths.insert(supersedes);
+    }
+  }
+
+  for (auto entry : entries) {
+    entry["superseded"] = supersededPaths.count(entry.get("path", "").asString()) > 0;
+    history["entries"].append(entry);
+  }
+  history["empty"] = history["entries"].empty();
+  return history;
 }
 
 void WriteJsonFile(const std::filesystem::path& path, const Json::Value& value) {
@@ -3381,6 +3498,9 @@ Json::Value BacklogWebviewService::GetEvidenceDetail(const std::string& product,
   const auto item = detail["item"];
   response["item"] = item;
   response["evidence"] = BuildEvidenceSummary(item);
+  response["review_decision_history"] = BuildReviewDecisionHistory(
+      ProductRoot(item.get("product", product).asString()),
+      item.get("product", product).asString(), item.get("id", id).asString());
   response["worklog_events"] = Json::arrayValue;
   for (const auto& line : ExtractWorklogLines(item.get("content", "").asString())) {
     Json::Value event(Json::objectValue);
@@ -4061,6 +4181,8 @@ std::string BacklogWebviewService::RenderItemPartial(const std::string& product,
 
   html += "<section class=\"panel detail-section\"><h4>Evidence</h4>" +
           RenderEvidenceSummaryPartial(detail["evidence"]) + "</section>";
+
+  html += RenderReviewDecisionHistoryPartial(detail["review_decision_history"]);
 
   if (!reviewSections.empty()) {
     html += "<div class=\"detail-sections\">";

@@ -74,15 +74,28 @@ Each submitted record includes:
 | `supersedes` | Optional prior submitted decision record path. |
 | `transition` | Result of the KOB policy transition when `target_state` is requested. |
 
-Lane actions use explicit names such as `Send To Review`, `Request More
-Evidence`, `Approve Done With Evidence`, `Accept Evidence Risk`, and `Reopen
-Done For Review` instead of generic Accept/Reject labels where possible.
+Lane actions use explicit names instead of generic Accept/Reject labels where
+possible. The review action policy is:
+
+| Action | Lane | Target state | Confirmation |
+| --- | --- | --- | --- |
+| Mark Done | Done Candidate | Done | Required |
+| Move to Review | Done Candidate | Review | Single click |
+| Reject Completion | Done Candidate | Review | Single click |
+| Request Evidence | Needs Review, False Done Suspect, Evidence Gap | none | Single click |
+| Reopen from Done | False Done Suspect | Review | Required |
+| Dismiss | False Done Suspect | none | Single click |
+| Accept Risk | Blocked/Dirty | none | Required |
+| Drop | Stale/Drift | Dropped | Required |
 
 High-risk actions, including moving to Done, dropping work, accepting evidence
 risk, or reopening Done, require explicit confirmation before any KOB state
-transition is attempted. Confirmed actions call the existing KOB transition
-policy; Backboard must not bypass transition validation and must not start
-agents or dispatch work.
+transition is attempted. The UI must show the resulting state before submit for
+any action with a target state. Confirmed target-state actions call the existing
+KOB transition policy; Backboard must not bypass transition validation and must
+not start agents or dispatch work. If KOB rejects a target-state transition,
+Backboard records the submitted decision with the policy rejection and leaves the
+item Markdown unchanged.
 
 ## Current Reason Codes
 

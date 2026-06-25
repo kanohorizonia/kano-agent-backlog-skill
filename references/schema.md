@@ -2,6 +2,23 @@
 
 ## Directory structure
 
+Backlog roots can carry product hierarchy, topic context, and release evidence as
+separate axes:
+
+```
+_kano/backlog/
+|-- products/<product>/  # Product-scoped hierarchy, artifacts, ADRs, and views
+|-- releases/<version>/  # Release records, scope views, evidence, and drafts
+`-- topics/              # Horizontal context bundles
+```
+
+Release workspaces are defined by the
+[Release Record schema](../docs/design/release-record-schema.md) and
+[Releases directory contract](../docs/design/releases-directory-contract.md).
+They aggregate scope and evidence without changing item parentage.
+
+Product directory structure:
+
 ```
 _kano/backlog/products/<product>/
 ├── _config/          # Product configuration (config.toml, profile.env)

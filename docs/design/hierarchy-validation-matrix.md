@@ -15,6 +15,9 @@ C++ validators, schemas, or KOA contracts.
 - `relates` remains a non-blocking reference.
 - Release membership, topics, and work orders are separate axes and must never be
   accepted as structural parents.
+  Release scope is defined by [Release Record Schema](release-record-schema.md)
+  and [Releases Directory Contract](releases-directory-contract.md) records, not
+  by `parent` edits.
 
 ## Severity
 

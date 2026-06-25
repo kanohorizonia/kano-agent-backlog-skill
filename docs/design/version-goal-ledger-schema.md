@@ -46,6 +46,14 @@ Each ledger entry includes:
 - Backboard may show roadmap status, but must not mutate backlog or start agents.
 - Ark Console execution admission is separate and out of scope.
 
+## Release Record Integration
+
+Release records may reference Version Goal Ledger goals when a release needs a
+bounded snapshot of roadmap intent. The Release Record does not replace this
+ledger, does not own roadmap status, and does not turn release membership into a
+parent relationship. See [Release Record Schema](release-record-schema.md) and
+[Releases Directory Contract](releases-directory-contract.md).
+
 ## Fixture
 
 The schema and example fixture live in:

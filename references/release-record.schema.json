@@ -1,0 +1,149 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentskill-backlog.kanohorizonia.com/references/release-record.schema.json",
+  "title": "KOB Release Record",
+  "type": "object",
+  "required": [
+    "schema",
+    "release_id",
+    "target_products",
+    "lifecycle_state",
+    "goals",
+    "included_items",
+    "deferred_items",
+    "validation_refs",
+    "dogfood_refs",
+    "limitations",
+    "release_notes_artifact_refs",
+    "public_docs_refs"
+  ],
+  "properties": {
+    "schema": { "const": "kob.release.record.v1" },
+    "release_id": { "type": "string", "minLength": 1 },
+    "version_label": { "type": "string", "minLength": 1 },
+    "summary": { "type": "string", "minLength": 1 },
+    "lifecycle_state": {
+      "enum": ["planned", "assembling", "validating", "released", "archived"]
+    },
+    "target_products": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/ref" }
+    },
+    "goals": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/goal" }
+    },
+    "included_items": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/item_ref" }
+    },
+    "deferred_items": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/deferred_item" }
+    },
+    "validation_refs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/ref" }
+    },
+    "dogfood_refs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/ref" }
+    },
+    "limitations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/limitation" }
+    },
+    "release_notes_artifact_refs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/ref" }
+    },
+    "public_docs_refs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/ref" }
+    }
+  },
+  "$defs": {
+    "ref": {
+      "type": "object",
+      "required": ["product"],
+      "properties": {
+        "product": { "type": "string", "minLength": 1 },
+        "item_id": { "type": "string", "minLength": 1 },
+        "uid": { "type": "string", "minLength": 1 },
+        "topic_id": { "type": "string", "minLength": 1 },
+        "adr_id": { "type": "string", "minLength": 1 },
+        "evidence_id": { "type": "string", "minLength": 1 },
+        "artifact_id": { "type": "string", "minLength": 1 },
+        "doc_id": { "type": "string", "minLength": 1 },
+        "public_url": { "type": "string", "minLength": 1 },
+        "reason": { "type": "string", "minLength": 1 }
+      },
+      "anyOf": [
+        { "required": ["item_id"] },
+        { "required": ["uid"] },
+        { "required": ["topic_id"] },
+        { "required": ["adr_id"] },
+        { "required": ["evidence_id"] },
+        { "required": ["artifact_id"] },
+        { "required": ["doc_id"] },
+        { "required": ["public_url"] }
+      ],
+      "additionalProperties": false
+    },
+    "goal": {
+      "type": "object",
+      "required": ["goal_id", "summary"],
+      "properties": {
+        "goal_id": { "type": "string", "minLength": 1 },
+        "summary": { "type": "string", "minLength": 1 },
+        "ledger_goal_refs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ref" }
+        },
+        "linked_refs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ref" }
+        },
+        "reason": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "item_ref": {
+      "type": "object",
+      "required": ["product", "item_id"],
+      "properties": {
+        "product": { "type": "string", "minLength": 1 },
+        "item_id": { "type": "string", "minLength": 1 },
+        "uid": { "type": "string", "minLength": 1 },
+        "reason": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "deferred_item": {
+      "type": "object",
+      "required": ["product", "item_id", "reason"],
+      "properties": {
+        "product": { "type": "string", "minLength": 1 },
+        "item_id": { "type": "string", "minLength": 1 },
+        "uid": { "type": "string", "minLength": 1 },
+        "reason": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "limitation": {
+      "type": "object",
+      "required": ["summary"],
+      "properties": {
+        "summary": { "type": "string", "minLength": 1 },
+        "reason": { "type": "string", "minLength": 1 },
+        "linked_refs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ref" }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

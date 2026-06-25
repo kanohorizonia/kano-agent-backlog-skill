@@ -3,8 +3,9 @@
 Status: accepted design contract for `KOB-TSK-0087` under `KOB-FTR-0030`.
 
 This matrix defines how reparenting should be validated once hierarchy checks are
-implemented or tightened. It is a design artifact only; this run does not change
-C++ validators, schemas, or KOA contracts.
+implemented or tightened. `KOB-TSK-0097` adds the hard Initiative item type; this
+matrix remains a design contract for future parent validation and does not add
+KOA contracts or Product Line / Portfolio membership.
 
 ## Edge Semantics
 
@@ -32,14 +33,15 @@ C++ validators, schemas, or KOA contracts.
 
 | Child | Valid parent | Warning | Invalid or unsupported |
 | --- | --- | --- | --- |
-| Project-equivalent | none | Product projection or future vision-layer ref should be explicit in Product Map. | Hard `type: Project` item is unsupported in this run. |
-| Epic | Project-equivalent | Current storage may keep Epic root-scoped under product projection. | Feature, UserStory, Task, Bug, Issue, Topic, Work Order, Release. |
-| Feature | Epic | None. | Project-equivalent as direct parent, UserStory, Task, Bug, Issue, Topic, Work Order, Release. |
+| Project-equivalent | none | Product projection, future vision-layer ref, or Product Line / Portfolio catalog should be explicit outside item parentage. | Hard `type: Project` item is unsupported. |
+| Initiative | Project-equivalent | Current storage keeps Initiative root-scoped under product projection. | Project hard type, UserStory, Task, Topic, Work Order, Release. |
+| Epic | Initiative | Existing root Epics may remain while migrating to Initiative roots. | Feature, UserStory, Task, Bug, Issue, Topic, Work Order, Release. |
+| Feature | Initiative or Epic | Direct Initiative parent is valid when no release/campaign Epic boundary is useful. | Project-equivalent as direct parent, UserStory, Task, Bug, Issue, Topic, Work Order, Release. |
 | UserStory | Feature or Epic | Direct Epic parent should be used only when no release-facing Feature boundary is useful. | Task, Bug, Issue, Topic, Work Order, Release. |
 | Task | UserStory, Feature, or Epic | Direct Epic or Feature parent is valid for foundation work without story boundaries. | Bug, Issue, Topic, Work Order, Release. |
 | SubTask role | Task | Store as child `Task` under Task until hard SubTask support exists. | Non-Task parent; hard `type: SubTask` item is unsupported in this run. |
-| Bug | Task, Feature, Epic, or Project-equivalent | Project-equivalent attachment may be root/product scoped until vision refs exist. | UserStory unless the process explicitly chooses story-level bug ownership; Topic, Work Order, Release. |
-| Issue | Task, Feature, Epic, or Project-equivalent | Project-equivalent attachment may be root/product scoped until vision refs exist. | UserStory unless the scope is already localized by process policy; Topic, Work Order, Release. |
+| Bug | Task, Feature, Epic, Initiative, or Project-equivalent | Project-equivalent attachment may be root/product scoped until vision refs exist. | UserStory unless the process explicitly chooses story-level bug ownership; Topic, Work Order, Release. |
+| Issue | Task, Feature, Epic, Initiative, or Project-equivalent | Project-equivalent attachment may be root/product scoped until vision refs exist. | UserStory unless the scope is already localized by process policy; Topic, Work Order, Release. |
 
 ## Required Diagnostics
 
@@ -67,7 +69,7 @@ Before mutating an item parent, future tooling should check:
 1. Child and parent refs resolve uniquely in the active product.
 2. Parent is not the child and does not create a cycle.
 3. Parent belongs to a structural item type or the selected Project-equivalent
-   model.
+   model; Product Line / Portfolio membership is not a parent edge.
 4. Parent is not a release, topic, work order, raw path, or external product name.
 5. Child/parent pair is valid or intentionally warning-level according to the
    matrix above.
@@ -75,7 +77,9 @@ Before mutating an item parent, future tooling should check:
 
 ## Migration Notes
 
-Existing root Epics remain acceptable while Project-equivalent scope is product
-projected. Existing Task-to-Task relationships should be reviewed as SubTask-role
-work: keep them only when they are independently delegable and validated; move
-ordinary step lists back into the parent Task body or Worklog.
+Existing root Epics remain acceptable while Initiative migration is incremental.
+New durable component roots should use Initiative when they need independent
+release or narrative ownership. Existing Task-to-Task relationships should be
+reviewed as SubTask-role work: keep them only when they are independently
+delegable and validated; move ordinary step lists back into the parent Task body
+or Worklog.

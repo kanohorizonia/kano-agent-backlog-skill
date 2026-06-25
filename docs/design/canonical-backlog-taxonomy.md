@@ -1,19 +1,24 @@
 # Canonical Backlog Taxonomy
 
-Status: accepted design contract for `KOB-FTR-0030`, `KOB-TSK-0086`, and the
-semantic-absorption amendment from `KOB-TSK-0096`.
+Status: accepted design contract for `KOB-FTR-0030`, `KOB-TSK-0086`, the
+semantic-absorption amendment from `KOB-TSK-0096`, and the hard Initiative
+amendment from `KOB-TSK-0097`.
 
 ## Scope
 
 This contract defines KOB taxonomy semantics and the intended structural parent
-model. It does not implement new hard item types, release records, KOA contract
-changes, HorizonPlugin migration, or Backboard mutation behavior.
+model. `KOB-TSK-0097` adds the hard `Initiative` item type only. It does not
+implement hard `Project` or `SubTask` types, Product Line / Portfolio membership,
+release records, KOA contract changes, HorizonPlugin migration, or Backboard
+mutation behavior.
 
-Current hard formal item types remain `Epic`, `Feature`, `UserStory`, `Task`,
-`Bug`, and `Issue`. `Project` is represented by the selected Project-equivalent
-model from [Project Model Decision](project-model-decision.md). `SubTask` is a
-role for independently delegable child work under a Task, represented with the
-current Task storage until a future hard type is explicitly accepted.
+Current hard formal item types are `Initiative`, `Epic`, `Feature`, `UserStory`,
+`Task`, `Bug`, and `Issue`. `Project` remains rejected as a hard item type by
+[Project Model Decision](project-model-decision.md); `Initiative` is the
+KOB-TSK-0097 amendment for an independently releasable component/module/product
+narrative layer. `SubTask` is a role for independently delegable child work under
+a Task, represented with the current Task storage until a future hard type is
+explicitly accepted.
 
 ## Relationship Axes
 
@@ -30,27 +35,29 @@ current Task storage until a future hard type is explicitly accepted.
 
 | Type or role | Canonical meaning | Admission rule |
 | --- | --- | --- |
-| Project-equivalent | Product-scale or vision-layer planning scope above Epic. | Use backlog product projection now; use vision-layer records when implemented. Do not create hard `Project` items in this run. |
-| Epic | Durable deliverable outcome group under Project-equivalent scope. | Use when multiple capabilities, stories, tasks, or fixes share an outcome boundary. |
-| Feature | Capability or release-facing highlight unit. | Use when the result is a coherent capability or likely release-note highlight. It is not mandatory under every Epic. |
+| Project-equivalent | Product-scale or vision-layer planning scope above Initiative. | Use backlog product projection now; use vision-layer records when implemented. Do not create hard `Project` items. |
+| Initiative | Independently releasable component, module, or product narrative layer. | Use when a durable line can be released, maintained, presented, and explained independently across multiple Epics or Features. |
+| Epic | Durable release/campaign story under an Initiative. | Use when multiple capabilities, stories, tasks, or fixes share a coherent outcome boundary. Epic remains optional for early or MVP apps. |
+| Feature | Capability or release-facing highlight unit under an Initiative or Epic. | Use when the result is a coherent capability or likely release-note highlight. It is not mandatory under every Epic. |
 | UserStory | Stakeholder or user value slice. | Use when value framing and outcome acceptance matter. It may sit under Feature or directly under Epic. |
 | Task | Focused executable work. | Use for one bounded implementation, docs, validation, analysis, or migration unit. A Task may support UserStory, Feature, or Epic directly. |
 | SubTask role | Independently delegable child work under a Task. | Use only when a distinct agent or thread can own it with its own output and validation. Otherwise keep the steps as a checklist or Worklog note. |
-| Bug | Known incorrect behavior or regression. | Attach to the smallest useful ownership boundary: Task, Feature, Epic, or Project-equivalent. |
-| Issue | Pre-triage unclear problem, risk, blocker, or runtime gap. | Attach to the smallest useful boundary when known; split into Task or Bug once actionable. |
+| Bug | Known incorrect behavior or regression. | Attach to the smallest useful ownership boundary: Task, Feature, Epic, Initiative, or Project-equivalent. |
+| Issue | Pre-triage unclear problem, risk, blocker, or runtime gap. | Attach to the smallest useful boundary when known; split into Task or Bug once actionable. Initiative is valid for component-level unclear scope. |
 
 ## Flexible Parent Model
 
 | Child | Model parent | Current storage rule |
 | --- | --- | --- |
-| Project-equivalent | none | Product projection or future vision-layer record. No `type: Project` item. |
-| Epic | Project-equivalent | Root Epic under product scope until vision refs exist. |
-| Feature | Epic | `parent` points to an Epic. |
+| Project-equivalent | none | Product projection, future vision-layer record, or Product Line / Portfolio catalog outside item hierarchy. No `type: Project` item. |
+| Initiative | Project-equivalent | Root Initiative under product scope. Store as `items/initiative` with `INIT` display IDs. |
+| Epic | Initiative | `parent` points to an Initiative; existing root Epics may remain during migration. |
+| Feature | Initiative or Epic | `parent` points to the closest useful Initiative or Epic boundary. |
 | UserStory | Feature or Epic | `parent` points to a Feature or Epic. |
 | Task | UserStory, Feature, or Epic | `parent` points to the closest useful structural owner. |
 | SubTask role | Task | Store as a child `Task` under a Task only when independently delegable. |
-| Bug | Task, Feature, Epic, or Project-equivalent | Use structural parent when local; use root/product scope or links when cross-epic. |
-| Issue | Task, Feature, Epic, or Project-equivalent | Use structural parent when local; use root/product scope or links when not yet localized. |
+| Bug | Task, Feature, Epic, Initiative, or Project-equivalent | Use structural parent when local; use Initiative or root/product scope when cross-epic. |
+| Issue | Task, Feature, Epic, Initiative, or Project-equivalent | Use structural parent when local; use Initiative or root/product scope when not yet localized. |
 
 Parent links must remain intra-product structural refs. Do not use release ids,
 topic ids, work-order ids, raw paths, or product names as parent refs.
@@ -63,6 +70,10 @@ semantics from KOA-TSK-0211 and KOA-TSK-0212 as follows:
 
 - Feature may be release-facing highlight material, not a mandatory layer under
   every Epic.
+- Initiative is the independently releasable component/module/product narrative
+  layer above Epic and Feature.
+- Product Line / Portfolio grouping above Initiative is catalog membership, not a
+  structural parent in this taxonomy run.
 - Task may directly support Epic, Feature, or UserStory.
 - SubTask is independently delegable coding-agent or thread work under Task, not
   a checklist primitive.
@@ -142,6 +153,7 @@ than duplicated.
 - No hard `Project` item type.
 - No hard `SubTask` item type.
 - No `items/project/` or `items/subtask/` directories.
+- No Product Line / Portfolio hard item type or membership implementation.
 - No Release Record, `releases/` directory, or KCC publication gate work.
 - No KOA contract/view update or HorizonPlugin migration.
 - No Backboard mutation behavior.

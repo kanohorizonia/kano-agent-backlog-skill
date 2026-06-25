@@ -49,8 +49,9 @@ specified in config (built-in or custom) instead of hardcoding the list.
 
 ## Formal item types
 
+- Initiative: independently releasable component, module, or product narrative layer above Epic/Feature.
 - Epic: milestone-scale container.
-- Feature: capability container and/or release-facing highlight unit under an Epic.
+- Feature: capability container and/or release-facing highlight unit under an Initiative or Epic.
 - UserStory: user-facing outcome under a Feature or directly under an Epic when no release-facing Feature boundary is useful.
 - Task: focused implementation, docs, test, or maintenance work.
 - Bug: confirmed defect or regression against existing intent.
@@ -58,22 +59,24 @@ specified in config (built-in or custom) instead of hardcoding the list.
 
 Research, Decision, Spike, and Investigation are not formal item types. Treat them as activity metadata in worklogs, ADRs, topics, tags, artifacts, or follow-up Tasks/Bugs/Issues.
 
-`Project` is not a hard formal item type in the current schema. The canonical
-design uses a Project-equivalent model: backlog product projection now, and a
-future vision-layer record when that feature lands. `SubTask` is not a hard item
-type in this schema; represent independently delegable subtask-role work as a
-child Task under a Task, or keep ordinary steps as a checklist or Worklog note.
+`Project` is not a hard formal item type in the current schema. `Initiative` is
+the hard top planning item type for independently releasable component narrative
+ownership. Product Line / Portfolio grouping above Initiative is catalog
+membership, not a parent item. `SubTask` is not a hard item type in this schema;
+represent independently delegable subtask-role work as a child Task under a Task,
+or keep ordinary steps as a checklist or Worklog note.
 See [Canonical backlog taxonomy](../docs/design/canonical-backlog-taxonomy.md)
 and [Project model decision](../docs/design/project-model-decision.md).
 
 ## Parent rules (canonical design)
 
-- Project-equivalent -> Epic (currently stored as root Epic under product scope until vision refs exist)
+- Project-equivalent -> Initiative (stored as root Initiative under product scope)
+- Initiative -> Epic, Feature, Bug, or Issue
 - Epic -> Feature, UserStory, Task, Bug, or Issue
 - Feature -> UserStory, Task, Bug, or Issue
 - UserStory -> Task
 - Task -> child Task only when it represents independently delegable SubTask-role work
-- Bug and Issue may attach to Task, Feature, Epic, or Project-equivalent scope; split actionable Issue remediation into Task/Bug follow-ups once triage is clear
+- Bug and Issue may attach to Task, Feature, Epic, Initiative, or Project-equivalent scope; split actionable Issue remediation into Task/Bug follow-ups once triage is clear
 
 Release membership, topics, work orders, and execution dependencies are not
 parents. Use release scope, topic membership, work-order context, `blocks`,
@@ -111,7 +114,9 @@ To move Tasks, Bugs, or Issues into active execution, each item must include:
 - Acceptance Criteria
 - Risks / Dependencies
 
-Epics and Features use the lighter profile-specific gates in validation, but should still carry enough context for review.
+Initiatives and Epics require Context and Goal. Features and UserStories require
+Context, Goal, and Acceptance Criteria. All items should still carry enough
+context for review.
 
 ## Done evidence for code-changing items
 
@@ -128,6 +133,7 @@ Record branch convergence evidence in Worklog or Intent Amendments before closin
 - `<ID>_<slug>.md`
 - Slug: ASCII, hyphen-separated
 - ID prefixes:
+  - `KABSD-INIT-`
   - `KABSD-EPIC-`
   - `KABSD-FTR-`
   - `KABSD-USR-`

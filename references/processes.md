@@ -26,6 +26,10 @@ states = [
 terminal_states = ["Done", "Duplicate", "Dropped"]
 
 [[work_item_types]]
+type = "Initiative"
+slug = "initiative"
+
+[[work_item_types]]
 type = "Epic"
 slug = "epic"
 

@@ -84,12 +84,14 @@ Use this skill to:
   - Open an ADR (and link it) when a real trade-off or direction change is decided.
   - Otherwise, record the discussion in an existing Worklog; ask if unsure.
 - Ticket type selection (keep it lightweight):
+  - Initiative: independently releasable component, module, or product narrative layer above Epic/Feature.
   - Epic: multi-release or multi-team milestone spanning multiple Features.
   - Feature: a new capability that delivers multiple UserStories.
   - UserStory: a single user-facing outcome that requires multiple Tasks.
   - Task: a single focused implementation or doc change (typically one session).
   - Issue: a pre-triage unclear problem, risk, blocker, or runtime gap; split into Task/Bug follow-ups once actionable.
-  - Example: "End-to-end embedding pipeline" = Epic; "Pluggable vector backend" = Feature; "MVP chunking pipeline" = UserStory; "Implement tokenizer adapter" = Task.
+  - Product Line/Portfolio membership above Initiative is catalog metadata, not a backlog item type.
+  - Example: "Asset platform" = Initiative; "End-to-end embedding pipeline" = Epic; "Pluggable vector backend" = Feature; "MVP chunking pipeline" = UserStory; "Implement tokenizer adapter" = Task.
 - Bug vs Task triage (when fixing behavior):
   - If you are correcting a behavior that was previously marked `Done` and the behavior violates the original intent/acceptance (defect or regression), open a **Bug** and link it to the original item.
   - If the change is a new requirement/scope change beyond the original acceptance, open a **Task/UserStory** (or Feature) instead, and link it for traceability.
@@ -148,7 +150,7 @@ Intent Engineering keeps the human purpose of work visible across agent sessions
 
 ### Intent Stack
 
-- The Intent Stack is the existing parent chain: Epic -> Feature -> User Story -> Task/Bug.
+- The Intent Stack is the existing parent chain: Initiative -> Epic -> Feature -> User Story -> Task/Bug.
 - Before implementation, trace upward until the highest available parent that still carries relevant intent.
 - Summarize inherited intent from parent Context, Goal, Approach, Acceptance Criteria, Risks, Worklog decisions, and any Non-Goals / Do Not notes.
 - Do not copy whole parent documents into child items. Use bounded summaries with item IDs and paths when needed.

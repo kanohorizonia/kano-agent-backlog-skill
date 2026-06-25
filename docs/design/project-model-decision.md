@@ -10,9 +10,23 @@ over the backlog product. In taxonomy and validation docs, `Project-equivalent`
 means that selected model, not a literal `type: Project` Markdown item.
 
 Until the vision-layer model is implemented, project-scale scope is represented
-by the backlog product plus root Epics, product map projections, and explicit
-links or worklogs. Agents must not create `items/project/`, `PRJ` IDs, or
-`type: Project` frontmatter from this decision.
+by the backlog product plus root Initiatives or legacy root Epics, product map
+projections, and explicit links or worklogs. Agents must not create
+`items/project/`, `PRJ` IDs, or `type: Project` frontmatter from this decision.
+
+## KOB-TSK-0097 Amendment
+
+`KOB-TSK-0097` does not reverse the hard `Project` rejection above. It accepts a
+different hard item type: `Initiative`, stored under `items/initiative` with
+`INIT` display IDs. Initiative avoids the overloaded Project term and represents
+an independently releasable component, module, or product narrative line above
+Epic and Feature.
+
+The amended top hierarchy is Project-equivalent product/vision scope ->
+Initiative -> Epic or Feature. Epic remains optional and useful for release or
+campaign story grouping. Product Line / Portfolio grouping above Initiative is a
+separate catalog membership model tracked by `KOB-TSK-0098`, not a parent item in
+this decision.
 
 ## Options Evaluated
 
@@ -38,27 +52,30 @@ links or worklogs. Agents must not create `items/project/`, `PRJ` IDs, or
 
 ## Parent Semantics
 
-The model-level hierarchy is:
+The model-level hierarchy, as amended by `KOB-TSK-0097`, is:
 
 | Child | Model parent |
 | --- | --- |
 | Project-equivalent | none |
-| Epic | Project-equivalent |
-| Feature | Epic |
+| Initiative | Project-equivalent |
+| Epic | Initiative |
+| Feature | Initiative or Epic |
 | UserStory | Feature or Epic |
 | Task | UserStory, Feature, or Epic |
 | SubTask role | Task |
-| Bug | Task, Feature, Epic, or Project-equivalent |
-| Issue | Task, Feature, Epic, or Project-equivalent |
+| Bug | Task, Feature, Epic, Initiative, or Project-equivalent |
+| Issue | Task, Feature, Epic, Initiative, or Project-equivalent |
 
 Because `Project-equivalent` is not a hard item type, current storage represents
-that parent through product scope and future vision-layer refs. Do not put a
-product name, topic id, release id, or work-order id into `parent` to simulate a
-Project.
+that parent through product scope and future vision-layer refs. `Initiative` is
+the hard root item beneath that scope when a durable component narrative is
+needed. Do not put a product name, topic id, release id, or work-order id into
+`parent` to simulate a Project.
 
 ## Schema Impact
 
-This decision changes documentation and validation policy only.
+This `KOB-TSK-0088` decision changed documentation and validation policy only.
+`KOB-TSK-0097` separately adds hard Initiative schema support.
 
 - No `Project` enum value is added.
 - No `items/project/` directory is added.
@@ -70,8 +87,9 @@ This decision changes documentation and validation policy only.
 
 ## Migration Impact
 
-- Existing root Epics remain valid while Project-equivalent storage is product or
-  vision projected.
+- Existing root Epics remain valid during migration, but new durable component
+  roots should use Initiative when an independently releasable narrative line is
+  needed.
 - Existing Features are not forced under every Epic when they only serve as
   release-facing highlight material.
 - Existing Task, Bug, and Issue items do not need retyping to conform to this
@@ -91,6 +109,8 @@ canonical KOB taxonomy work:
 
 - Feature may be release-facing highlight material, not a mandatory layer under
   every Epic.
+- Initiative now carries independently releasable component/module/product
+  narrative ownership without adding hard `Project` semantics.
 - Task may directly support Epic, Feature, or UserStory.
 - SubTask is independently delegable coding-agent or thread work under Task, not
   a checklist primitive.

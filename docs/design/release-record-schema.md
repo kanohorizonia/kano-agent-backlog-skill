@@ -28,8 +28,27 @@ Each release record includes:
 | `validation_refs` | Validation evidence refs for the release state claims. |
 | `dogfood_refs` | Internal dogfood refs that support release confidence. |
 | `limitations` | Known gaps, constraints, or caveats that remain true. |
-| `release_notes_artifact_refs` | Draft or published release note artifact refs. |
+| `release_notes_artifact_refs` | Draft or reviewed release note artifact refs generated from a release-notes evidence bundle. |
 | `public_docs_refs` | Public doc refs or planned publication targets. |
+
+## Release Notes Evidence Workflow
+
+`KOB-TSK-0091` defines release notes as evidence-derived draft artifacts, not
+memory summaries or ticket-title rollups. A release record should point
+`release_notes_artifact_refs` at notes that were produced from a bounded
+release-notes evidence bundle. That bundle collects included items, commits,
+validation refs, dogfood refs, known limitations, planned public docs targets,
+and human verification markers.
+
+Draft notes must cite source refs for each supported claim. If a claim lacks
+evidence, the bundle records it under `missing_evidence` and the draft either
+omits the claim or marks the section as needing human review. Missing evidence is
+not permission to invent a weaker claim.
+
+AI may draft wording from the bundle, but human review remains the boundary for
+approval. Public docs publication and live release-page handoff remain owned by
+`KOB-TSK-0093`; this schema only records draft or reviewed release-note
+artifacts and their evidence lineage.
 
 ## Release Lifecycle Taxonomy
 
@@ -51,6 +70,9 @@ Each release record includes:
 - `released` in this schema records release state, not an automatic public
   publication claim. Public release surfaces still require explicit human review
   and publication.
+- Release notes must be generated from release-notes evidence bundle refs. They
+  must preserve missing evidence as omissions, caveats, or human-review blockers
+  rather than unsupported public claims.
 - KOB-TSK-0065 Version Goal Ledger remains the roadmap contract. Release goals
   may reference ledger goals, but they do not replace the ledger or its status
   model.
@@ -65,5 +87,7 @@ Each release record includes:
 The schema and example fixture live in:
 
 - [release-record.schema.json](../../references/release-record.schema.json)
+- [release-notes-evidence-bundle.schema.json](../../references/release-notes-evidence-bundle.schema.json)
+- [release-notes-evidence-bundle.fixture.json](../../references/release-notes-evidence-bundle.fixture.json)
 - [release-record.fixture.json](../../references/release-record.fixture.json)
 - [release-record-v0.2.0.fixture.json](../../references/release-record-v0.2.0.fixture.json)

@@ -31,9 +31,9 @@ Each workspace manifest includes:
 | `goals` | Release goals and optional links to Version Goal Ledger goals. |
 | `included_items` | Items intentionally included in the release scope view. |
 | `deferred_items` | Items reviewed for the release but moved out of scope. |
-| `evidence_refs` | Evidence refs used to support release state and scope claims. |
+| `evidence_refs` | Evidence refs used to support release state, scope claims, and release-note draft claims. |
 | `source_artifact_refs` | Repo-relative source artifact refs, such as CI indexes or packet drafts. |
-| `notes_draft_refs` | Draft release note refs that remain non-public until human review passes. |
+| `notes_draft_refs` | Draft release note refs generated from release-notes evidence bundles; they remain non-public until human review passes. |
 | `public_output_refs` | Planned public output refs. These stay draft or planned until publication review passes. |
 | `human_verification` | Human review markers for scope, evidence, and publication gates. |
 
@@ -57,6 +57,33 @@ entry set is:
 The manifest should name these entries explicitly through `workspace_entries` so
 tools can validate the workspace without scanning unknown content.
 
+## Release Notes Evidence Collection
+
+Release-note drafting starts from an evidence bundle, not from memory. The bundle
+is a bounded artifact under the release workspace evidence or source-artifacts
+tree and is described by
+[release-notes-evidence-bundle.schema.json](../../references/release-notes-evidence-bundle.schema.json).
+
+The collection workflow is:
+
+1. Collect source inputs: included items, relevant commits, validation refs,
+   dogfood refs, known limitations, planned public docs targets, and human
+   verification markers.
+2. Record missing evidence for every attractive but unsupported release-note
+   claim.
+3. Generate draft release notes only from cited source inputs and missing
+   evidence entries.
+4. Save draft notes under `notes-drafts/` and link them through
+   `notes_draft_refs`.
+5. Keep public-output refs planned or draft until the public docs handoff and
+   human publication review pass.
+
+AI-authored draft notes are allowed as draft artifacts, but every section must
+carry source refs or explicit missing-evidence refs. Human approval is required
+before draft notes are used as public-facing release notes. `KOB-TSK-0093` owns
+the public docs publishing handoff; this contract only defines evidence
+collection and draft lineage.
+
 ## Rules
 
 - The release workspace is not a parent axis. Included or deferred items keep
@@ -74,6 +101,9 @@ tools can validate the workspace without scanning unknown content.
   acceptance semantics.
 - `public_output_refs` are planned or draft refs until the human publication
   marker passes. They must not be read as proof of live public publication.
+- `notes_draft_refs` must trace back to release-notes evidence bundles. Missing
+  evidence should remain visible in drafts instead of being converted into
+  unsupported release claims.
 - KOA-TSK-0215 packet concepts are useful lineage inputs, but this contract does
   not migrate HorizonPlugin, create live public content, or start a publishing
   workflow.
@@ -85,5 +115,7 @@ tools can validate the workspace without scanning unknown content.
 The schema and example fixture live in:
 
 - [releases-directory-contract.schema.json](../../references/releases-directory-contract.schema.json)
+- [release-notes-evidence-bundle.schema.json](../../references/release-notes-evidence-bundle.schema.json)
+- [release-notes-evidence-bundle.fixture.json](../../references/release-notes-evidence-bundle.fixture.json)
 - [releases-directory-contract.fixture.json](../../references/releases-directory-contract.fixture.json)
 - [releases-directory-contract-v0.2.0.fixture.json](../../references/releases-directory-contract-v0.2.0.fixture.json)

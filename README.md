@@ -201,6 +201,7 @@ not a current UI screenshot.
 - [Release channels](docs/release-channels.md)
 - [Release Record schema](docs/design/release-record-schema.md)
 - [Releases directory contract](docs/design/releases-directory-contract.md)
+- [Release notes evidence bundle schema](references/release-notes-evidence-bundle.schema.json)
 - [Native CLI direction](docs/design/native-cli-direction.md)
 - [Backboard information architecture](docs/design/backboard-information-architecture.md)
 - [Backboard Review Inbox model](docs/design/backboard-review-inbox-model.md)

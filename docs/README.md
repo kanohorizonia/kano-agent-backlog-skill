@@ -54,6 +54,8 @@ If you are reading the repository directly, start here instead of `docs/index.md
 - [Version Goal Ledger schema fixture](../references/version-goal-ledger.schema.json)
 - [Release Record schema fixture](../references/release-record.schema.json)
 - [Release Record v0.2.0 fixture](../references/release-record-v0.2.0.fixture.json)
+- [Release notes evidence bundle schema fixture](../references/release-notes-evidence-bundle.schema.json)
+- [Release notes evidence bundle fixture](../references/release-notes-evidence-bundle.fixture.json)
 - [Releases directory schema fixture](../references/releases-directory-contract.schema.json)
 - [Releases directory v0.2.0 fixture](../references/releases-directory-contract-v0.2.0.fixture.json)
 - [Evidence quality schema fixture](../references/evidence-quality-classification.schema.json)

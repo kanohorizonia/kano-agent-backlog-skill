@@ -178,7 +178,7 @@ not a current UI screenshot.
 | Workflow | [Worksets](guides/workset.md), [Topics](guides/topic.md), [Workflow reference](references/workflow.md) |
 | CLI and API | [CLI reference](cli/commands.md), [API overview](api/overview.md), [Native executable API](api/native.md) |
 | Release channels | [Installation](guides/installation.md), [Release channels](guides/release-channels.md), [Release notes](releases/0.0.4.md), [Changelog](releases/changelog.md) |
-| Release model | [Release Record](design/release-record-schema.md), [Releases workspace](design/releases-directory-contract.md) |
+| Release model | [Release Record](design/release-record-schema.md), [Releases workspace](design/releases-directory-contract.md), [release notes evidence bundle](../references/release-notes-evidence-bundle.schema.json) |
 | Testing | [Latest public test report](reports/latest/test-report/), [Latest public coverage report](reports/latest/coverage-report/), [GitHub Actions](https://github.com/kanohorizonia/kano-agent-backlog-skill/actions) |
 | Tokenizer adapters | [Quick start](guides/tokenizer-quickstart.md), [Overview](guides/tokenizer-adapters.md), [Configuration](guides/tokenizer-configuration.md), [CLI](guides/tokenizer-cli-reference.md), [Troubleshooting](guides/tokenizer-troubleshooting.md), [Performance](guides/tokenizer-performance.md) |
 | Maintainers | [Maintainer automation](automation/maintainer-automation.md), [Docs pipeline](automation/docs-pipeline.md), [Native CLI direction](guides/native-cli-direction.md), [Backboard IA](design/backboard-information-architecture.md), [Actor aliases](design/actor-alias-and-assignment-policy.md) |

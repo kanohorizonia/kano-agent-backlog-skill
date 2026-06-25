@@ -270,10 +270,10 @@ int main() {
             item_doc("PRA-TSK-0003",
                      "019ec100-0000-7000-8000-000000000005",
                      "Task",
-                     "Alpha related task",
+                     "Alpha stale drift related task",
                      "Ready",
                      "PRA-EPIC-0001",
-                     "Related-only cycle coverage.",
+                     "Related-only cycle coverage with stale drift signal.",
                      "links:\n"
                      "  relates:\n"
                      "    - PRA-TSK-0001\n"
@@ -287,7 +287,9 @@ int main() {
                      "Beta live bug",
                      "InProgress",
                      "",
-                     "Beta product bug body.",
+                     "Beta product bug body.\n\n"
+                     "## Worklog\n\n"
+                     "2026-06-14 11:30 [agent=codex] Validation: pixi run quick-test PASS.\n",
                      "links:\n"
                      "  relates: [product-alpha:PRA-TSK-0001]\n"
                      "  blocks: []\n"
@@ -468,6 +470,20 @@ int main() {
                                  "Blocked/Dirty", "Stale/Drift", "Ready Frontier"}) {
             expect(inbox["lanes"].isMember(lane), std::string("review inbox should expose queue: ") + lane);
         }
+        auto lane_has_action = [&](const std::string& lane,
+                                   const std::string& label,
+                                   std::optional<bool> requiresConfirmation = std::nullopt) {
+            for (const auto& bundle : inbox["lanes"][lane]) {
+                for (const auto& action : bundle["actions"]) {
+                    if (action["label"].asString() == label &&
+                        (!requiresConfirmation.has_value() ||
+                         action["requires_confirmation"].asBool() == *requiresConfirmation)) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        };
         expect(inbox["lane_taxonomy"].size() >= 7, "review inbox should expose lane taxonomy metadata");
         expect(inbox["lanes"]["Ready Frontier"].size() >= 1, "review inbox should expose ready frontier queue");
         expect(!inbox["lanes"]["Ready Frontier"][0]["review_reason"].asString().empty(),
@@ -481,12 +497,28 @@ int main() {
                "review inbox should expose detector output as suggested_decision only");
         expect(inbox["lanes"]["Ready Frontier"][0]["actions"].size() >= 1,
                "review inbox bundles should expose lane-specific human actions");
-        expect(inbox["lanes"]["Ready Frontier"][0]["actions"][0]["label"].asString() != "Accept",
-               "review action labels should avoid generic Accept where lane-specific naming exists");
+        for (const auto& lane : inbox["lane_order"]) {
+            for (const auto& bundle : inbox["lanes"][lane.asString()]) {
+                for (const auto& action : bundle["actions"]) {
+                    expect(action["label"].asString() != "Accept" && action["label"].asString() != "Reject",
+                           "review action labels should avoid generic Accept/Reject labels");
+                    expect(!action["starts_agent"].asBool(), "review actions must not start agents");
+                    expect(!action["dispatches_work"].asBool(), "review actions must not dispatch work");
+                }
+            }
+        }
         expect(inbox["lanes"]["Ready Frontier"][0]["actions"][0]["label"].asString() == "Approve Ready Boundary",
                "ready frontier action should use lane-specific Approve Ready Boundary label");
-        expect(inbox["lanes"]["False Done Suspect"][0]["actions"][0]["label"].asString() == "Reopen Done For Review",
-               "false done suspect action should use lane-specific Reopen Done For Review label");
+        expect(lane_has_action("Needs Review", "Request Evidence"),
+               "needs review action should use lane-specific Request Evidence label");
+        expect(lane_has_action("Done Candidate", "Confirm Done", true),
+               "done candidate action should use lane-specific Confirm Done label");
+        expect(lane_has_action("False Done Suspect", "Reopen", true),
+               "false done suspect action should use lane-specific Reopen label");
+        expect(lane_has_action("Blocked/Dirty", "Accept Risk", true),
+               "blocked dirty action should expose confirm-gated Accept Risk label");
+        expect(lane_has_action("Stale/Drift", "Mark Obsolete", true),
+               "stale drift action should expose Mark Obsolete label");
 
         auto evidence = service.GetEvidenceDetail("product-alpha", "PRA-TSK-0001");
         expect(evidence["evidence"]["signals"]["artifact"].asBool(), "evidence detail should detect artifact signal");
@@ -746,10 +778,10 @@ int main() {
         Json::Value highRisk(Json::objectValue);
         highRisk["product"] = "product-alpha";
         highRisk["item_id"] = "PRA-TSK-0004";
-        highRisk["lane"] = "Needs Review";
+        highRisk["lane"] = "Done Candidate";
         highRisk["reason_code"] = "review_state";
-        highRisk["suggested_decision"] = "approve_done_with_evidence";
-        highRisk["human_decision"] = "approve_done_with_evidence";
+        highRisk["suggested_decision"] = "confirm_done";
+        highRisk["human_decision"] = "confirm_done";
         highRisk["rationale"] = "Human accepted evidence chain.";
         highRisk["actor_alias"] = "reviewer-alias";
         highRisk["target_state"] = "Done";
@@ -774,12 +806,12 @@ int main() {
                "confirmed high-risk action should use existing KOB state transition policy");
 
         Json::Value acceptRisk(Json::objectValue);
-        acceptRisk["product"] = "product-beta";
-        acceptRisk["item_id"] = "PRB-BUG-0003";
-        acceptRisk["lane"] = "False Done Suspect";
-        acceptRisk["reason_code"] = "done_without_evidence";
-        acceptRisk["suggested_decision"] = "reopen_done_for_review";
-        acceptRisk["human_decision"] = "accept_evidence_risk";
+        acceptRisk["product"] = "product-alpha";
+        acceptRisk["item_id"] = "PRA-TSK-0002";
+        acceptRisk["lane"] = "Blocked/Dirty";
+        acceptRisk["reason_code"] = "blocked_state";
+        acceptRisk["suggested_decision"] = "accept_risk";
+        acceptRisk["human_decision"] = "accept_risk";
         acceptRisk["rationale"] = "Human accepts the evidence risk for now.";
         acceptRisk["actor_alias"] = "reviewer-alias";
         auto acceptRiskBlocked = service.SubmitReviewDecision(acceptRisk);
@@ -800,8 +832,8 @@ int main() {
         reopenDone["item_id"] = "PRB-BUG-0003";
         reopenDone["lane"] = "False Done Suspect";
         reopenDone["reason_code"] = "done_without_evidence";
-        reopenDone["suggested_decision"] = "reopen_done_for_review";
-        reopenDone["human_decision"] = "reopen_done_for_review";
+        reopenDone["suggested_decision"] = "reopen_done";
+        reopenDone["human_decision"] = "reopen_done";
         reopenDone["rationale"] = "Human wants Done reopened for review.";
         reopenDone["actor_alias"] = "reviewer-alias";
         reopenDone["target_state"] = "Review";
@@ -839,8 +871,8 @@ int main() {
         writeFailureTransition["item_id"] = "PRB-BUG-0001";
         writeFailureTransition["lane"] = "Done Candidate";
         writeFailureTransition["reason_code"] = "validation_seen_in_progress";
-        writeFailureTransition["suggested_decision"] = "review_for_completion";
-        writeFailureTransition["human_decision"] = "send_to_review";
+        writeFailureTransition["suggested_decision"] = "keep_in_review";
+        writeFailureTransition["human_decision"] = "keep_in_review";
         writeFailureTransition["rationale"] = "Human wants review before Done.";
         writeFailureTransition["actor_alias"] = "reviewer-alias";
         writeFailureTransition["target_state"] = "Review";
@@ -864,8 +896,8 @@ int main() {
         reviewTransition["item_id"] = "PRB-BUG-0001";
         reviewTransition["lane"] = "Done Candidate";
         reviewTransition["reason_code"] = "validation_seen_in_progress";
-        reviewTransition["suggested_decision"] = "review_for_completion";
-        reviewTransition["human_decision"] = "send_to_review";
+        reviewTransition["suggested_decision"] = "keep_in_review";
+        reviewTransition["human_decision"] = "keep_in_review";
         reviewTransition["rationale"] = "Human wants review before Done.";
         reviewTransition["actor_alias"] = "reviewer-alias";
         reviewTransition["target_state"] = "Review";

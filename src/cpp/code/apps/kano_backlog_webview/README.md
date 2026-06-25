@@ -44,6 +44,18 @@ Design contracts:
 delegated partial links, filter debounce support, URL query-state helpers, and
 bounded error rendering without npm or a frontend build step.
 
+## Embedded asset layout
+
+The Backboard root shell remains embedded in the native binary to avoid runtime
+static-file lookup and Docker packaging drift.
+
+- `assets/index_html.hpp` composes the `/` HTML shell and stitches the embedded
+  CSS and page app JavaScript into one response body.
+- `assets/backboard_css.hpp` holds the first-party CSS used by the root shell.
+- `assets/backboard_app_js.hpp` holds the inline page application JavaScript for
+  the root shell.
+- `assets/kob_ui_js.hpp` holds the first-party `/assets/kob-ui.js` runtime.
+
 ## Security Defaults
 
 - Binds to `127.0.0.1` only

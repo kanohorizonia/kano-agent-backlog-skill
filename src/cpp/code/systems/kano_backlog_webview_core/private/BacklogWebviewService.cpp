@@ -3243,7 +3243,17 @@ Json::Value BacklogWebviewService::SubmitReviewDecision(
         humanDecisionLower.find("reopen") != std::string::npos ||
         (currentStateLower == "done" && !targetState.empty() && targetStateLower != "done");
     if (highRisk && !JsonBoolField(request, "confirmed")) {
-      return MakeError("review_decision.confirmation_required", "explicit confirmation is required before submitting this high-risk review action");
+      auto error = MakeError("review_decision.confirmation_required", "explicit confirmation is required before submitting this high-risk review action");
+      Json::Value transition(Json::objectValue);
+      transition["attempted"] = false;
+      transition["applied"] = false;
+      transition["parent_synced"] = false;
+      transition["dashboards_refreshed"] = false;
+      transition["outcome"] = "pending_confirmation";
+      transition["diagnostics"] = Json::arrayValue;
+      transition["diagnostics"].append("explicit confirmation is required before transition policy can run");
+      error["transition"] = transition;
+      return error;
     }
 
     const auto now = std::chrono::system_clock::now();
@@ -3259,6 +3269,7 @@ Json::Value BacklogWebviewService::SubmitReviewDecision(
     transition["applied"] = false;
     transition["parent_synced"] = false;
     transition["dashboards_refreshed"] = false;
+    transition["outcome"] = "skipped";
     transition["diagnostics"] = Json::arrayValue;
     std::optional<kano::backlog_core::BacklogItem> transitionItem;
     if (!targetState.empty()) {
@@ -3271,6 +3282,7 @@ Json::Value BacklogWebviewService::SubmitReviewDecision(
         return MakeError("review_decision.target_state_invalid", "target_state cannot be requested by a review decision: " + targetState);
       }
       transition["attempted"] = true;
+      transition["outcome"] = "blocked";
       auto currentState = kano::backlog_core::parse_item_state(item.get("state", "").asString());
       if (!currentState) {
         return MakeError("review_decision.current_state_invalid", "current item state is not a recognized KOB item state");
@@ -3330,6 +3342,7 @@ Json::Value BacklogWebviewService::SubmitReviewDecision(
     if (transitionItem) {
       ApplyTransitionToMarkdown(productRoot, item, *transitionItem);
       transition["applied"] = true;
+      transition["outcome"] = "applied";
       record["transition"] = transition;
       WriteJsonFile(recordPath, record);
       cacheByProduct.erase(product);

@@ -136,6 +136,19 @@ std::size_t count_regular_files(const std::filesystem::path& root) {
     return count;
 }
 
+bool directory_tree_contains_text(const std::filesystem::path& root,
+                                  const std::string& needle) {
+    if (!std::filesystem::exists(root)) {
+        return false;
+    }
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(root)) {
+        if (entry.is_regular_file() && read_text(entry.path()).find(needle) != std::string::npos) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void expect_in_order(const std::string& text,
                      const std::vector<std::string>& markers,
                      const std::string& message) {
@@ -712,6 +725,8 @@ int main() {
         expect(!submittedOne.isMember("error"), "submitted review decision should succeed");
         const auto submittedOnePath = products / "product-alpha" / submittedOne["path"].asString();
         expect(std::filesystem::exists(submittedOnePath), "submitted review decision should persist append-only record");
+        expect(submittedOne["record"]["transition"]["outcome"].asString() == "skipped",
+               "submitted decision without target state should record skipped transition outcome");
         expect(!submittedOne["record"]["agent_started"].asBool(), "review decision submit should not start agents");
         expect(!submittedOne["record"]["dispatch_started"].asBool(), "review decision submit should not dispatch work");
 
@@ -741,6 +756,8 @@ int main() {
         auto highRiskBlocked = service.SubmitReviewDecision(highRisk);
         expect(highRiskBlocked["error_code"].asString() == "review_decision.confirmation_required",
                "high-risk Done action should require explicit confirmation before transition");
+        expect(highRiskBlocked["transition"]["outcome"].asString() == "pending_confirmation",
+               "unconfirmed high-risk action should expose pending confirmation transition outcome");
         expect(read_text(products / "product-alpha" / "items" / "task" / "0004" / "PRA-TSK-0004.md").find("state: Ready") != std::string::npos,
                "unconfirmed high-risk action must not mutate state");
         highRisk["confirmed"] = true;
@@ -749,6 +766,8 @@ int main() {
         expect(highRiskSubmitted["record"]["high_risk"].asBool(), "confirmed Done action should be marked high risk");
         expect(highRiskSubmitted["record"]["transition"]["attempted"].asBool(),
                "confirmed target-state action should call KOB state transition policy");
+        expect(highRiskSubmitted["record"]["transition"]["outcome"].asString() == "applied",
+               "confirmed target-state action should record applied transition outcome");
         expect(!highRiskSubmitted["record"]["agent_started"].asBool(), "confirmed review action should not start agents");
         expect(!highRiskSubmitted["record"]["dispatch_started"].asBool(), "confirmed review action should not dispatch work");
         expect(read_text(products / "product-alpha" / "items" / "task" / "0004" / "PRA-TSK-0004.md").find("state: Done") != std::string::npos,
@@ -773,6 +792,8 @@ int main() {
                "Accept Evidence Risk should be marked high risk");
         expect(!acceptRiskSubmitted["record"]["transition"]["attempted"].asBool(),
                "Accept Evidence Risk should not mutate state without a target state");
+        expect(acceptRiskSubmitted["record"]["transition"]["outcome"].asString() == "skipped",
+               "accepted evidence risk without target state should record skipped transition outcome");
 
         Json::Value reopenDone(Json::objectValue);
         reopenDone["product"] = "product-beta";
@@ -795,6 +816,8 @@ int main() {
                "confirmed reopen decision should call transition policy");
         expect(reopenSubmitted["record"]["transition"]["policy_status"].asString() == "rejected",
                "unsupported Done to Review transition should be reported as policy rejection");
+        expect(reopenSubmitted["record"]["transition"]["outcome"].asString() == "blocked",
+               "policy-rejected transition should record blocked transition outcome");
         expect(!reopenSubmitted["record"]["transition"]["applied"].asBool(),
                "policy-rejected reopen must not mutate markdown state");
         expect(std::filesystem::exists(products / "product-beta" / reopenSubmitted["path"].asString()),
@@ -831,6 +854,8 @@ int main() {
                "markdown apply failure after accepted policy should report submit failure");
         expect(count_regular_files(transitionSubmittedDir) == transitionRecordCountBefore + 1,
                "submitted audit record should survive markdown apply failure");
+        expect(directory_tree_contains_text(transitionSubmittedDir, "blocked"),
+               "markdown apply failure should leave a recoverable blocked transition outcome in submitted record");
         expect(read_text(transitionItemPath).find("state: InProgress") != std::string::npos,
                "markdown apply failure should leave original item state unchanged");
 
@@ -850,6 +875,8 @@ int main() {
                "target-state review action should call transition policy");
         expect(reviewTransitionResult["record"]["transition"]["new_state"].asString() == "Review",
                "review action should transition through KOB policy to Review");
+        expect(reviewTransitionResult["record"]["transition"]["outcome"].asString() == "applied",
+               "non-high-risk target-state action should record applied transition outcome");
         expect(!reviewTransitionResult["record"]["agent_started"].asBool(), "review transition should not start agents");
         expect(!reviewTransitionResult["record"]["dispatch_started"].asBool(), "review transition should not dispatch work");
 

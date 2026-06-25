@@ -18,6 +18,8 @@ If you are reading the repository directly, start here instead of `docs/index.md
 - [Demo maintenance follow-up](demo-maintenance.md)
 - [Version policy](version-policy.md)
 - [Release channels](release-channels.md)
+- [Release Record schema](design/release-record-schema.md)
+- [Releases directory contract](design/releases-directory-contract.md)
 - [Native CLI direction](design/native-cli-direction.md)
 - [Backboard information architecture](design/backboard-information-architecture.md)
 - [Backboard Review Inbox model](design/backboard-review-inbox-model.md)
@@ -50,6 +52,8 @@ If you are reading the repository directly, start here instead of `docs/index.md
 - [Feature evolution schema fixture](../references/feature-evolution-event.schema.json)
 - [Design-history graph schema fixture](../references/design-history-graph.schema.json)
 - [Version Goal Ledger schema fixture](../references/version-goal-ledger.schema.json)
+- [Release Record schema fixture](../references/release-record.schema.json)
+- [Releases directory schema fixture](../references/releases-directory-contract.schema.json)
 - [Evidence quality schema fixture](../references/evidence-quality-classification.schema.json)
 - [Context recovery schema fixture](../references/context-recovery-summary.schema.json)
 

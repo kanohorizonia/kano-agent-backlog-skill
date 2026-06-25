@@ -199,6 +199,8 @@ not a current UI screenshot.
 - [Topics](docs/topic.md)
 - [Version policy](docs/version-policy.md)
 - [Release channels](docs/release-channels.md)
+- [Release Record schema](docs/design/release-record-schema.md)
+- [Releases directory contract](docs/design/releases-directory-contract.md)
 - [Native CLI direction](docs/design/native-cli-direction.md)
 - [Backboard information architecture](docs/design/backboard-information-architecture.md)
 - [Backboard Review Inbox model](docs/design/backboard-review-inbox-model.md)

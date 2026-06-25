@@ -53,7 +53,9 @@ If you are reading the repository directly, start here instead of `docs/index.md
 - [Design-history graph schema fixture](../references/design-history-graph.schema.json)
 - [Version Goal Ledger schema fixture](../references/version-goal-ledger.schema.json)
 - [Release Record schema fixture](../references/release-record.schema.json)
+- [Release Record v0.2.0 fixture](../references/release-record-v0.2.0.fixture.json)
 - [Releases directory schema fixture](../references/releases-directory-contract.schema.json)
+- [Releases directory v0.2.0 fixture](../references/releases-directory-contract-v0.2.0.fixture.json)
 - [Evidence quality schema fixture](../references/evidence-quality-classification.schema.json)
 - [Context recovery schema fixture](../references/context-recovery-summary.schema.json)
 

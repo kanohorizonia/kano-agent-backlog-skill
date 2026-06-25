@@ -60,6 +60,11 @@
       "product": "kano-agent-backlog-skill",
       "artifact_id": "release-packet-draft-v0-1-0",
       "reason": "KOA-TSK-0215 release packet lineage example."
+    },
+    {
+      "product": "kano-agent-backlog-skill",
+      "artifact_id": "release-notes-evidence-bundle-v0-1-0",
+      "reason": "KOB-TSK-0091 evidence bundle that bounds draft release-note claims."
     }
   ],
   "dogfood_refs": [
@@ -85,7 +90,7 @@
     {
       "product": "kano-agent-backlog-skill",
       "artifact_id": "draft-release-notes-v0-1-0",
-      "reason": "Non-public draft release notes artifact."
+      "reason": "Non-public draft release notes artifact generated from release-notes-evidence-bundle-v0-1-0."
     }
   ],
   "public_docs_refs": [

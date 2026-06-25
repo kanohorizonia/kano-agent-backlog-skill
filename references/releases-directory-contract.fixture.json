@@ -97,6 +97,12 @@
       "evidence_id": "ev-release-workspace-schema-review-v0-1-0",
       "repo_relpath": "_kano/backlog/releases/v0.1.0/evidence/schema-review.md",
       "reason": "Draft schema review evidence only."
+    },
+    {
+      "product": "kano-agent-backlog-skill",
+      "evidence_id": "release-notes-evidence-bundle-v0-1-0",
+      "repo_relpath": "_kano/backlog/releases/v0.1.0/evidence/release-notes-evidence-bundle.json",
+      "reason": "KOB-TSK-0091 bundle that collects source refs and missing evidence before drafting notes."
     }
   ],
   "source_artifact_refs": [
@@ -112,7 +118,7 @@
       "product": "kano-agent-backlog-skill",
       "doc_id": "release-notes-draft-v0.1.0",
       "repo_relpath": "_kano/backlog/releases/v0.1.0/notes-drafts/release-notes.md",
-      "reason": "Draft notes only, not live public release content."
+      "reason": "Draft notes generated from release-notes-evidence-bundle-v0-1-0; not live public release content."
     }
   ],
   "public_output_refs": [

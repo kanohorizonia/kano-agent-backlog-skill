@@ -107,6 +107,12 @@
       "evidence_id": "ev-dogfood-cli-smoke-v0-2-0",
       "repo_relpath": "_kano/backlog/releases/v0.2.0/evidence/dogfood-cli-smoke.md",
       "reason": "Internal smoke evidence only."
+    },
+    {
+      "product": "kano-agent-backlog-skill",
+      "evidence_id": "release-notes-evidence-bundle-v0-2-0",
+      "repo_relpath": "_kano/backlog/releases/v0.2.0/evidence/release-notes-evidence-bundle.json",
+      "reason": "KOB-TSK-0091 bundle that collects source refs and missing evidence before drafting notes."
     }
   ],
   "source_artifact_refs": [
@@ -128,7 +134,7 @@
       "product": "kano-agent-backlog-skill",
       "doc_id": "release-notes-draft-v0.2.0",
       "repo_relpath": "_kano/backlog/releases/v0.2.0/notes-drafts/release-notes.md",
-      "reason": "Draft notes only, not a live public release page."
+      "reason": "Draft notes generated from release-notes-evidence-bundle-v0-2-0; not a live public release page."
     },
     {
       "product": "kano-agent-backlog-skill",

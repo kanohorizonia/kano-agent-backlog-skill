@@ -1757,6 +1757,167 @@ Json::Value ReviewActionsForLane(const std::string& lane) {
   return actions;
 }
 
+struct CapabilityRouteRule {
+  std::string id;
+  std::string capabilityProduct;
+  std::string skill;
+  std::string command;
+  std::string reasonCode;
+  std::string reason;
+  std::vector<std::string> types;
+  std::vector<std::string> keywords;
+};
+
+const std::vector<CapabilityRouteRule>& CapabilityRouteRules() {
+  static const std::vector<CapabilityRouteRule> rules = {
+      {"native-cpp", "kano-native-cpp", "kano-cpp-expert-skill",
+       "pixi run build && pixi run quick-test",
+       "native_cpp_signal",
+       "Native C++ or Drogon work should route to the Kano C++ skill path.",
+       {"Feature", "UserStory", "Task", "Bug", "Issue"},
+       {"c++", "cpp", "native", "cmake", "drogon", "msvc", "webview", "pixi"}},
+      {"docs", "kano-docs", "kano-agent-backlog-skill",
+       "review docs and update markdown references",
+       "documentation_signal",
+       "Documentation-heavy work should route to the Kano backlog/docs authoring path.",
+       {"Feature", "UserStory", "Task", "Bug", "Issue"},
+       {"doc", "docs", "documentation", "readme", "reference", "design note"}},
+      {"git", "kano-git", "kano-git-master-skill",
+       "GIT_MASTER=1 git status",
+       "git_workflow_signal",
+       "Git workflow work should route through the Git master path.",
+       {"Feature", "UserStory", "Task", "Bug", "Issue"},
+       {"git", "commit", "push", "branch", "worktree", "merge"}},
+  };
+  return rules;
+}
+
+bool RouteTypeMatches(const CapabilityRouteRule& rule, const std::string& type) {
+  return rule.types.empty() ||
+         std::find(rule.types.begin(), rule.types.end(), type) != rule.types.end();
+}
+
+std::string RouteDeclarationSourceField(const Json::Value& item,
+                                        const std::string& token) {
+  if (!item["external"].isObject()) {
+    return "external.capability_route";
+  }
+  for (const auto& key : {"capability_route", "capability_routes", "agent_skill",
+                          "skill", "route"}) {
+    if (!item["external"].isMember(key)) {
+      continue;
+    }
+    for (const auto& declared : SplitCsv(item["external"][key].asString())) {
+      if (text::ToLower(Trim(declared)) == text::ToLower(Trim(token))) {
+        return std::string("external.") + key;
+      }
+    }
+  }
+  return "external.capability_route";
+}
+
+std::string CapabilitySearchText(const Json::Value& item) {
+  std::vector<std::string> parts = {
+      item.get("id", "").asString(), item.get("type", "").asString(),
+      item.get("title", "").asString(), item.get("state", "").asString(),
+      item.get("area", "").asString(), item.get("topic", "").asString(),
+      item.get("content", "").asString()};
+  for (const auto& tag : item["tags"]) {
+    parts.push_back(tag.asString());
+  }
+  if (item["external"].isObject()) {
+    for (const auto& key : item["external"].getMemberNames()) {
+      parts.push_back(key);
+      parts.push_back(item["external"][key].asString());
+    }
+  }
+  return JoinStrings(parts, "\n");
+}
+
+std::vector<std::string> CapabilityRouteDeclarations(const Json::Value& item) {
+  std::vector<std::string> declarations;
+  if (!item["external"].isObject()) {
+    return declarations;
+  }
+  for (const auto& key : {"capability_route", "capability_routes", "agent_skill",
+                          "skill", "route"}) {
+    if (!item["external"].isMember(key)) {
+      continue;
+    }
+    for (const auto& token : SplitCsv(item["external"][key].asString())) {
+      AppendUnique(declarations, token);
+    }
+  }
+  return declarations;
+}
+
+std::optional<CapabilityRouteRule> CapabilityRuleForToken(const std::string& token) {
+  const auto normalized = text::ToLower(Trim(token));
+  if (normalized.empty()) {
+    return std::nullopt;
+  }
+  for (const auto& rule : CapabilityRouteRules()) {
+    if (text::ToLower(rule.id) == normalized ||
+        text::ToLower(rule.skill) == normalized ||
+        text::ToLower(rule.capabilityProduct) == normalized) {
+      return rule;
+    }
+  }
+  return std::nullopt;
+}
+
+bool IsCommonRoutableType(const std::string& type) {
+  static const std::vector<std::string> types = {
+      "Initiative", "Epic", "Feature", "UserStory", "Task", "Bug", "Issue"};
+  return std::find(types.begin(), types.end(), type) != types.end();
+}
+
+Json::Value CapabilityRouteToJson(const CapabilityRouteRule& rule,
+                                  const Json::Value& item,
+                                  const std::string& confidence,
+                                  const std::string& reason,
+                                  const std::vector<std::string>& sourceFields) {
+  Json::Value route(Json::objectValue);
+  route["id"] = rule.id;
+  route["product"] = item.get("product", "").asString();
+  route["item_id"] = item.get("id", "").asString();
+  route["capability_product"] = rule.capabilityProduct;
+  route["skill"] = rule.skill;
+  route["command"] = rule.command;
+  route["confidence"] = confidence;
+  route["reason"] = reason.empty() ? rule.reason : reason;
+  route["reason_code"] = rule.reasonCode;
+  route["source_fields"] = MakeArray(sourceFields);
+  route["read_only"] = true;
+  route["mutation_allowed"] = false;
+  route["starts_agent"] = false;
+  route["dispatches_work"] = false;
+  return route;
+}
+
+Json::Value FallbackCapabilityRoute(const Json::Value& item) {
+  CapabilityRouteRule fallback{
+      "kob-workitem", "kano-agent-backlog-skill", "kano-agent-backlog-skill",
+      "scripts/kob item read --product " + item.get("product", "").asString() +
+          " --item " + item.get("id", "").asString(),
+      "common_item_type_fallback",
+      "No explicit capability metadata matched; use the native KOB work-item review path.",
+      {}, {}};
+  return CapabilityRouteToJson(
+      fallback, item, "medium", fallback.reason,
+      {"type", "product", "item_id", "external.capability_route"});
+}
+
+Json::Value CapabilityWarning(const std::string& code,
+                              const std::string& message,
+                              const std::vector<std::string>& sourceFields) {
+  Json::Value warning(Json::objectValue);
+  warning["code"] = code;
+  warning["message"] = message;
+  warning["source_fields"] = MakeArray(sourceFields);
+  return warning;
+}
+
 std::optional<Json::Value> FindReviewAction(const std::string& lane,
                                             const std::string& humanDecision) {
   for (const auto& action : ReviewActionsForLane(lane)) {
@@ -2750,6 +2911,112 @@ Json::Value BacklogWebviewService::GetItem(const std::string& product,
       response["duplicates"].append(ItemToJson(productCache.allItems[index]));
     }
   }
+  return response;
+}
+
+Json::Value BacklogWebviewService::RecommendCapabilityRoute(
+    const std::string& product,
+    const std::string& itemId,
+    bool forceRefresh) {
+  if (Trim(itemId).empty()) {
+    return MakeError("capability_route.item_required",
+                     "pass item or item_id for capability route lookup");
+  }
+
+  auto detail = GetItem(product.empty() ? "all" : product, itemId, forceRefresh);
+  if (detail.isMember("error")) {
+    return detail;
+  }
+
+  const auto item = detail["item"];
+  const auto itemType = item.get("type", "").asString();
+  const auto declarations = CapabilityRouteDeclarations(item);
+  Json::Value response(Json::objectValue);
+  response["product"] = item.get("product", product).asString();
+  response["item_id"] = item.get("id", itemId).asString();
+  response["item_type"] = itemType;
+  response["item_title"] = item.get("title", "").asString();
+  response["status"] = "no_route";
+  response["route"] = Json::Value(Json::nullValue);
+  response["alternatives"] = Json::arrayValue;
+  response["warnings"] = Json::arrayValue;
+  response["capability_declarations"] = MakeArray(declarations);
+  response["missing_capability_metadata"] = declarations.empty();
+  response["ambiguous_capability_data"] = false;
+  response["read_only"] = true;
+  response["mutation_allowed"] = false;
+  response["starts_agent"] = false;
+  response["dispatches_work"] = false;
+
+  for (const auto& declaration : declarations) {
+    const auto rule = CapabilityRuleForToken(declaration);
+    const auto sourceField = RouteDeclarationSourceField(item, declaration);
+    if (!rule.has_value()) {
+      response["warnings"].append(CapabilityWarning(
+          "capability_route.unknown_declaration",
+          "Capability declaration does not match a known deterministic route: " + declaration,
+          {sourceField}));
+      continue;
+    }
+    if (!RouteTypeMatches(*rule, itemType)) {
+      response["warnings"].append(CapabilityWarning(
+          "capability_route.type_mismatch",
+          "Capability declaration " + declaration + " does not support item type " + itemType,
+          {sourceField, "type"}));
+      continue;
+    }
+    response["alternatives"].append(CapabilityRouteToJson(
+        *rule, item, "high",
+        "Explicit capability metadata selects " + rule->skill + ".",
+        {sourceField, "type"}));
+  }
+
+  if (response["alternatives"].empty() && declarations.empty()) {
+    const auto searchable = CapabilitySearchText(item);
+    for (const auto& rule : CapabilityRouteRules()) {
+      if (!RouteTypeMatches(rule, itemType)) {
+        continue;
+      }
+      if (ContentContainsAny(searchable, rule.keywords)) {
+        response["alternatives"].append(CapabilityRouteToJson(
+            rule, item, "medium",
+            "Deterministic keyword signals match " + rule.skill + ".",
+            {"title", "content", "tags", "external", "type"}));
+      }
+    }
+  }
+
+  if (response["alternatives"].size() == 1) {
+    response["route"] = response["alternatives"][0];
+    response["status"] = "routed";
+    return response;
+  }
+
+  if (response["alternatives"].size() > 1) {
+    response["status"] = "ambiguous";
+    response["ambiguous_capability_data"] = true;
+    response["warnings"].append(CapabilityWarning(
+        "capability_route.ambiguous",
+        "Multiple deterministic capability routes match; choose one before starting work.",
+        declarations.empty() ? std::vector<std::string>{"title", "content", "tags", "external", "type"}
+                             : std::vector<std::string>{"external.capability_route", "type"}));
+    return response;
+  }
+
+  if (IsCommonRoutableType(itemType)) {
+    response["status"] = "fallback";
+    response["route"] = FallbackCapabilityRoute(item);
+    response["warnings"].append(CapabilityWarning(
+        "capability_route.missing_metadata",
+        "No capability metadata matched this common item type; using the native KOB work-item fallback.",
+        {"type", "product", "item_id", "external.capability_route"}));
+    return response;
+  }
+
+  response["warnings"].append(CapabilityWarning(
+      "capability_route.no_route",
+      "No deterministic capability route matched this item type or metadata.",
+      {"type", "external.capability_route"}));
   return response;
 }
 
@@ -4692,6 +4959,31 @@ void RegisterBacklogWebviewRoutes(
           std::function<void(const HttpResponsePtr&)>&& callback) {
         auto data = service.PreviewCommand(request->getParameter("q"),
                                            queryOptionsFromRequest(request));
+        Json::Value body(Json::objectValue);
+        body["ok"] = !data.isMember("error");
+        body["data"] = data;
+        metaAppender(request, body);
+        auto response = HttpResponse::newHttpJsonResponse(body);
+        if (!body["ok"].asBool()) {
+          response->setStatusCode(k400BadRequest);
+        }
+        callback(response);
+      },
+      {Get});
+
+  app().registerHandler(
+      "/api/review/capability-route",
+      [metaAppender, &service](const HttpRequestPtr& request,
+          std::function<void(const HttpResponsePtr&)>&& callback) {
+        auto itemId = request->getParameter("item");
+        if (itemId.empty()) {
+          itemId = request->getParameter("item_id");
+        }
+        auto product = request->getParameter("product");
+        if (product.empty()) {
+          product = request->getParameter("products");
+        }
+        auto data = service.RecommendCapabilityRoute(product, itemId);
         Json::Value body(Json::objectValue);
         body["ok"] = !data.isMember("error");
         body["data"] = data;

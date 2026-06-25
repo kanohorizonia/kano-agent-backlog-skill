@@ -337,9 +337,49 @@ int main() {
                      "Review",
                      "",
                      "Review candidate with durable evidence.\n\n"
-                     "## Worklog\n\n"
-                     "2026-06-14 12:00 [agent=codex] Artifact attached: [report](../artifacts/PRB-BUG-0004/report.md).\n"
-                     "2026-06-14 12:10 [agent=codex] Validation: pixi run quick-test PASS.\n"));
+                      "## Worklog\n\n"
+                      "2026-06-14 12:00 [agent=codex] Artifact attached: [report](../artifacts/PRB-BUG-0004/report.md).\n"
+                      "2026-06-14 12:10 [agent=codex] Validation: pixi run quick-test PASS.\n"));
+        write_text(
+            products / "product-alpha" / "items" / "feature" / "0002" / "PRA-FTR-0002.md",
+            item_doc("PRA-FTR-0002",
+                     "019ec100-0000-7000-8000-000000000011",
+                     "Feature",
+                     "Alpha explicit docs capability",
+                     "Ready",
+                     "",
+                     "Route this feature through explicit capability metadata.",
+                     "external:\n"
+                     "  capability_route: docs\n"));
+        write_text(
+            products / "product-alpha" / "items" / "feature" / "0003" / "PRA-FTR-0003.md",
+            item_doc("PRA-FTR-0003",
+                     "019ec100-0000-7000-8000-000000000012",
+                     "Feature",
+                     "Alpha neutral capability fallback",
+                     "Ready",
+                     "",
+                     "Routine backlog review body for fallback routing."));
+        write_text(
+            products / "product-alpha" / "items" / "feature" / "0004" / "PRA-FTR-0004.md",
+            item_doc("PRA-FTR-0004",
+                     "019ec100-0000-7000-8000-000000000013",
+                     "Feature",
+                     "Alpha ambiguous capability metadata",
+                     "Ready",
+                     "",
+                     "Route this feature only after humans choose the deterministic capability.",
+                     "external:\n"
+                     "  capability_routes: native-cpp, docs\n"));
+        write_text(
+            products / "product-alpha" / "items" / "experiment" / "0001" / "PRA-EXP-0001.md",
+            item_doc("PRA-EXP-0001",
+                     "019ec100-0000-7000-8000-000000000014",
+                     "Experiment",
+                     "Alpha unknown capability type",
+                     "Ready",
+                     "",
+                     "Unclassified item body without route metadata."));
 
         write_text(root / "topics" / "native-migration" / "manifest.json",
                    R"json({"topic":"Native Migration","status":"open","seed_items":["019ec100-0000-7000-8000-000000000002","PRA-TSK-0001"]})json");
@@ -356,7 +396,7 @@ int main() {
         auto all = service.QueryItems(allOptions);
         expect(!all.isMember("error"), "all-products query should not fail");
         expect(all["products"].size() == 2, "all-products query should include both products");
-        expect(all["total"].asUInt64() == 11, "all-products query should include items plus unique topic pseudo-items");
+        expect(all["total"].asUInt64() == 15, "all-products query should include items plus unique topic pseudo-items");
         for (const auto& item : all["items"]) {
             expect(item.isMember("gate_status"), "all-products items should include gate_status");
             expect(item["gate_status"].isMember("ready"), "gate_status should include ready gate");
@@ -502,6 +542,77 @@ int main() {
         expect(preview["generated_kobql"].asString().find("state:Ready") != std::string::npos,
                "command preview should expose generated KOBQL");
         expect(preview["mutation_allowed"].asBool() == false, "command preview must stay read-only");
+
+        auto exactRoute = service.RecommendCapabilityRoute("product-alpha", "PRA-FTR-0002");
+        expect(!exactRoute.isMember("error"), "exact capability route should not fail");
+        expect(exactRoute["status"].asString() == "routed", "exact capability route should be routed");
+        expect(exactRoute["route"]["product"].asString() == "product-alpha",
+               "exact route should show selected product");
+        expect(exactRoute["route"]["skill"].asString() == "kano-agent-backlog-skill",
+               "exact route should show selected skill");
+        expect(exactRoute["route"]["confidence"].asString() == "high",
+               "exact route should show high confidence");
+        expect(!exactRoute["route"]["reason"].asString().empty(),
+               "exact route should show reason text");
+        expect(exactRoute["route"]["source_fields"].size() >= 1,
+               "exact route should expose source fields");
+        expect(exactRoute["route"]["read_only"].asBool(),
+               "exact route should be marked read-only");
+        expect(!exactRoute["route"]["mutation_allowed"].asBool(),
+               "exact route must not allow mutations");
+        expect(!exactRoute["route"]["starts_agent"].asBool(),
+               "exact route must not start agents");
+        expect(!exactRoute["route"]["dispatches_work"].asBool(),
+               "exact route must not dispatch work");
+        expect(!exactRoute["mutation_allowed"].asBool(),
+               "capability route response must not allow mutations");
+        expect(!exactRoute["starts_agent"].asBool(),
+               "capability route response must not start agents");
+        expect(!exactRoute["dispatches_work"].asBool(),
+               "capability route response must not dispatch work");
+
+        auto fallbackRoute = service.RecommendCapabilityRoute("product-alpha", "PRA-FTR-0003");
+        expect(!fallbackRoute.isMember("error"), "fallback capability route should not fail");
+        expect(fallbackRoute["status"].asString() == "fallback",
+               "common item without metadata should use fallback route");
+        expect(fallbackRoute["missing_capability_metadata"].asBool(),
+               "fallback route should flag missing capability metadata");
+        expect(fallbackRoute["warnings"].size() >= 1,
+               "fallback route should expose actionable warning");
+        expect(fallbackRoute["warnings"][0]["code"].asString() == "capability_route.missing_metadata",
+               "fallback warning should explain missing metadata");
+        expect(fallbackRoute["route"]["skill"].asString() == "kano-agent-backlog-skill",
+               "fallback route should point to native KOB review path");
+        expect(!fallbackRoute["route"]["starts_agent"].asBool(),
+               "fallback route must not start agents");
+
+        auto ambiguousRoute = service.RecommendCapabilityRoute("product-alpha", "PRA-FTR-0004");
+        expect(!ambiguousRoute.isMember("error"), "ambiguous capability route should not fail");
+        expect(ambiguousRoute["status"].asString() == "ambiguous",
+               "multiple explicit capability routes should be ambiguous");
+        expect(ambiguousRoute["route"].isNull(), "ambiguous route should not select a default route");
+        expect(ambiguousRoute["alternatives"].size() == 2,
+               "ambiguous route should expose alternatives");
+        expect(ambiguousRoute["ambiguous_capability_data"].asBool(),
+               "ambiguous route should flag ambiguous capability data");
+        expect(ambiguousRoute["warnings"].size() >= 1,
+               "ambiguous route should expose actionable warning");
+        expect(!ambiguousRoute["mutation_allowed"].asBool(),
+               "ambiguous route response must not allow mutations");
+        expect(!ambiguousRoute["starts_agent"].asBool(),
+               "ambiguous route response must not start agents");
+
+        auto noRoute = service.RecommendCapabilityRoute("product-alpha", "PRA-EXP-0001");
+        expect(!noRoute.isMember("error"), "no-route capability lookup should not fail");
+        expect(noRoute["status"].asString() == "no_route",
+               "unknown item type without metadata should report no route");
+        expect(noRoute["route"].isNull(), "no-route response should not select a route");
+        expect(noRoute["warnings"].size() >= 1, "no-route response should expose warning");
+        expect(noRoute["warnings"][0]["code"].asString() == "capability_route.no_route",
+               "no-route warning should use deterministic code");
+        expect(!noRoute["mutation_allowed"].asBool(), "no-route response must not allow mutations");
+        expect(!noRoute["starts_agent"].asBool(), "no-route response must not start agents");
+        expect(!noRoute["dispatches_work"].asBool(), "no-route response must not dispatch work");
 
         auto inbox = service.BuildReviewInbox(allOptions);
         expect(!inbox["lanes"].isMember("Ready Approval"), "review inbox should not expose legacy Ready Approval lane");

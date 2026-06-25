@@ -61,6 +61,14 @@
     "public_docs_refs": {
       "type": "array",
       "items": { "$ref": "#/$defs/ref" }
+    },
+    "readiness_gate_refs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/ref" }
+    },
+    "public_docs_handoff_refs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/ref" }
     }
   },
   "$defs": {

@@ -30,6 +30,8 @@ Each release record includes:
 | `limitations` | Known gaps, constraints, or caveats that remain true. |
 | `release_notes_artifact_refs` | Draft or reviewed release note artifact refs generated from a release-notes evidence bundle. |
 | `public_docs_refs` | Public doc refs or planned publication targets. |
+| `readiness_gate_refs` | Optional refs to release readiness gate reports. |
+| `public_docs_handoff_refs` | Optional refs to public docs publishing handoff reports. |
 
 ## Release Notes Evidence Workflow
 
@@ -49,6 +51,30 @@ AI may draft wording from the bundle, but human review remains the boundary for
 approval. Public docs publication and live release-page handoff remain owned by
 `KOB-TSK-0093`; this schema only records draft or reviewed release-note
 artifacts and their evidence lineage.
+
+## Release Readiness Gate
+
+`KOB-TSK-0092` defines readiness as an evidence report, not a derived state from
+closed backlog items. A release record can point `readiness_gate_refs` at a
+readiness gate report that covers included item state, validation evidence,
+dogfood evidence, release notes evidence, public docs drafts, known limitations,
+unresolved blockers, and human approval.
+
+The readiness gate records `pass`, `fail`, `blocked`, or `unknown` for each
+category. Missing evidence remains actionable and visible. Early dogfood release
+scope can be deferred or cut with rationale, but public availability still
+requires publication evidence.
+
+## Public Docs Handoff
+
+`KOB-TSK-0093` defines how evidence-derived release drafts move toward public
+refs. A release record can point `public_docs_handoff_refs` at the handoff report
+for README, docs site, package metadata, marketplace/listing text, official
+release page, and announcement copy surfaces where applicable.
+
+The handoff does not publish live docs by itself. It records draft outputs,
+human approval checkpoints, publication refs, rollback/follow-up policy,
+limitations, and no-overclaim rules.
 
 ## Release Lifecycle Taxonomy
 
@@ -73,6 +99,10 @@ artifacts and their evidence lineage.
 - Release notes must be generated from release-notes evidence bundle refs. They
   must preserve missing evidence as omissions, caveats, or human-review blockers
   rather than unsupported public claims.
+- Readiness gate reports can block release claims even when release scope exists.
+  Public availability requires both human approval and publication evidence.
+- Public docs handoff refs must not be interpreted as live publication unless the
+  handoff records published refs and approval markers.
 - KOB-TSK-0065 Version Goal Ledger remains the roadmap contract. Release goals
   may reference ledger goals, but they do not replace the ledger or its status
   model.
@@ -89,5 +119,9 @@ The schema and example fixture live in:
 - [release-record.schema.json](../../references/release-record.schema.json)
 - [release-notes-evidence-bundle.schema.json](../../references/release-notes-evidence-bundle.schema.json)
 - [release-notes-evidence-bundle.fixture.json](../../references/release-notes-evidence-bundle.fixture.json)
+- [release-readiness-gate.schema.json](../../references/release-readiness-gate.schema.json)
+- [release-readiness-gate.fixture.json](../../references/release-readiness-gate.fixture.json)
+- [public-docs-publishing-handoff.schema.json](../../references/public-docs-publishing-handoff.schema.json)
+- [public-docs-publishing-handoff.fixture.json](../../references/public-docs-publishing-handoff.fixture.json)
 - [release-record.fixture.json](../../references/release-record.fixture.json)
 - [release-record-v0.2.0.fixture.json](../../references/release-record-v0.2.0.fixture.json)

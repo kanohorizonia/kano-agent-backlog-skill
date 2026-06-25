@@ -180,13 +180,26 @@ int main() {
         const auto products = root / "products";
 
         write_text(
+            products / "product-alpha" / "items" / "initiative" / "0001" / "PRA-INIT-0001.md",
+            item_doc("PRA-INIT-0001",
+                     "019ec100-0000-7000-8000-000000000010",
+                     "Initiative",
+                     "Alpha platform initiative",
+                     "Ready",
+                     "",
+                     "Initiative component narrative.\n\n"
+                     "## Context\n\n"
+                     "Alpha platform is an independently releasable component.\n\n"
+                     "## Goal\n\n"
+                     "Keep component ownership visible above release stories.\n"));
+        write_text(
             products / "product-alpha" / "items" / "epic" / "0001" / "PRA-EPIC-0001.md",
             item_doc("PRA-EPIC-0001",
                      "019ec100-0000-7000-8000-000000000001",
                      "Epic",
                      "Alpha epic",
                      "Ready",
-                     "",
+                     "PRA-INIT-0001",
                      "Alpha parent body."));
         write_text(
             products / "product-alpha" / "items" / "task" / "0001" / "PRA-TSK-0001.md",
@@ -343,13 +356,19 @@ int main() {
         auto all = service.QueryItems(allOptions);
         expect(!all.isMember("error"), "all-products query should not fail");
         expect(all["products"].size() == 2, "all-products query should include both products");
-        expect(all["total"].asUInt64() == 10, "all-products query should include items plus unique topic pseudo-items");
+        expect(all["total"].asUInt64() == 11, "all-products query should include items plus unique topic pseudo-items");
         for (const auto& item : all["items"]) {
             expect(item.isMember("gate_status"), "all-products items should include gate_status");
             expect(item["gate_status"].isMember("ready"), "gate_status should include ready gate");
             expect(item["gate_status"].isMember("review"), "gate_status should include review gate");
             expect(item["gate_status"].isMember("done"), "gate_status should include done gate");
         }
+
+        auto initiative = find_item(all["items"], "product-alpha", "PRA-INIT-0001");
+        expect(initiative.has_value(), "alpha initiative should be present");
+        expect((*initiative)["type"].asString() == "Initiative", "initiative type should round-trip through service json");
+        expect((*initiative)["gate_status"]["ready"]["state"].asString() == "passed",
+               "initiative with Context and Goal should pass ready gate");
 
         auto task = find_item(all["items"], "product-alpha", "PRA-TSK-0001");
         expect(task.has_value(), "alpha task should be present");
@@ -404,6 +423,13 @@ int main() {
         expect(taskTextResult["total"].asUInt64() == 1, "type and text filter should narrow to one task");
         expect(taskTextResult["items"][0]["id"].asString() == "PRA-TSK-0001", "filtered task id mismatch");
 
+        webview::ItemQueryOptions initiativeText;
+        initiativeText.types = {"Initiative"};
+        initiativeText.text = "component narrative";
+        auto initiativeTextResult = service.QueryItems(initiativeText);
+        expect(initiativeTextResult["total"].asUInt64() == 1, "initiative type filter should find the initiative");
+        expect(initiativeTextResult["items"][0]["id"].asString() == "PRA-INIT-0001", "filtered initiative id mismatch");
+
         webview::ItemQueryOptions betaDoing;
         betaDoing.products = {"product-beta"};
         betaDoing.states = {"InProgress"};
@@ -435,6 +461,19 @@ int main() {
         }
         expect(foundEpicRoot, "filtered tree should keep the epic root");
         expect(foundStandaloneTaskRoot, "filtered tree should keep standalone tasks without parents as roots");
+
+        webview::ItemQueryOptions initiativeTreeOptions;
+        initiativeTreeOptions.types = {"Initiative", "Epic", "Task"};
+        auto initiativeTree = service.BuildTree(initiativeTreeOptions);
+        expect(!initiativeTree.isMember("error"), "initiative tree query should not fail");
+        bool foundInitiativeRoot = false;
+        for (const auto& rootNode : initiativeTree["roots"]) {
+            if (rootNode["id"].asString() == "PRA-INIT-0001") {
+                foundInitiativeRoot = true;
+                expect(rootNode["children"].size() == 1, "initiative root should attach the epic child");
+            }
+        }
+        expect(foundInitiativeRoot, "tree should expose initiative as structural root");
 
         auto kanban = service.BuildKanban(betaDoing);
         expect(kanban["lanes"]["Doing"].size() == 1, "kanban should place InProgress item in Doing lane");

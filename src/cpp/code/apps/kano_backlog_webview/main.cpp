@@ -531,7 +531,7 @@ R"HTML(  <script src="/assets/kob-ui.js"></script>
       products: [],
       selectedProducts: new Set(['all']),
       selectedStates: new Set(['Proposed', 'Ready', 'InProgress', 'Blocked', 'Review', 'Done', 'Dropped']),
-      selectedTypes: new Set(['Theme', 'Epic', 'Feature', 'UserStory', 'Task', 'Bug', 'Issue', 'ADR', 'Topic', 'Workset']),
+      selectedTypes: new Set(['Theme', 'Initiative', 'Epic', 'Feature', 'UserStory', 'Task', 'Bug', 'Issue', 'ADR', 'Topic', 'Workset']),
       q: '',
       limit: 200,
       workspace: '',
@@ -556,7 +556,7 @@ R"HTML(  <script src="/assets/kob-ui.js"></script>
     const lanes = ['Backlog', 'Doing', 'Blocked', 'Review', 'Done'];
     const reviewQueueOrder = ['Needs Review', 'Done Candidate', 'False Done Suspect', 'Evidence Gap', 'Blocked/Dirty', 'Stale/Drift', 'Ready Frontier'];
     const itemStates = ['Proposed', 'Ready', 'InProgress', 'Blocked', 'Review', 'Done', 'Dropped'];
-    const itemTypes = ['Theme', 'Epic', 'Feature', 'UserStory', 'Task', 'Bug', 'Issue', 'ADR', 'Topic', 'Workset'];
+    const itemTypes = ['Theme', 'Initiative', 'Epic', 'Feature', 'UserStory', 'Task', 'Bug', 'Issue', 'ADR', 'Topic', 'Workset'];
     const workspaceStorageKey = 'kano_webview_workspaces_v2';
 
     function tokenSetFromQuery(value, fallback) {
@@ -1175,6 +1175,7 @@ R"HTML(
 R"HTML(    function typeIcon(type) {
       const map = {
         Theme: '🧩',
+        Initiative: 'I',
         Epic: '👑',
         Feature: '🔷',
         UserStory: '📖',

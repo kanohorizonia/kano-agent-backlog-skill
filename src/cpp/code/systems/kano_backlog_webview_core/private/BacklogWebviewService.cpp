@@ -750,6 +750,22 @@ std::string CleanListToken(std::string value) {
   return value;
 }
 
+std::string NormalizeItemTypeName(const std::string& value) {
+  const auto trimmed = Trim(value);
+  const auto lowered = text::ToLower(trimmed);
+  if (lowered == "initiative") return "Initiative";
+  if (lowered == "epic") return "Epic";
+  if (lowered == "feature") return "Feature";
+  if (lowered == "userstory" || lowered == "user story" ||
+      lowered == "user-story" || lowered == "story") {
+    return "UserStory";
+  }
+  if (lowered == "task") return "Task";
+  if (lowered == "bug") return "Bug";
+  if (lowered == "issue") return "Issue";
+  return trimmed;
+}
+
 std::vector<std::string> ParseListValue(std::string value) {
   std::vector<std::string> result;
   value = StripInlineComment(Trim(value));
@@ -925,7 +941,7 @@ const std::vector<SavedViewDefinition>& SavedViews() {
   static const std::vector<SavedViewDefinition> views = {
       {"ready-frontier", "Ready Frontier",
        "Ready items waiting for a human to approve, dispatch, or defer.",
-       "state:Ready type:Feature type:UserStory type:Task type:Bug"},
+       "state:Ready type:Initiative type:Feature type:UserStory type:Task type:Bug"},
       {"needs-review", "Needs Review",
        "Items waiting for a human to review delivered results.",
        "state:Review"},
@@ -1502,10 +1518,14 @@ Json::Value MakeGateStatus(const std::string& name,
 
 Json::Value BuildReadyGateStatus(const ItemRecord& item) {
   Json::Value checks(Json::arrayValue);
-  const std::vector<std::string> sourceFields = {
-      "source_kind", "state", "content.sections.Context", "content.sections.Goal",
-      "content.sections.Acceptance Criteria", "content.sections.Risks",
-      "content.sections.Risks / Dependencies"};
+  const bool structuralRoot = item.type == "Initiative" || item.type == "Epic";
+  const std::vector<std::string> requiredSections = structuralRoot
+      ? std::vector<std::string>{"Context", "Goal"}
+      : std::vector<std::string>{"Context", "Goal", "Acceptance Criteria", "Risks / Dependencies"};
+  std::vector<std::string> sourceFields = {"source_kind", "state"};
+  for (const auto& sectionName : requiredSections) {
+    sourceFields.push_back("content.sections." + sectionName);
+  }
   if (item.sourceKind != "Item") {
     checks.append(MakeValidationCheck("applicable_source_kind", "unknown",
                                       "Ready gate applies only to backlog item Markdown."));
@@ -1521,8 +1541,6 @@ Json::Value BuildReadyGateStatus(const ItemRecord& item) {
                           {"state"});
   }
 
-  const std::vector<std::string> requiredSections = {
-      "Context", "Goal", "Acceptance Criteria", "Risks / Dependencies"};
   const auto sectionPresence =
       ExtractSectionContentPresence(item.rawContent, requiredSections);
   std::vector<std::string> missing;
@@ -1534,9 +1552,12 @@ Json::Value BuildReadyGateStatus(const ItemRecord& item) {
     }
   }
 
+  const std::string requirementMessage = structuralRoot
+      ? "Context and Goal sections must contain content."
+      : "Context, Goal, Acceptance Criteria, and Risks / Dependencies sections must contain content.";
   checks.append(MakeValidationCheck(
       "required_ready_sections", missing.empty() ? "passed" : "failed",
-      "Context, Goal, Acceptance Criteria, and Risks / Dependencies sections must contain content."));
+      requirementMessage));
   return MakeGateStatus("ready", "Ready", missing.empty() ? "passed" : "failed",
                         missing, checks, sourceFields);
 }
@@ -2025,10 +2046,13 @@ BacklogWebviewService::BuildTopicLookup() const {
 std::string BacklogWebviewService::NormalizeTypeFromPath(
     const std::filesystem::path& itemPath, const std::string& declaredType) {
   if (!declaredType.empty()) {
-    return declaredType;
+    return NormalizeItemTypeName(declaredType);
   }
 
   const auto parent = itemPath.parent_path().parent_path().filename().string();
+  if (parent == "initiative") {
+    return "Initiative";
+  }
   if (parent == "story" || parent == "userstory") {
     return "UserStory";
   }
@@ -2761,7 +2785,7 @@ Json::Value BacklogWebviewService::BuildTree(const ItemQueryOptions& options) {
 
   for (const auto& item : itemsResponse["items"]) {
     const auto type = item["type"].asString();
-    if (type != "Epic" && type != "Feature" && type != "UserStory" &&
+    if (type != "Initiative" && type != "Epic" && type != "Feature" && type != "UserStory" &&
         type != "Task" && type != "Bug" && type != "Issue" && type != "Theme") {
       continue;
     }
@@ -2785,7 +2809,7 @@ Json::Value BacklogWebviewService::BuildTree(const ItemQueryOptions& options) {
 
   for (const auto& item : itemsResponse["items"]) {
     const auto type = item["type"].asString();
-    if (type != "Epic" && type != "Feature" && type != "UserStory" &&
+    if (type != "Initiative" && type != "Epic" && type != "Feature" && type != "UserStory" &&
         type != "Task" && type != "Bug" && type != "Issue" && type != "Theme") {
       continue;
     }
@@ -2828,7 +2852,7 @@ Json::Value BacklogWebviewService::BuildTree(const ItemQueryOptions& options) {
 
   for (const auto& item : itemsResponse["items"]) {
     const auto type = item["type"].asString();
-    if (type != "Epic" && type != "Feature" && type != "UserStory" &&
+    if (type != "Initiative" && type != "Epic" && type != "Feature" && type != "UserStory" &&
         type != "Task" && type != "Bug" && type != "Issue" && type != "Theme") {
       continue;
     }
@@ -4108,7 +4132,7 @@ std::string BacklogWebviewService::RenderFiltersPartial(
   const std::vector<std::string> states = {"Proposed", "Ready", "InProgress",
                                            "Blocked", "Review", "Done",
                                            "Dropped"};
-  const std::vector<std::string> types = {"Theme", "Epic", "Feature",
+  const std::vector<std::string> types = {"Theme", "Initiative", "Epic", "Feature",
                                           "UserStory", "Task", "Bug",
                                           "Issue", "ADR", "Topic",
                                           "Workset"};
@@ -4384,6 +4408,9 @@ void RegisterBacklogWebviewRoutes(
     options.text = request->getParameter("q");
     options.states = SplitCsv(request->getParameter("state"));
     options.types = SplitCsv(request->getParameter("type"));
+    for (auto& type : options.types) {
+      type = NormalizeItemTypeName(type);
+    }
     options.limit =
         ParseSizeOrDefault(request->getParameter("limit"), 200, 1000);
     options.offset =

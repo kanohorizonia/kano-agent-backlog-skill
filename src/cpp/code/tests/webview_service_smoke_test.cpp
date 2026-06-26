@@ -80,7 +80,8 @@ std::string item_doc(const std::string& id,
                      const std::string& state,
                      const std::string& parent,
                      const std::string& body,
-                     const std::string& extra_frontmatter = "") {
+                     const std::string& extra_frontmatter = "",
+                     const std::string& updated = "2026-06-14") {
     std::ostringstream out;
     out << "---\n";
     out << "id: " << id << "\n";
@@ -91,19 +92,33 @@ std::string item_doc(const std::string& id,
     out << "parent: " << (parent.empty() ? "null" : parent) << "\n";
     out << extra_frontmatter;
     out << "created: 2026-06-14\n";
-    out << "updated: 2026-06-14\n";
+    out << "updated: " << updated << "\n";
     out << "---\n\n";
     out << body << "\n";
     return out.str();
 }
 
 std::optional<Json::Value> find_item(const Json::Value& items,
-                                     const std::string& product,
-                                     const std::string& id) {
+                                      const std::string& product,
+                                      const std::string& id) {
     for (const auto& item : items) {
         if (item["product"].asString() == product &&
             item["id"].asString() == id) {
             return item;
+        }
+    }
+    return std::nullopt;
+}
+
+std::optional<Json::Value> find_finding(const Json::Value& findings,
+                                        const std::string& product,
+                                        const std::string& item_id,
+                                        const std::string& reason_code) {
+    for (const auto& finding : findings) {
+        if (finding["product"].asString() == product &&
+            finding["item_id"].asString() == item_id &&
+            finding["reason_code"].asString() == reason_code) {
+            return finding;
         }
     }
     return std::nullopt;
@@ -315,10 +330,13 @@ int main() {
                      "Beta done with evidence",
                      "Done",
                      "",
-                     "Done candidate with durable evidence.\n\n"
-                     "## Worklog\n\n"
-                     "2026-06-14 11:00 [agent=codex] Artifact attached: [report](../artifacts/PRB-BUG-0002/report.md).\n"
-                     "2026-06-14 11:10 [agent=codex] Validation: pixi run quick-test PASS.\n"));
+                      "Done candidate with durable evidence.\n\n"
+                      "## Worklog\n\n"
+                      "2026-06-14 10:50 [agent=codex] Work order dispatched for done evidence review.\n"
+                      "2026-06-14 11:00 [agent=codex] Artifact attached: [report](../artifacts/PRB-BUG-0002/report.md).\n"
+                      "2026-06-14 11:05 [agent=codex] Commit evidence: implementation_commit=abc1234 revision abc1234.\n"
+                      "2026-06-14 11:10 [agent=codex] Branch convergence: target=main implementation_commit=abc1234 reachable_from_target=true remote_publication=origin/main.\n"
+                      "2026-06-14 11:20 [agent=codex] Validation: pixi run quick-test PASS.\n"));
         write_text(
             products / "product-beta" / "items" / "bug" / "0003" / "PRB-BUG-0003.md",
             item_doc("PRB-BUG-0003",
@@ -327,7 +345,7 @@ int main() {
                      "Beta done without evidence",
                      "Done",
                      "",
-                     "Closed without durable validation evidence."));
+                     "Closed without durable proof."));
         write_text(
             products / "product-beta" / "items" / "bug" / "0004" / "PRB-BUG-0004.md",
             item_doc("PRB-BUG-0004",
@@ -336,10 +354,57 @@ int main() {
                      "Beta review with evidence",
                      "Review",
                      "",
-                     "Review candidate with durable evidence.\n\n"
-                      "## Worklog\n\n"
-                      "2026-06-14 12:00 [agent=codex] Artifact attached: [report](../artifacts/PRB-BUG-0004/report.md).\n"
-                      "2026-06-14 12:10 [agent=codex] Validation: pixi run quick-test PASS.\n"));
+                      "Review candidate with durable evidence.\n\n"
+                       "## Worklog\n\n"
+                       "2026-06-14 12:00 [agent=codex] Artifact attached: [report](../artifacts/PRB-BUG-0004/report.md).\n"
+                       "2026-06-14 12:10 [agent=codex] Validation: pixi run quick-test PASS.\n"));
+        const auto missingCommitPath = products / "product-beta" / "items" / "bug" / "0005" / "PRB-BUG-0005.md";
+        write_text(
+            missingCommitPath,
+            item_doc("PRB-BUG-0005",
+                     "019ec100-0000-7000-8000-000000000015",
+                     "Bug",
+                     "Beta done missing source-control evidence",
+                     "Done",
+                     "",
+                     "Done item with validation and artifact but no source-control proof.\n\n"
+                     "## Worklog\n\n"
+                     "2026-06-14 12:30 [agent=codex] Work order dispatched for source-control detector coverage.\n"
+                     "2026-06-14 12:40 [agent=codex] Artifact attached: [report](../artifacts/PRB-BUG-0005/report.md).\n"
+                     "2026-06-14 12:50 [agent=codex] Validation: pixi run quick-test PASS.\n"));
+        const auto staleDonePath = products / "product-beta" / "items" / "bug" / "0006" / "PRB-BUG-0006.md";
+        write_text(
+            staleDonePath,
+            item_doc("PRB-BUG-0006",
+                     "019ec100-0000-7000-8000-000000000016",
+                     "Bug",
+                     "Beta done with stale worklog",
+                     "Done",
+                     "",
+                     "Done item whose markdown updated after the latest evidence worklog.\n\n"
+                     "## Worklog\n\n"
+                     "2026-06-14 13:00 [agent=codex] Work order dispatched for stale worklog detector coverage.\n"
+                     "2026-06-14 13:10 [agent=codex] Artifact attached: [report](../artifacts/PRB-BUG-0006/report.md).\n"
+                     "2026-06-14 13:20 [agent=codex] Commit evidence: implementation_commit=def5678 revision def5678.\n"
+                     "2026-06-14 13:30 [agent=codex] Branch convergence: target=main implementation_commit=def5678 reachable_from_target=true remote_publication=origin/main.\n"
+                     "2026-06-14 13:40 [agent=codex] Validation: pixi run quick-test PASS.\n",
+                     "",
+                     "2026-06-20"));
+        const auto branchUnknownPath = products / "product-beta" / "items" / "bug" / "0007" / "PRB-BUG-0007.md";
+        write_text(
+            branchUnknownPath,
+            item_doc("PRB-BUG-0007",
+                     "019ec100-0000-7000-8000-000000000017",
+                     "Bug",
+                     "Beta done missing target reachability",
+                     "Done",
+                     "",
+                     "Done item with commit and push evidence but no explicit target reachability note.\n\n"
+                     "## Worklog\n\n"
+                     "2026-06-14 14:00 [agent=codex] Work order dispatched for target reachability detector coverage.\n"
+                     "2026-06-14 14:10 [agent=codex] Artifact attached: [report](../artifacts/PRB-BUG-0007/report.md).\n"
+                     "2026-06-14 14:20 [agent=codex] Commit evidence: commit abc9999 pushed to origin/main.\n"
+                     "2026-06-14 14:30 [agent=codex] Validation: pixi run quick-test PASS.\n"));
         write_text(
             products / "product-alpha" / "items" / "feature" / "0002" / "PRA-FTR-0002.md",
             item_doc("PRA-FTR-0002",
@@ -396,7 +461,7 @@ int main() {
         auto all = service.QueryItems(allOptions);
         expect(!all.isMember("error"), "all-products query should not fail");
         expect(all["products"].size() == 2, "all-products query should include both products");
-        expect(all["total"].asUInt64() == 15, "all-products query should include items plus unique topic pseudo-items");
+        expect(all["total"].asUInt64() == 18, "all-products query should include items plus unique topic pseudo-items");
         for (const auto& item : all["items"]) {
             expect(item.isMember("gate_status"), "all-products items should include gate_status");
             expect(item["gate_status"].isMember("ready"), "gate_status should include ready gate");
@@ -455,6 +520,89 @@ int main() {
         expect(reviewWithEvidence.has_value(), "review item with evidence should be present");
         expect((*reviewWithEvidence)["gate_status"]["review"]["state"].asString() == "passed",
                "review item with sufficient evidence should pass review gate");
+
+        const auto detectorFileCountBefore = count_regular_files(products);
+        const auto detectorStateBefore = read_text(products / "product-beta" / "items" / "bug" / "0001" / "PRB-BUG-0001.md");
+        auto doneDetector = service.BuildDoneCandidateDetector(allOptions);
+        expect(!doneDetector.isMember("error"), "done detector query should not fail");
+        expect(doneDetector["read_only"].asBool(), "done detector must be read-only");
+        expect(!doneDetector["mutation_allowed"].asBool(), "done detector must not allow mutations");
+        expect(!doneDetector["starts_agent"].asBool(), "done detector must not start agents");
+        expect(!doneDetector["dispatches_work"].asBool(), "done detector must not dispatch work");
+        expect(doneDetector["advisory_only"].asBool(), "done detector must be advisory only");
+        expect(doneDetector["finding_count"].asUInt64() == doneDetector["findings"].size(),
+               "done detector should expose bounded finding_count metadata");
+        expect(doneDetector["pagination_ignored_for_full_scan"].asBool(),
+               "done detector should scan the selected set instead of one query page");
+        expect(doneDetector["scanned"].asUInt64() == doneDetector["query_total"].asUInt64(),
+               "done detector full scan should visit every selected query match");
+        expect(!doneDetector["truncated"].asBool(), "unbounded smoke detector query should not be truncated");
+        expect(count_regular_files(products) == detectorFileCountBefore,
+               "done detector must not create or delete files");
+        expect(read_text(products / "product-beta" / "items" / "bug" / "0001" / "PRB-BUG-0001.md") == detectorStateBefore,
+               "done detector must not mutate item markdown state");
+        for (const auto& finding : doneDetector["findings"]) {
+            expect(!finding["product"].asString().empty(), "detector finding should include product");
+            expect(!finding["item_id"].asString().empty(), "detector finding should include item id");
+            expect(!finding["title"].asString().empty(), "detector finding should include title");
+            expect(!finding["state"].asString().empty(), "detector finding should include state");
+            expect(!finding["reason_code"].asString().empty(), "detector finding should include reason code");
+            expect(!finding["severity"].asString().empty(), "detector finding should include severity");
+            expect(finding["last_relevant_worklog"].isObject(),
+                   "detector finding should include last relevant worklog summary/ref");
+            expect(finding["available_evidence_refs"].isArray(),
+                   "detector finding should include evidence refs");
+            expect(!finding["suggested_human_action"].asString().empty(),
+                   "detector finding should include suggested human action");
+            expect(finding["advisory"].asBool(), "detector findings should be advisory");
+            expect(!finding["blocks_done"].asBool(), "detector findings should not block Done directly");
+            expect(!finding["mutation_allowed"].asBool(), "detector findings should not allow mutation");
+            expect(!finding["starts_agent"].asBool(), "detector findings should not start agents");
+            expect(!finding["dispatches_work"].asBool(), "detector findings should not dispatch work");
+        }
+        expect(find_finding(doneDetector["findings"], "product-beta", "PRB-BUG-0001", "done_candidate").has_value(),
+               "in-progress item with validation should be reported as a done candidate");
+        expect(find_finding(doneDetector["findings"], "product-beta", "PRB-BUG-0002", "false_done_suspect") == std::nullopt,
+               "strong done evidence item should not be reported as false done");
+        expect(find_finding(doneDetector["findings"], "product-beta", "PRB-BUG-0003", "false_done_suspect").has_value(),
+               "done item without evidence should be reported as false done suspect");
+        expect(find_finding(doneDetector["findings"], "product-beta", "PRB-BUG-0003", "missing_validation_evidence").has_value(),
+               "done item without validation should report missing validation evidence");
+        expect(find_finding(doneDetector["findings"], "product-beta", "PRB-BUG-0005", "missing_commit_or_push_evidence").has_value(),
+               "done item without source-control proof should report missing commit or push evidence");
+        expect(find_finding(doneDetector["findings"], "product-beta", "PRB-BUG-0006", "stale_worklog_after_done").has_value(),
+               "done item updated after worklog evidence should report stale worklog");
+        auto branchFinding = find_finding(doneDetector["findings"], "product-beta", "PRB-BUG-0007", "branch_convergence_missing_or_unknown");
+        expect(branchFinding.has_value(), "done item without branch convergence proof should report unknown convergence");
+        expect((*branchFinding)["diagnostic_status"].asString() == "unknown",
+               "unknown branch convergence evidence should be marked unknown");
+        expect(!(*branchFinding)["branch_convergence_evidence"]["complete"].asBool(),
+               "missing branch convergence evidence should expose incomplete field-level status");
+        expect((*branchFinding)["branch_convergence_evidence"]["missing"].size() >= 3,
+               "missing branch convergence evidence should name missing target/reachability/publication fields");
+        webview::ItemQueryOptions pagedDetectorOptions = allOptions;
+        pagedDetectorOptions.limit = 1;
+        auto pagedDetector = service.BuildDoneCandidateDetector(pagedDetectorOptions);
+        expect(find_finding(pagedDetector["findings"], "product-beta", "PRB-BUG-0007", "branch_convergence_missing_or_unknown").has_value(),
+               "done detector should not miss findings beyond the first requested page");
+        expect(!pagedDetector["truncated"].asBool(),
+               "done detector should report no truncation after internal pagination completes");
+        expect(doneDetector["counts_by_reason"]["done_candidate"].asUInt64() >= 1,
+               "detector should count done candidate findings by reason");
+        expect(doneDetector["counts_by_reason"]["false_done_suspect"].asUInt64() >= 1,
+               "detector should count false done findings by reason");
+        expect(doneDetector["counts_by_reason"]["weak_done_evidence"].asUInt64() >= 1,
+               "detector should count weak done evidence findings by reason");
+        expect(doneDetector["counts_by_reason"]["missing_validation_evidence"].asUInt64() >= 1,
+               "detector should count missing validation findings by reason");
+        expect(doneDetector["counts_by_reason"]["missing_commit_or_push_evidence"].asUInt64() >= 1,
+               "detector should count missing commit or push findings by reason");
+        expect(doneDetector["counts_by_reason"]["missing_artifact_or_worklog_evidence"].asUInt64() >= 1,
+               "detector should count missing artifact or worklog findings by reason");
+        expect(doneDetector["counts_by_reason"]["stale_worklog_after_done"].asUInt64() >= 1,
+               "detector should count stale worklog findings by reason");
+        expect(doneDetector["counts_by_reason"]["branch_convergence_missing_or_unknown"].asUInt64() >= 1,
+               "detector should count branch convergence findings by reason");
 
         webview::ItemQueryOptions taskText;
         taskText.types = {"Task"};
@@ -858,6 +1006,10 @@ int main() {
         const auto pixiToml = read_text(locate_repo_file("pixi.toml"));
         expect(pixiToml.find("webview-smoke-artifacts") != std::string::npos,
                "pixi manifest should expose the smoke artifact command");
+
+        const auto webviewReadme = read_text(webviewAppRoot / "README.md");
+        expect(webviewReadme.find("/api/review/done-detector") != std::string::npos,
+               "webview README should list the done detector API route");
 
         const auto readme = read_text(locate_repo_file("README.md"));
         expect(readme.find("pixi run webview-smoke-artifacts") != std::string::npos,

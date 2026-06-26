@@ -2005,6 +2005,242 @@ Json::Value MakeReviewQueueBundle(
   return out;
 }
 
+std::string WorklogRef(const Json::Value& item) {
+  return item.get("id", "").asString() + "#worklog";
+}
+
+std::string DatePrefix(const std::string& value) {
+  if (value.size() >= 10 && value[4] == '-' && value[7] == '-') {
+    return value.substr(0, 10);
+  }
+  return "";
+}
+
+bool JsonBoolAt(const Json::Value& value, const std::string& key) {
+  return value.isObject() && value.isMember(key) && value[key].asBool();
+}
+
+bool HasPushEvidence(const std::string& content) {
+  return ContentContainsAny(content, {"push", "pushed", "remote_publication", "remote publication", "origin/", "published branch"});
+}
+
+std::optional<std::string> EvidenceField(const std::string& content,
+                                         const std::string& key) {
+  const std::regex fieldRegex(key + R"(\s*[:=]\s*([^\s,;\]\)]+))",
+                              std::regex_constants::icase);
+  std::smatch match;
+  if (std::regex_search(content, match, fieldRegex) && match.size() > 1) {
+    return Trim(match[1].str());
+  }
+  return std::nullopt;
+}
+
+bool EvidenceYes(const std::optional<std::string>& value) {
+  if (!value.has_value()) {
+    return false;
+  }
+  const auto normalized = text::ToLower(Trim(*value));
+  return normalized == "true" || normalized == "yes" || normalized == "y" ||
+         normalized == "1" || normalized == "complete" ||
+         normalized == "completed";
+}
+
+bool EvidencePresent(const std::optional<std::string>& value) {
+  return value.has_value() && !Trim(*value).empty() &&
+         text::ToLower(Trim(*value)) != "unknown" &&
+         text::ToLower(Trim(*value)) != "none";
+}
+
+Json::Value BranchConvergenceEvidence(const std::string& content) {
+  Json::Value evidence(Json::objectValue);
+  const auto target = EvidenceField(content, "target(?:_branch)?");
+  const auto implementationCommit = EvidenceField(content, "implementation_commit");
+  const auto reachable = EvidenceField(content, "reachable_from_target");
+  const auto remotePublication = EvidenceField(content, "remote_publication");
+  const auto sideBranch = EvidenceField(content, "side_branch");
+  const auto nestedGitlink = EvidenceField(content, "nested_gitlink");
+  const auto blocked = EvidenceField(content, "blocked_convergence");
+
+  evidence["target_branch"] = target.value_or("unknown");
+  evidence["implementation_commit"] = implementationCommit.value_or("unknown");
+  evidence["reachable_from_target"] = reachable.value_or("unknown");
+  evidence["remote_publication"] = remotePublication.value_or("unknown");
+  evidence["side_branch"] = sideBranch.value_or("unknown");
+  evidence["nested_gitlink"] = nestedGitlink.value_or("unknown");
+  evidence["blocked_convergence"] = blocked.value_or("unknown");
+  evidence["status"] = "unknown";
+
+  const bool hasTarget = EvidencePresent(target);
+  const bool hasImplementationCommit = EvidencePresent(implementationCommit);
+  const bool targetReachable = EvidenceYes(reachable);
+  const bool remotelyPublished = EvidenceYes(remotePublication) ||
+                                 (remotePublication.has_value() &&
+                                  remotePublication->find('/') != std::string::npos);
+  const bool convergenceBlocked = EvidenceYes(blocked);
+  const bool hasKnownSideBranch = EvidencePresent(sideBranch);
+  const bool hasKnownNestedGitlink = EvidencePresent(nestedGitlink);
+
+  evidence["has_target_branch"] = hasTarget;
+  evidence["has_implementation_commit"] = hasImplementationCommit;
+  evidence["target_reachable"] = targetReachable;
+  evidence["remotely_published"] = remotelyPublished;
+  evidence["has_side_branch"] = hasKnownSideBranch;
+  evidence["has_nested_gitlink"] = hasKnownNestedGitlink;
+  evidence["convergence_blocked"] = convergenceBlocked;
+  evidence["missing"] = Json::arrayValue;
+  if (!hasTarget) {
+    evidence["missing"].append("target_branch");
+  }
+  if (!hasImplementationCommit) {
+    evidence["missing"].append("implementation_commit");
+  }
+  if (!targetReachable) {
+    evidence["missing"].append("reachable_from_target");
+  }
+  if (!remotelyPublished) {
+    evidence["missing"].append("remote_publication");
+  }
+  evidence["complete"] = hasTarget && hasImplementationCommit && targetReachable &&
+                         remotelyPublished && !convergenceBlocked;
+  if (evidence["complete"].asBool()) {
+    evidence["status"] = "complete";
+  } else if (convergenceBlocked) {
+    evidence["status"] = "blocked";
+  } else if (hasTarget || hasImplementationCommit || targetReachable || remotelyPublished ||
+             hasKnownSideBranch || hasKnownNestedGitlink) {
+    evidence["status"] = "partial";
+  }
+  return evidence;
+}
+
+Json::Value MergeWarnings(const Json::Value& first, const Json::Value& second) {
+  Json::Value merged(Json::arrayValue);
+  if (first.isArray()) {
+    for (const auto& warning : first) {
+      merged.append(warning);
+    }
+  }
+  if (second.isArray()) {
+    for (const auto& warning : second) {
+      merged.append(warning);
+    }
+  }
+  return merged;
+}
+
+Json::Value EvidenceRef(const std::string& kind,
+                        const std::string& ref,
+                        const std::string& source) {
+  Json::Value value(Json::objectValue);
+  value["kind"] = kind;
+  value["ref"] = ref;
+  value["source"] = source;
+  return value;
+}
+
+Json::Value WorklogEventFromLine(const std::string& line) {
+  Json::Value event(Json::objectValue);
+  event["timestamp"] = ExtractTimestamp(line);
+  event["agent"] = ExtractAgent(line);
+  event["kind"] = InferEventKind(line);
+  event["text"] = line;
+  return event;
+}
+
+Json::Value LastRelevantWorklog(const Json::Value& item) {
+  Json::Value result(Json::objectValue);
+  result["status"] = "missing";
+  result["ref"] = WorklogRef(item);
+  const auto lines = ExtractWorklogLines(item.get("content", "").asString());
+  if (lines.empty()) {
+    result["summary"] = "No worklog entries found.";
+    return result;
+  }
+
+  auto selected = lines.back();
+  for (auto it = lines.rbegin(); it != lines.rend(); ++it) {
+    const auto kind = InferEventKind(*it);
+    if (kind == "validation" || kind == "artifact" ||
+        kind == "state-transition" || kind == "work-order") {
+      selected = *it;
+      break;
+    }
+  }
+
+  result = WorklogEventFromLine(selected);
+  result["status"] = "present";
+  result["summary"] = selected;
+  result["ref"] = WorklogRef(item);
+  return result;
+}
+
+Json::Value AvailableEvidenceRefs(const Json::Value& item,
+                                  const Json::Value& evidence,
+                                  const bool hasPush,
+                                  const bool hasBranchConvergence) {
+  Json::Value refs(Json::arrayValue);
+  const auto& signals = evidence["signals"];
+  if (JsonBoolAt(signals, "validation")) {
+    refs.append(EvidenceRef("validation", "validation signal", WorklogRef(item)));
+  }
+  if (JsonBoolAt(signals, "artifact")) {
+    refs.append(EvidenceRef("artifact", "artifact signal", WorklogRef(item)));
+  }
+  if (JsonBoolAt(signals, "commit")) {
+    refs.append(EvidenceRef("commit", "commit signal", WorklogRef(item)));
+  }
+  if (hasPush) {
+    refs.append(EvidenceRef("push", "remote publication signal", WorklogRef(item)));
+  }
+  if (hasBranchConvergence) {
+    refs.append(EvidenceRef("branch_convergence", "branch convergence signal", WorklogRef(item)));
+  }
+  const auto last = LastRelevantWorklog(item);
+  if (last.get("status", "missing").asString() == "present") {
+    refs.append(EvidenceRef("worklog", last.get("summary", "").asString(), WorklogRef(item)));
+  }
+  return refs;
+}
+
+bool HasStaleWorklogAfterDone(const Json::Value& item,
+                              const Json::Value& lastWorklog) {
+  if (text::ToLower(item.get("state", "").asString()) != "done") {
+    return false;
+  }
+  const auto updatedDate = DatePrefix(item.get("updated", "").asString());
+  const auto worklogDate = DatePrefix(lastWorklog.get("timestamp", "").asString());
+  return !updatedDate.empty() && !worklogDate.empty() && worklogDate < updatedDate;
+}
+
+Json::Value DoneDetectorFinding(const Json::Value& item,
+                                const Json::Value& evidence,
+                                const std::string& reasonCode,
+                                const std::string& severity,
+                                const std::string& suggestedHumanAction,
+                                const std::string& diagnosticStatus,
+                                const Json::Value& lastWorklog,
+                                const Json::Value& evidenceRefs) {
+  Json::Value finding(Json::objectValue);
+  finding["product"] = item.get("product", "").asString();
+  finding["item_id"] = item.get("id", "").asString();
+  finding["title"] = item.get("title", "").asString();
+  finding["state"] = item.get("state", "").asString();
+  finding["reason_code"] = reasonCode;
+  finding["severity"] = severity;
+  finding["last_relevant_worklog"] = lastWorklog;
+  finding["available_evidence_refs"] = evidenceRefs;
+  finding["missing_evidence"] = evidence["missing"];
+  finding["evidence_score"] = evidence.get("score", 0U).asUInt64();
+  finding["suggested_human_action"] = suggestedHumanAction;
+  finding["diagnostic_status"] = diagnosticStatus;
+  finding["advisory"] = true;
+  finding["blocks_done"] = false;
+  finding["mutation_allowed"] = false;
+  finding["starts_agent"] = false;
+  finding["dispatches_work"] = false;
+  return finding;
+}
+
 bool ItemMatchesTopic(const Json::Value& item, const std::string& topic) {
   if (topic.empty()) {
     return true;
@@ -3492,6 +3728,145 @@ Json::Value BacklogWebviewService::BuildReviewInbox(const ItemQueryOptions& opti
     response["counts"][lane] =
         static_cast<Json::UInt64>(response["lanes"][lane].size());
   }
+  return response;
+}
+
+Json::Value BacklogWebviewService::BuildDoneCandidateDetector(
+    const ItemQueryOptions& options) {
+  Json::Value response(Json::objectValue);
+  response["findings"] = Json::arrayValue;
+  response["counts_by_reason"] = Json::objectValue;
+  response["counts_by_severity"] = Json::objectValue;
+  response["read_only"] = true;
+  response["mutation_allowed"] = false;
+  response["starts_agent"] = false;
+  response["dispatches_work"] = false;
+  response["advisory_only"] = true;
+  response["empty_state"] =
+      "No Done or near-Done items need detector attention for the current filters.";
+
+  auto scanOptions = options;
+  scanOptions.limit = 1000;
+  scanOptions.offset = 0;
+  auto items = QueryItems(scanOptions);
+  if (items.isMember("error")) {
+    return items;
+  }
+  while (items["offset"].asUInt64() + items["items"].size() < items["total"].asUInt64()) {
+    scanOptions.offset = items["offset"].asUInt64() + items["items"].size();
+    auto page = QueryItems(scanOptions);
+    if (page.isMember("error")) {
+      return page;
+    }
+    for (const auto& item : page["items"]) {
+      items["items"].append(item);
+    }
+    items["warnings"] = MergeWarnings(items["warnings"], page["warnings"]);
+    items["limit"] = page["limit"];
+    items["offset"] = 0U;
+  }
+  response["products"] = items["products"];
+  response["warnings"] = items["warnings"];
+  response["requested_limit"] = static_cast<Json::UInt64>(options.limit);
+  response["requested_offset"] = static_cast<Json::UInt64>(options.offset);
+  response["scan_limit"] = items.get("limit", 0U);
+  response["scan_offset"] = 0U;
+  response["pagination_ignored_for_full_scan"] = true;
+  response["query_total"] = items.get("total", 0U);
+  response["scanned"] = static_cast<Json::UInt64>(items["items"].size());
+  response["truncated"] = response["scanned"].asUInt64() <
+                          response["query_total"].asUInt64();
+
+  auto appendFinding = [&](const Json::Value& finding) {
+    response["findings"].append(finding);
+    const auto reason = finding.get("reason_code", "unknown").asString();
+    const auto severity = finding.get("severity", "info").asString();
+    response["counts_by_reason"][reason] = static_cast<Json::UInt64>(
+        response["counts_by_reason"].get(reason, 0U).asUInt64() + 1U);
+    response["counts_by_severity"][severity] = static_cast<Json::UInt64>(
+        response["counts_by_severity"].get(severity, 0U).asUInt64() + 1U);
+  };
+
+  for (const auto& itemSummary : items["items"]) {
+    if (itemSummary.get("source_kind", "").asString() != "Item") {
+      continue;
+    }
+    const auto product = itemSummary.get("product", "").asString();
+    const auto itemId = itemSummary.get("id", "").asString();
+    auto detail = GetEvidenceDetail(product, itemId, options.forceRefresh);
+    if (detail.isMember("error")) {
+      response["warnings"].append(product + ": " + itemId + ": " +
+                                  detail.get("error", "unknown error").asString());
+      continue;
+    }
+
+    const auto item = detail["item"];
+    const auto evidence = detail["evidence"];
+    const auto state = text::ToLower(item.get("state", "").asString());
+    const auto content = item.get("content", "").asString();
+    const auto lastWorklog = LastRelevantWorklog(item);
+    const auto& signals = evidence["signals"];
+    const bool hasArtifact = JsonBoolAt(signals, "artifact");
+    const bool hasValidation = JsonBoolAt(signals, "validation");
+    const bool hasCommit = JsonBoolAt(signals, "commit");
+    const bool hasWorklog = lastWorklog.get("status", "missing").asString() == "present";
+    const bool hasPush = HasPushEvidence(content);
+    const auto branchConvergence = BranchConvergenceEvidence(content);
+    const bool hasBranchConvergence = branchConvergence.get("complete", false).asBool();
+    const auto refs = AvailableEvidenceRefs(item, evidence, hasPush, hasBranchConvergence);
+    const bool done = state == "done";
+    const bool doneCandidate = state == "inprogress" && hasValidation;
+
+    if (doneCandidate) {
+      appendFinding(DoneDetectorFinding(
+          item, evidence, "done_candidate", "info", "review_for_completion",
+          "deterministic", lastWorklog, refs));
+    }
+    if (done && !evidence.get("complete", false).asBool()) {
+      appendFinding(DoneDetectorFinding(
+          item, evidence, "false_done_suspect", "warning",
+          "request_evidence_or_reopen", "deterministic", lastWorklog, refs));
+    }
+    if (done && evidence.get("score", 0U).asUInt64() < 3U) {
+      appendFinding(DoneDetectorFinding(
+          item, evidence, "weak_done_evidence", "warning",
+          "request_stronger_evidence", "deterministic", lastWorklog, refs));
+    }
+    if (done && !hasValidation) {
+      appendFinding(DoneDetectorFinding(
+          item, evidence, "missing_validation_evidence", "warning",
+          "request_validation_evidence", "deterministic", lastWorklog, refs));
+    }
+    if ((done || doneCandidate) && (!hasCommit || !hasPush)) {
+      appendFinding(DoneDetectorFinding(
+          item, evidence, "missing_commit_or_push_evidence", "warning",
+          "request_commit_and_remote_publication_evidence", "unknown", lastWorklog,
+          refs));
+    }
+    if (done && (!hasArtifact || !hasWorklog)) {
+      appendFinding(DoneDetectorFinding(
+          item, evidence, "missing_artifact_or_worklog_evidence", "warning",
+          "request_artifact_or_worklog_evidence", "deterministic", lastWorklog,
+          refs));
+    }
+    if (HasStaleWorklogAfterDone(item, lastWorklog)) {
+      appendFinding(DoneDetectorFinding(
+          item, evidence, "stale_worklog_after_done", "info",
+          "refresh_done_evidence_or_accept_risk", "deterministic", lastWorklog,
+          refs));
+    }
+    if ((done || doneCandidate) && !hasBranchConvergence) {
+      auto finding = DoneDetectorFinding(
+          item, evidence, "branch_convergence_missing_or_unknown", "info",
+          "request_branch_convergence_evidence_or_mark_not_applicable", "unknown",
+          lastWorklog, refs);
+      finding["branch_convergence_evidence"] = branchConvergence;
+      appendFinding(finding);
+    }
+  }
+
+  response["empty"] = response["findings"].empty();
+  response["finding_count"] = static_cast<Json::UInt64>(response["findings"].size());
   return response;
 }
 
@@ -5001,6 +5376,23 @@ void RegisterBacklogWebviewRoutes(
       [metaAppender, &service, queryOptionsFromRequest](const HttpRequestPtr& request,
           std::function<void(const HttpResponsePtr&)>&& callback) {
         auto data = service.BuildReviewInbox(queryOptionsFromRequest(request));
+        Json::Value body(Json::objectValue);
+        body["ok"] = !data.isMember("error");
+        body["data"] = data;
+        metaAppender(request, body);
+        auto response = HttpResponse::newHttpJsonResponse(body);
+        if (!body["ok"].asBool()) {
+          response->setStatusCode(k400BadRequest);
+        }
+        callback(response);
+      },
+      {Get});
+
+  app().registerHandler(
+      "/api/review/done-detector",
+      [metaAppender, &service, queryOptionsFromRequest](const HttpRequestPtr& request,
+          std::function<void(const HttpResponsePtr&)>&& callback) {
+        auto data = service.BuildDoneCandidateDetector(queryOptionsFromRequest(request));
         Json::Value body(Json::objectValue);
         body["ok"] = !data.isMember("error");
         body["data"] = data;

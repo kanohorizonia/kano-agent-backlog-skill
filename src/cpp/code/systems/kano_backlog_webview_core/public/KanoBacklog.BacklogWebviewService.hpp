@@ -70,10 +70,11 @@ class BacklogWebviewService {
   Json::Value RunKobql(const std::string& query,
                        const ItemQueryOptions& options);
   Json::Value PreviewCommand(const std::string& phrase,
-                               const ItemQueryOptions& options);
+                                const ItemQueryOptions& options);
   Json::Value RecommendCapabilityRoute(const std::string& product,
-                                       const std::string& itemId,
-                                       bool forceRefresh = false);
+                                        const std::string& itemId,
+                                        bool forceRefresh = false);
+  Json::Value BuildDoneCandidateDetector(const ItemQueryOptions& options);
   Json::Value BuildReviewInbox(const ItemQueryOptions& options);
   Json::Value SaveReviewDecisionDraft(const Json::Value& request);
   Json::Value DiscardReviewDecisionDraft(const Json::Value& request);

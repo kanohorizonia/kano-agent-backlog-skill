@@ -66,6 +66,11 @@ UserStory, Task, Bug, or Issue. Non-implementation items should also state:</p>
 <li><code>follow_up_policy</code>: whether and how implementation/remediation tickets are created</li>
 <li><code>no_go_or_defer_policy</code>: how no-change, no-go, defer, or blocked outcomes are recorded</li>
 </ul>
+<p>Optional <code>intent.author</code>, <code>intent.source</code>, <code>intent.owner</code>, <code>intent.reviewers</code>,
+<code>intent.conflicts_with</code>, and <code>intent.supersedes</code> fields may preserve provenance
+or flag visible intent conflicts for future review. They are not governance
+controls: they do not assign authority, require voting, enforce permissions, or
+merge conflicting human requests.</p>
 <p>For no-code investigations and decisions, Done means the recorded result and
 evidence satisfy that contract. If code or operational work follows, create a
 linked Task/Bug/Feature rather than stretching the no-code item into an

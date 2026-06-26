@@ -95,6 +95,19 @@ follow-up tickets when the result is not code.</li>
 <li><code>no_go_or_defer_policy</code>: optional rule for recording no-change, no-go, defer,
 or blocked outcomes.</li>
 </ul>
+<p>Passive provenance extension fields reserved for future multi-human workflows:</p>
+<ul>
+<li><code>intent.author</code>: optional human or agent originator label for the current intent.</li>
+<li><code>intent.source</code>: optional source channel, document, conversation, or import label.</li>
+<li><code>intent.owner</code>: optional current intent steward label; this is not an authority rule.</li>
+<li><code>intent.reviewers</code>: optional list of people or agents asked to review intent.</li>
+<li><code>intent.conflicts_with</code>: optional list of item refs that may conflict with this intent.</li>
+<li><code>intent.supersedes</code>: optional list of item refs whose intent this item supersedes.</li>
+</ul>
+<p>These <code>intent.*</code> fields are passive metadata only. They do not implement voting,
+approval matrices, permission checks, ownership transfer, or automated conflict
+resolution. They are safe to omit, and current KOB workflow remains focused on
+single-maintainer and small-team review.</p>
 <p><code>implementation</code> is the default work intent for newly rendered item templates.
 For non-implementation intents, moving from InProgress to Review emits advisory
 diagnostics when <code>result_contract</code>, <code>evidence_requirement</code>, <code>follow_up_policy</code>,
@@ -195,6 +208,12 @@ result_contract: null
 evidence_requirement: null
 follow_up_policy: null
 no_go_or_defer_policy: null
+intent.author: null
+intent.source: null
+intent.owner: null
+intent.reviewers: []
+intent.conflicts_with: []
+intent.supersedes: []
 tags: []
 created: 2026-01-02
 updated: 2026-01-02

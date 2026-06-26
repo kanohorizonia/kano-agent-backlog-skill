@@ -67,7 +67,29 @@ bash scripts/kob item create --type task --title "Add authentication" --product 
 This workflow is tickets first. Before implementation, search for existing work
 and create the work item with duplicate-search admission evidence.
 
-Use `--type issue` instead of `task` when the report is still pre-triage: an unclear problem, runtime gap, risk, or blocker that needs evidence before it can be split into a Task or Bug. Research, Decisions, and Spikes remain worklog, ADR, topic, tag, or artifact metadata rather than separate formal item types.
+Use `--type issue` instead of `task` when the report is still pre-triage: an
+unclear problem, runtime gap, risk, or blocker that needs evidence before it can
+be split into a Task or Bug. Research, Decisions, Spikes, Experiments,
+Validations, Audits, Migrations, Policy Contracts, Runbooks, Incidents, and
+Deprecations remain Work Intent metadata, worklog evidence, ADRs, topics, tags,
+or artifacts rather than separate formal item types.
+
+New item templates include optional Work Intent frontmatter:
+
+```yaml
+work_intent: implementation
+execution_mode: null
+result_contract: null
+evidence_requirement: null
+follow_up_policy: null
+no_go_or_defer_policy: null
+```
+
+Keep `work_intent: implementation` for ordinary code-changing work. For no-code
+investigation or decision work, set a non-implementation intent and fill the
+result contract fields so Review can verify the outcome. If the finding requires
+implementation, create a linked Task/Bug/Feature follow-up instead of inventing a
+new item type.
 
 ## 4. Satisfy the Ready Gate
 

@@ -13,6 +13,8 @@ Based on the repo docs, maintainers can automate or standardize these workflows:
 - backlog initialization for a product
 - work item creation and state transitions
 - Ready Gate enforcement for tasks, bugs, and issues
+- Work Intent metadata for implementation, investigation, decision, validation,
+  audit, migration, policy contract, runbook, incident, and deprecation work
 - append only worklog entries
 - ADR creation and linkage
 - workset setup, refresh, promotion, and cleanup
@@ -57,7 +59,28 @@ The Ready Gate is one of the main controls that keeps agent heavy workflows unde
 
 Schema details belong in [../references/schema.md](../references/schema.md).
 
-Use the formal `Issue` type only for pre-triage unclear problems, risks, blockers, or runtime gaps. Once triage produces actionable work, link or split it into Task/Bug follow-ups instead of inventing Research, Decision, Spike, or Investigation item types.
+Use the formal `Issue` type only for pre-triage unclear problems, risks,
+blockers, or runtime gaps. Once triage produces actionable work, link or split it
+into Task/Bug follow-ups instead of inventing Research, Decision, Spike,
+Investigation, Audit, Migration, Policy, Runbook, Incident, or Deprecation item
+types.
+
+## Work Intent for no-code maintainer work
+
+Work Intent is metadata on a normal item, not a hard type. Maintainers can set
+`work_intent` to `investigation`, `decision`, `validation`, `audit`, `runbook`,
+or another allowed value while keeping `type` as Initiative, Epic, Feature,
+UserStory, Task, Bug, or Issue. Non-implementation items should also state:
+
+- `result_contract`: the expected output, such as a decision record or validation report
+- `evidence_requirement`: what evidence a reviewer should inspect
+- `follow_up_policy`: whether and how implementation/remediation tickets are created
+- `no_go_or_defer_policy`: how no-change, no-go, defer, or blocked outcomes are recorded
+
+For no-code investigations and decisions, Done means the recorded result and
+evidence satisfy that contract. If code or operational work follows, create a
+linked Task/Bug/Feature rather than stretching the no-code item into an
+implementation ticket.
 
 ## Topics and worksets serve different roles
 

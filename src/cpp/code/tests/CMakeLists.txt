@@ -31,6 +31,18 @@ set_tests_properties("${KB_TEST_WORKITEM_OPS}" PROPERTIES
     ENVIRONMENT "CI=true;KANO_BACKLOG_NONINTERACTIVE=1;KANO_TEST_NONINTERACTIVE=1;GIT_TERMINAL_PROMPT=0"
 )
 
+add_executable(integrity_ops_smoke_test
+    integrity_ops_smoke_test.cpp
+)
+target_compile_features(integrity_ops_smoke_test PRIVATE cxx_std_23)
+target_link_libraries(integrity_ops_smoke_test PRIVATE kano::backlog_ops)
+set(KB_TEST_INTEGRITY_OPS "[bdd][featured][feature:integrity-ops][scenario:KOB-BDD-INTEGRITY-001] Integrity operations detect stale drift duplicate metadata without writes")
+add_test(NAME "${KB_TEST_INTEGRITY_OPS}" COMMAND integrity_ops_smoke_test)
+set_tests_properties("${KB_TEST_INTEGRITY_OPS}" PROPERTIES
+    TIMEOUT 30
+    ENVIRONMENT "CI=true;KANO_BACKLOG_NONINTERACTIVE=1;KANO_TEST_NONINTERACTIVE=1;GIT_TERMINAL_PROMPT=0"
+)
+
 add_executable(cli_repo_smoke_test
     cli_repo_smoke_test.cpp
 )

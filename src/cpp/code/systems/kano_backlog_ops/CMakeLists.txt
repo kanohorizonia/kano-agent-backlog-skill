@@ -20,6 +20,8 @@ target_sources(kano_backlog_ops
     config/private/config_ops.cpp
     doctor/public/kano/backlog_ops/doctor/doctor_ops.hpp
     doctor/private/doctor_ops.cpp
+    integrity/public/kano/backlog_ops/integrity/integrity_ops.hpp
+    integrity/private/integrity_ops.cpp
 )
 
 add_library(kano::backlog_ops ALIAS kano_backlog_ops)
@@ -38,6 +40,7 @@ target_include_directories(kano_backlog_ops
       orchestration/public
       config/public
       doctor/public
+      integrity/public
     PRIVATE
       workitem/private
       view/private
@@ -48,6 +51,7 @@ target_include_directories(kano_backlog_ops
       orchestration/private
       config/private
       doctor/private
+      integrity/private
 )
 
 target_link_libraries(kano_backlog_ops 

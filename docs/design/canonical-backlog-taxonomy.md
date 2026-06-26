@@ -1,6 +1,6 @@
 # Canonical Backlog Taxonomy
 
-Status: accepted design contract for `KOB-FTR-0030`, `KOB-TSK-0086`, the
+Status: accepted design contract for `KOB-FTR-0030`, `KOB-FTR-0021`, `KOB-TSK-0086`, the
 semantic-absorption amendment from `KOB-TSK-0096`, the hard Initiative amendment
 from `KOB-TSK-0097`, and the Product Line / Portfolio membership definition from
 `KOB-TSK-0098`.
@@ -22,6 +22,13 @@ KOB-TSK-0097 amendment for an independently releasable component/module/product
 narrative layer. `SubTask` is a role for independently delegable child work under
 a Task, represented with the current Task storage until a future hard type is
 explicitly accepted.
+
+Work Intent is metadata on those item types, not another taxonomy tier. The
+accepted metadata fields are `work_intent`, `execution_mode`, `result_contract`,
+`evidence_requirement`, `follow_up_policy`, and `no_go_or_defer_policy`.
+Allowed `work_intent` values are `implementation`, `investigation`, `spike`,
+`decision`, `experiment`, `validation`, `audit`, `migration`,
+`policy_contract`, `runbook`, `incident`, and `deprecation`.
 
 ## Relationship Axes
 
@@ -49,6 +56,22 @@ explicitly accepted.
 | SubTask role | Independently delegable child work under a Task. | Use only when a distinct agent or thread can own it with its own output and validation. Otherwise keep the steps as a checklist or Worklog note. |
 | Bug | Known incorrect behavior or regression. | Attach to the smallest useful ownership boundary: Task, Feature, Epic, Initiative, or Project-equivalent. |
 | Issue | Pre-triage unclear problem, risk, blocker, or runtime gap. | Attach to the smallest useful boundary when known; split into Task or Bug once actionable. Initiative is valid for component-level unclear scope. |
+
+## Work Intent Metadata Contract
+
+`KOB-FTR-0021` keeps investigation, decision, spike, experiment, validation,
+audit, migration, policy contract, runbook, incident, and deprecation work as
+metadata-first intent on existing items. It does not add hard Research, Decision,
+Spike, Experiment, Validation, Audit, Migration, Policy, Runbook, Incident, or
+Deprecation item types, directories, ID prefixes, or parent rules.
+
+For non-implementation intents, the Done gate is the result contract, not a code
+change. A no-code investigation or decision can close when the result is recorded
+in the item, ADR, artifact, or worklog; evidence is inspectable; the follow-up
+policy says whether implementation tickets were created; and the no-go/defer
+policy records why no change follows. If implementation is required, create or
+link a follow-up Task/Bug/Feature and keep the original no-code item as the
+decision or investigation record.
 
 ## Flexible Parent Model
 
@@ -203,6 +226,8 @@ than duplicated.
 
 - No hard `Project` item type.
 - No hard `SubTask` item type.
+- No hard Research, Decision, Spike, Experiment, Validation, Audit, Migration,
+  Policy, Runbook, Incident, or Deprecation item types; use Work Intent metadata.
 - No `items/project/` or `items/subtask/` directories.
 - No Product Line / Portfolio hard item type, storage, CLI/API, or runtime
   membership implementation.

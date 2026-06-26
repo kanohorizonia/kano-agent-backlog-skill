@@ -212,6 +212,7 @@ not a current UI screenshot.
 - [Canonical backlog taxonomy](docs/design/canonical-backlog-taxonomy.md)
 - [Project model decision](docs/design/project-model-decision.md)
 - [Hierarchy validation matrix](docs/design/hierarchy-validation-matrix.md)
+- [Vision-layer management model](docs/design/vision-layer-management-model.md)
 - [Product Map projection schema](docs/design/product-map-projection-schema.md)
 - [ADR lifecycle metadata](docs/design/adr-lifecycle-metadata.md)
 - [Feature evolution event model](docs/design/feature-evolution-event-model.md)

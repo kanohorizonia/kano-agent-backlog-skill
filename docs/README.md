@@ -29,6 +29,7 @@ If you are reading the repository directly, start here instead of `docs/index.md
 - [Canonical backlog taxonomy](design/canonical-backlog-taxonomy.md)
 - [Project model decision](design/project-model-decision.md)
 - [Hierarchy validation matrix](design/hierarchy-validation-matrix.md)
+- [Vision-layer management model](design/vision-layer-management-model.md)
 - [Product Map projection schema](design/product-map-projection-schema.md)
 - [ADR lifecycle metadata](design/adr-lifecycle-metadata.md)
 - [Feature evolution event model](design/feature-evolution-event-model.md)

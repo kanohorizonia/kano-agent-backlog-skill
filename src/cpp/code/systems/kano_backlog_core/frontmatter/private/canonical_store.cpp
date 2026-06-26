@@ -170,6 +170,12 @@ BacklogItem item_from_context(
         item.evidence_requirement = parse_optional_string(ctx.metadata["evidence_requirement"]);
         item.follow_up_policy = parse_optional_string(ctx.metadata["follow_up_policy"]);
         item.no_go_or_defer_policy = parse_optional_string(ctx.metadata["no_go_or_defer_policy"]);
+        item.intent_author = parse_optional_string(ctx.metadata["intent.author"]);
+        item.intent_source = parse_optional_string(ctx.metadata["intent.source"]);
+        item.intent_owner = parse_optional_string(ctx.metadata["intent.owner"]);
+        item.intent_reviewers = parse_string_list(ctx.metadata["intent.reviewers"]);
+        item.intent_conflicts_with = parse_string_list(ctx.metadata["intent.conflicts_with"]);
+        item.intent_supersedes = parse_string_list(ctx.metadata["intent.supersedes"]);
         item.created = ctx.metadata["created"].as<std::string>();
         item.updated = ctx.metadata["updated"].as<std::string>();
 
@@ -341,6 +347,18 @@ void CanonicalStore::write(BacklogItem& item) const {
     metadata["evidence_requirement"] = item.evidence_requirement ? YAML::Node(*item.evidence_requirement) : YAML::Node(YAML::NodeType::Null);
     metadata["follow_up_policy"] = item.follow_up_policy ? YAML::Node(*item.follow_up_policy) : YAML::Node(YAML::NodeType::Null);
     metadata["no_go_or_defer_policy"] = item.no_go_or_defer_policy ? YAML::Node(*item.no_go_or_defer_policy) : YAML::Node(YAML::NodeType::Null);
+    metadata["intent.author"] = item.intent_author ? YAML::Node(*item.intent_author) : YAML::Node(YAML::NodeType::Null);
+    metadata["intent.source"] = item.intent_source ? YAML::Node(*item.intent_source) : YAML::Node(YAML::NodeType::Null);
+    metadata["intent.owner"] = item.intent_owner ? YAML::Node(*item.intent_owner) : YAML::Node(YAML::NodeType::Null);
+    YAML::Node intent_reviewers(YAML::NodeType::Sequence);
+    for (const auto& value : item.intent_reviewers) intent_reviewers.push_back(value);
+    metadata["intent.reviewers"] = intent_reviewers;
+    YAML::Node intent_conflicts_with(YAML::NodeType::Sequence);
+    for (const auto& value : item.intent_conflicts_with) intent_conflicts_with.push_back(value);
+    metadata["intent.conflicts_with"] = intent_conflicts_with;
+    YAML::Node intent_supersedes(YAML::NodeType::Sequence);
+    for (const auto& value : item.intent_supersedes) intent_supersedes.push_back(value);
+    metadata["intent.supersedes"] = intent_supersedes;
     metadata["created"] = item.created;
     metadata["updated"] = item.updated;
 

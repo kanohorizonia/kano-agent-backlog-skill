@@ -83,7 +83,13 @@ struct BacklogItem {
     std::optional<std::string> evidence_requirement;
     std::optional<std::string> follow_up_policy;
     std::optional<std::string> no_go_or_defer_policy;
-    
+    std::optional<std::string> intent_author;
+    std::optional<std::string> intent_source;
+    std::optional<std::string> intent_owner;
+    std::vector<std::string> intent_reviewers;
+    std::vector<std::string> intent_conflicts_with;
+    std::vector<std::string> intent_supersedes;
+
     std::map<std::string, std::string> external; // Simplified from Dict[str, Any]
     ItemLinks links;
     std::vector<std::string> decisions;

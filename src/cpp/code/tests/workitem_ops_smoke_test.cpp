@@ -176,6 +176,12 @@ int main() {
             expect(created_text.find("evidence_requirement: null") != std::string::npos, "created item template should include evidence_requirement placeholder");
             expect(created_text.find("follow_up_policy: null") != std::string::npos, "created item template should include follow_up_policy placeholder");
             expect(created_text.find("no_go_or_defer_policy: null") != std::string::npos, "created item template should include no_go_or_defer_policy placeholder");
+            expect(created_text.find("intent.author: null") != std::string::npos, "created item template should include intent.author placeholder");
+            expect(created_text.find("intent.source: null") != std::string::npos, "created item template should include intent.source placeholder");
+            expect(created_text.find("intent.owner: null") != std::string::npos, "created item template should include intent.owner placeholder");
+            expect(created_text.find("intent.reviewers: []") != std::string::npos, "created item template should include intent.reviewers placeholder");
+            expect(created_text.find("intent.conflicts_with: []") != std::string::npos, "created item template should include intent.conflicts_with placeholder");
+            expect(created_text.find("intent.supersedes: []") != std::string::npos, "created item template should include intent.supersedes placeholder");
 
             auto queried = index.query_items(ItemType::Task, std::nullopt);
             expect(!queried.empty(), "task item should appear in index query");
@@ -242,6 +248,12 @@ int main() {
             intent_roundtrip.evidence_requirement = "notes-and-links";
             intent_roundtrip.follow_up_policy = "create-implementation-ticket-if-needed";
             intent_roundtrip.no_go_or_defer_policy = "record-no-change-rationale";
+            intent_roundtrip.intent_author = "human-requester";
+            intent_roundtrip.intent_source = "chat-session";
+            intent_roundtrip.intent_owner = "maintainer-owner";
+            intent_roundtrip.intent_reviewers = {"reviewer-a", "reviewer-b"};
+            intent_roundtrip.intent_conflicts_with = {"TST-TSK-0098"};
+            intent_roundtrip.intent_supersedes = {"TST-TSK-0097"};
             store.write(intent_roundtrip);
             auto intent_roundtrip_full = store.read(created.path);
             auto intent_roundtrip_metadata = store.read_metadata(created.path);
@@ -252,6 +264,13 @@ int main() {
             expect(intent_roundtrip_metadata.evidence_requirement && *intent_roundtrip_metadata.evidence_requirement == "notes-and-links", "metadata-only read should preserve evidence_requirement");
             expect(intent_roundtrip_metadata.follow_up_policy && *intent_roundtrip_metadata.follow_up_policy == "create-implementation-ticket-if-needed", "metadata-only read should preserve follow_up_policy");
             expect(intent_roundtrip_metadata.no_go_or_defer_policy && *intent_roundtrip_metadata.no_go_or_defer_policy == "record-no-change-rationale", "metadata-only read should preserve no_go_or_defer_policy");
+            expect(intent_roundtrip_full.intent_author && *intent_roundtrip_full.intent_author == "human-requester", "full read should round-trip intent.author metadata");
+            expect(intent_roundtrip_full.intent_source && *intent_roundtrip_full.intent_source == "chat-session", "full read should round-trip intent.source metadata");
+            expect(intent_roundtrip_full.intent_owner && *intent_roundtrip_full.intent_owner == "maintainer-owner", "full read should round-trip intent.owner metadata");
+            expect(intent_roundtrip_full.intent_reviewers.size() == 2 && intent_roundtrip_full.intent_reviewers[1] == "reviewer-b", "full read should round-trip intent.reviewers metadata");
+            expect(intent_roundtrip_metadata.intent_reviewers.size() == 2 && intent_roundtrip_metadata.intent_reviewers[0] == "reviewer-a", "metadata-only read should preserve intent.reviewers");
+            expect(intent_roundtrip_metadata.intent_conflicts_with.size() == 1 && intent_roundtrip_metadata.intent_conflicts_with[0] == "TST-TSK-0098", "metadata-only read should preserve intent.conflicts_with");
+            expect(intent_roundtrip_metadata.intent_supersedes.size() == 1 && intent_roundtrip_metadata.intent_supersedes[0] == "TST-TSK-0097", "metadata-only read should preserve intent.supersedes");
 
             auto invalid_intent = intent_roundtrip_full;
             invalid_intent.work_intent = "research";

@@ -92,7 +92,13 @@ std::string TemplateOps::render_frontmatter(const BacklogItem& item) {
     ss << "evidence_requirement: " << (item.evidence_requirement ? *item.evidence_requirement : "null") << "\n";
     ss << "follow_up_policy: " << (item.follow_up_policy ? *item.follow_up_policy : "null") << "\n";
     ss << "no_go_or_defer_policy: " << (item.no_go_or_defer_policy ? *item.no_go_or_defer_policy : "null") << "\n";
-    
+    ss << "intent.author: " << (item.intent_author ? *item.intent_author : "null") << "\n";
+    ss << "intent.source: " << (item.intent_source ? *item.intent_source : "null") << "\n";
+    ss << "intent.owner: " << (item.intent_owner ? *item.intent_owner : "null") << "\n";
+    ss << "intent.reviewers: []\n";
+    ss << "intent.conflicts_with: []\n";
+    ss << "intent.supersedes: []\n";
+
     ss << "tags: [";
     for (size_t i = 0; i < item.tags.size(); ++i) {
         ss << "\"" << item.tags[i] << "\"";

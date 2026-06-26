@@ -5,6 +5,7 @@
 #include <vector>
 #include <optional>
 #include <filesystem>
+#include <cstdint>
 
 namespace kano::backlog_ops {
 
@@ -119,6 +120,44 @@ public:
         std::string generated_at;  // ISO 8601
     };
 
+    struct TopicAuditOptions {
+        int ttl_days = 14;
+        int stale_days = 30;
+        std::optional<std::string> as_of;
+    };
+
+    struct TopicAuditEntry {
+        std::string topic;
+        std::string path;
+        std::string status;
+        std::string created_at;
+        std::string updated_at;
+        std::string closed_at;
+        int age_days = -1;
+        int inactive_days = -1;
+        std::vector<std::string> active_agents;
+        int item_count = 0;
+        int open_item_count = 0;
+        int done_item_count = 0;
+        int dropped_item_count = 0;
+        int pinned_doc_count = 0;
+        bool materials_present = false;
+        std::uintmax_t materials_size_bytes = 0;
+        int snapshot_count = 0;
+        bool has_date_prefix = false;
+        std::string date_prefix;
+        std::vector<std::string> stale_reasons;
+        std::string recommendation;
+    };
+
+    struct TopicAuditReport {
+        std::string as_of;
+        int ttl_days = 14;
+        int stale_days = 30;
+        bool mutated = false;
+        std::vector<TopicAuditEntry> topics;
+    };
+
     /**
      * Export topic context as a structured bundle.
      * Does NOT write a file — returns the bundle for CLI formatting.
@@ -131,6 +170,16 @@ public:
     static TopicContextBundle export_context(
         const std::string& topic_name,
         const std::filesystem::path& backlog_root
+    );
+
+    static TopicAuditReport audit_topics(
+        const std::filesystem::path& backlog_root,
+        const TopicAuditOptions& options = {}
+    );
+
+    static std::string render_audit_report(
+        const TopicAuditReport& report,
+        const std::string& format
     );
 
     // -------------------------------------------------------------------------
@@ -146,6 +195,10 @@ public:
         const std::string& agent,
         const std::filesystem::path& backlog_root
     );
+
+    static bool has_date_prefix(const std::string& topic_name);
+
+    static void validate_topic_name(const std::string& topic_name);
 
     /**
      * Add a backlog item (by ID, UID, or path) to a topic's seed_items.

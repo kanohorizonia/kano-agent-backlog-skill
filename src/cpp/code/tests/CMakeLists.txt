@@ -43,6 +43,18 @@ set_tests_properties("${KB_TEST_INTEGRITY_OPS}" PROPERTIES
     ENVIRONMENT "CI=true;KANO_BACKLOG_NONINTERACTIVE=1;KANO_TEST_NONINTERACTIVE=1;GIT_TERMINAL_PROMPT=0"
 )
 
+add_executable(topic_ops_smoke_test
+    topic_ops_smoke_test.cpp
+)
+target_compile_features(topic_ops_smoke_test PRIVATE cxx_std_23)
+target_link_libraries(topic_ops_smoke_test PRIVATE kano::backlog_ops)
+set(KB_TEST_TOPIC_OPS "[bdd][featured][feature:topic-ops][scenario:KOB-BDD-TOPIC-001] Topic audit reports lifecycle hygiene without writes")
+add_test(NAME "${KB_TEST_TOPIC_OPS}" COMMAND topic_ops_smoke_test)
+set_tests_properties("${KB_TEST_TOPIC_OPS}" PROPERTIES
+    TIMEOUT 30
+    ENVIRONMENT "CI=true;KANO_BACKLOG_NONINTERACTIVE=1;KANO_TEST_NONINTERACTIVE=1;GIT_TERMINAL_PROMPT=0"
+)
+
 add_executable(cli_repo_smoke_test
     cli_repo_smoke_test.cpp
 )

@@ -83,13 +83,21 @@ result_contract: null
 evidence_requirement: null
 follow_up_policy: null
 no_go_or_defer_policy: null
+intent.author: null
+intent.source: null
+intent.owner: null
+intent.reviewers: []
+intent.conflicts_with: []
+intent.supersedes: []
 ```
 
 Keep `work_intent: implementation` for ordinary code-changing work. For no-code
 investigation or decision work, set a non-implementation intent and fill the
 result contract fields so Review can verify the outcome. If the finding requires
 implementation, create a linked Task/Bug/Feature follow-up instead of inventing a
-new item type.
+new item type. The optional `intent.*` fields are passive provenance hints for
+small-team review and future conflict visibility; they do not enable governance,
+voting, permissions, or automated conflict handling.
 
 ## 4. Satisfy the Ready Gate
 

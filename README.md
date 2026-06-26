@@ -33,7 +33,9 @@ trail in the repository as reviewable Markdown.
 ## What this is
 
 `kano-agent-backlog-skill` is a repo-native intent and evidence layer for AI
-coding agents.
+coding agents. It is designed for single-maintainer and small-team review
+workflows; multi-human governance, voting, permission policy, and automated
+intent conflict resolution are intentionally outside the current scope.
 
 It provides:
 

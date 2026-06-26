@@ -57,7 +57,10 @@ specified in config (built-in or custom) instead of hardcoding the list.
 - Bug: confirmed defect or regression against existing intent.
 - Issue: pre-triage container for an unclear problem, risk, blocker, or runtime gap before it is clear whether follow-up work is a Task, Bug, Feature, or no change.
 
-Research, Decision, Spike, and Investigation are not formal item types. Treat them as activity metadata in worklogs, ADRs, topics, tags, artifacts, or follow-up Tasks/Bugs/Issues.
+Research, Decision, Spike, Investigation, Experiment, Validation, Audit,
+Migration, Policy Contract, Runbook, Incident, and Deprecation are not formal item
+types. Represent that execution shape with the Work Intent metadata fields below,
+plus worklogs, ADRs, topics, tags, artifacts, or follow-up Tasks/Bugs/Issues.
 
 `Project` is not a hard formal item type in the current schema. `Initiative` is
 the hard top planning item type for independently releasable component narrative
@@ -83,6 +86,43 @@ parents. Use release scope, topic membership, work-order context, `blocks`,
 `blocked_by`, or `relates` instead. See
 [Hierarchy validation matrix](../docs/design/hierarchy-validation-matrix.md) for
 the design-level reparent diagnostics.
+
+## Work Intent metadata
+
+Work Intent is optional top-level item metadata. It describes the shape of work
+without expanding the hard item-type enum. Use it when a Task, Bug, Issue,
+Feature, or other existing item type is being used for no-code investigation,
+decision, validation, policy, runbook, incident, migration, deprecation, or other
+non-implementation work.
+
+Fields:
+
+- `work_intent`: one of `implementation`, `investigation`, `spike`, `decision`,
+  `experiment`, `validation`, `audit`, `migration`, `policy_contract`,
+  `runbook`, `incident`, or `deprecation`.
+- `execution_mode`: optional compact execution mode, for example `code`,
+  `no-code`, `docs-only`, `analysis-only`, or `ops`.
+- `result_contract`: optional expected result shape, such as `decision-record`,
+  `investigation-notes`, `validation-report`, `runbook-update`, or
+  `follow-up-ticket`.
+- `evidence_requirement`: optional evidence needed for Review/Done.
+- `follow_up_policy`: optional rule for creating implementation/remediation
+  follow-up tickets when the result is not code.
+- `no_go_or_defer_policy`: optional rule for recording no-change, no-go, defer,
+  or blocked outcomes.
+
+`implementation` is the default work intent for newly rendered item templates.
+For non-implementation intents, moving from InProgress to Review emits advisory
+diagnostics when `result_contract`, `evidence_requirement`, `follow_up_policy`,
+or `no_go_or_defer_policy` is missing. These diagnostics do not block the state
+transition; they tell reviewers that the no-code result contract is incomplete.
+
+No-code investigation and decision items can be Done when their result contract
+is satisfied: the decision or finding is recorded, evidence is linked or quoted,
+the follow-up policy says whether implementation tickets were created, and the
+no-go/defer policy records why no implementation follows. If implementation is
+needed, create or link a separate Task/Bug/Feature follow-up instead of treating
+the investigation item as the implementation itself.
 
 ## Parent state sync (forward-only)
 
@@ -164,6 +204,12 @@ parent: KABSD-USR-0001
 duplicate_of: null
 area: general
 iteration: null
+work_intent: implementation
+execution_mode: null
+result_contract: null
+evidence_requirement: null
+follow_up_policy: null
+no_go_or_defer_policy: null
 tags: []
 created: 2026-01-02
 updated: 2026-01-02

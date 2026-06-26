@@ -118,10 +118,24 @@ kob topic create <topic-name> --agent <agent-name> \
 ```
 
 Creates a new topic:
-- Validates topic name (alphanumeric, hyphens, underscores)
+- Validates topic name (alphanumeric, hyphens, underscores, optional `YYYY-MM-DD-` prefix)
 - Creates `manifest.json` with empty seed_items/pinned_docs/snippet_refs
 - Creates `brief.md` template and topic subfolders
 - Creates `spec/` structure if `--with-spec` is used (requirements.md, design.md, tasks.md)
+
+Topic names should normally use `YYYY-MM-DD-<slug>` so stale topic reviews have
+an obvious creation date in directory listings. Legacy slugs such as
+`auth-refactor` remain path-safe and legal. Separators, traversal (`..`), empty
+names, `.`, `..`, spaces, and unsafe punctuation are rejected.
+
+The product config field `topics_date_prefix_policy` controls create-time
+handling for names without the date prefix:
+
+- `warn` (default): create succeeds and prints a warning to stderr.
+- `enforce`: create fails before creating directories or files.
+- `off`: create succeeds without a warning.
+
+The same policy applies to normal topic creation and `--template` topic creation.
 
 ### Create a Topic with Spec
 
@@ -234,11 +248,31 @@ This appends the decision under a `## Decisions` section in the item body (creat
 
 ```bash
 kob topic close <topic-name> --agent <agent-name>
+kob topic audit --ttl-days 14 --stale-days 30 --format plain
+kob topic audit --ttl-days 14 --stale-days 30 --format json
+kob topic audit --ttl-days 14 --stale-days 30 --format markdown
 kob topic cleanup --ttl-days 14
 kob topic cleanup --ttl-days 14 --apply
 ```
 
 Closing marks the topic as closed; cleanup removes raw materials after TTL (and may optionally delete closed topics depending on implementation flags).
+
+`kob topic audit` is stdout-only and non-mutating. It does not create reports,
+write `publish/`, update manifests, close topics, clean materials, delete topic
+directories, distill briefs, switch active topics, or dispatch agents. JSON
+output includes `mutated: false`.
+
+Audit scans each topic and reports hygiene metadata: topic name, path, status,
+created/updated/closed timestamps, age and inactive days, active agents, item
+counts by open/done/dropped, pinned document count, materials presence and byte
+size, snapshot count, date-prefix detection, stale reasons, and a recommendation
+of `keep`, `distill`, `close_candidate`, `cleanup_materials_candidate`,
+`delete_topic_candidate`, or `manual_review`.
+
+Active topics are protected with `keep`. Open topics are never cleanup/delete
+candidates; stale open topics may be recommended for distillation or closure.
+Closed topics become cleanup/delete candidates only after the TTL threshold, and
+actual cleanup remains apply-gated through `kob topic cleanup --apply`.
 
 ### Snapshots (Create/List/Restore/Cleanup)
 

@@ -35,6 +35,37 @@ Product-local `_config/config.toml` overrides project-level `[products.<name>]`
 defaults. Created items record whether assignment came from an explicit CLI
 argument or from product policy.
 
+## Topic naming policy
+
+Topics should normally be named `YYYY-MM-DD-<slug>` so lifecycle audits and
+directory listings expose when the work context started. KOB still accepts legacy
+safe slugs, but product configuration can choose how strongly to handle missing
+date prefixes:
+
+```toml
+[product]
+topics_date_prefix_policy = "warn" # off | warn | enforce
+```
+
+The same flat key can be set in project config under `[products.<name>]`:
+
+```toml
+[products.my-app]
+backlog_root = "_kano/backlog/products/my-app"
+topics_date_prefix_policy = "enforce"
+```
+
+Accepted values are:
+
+- `warn` (default): `kob topic create` succeeds for legacy names and warns to stderr.
+- `enforce`: missing `YYYY-MM-DD-` prefixes fail before topic directories/files are created.
+- `off`: legacy names succeed without warnings.
+
+`kob topic audit --ttl-days 14 --stale-days 30 --format plain|json|markdown`
+is read-only and stdout-only. It reports `mutated: false` in JSON and never
+writes audit artifacts, closes topics, cleans materials, deletes topic
+directories, distills briefs, switches active topics, or dispatches agents.
+
 ## 0.0.3 configuration notes
 
 Release `0.0.3` tightens the effective config flow:

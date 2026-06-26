@@ -6,6 +6,7 @@
 #include "kano/backlog_ops/orchestration/orchestration_ops.hpp"
 #include "kano/backlog_ops/config/config_ops.hpp"
 #include "kano/backlog_ops/doctor/doctor_ops.hpp"
+#include "kano/backlog_ops/integrity/integrity_ops.hpp"
 #include "kano/backlog_ops/topic/topic_ops.hpp"
 #include "kano/backlog_ops/workset/workset_ops.hpp"
 #include "kano/backlog_core/diagnostics/mutation_timing.hpp"
@@ -18102,6 +18103,37 @@ int main(int InArgc, char* InArgv[]) {
                     if (rendered.empty() || rendered.back() != '\n') {
                         std::cout << "\n";
                     }
+                }
+            });
+
+            auto* integrityCmd = inspectCmd->add_subcommand("integrity", "Detect stale, drifted, and duplicate backlog metadata");
+            std::vector<std::string> integrity_products;
+            std::string integrity_backlog_root;
+            std::string integrity_format = "markdown";
+            std::string integrity_as_of;
+            int integrity_stale_days = 90;
+            integrityCmd->add_option("--product", integrity_products, "Product name; repeat to scan multiple products");
+            integrityCmd->add_option("--backlog-root", integrity_backlog_root, "Path to _kano/backlog");
+            integrityCmd->add_option("--format", integrity_format, "Output format: markdown|json");
+            integrityCmd->add_option("--as-of", integrity_as_of, "As-of date for stale checks (YYYY-MM-DD)");
+            integrityCmd->add_option("--stale-days", integrity_stale_days, "Updated-age threshold in days");
+            integrityCmd->callback([&]() {
+                const auto format = lower_copy(integrity_format);
+                if (format != "markdown" && format != "json") {
+                    throw std::runtime_error("Unsupported inspect integrity --format: " + integrity_format + " (expected markdown|json)");
+                }
+                IntegrityOptions options;
+                options.backlog_root = resolve_backlog_root_arg(integrity_backlog_root);
+                options.products = integrity_products;
+                options.as_of = integrity_as_of;
+                options.stale_days = integrity_stale_days;
+                const auto report = IntegrityOps::inspect(options);
+                const auto rendered = format == "json"
+                    ? IntegrityOps::render_json(report)
+                    : IntegrityOps::render_markdown(report);
+                std::cout << rendered;
+                if (rendered.empty() || rendered.back() != '\n') {
+                    std::cout << "\n";
                 }
             });
         }

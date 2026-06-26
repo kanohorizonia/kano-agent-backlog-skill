@@ -26,11 +26,15 @@
       "type": "object",
       "required": ["product"],
       "properties": {
+        "backlog_id": { "type": "string", "minLength": 1 },
         "product": { "type": "string", "minLength": 1 },
+        "vision_id": { "type": "string" },
         "item_id": { "type": "string" },
         "uid": { "type": "string" },
         "topic_id": { "type": "string" },
         "adr_id": { "type": "string" },
+        "goal_id": { "type": "string" },
+        "release_id": { "type": "string" },
         "evidence_id": { "type": "string" }
       },
       "additionalProperties": false
@@ -41,7 +45,7 @@
       "properties": {
         "id": { "type": "string", "minLength": 1 },
         "node_type": {
-          "enum": ["vision", "epic", "feature", "topic", "work_order", "adr", "evidence"]
+          "enum": ["vision", "initiative", "epic", "feature", "topic", "work_order", "adr", "evidence"]
         },
         "title": { "type": "string" },
         "summary": { "type": "string" },
@@ -68,7 +72,7 @@
       "type": "object",
       "required": ["code", "target", "message"],
       "properties": {
-        "code": { "enum": ["missing_ref", "stale_ref", "ambiguous_ref", "evidence_gap"] },
+        "code": { "enum": ["missing_ref", "stale_ref", "ambiguous_ref", "evidence_gap", "orphan_epic", "blocked_area", "vision_scope_gap"] },
         "target": { "type": "string", "minLength": 1 },
         "message": { "type": "string", "minLength": 1 },
         "evidence_refs": {

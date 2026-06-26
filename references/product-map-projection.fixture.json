@@ -4,11 +4,45 @@
   "generated_at": "2026-06-23T00:00:00Z",
   "nodes": [
     {
+      "id": "vision:kob-planning-model",
+      "node_type": "vision",
+      "title": "KOB planning model",
+      "summary": "Vision-layer scope for taxonomy, work intent, Product Map, roadmap ledger, release records, and agent routing.",
+      "ref": { "backlog_id": "kano-main", "product": "kano-agent-backlog-skill", "vision_id": "kob-planning-model" },
+      "evidence_refs": [
+        { "backlog_id": "kano-main", "product": "kano-agent-backlog-skill", "item_id": "KOB-FTR-0023" }
+      ]
+    },
+    {
+      "id": "epic:KOB-EPIC-0003",
+      "node_type": "epic",
+      "title": "Agent backlog planning model",
+      "summary": "Epic umbrella for KOB planning semantics while vision-layer records remain projection-backed.",
+      "ref": { "backlog_id": "kano-main", "product": "kano-agent-backlog-skill", "item_id": "KOB-EPIC-0003" },
+      "evidence_refs": []
+    },
+    {
+      "id": "feature:KOB-FTR-0023",
+      "node_type": "feature",
+      "title": "Add vision-layer management model",
+      "summary": "Defines strategic planning scope above Epic without adding a hard Project item type.",
+      "ref": { "backlog_id": "kano-main", "product": "kano-agent-backlog-skill", "item_id": "KOB-FTR-0023" },
+      "evidence_refs": []
+    },
+    {
       "id": "feature:KOB-FTR-0021",
       "node_type": "feature",
       "title": "Work intent model",
       "summary": "Intent Engineering feature wave for durable design and review contracts.",
-      "ref": { "product": "kano-agent-backlog-skill", "item_id": "KOB-FTR-0021" },
+      "ref": { "backlog_id": "kano-main", "product": "kano-agent-backlog-skill", "item_id": "KOB-FTR-0021" },
+      "evidence_refs": []
+    },
+    {
+      "id": "topic:koa-roadmap-command-center",
+      "node_type": "topic",
+      "title": "KOA roadmap command-center context",
+      "summary": "Cross-product topic association for command-center planning; horizontal context only.",
+      "ref": { "backlog_id": "kano-main", "product": "kano-agent-ark-skill", "topic_id": "koa-roadmap-command-center" },
       "evidence_refs": []
     },
     {
@@ -16,19 +50,57 @@
       "node_type": "work_order",
       "title": "Define Product Map projection schema",
       "summary": "Design contract for bounded Backboard Product Map projection.",
-      "ref": { "product": "kano-agent-backlog-skill", "item_id": "KOB-TSK-0061" },
+      "ref": { "backlog_id": "kano-main", "product": "kano-agent-backlog-skill", "item_id": "KOB-TSK-0061" },
       "evidence_refs": []
     }
   ],
   "edges": [
     {
+      "from": "vision:kob-planning-model",
+      "to": "epic:KOB-EPIC-0003",
+      "edge_type": "roadmap_scope",
+      "source_ref": { "backlog_id": "kano-main", "product": "kano-agent-backlog-skill", "vision_id": "kob-planning-model" }
+    },
+    {
+      "from": "vision:kob-planning-model",
+      "to": "feature:KOB-FTR-0023",
+      "edge_type": "defines",
+      "source_ref": { "backlog_id": "kano-main", "product": "kano-agent-backlog-skill", "item_id": "KOB-FTR-0023" }
+    },
+    {
+      "from": "vision:kob-planning-model",
+      "to": "topic:koa-roadmap-command-center",
+      "edge_type": "related_topic",
+      "source_ref": { "backlog_id": "kano-main", "product": "kano-agent-backlog-skill", "vision_id": "kob-planning-model" }
+    },
+    {
       "from": "feature:KOB-FTR-0021",
       "to": "work_order:KOB-TSK-0061",
       "edge_type": "contains",
-      "source_ref": { "product": "kano-agent-backlog-skill", "item_id": "KOB-TSK-0061" }
+      "source_ref": { "backlog_id": "kano-main", "product": "kano-agent-backlog-skill", "item_id": "KOB-TSK-0061" }
     }
   ],
   "diagnostics": [
+    {
+      "code": "stale_ref",
+      "target": "feature:KOB-FTR-0023",
+      "message": "Vision-layer projection should be regenerated when planning model evidence changes.",
+      "evidence_refs": [
+        { "backlog_id": "kano-main", "product": "kano-agent-backlog-skill", "item_id": "KOB-FTR-0023" }
+      ]
+    },
+    {
+      "code": "orphan_epic",
+      "target": "epic:legacy-root-epic",
+      "message": "Legacy root Epics should be linked to Initiative or vision scope, or explicitly retained under product projection.",
+      "evidence_refs": []
+    },
+    {
+      "code": "vision_scope_gap",
+      "target": "vision:kob-planning-model",
+      "message": "Fixture records cross-product topic association, but runtime dogfood coverage is a follow-up view concern.",
+      "evidence_refs": []
+    },
     {
       "code": "evidence_gap",
       "target": "work_order:KOB-TSK-0061",

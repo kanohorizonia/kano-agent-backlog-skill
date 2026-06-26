@@ -2931,6 +2931,9 @@ Json::Value effective_config_json_for_context(const BacklogContext& ctx) {
     product["backlog_root"] = ctx.product_def.backlog_root;
     product["default_assignee"] = optional_text(ctx.product_def.default_assignee);
     product["default_bug_reviewer"] = optional_text(ctx.product_def.default_bug_reviewer);
+    product["topics_date_prefix_policy"] = ctx.product_def.topics_date_prefix_policy.empty()
+        ? "warn"
+        : ctx.product_def.topics_date_prefix_policy;
     config["product"] = product;
 
     Json::Value embedding(Json::objectValue);
@@ -7945,6 +7948,8 @@ std::optional<int> try_run_config_smoke_fast_path(int argc, char** argv) {
         text << "# Repo-visible actor aliases only; do not store personal names or emails here.\n";
         text << "default_assignee = " << toml_quote_string(ctx.product_def.default_assignee.value_or("")) << "\n";
         text << "default_bug_reviewer = " << toml_quote_string(ctx.product_def.default_bug_reviewer.value_or("")) << "\n\n";
+        text << "# Topic names should normally use YYYY-MM-DD-<slug>. Values: off, warn, enforce.\n";
+        text << "topics_date_prefix_policy = " << toml_quote_string(ctx.product_def.topics_date_prefix_policy.empty() ? std::string("warn") : ctx.product_def.topics_date_prefix_policy) << "\n\n";
         text << "[chunking]\n";
         text << "target_tokens = " << ctx.product_def.chunking_target_tokens.value_or(256) << "\n";
         text << "max_tokens = " << ctx.product_def.chunking_max_tokens.value_or(512) << "\n\n";
@@ -9474,6 +9479,8 @@ int main(int InArgc, char* InArgv[]) {
                 text << "# Repo-visible actor aliases only; do not store personal names or emails here.\n";
                 text << "default_assignee = " << toml_quote_string(ctx.product_def.default_assignee.value_or("")) << "\n";
                 text << "default_bug_reviewer = " << toml_quote_string(ctx.product_def.default_bug_reviewer.value_or("")) << "\n\n";
+                text << "# Topic names should normally use YYYY-MM-DD-<slug>. Values: off, warn, enforce.\n";
+                text << "topics_date_prefix_policy = " << toml_quote_string(ctx.product_def.topics_date_prefix_policy.empty() ? std::string("warn") : ctx.product_def.topics_date_prefix_policy) << "\n\n";
                 text << "[chunking]\n";
                 text << "target_tokens = " << ctx.product_def.chunking_target_tokens.value_or(256) << "\n";
                 text << "max_tokens = " << ctx.product_def.chunking_max_tokens.value_or(512) << "\n\n";
@@ -10315,26 +10322,94 @@ int main(int InArgc, char* InArgv[]) {
             return std::nullopt;
         };
 
+        auto topic_active_topic_names = [&](const std::filesystem::path& backlog_root) {
+            std::set<std::string> active;
+            auto add_active = [&](std::string topic_name) {
+                topic_name = trim_copy(topic_name);
+                if (!topic_name.empty()) {
+                    active.insert(topic_name);
+                    active.insert(lower_copy(topic_name));
+                }
+            };
+
+            const auto state = topic_load_state_index(backlog_root);
+            const auto& agents = state["agents"];
+            if (agents.isObject()) {
+                for (const auto& agent_id : agents.getMemberNames()) {
+                    const auto topic_id = agents[agent_id].get("active_topic_id", "").asString();
+                    if (topic_id.empty()) {
+                        continue;
+                    }
+                    auto doc = topic_find_state_doc_by_id(backlog_root, topic_id);
+                    if (doc) {
+                        add_active(doc->get("name", "").asString());
+                    }
+                }
+            }
+
+            const auto worksets_dir = backlog_root / ".cache" / "worksets";
+            if (std::filesystem::exists(worksets_dir)) {
+                for (const auto& entry : std::filesystem::directory_iterator(worksets_dir)) {
+                    if (!entry.is_regular_file()) {
+                        continue;
+                    }
+                    const auto filename = entry.path().filename().string();
+                    if (!starts_with(filename, "active_topic.") || !ends_with(filename, ".txt")) {
+                        continue;
+                    }
+                    add_active(read_text_file_path(entry.path()));
+                }
+            }
+
+            const auto topics_root = backlog_root / "topics";
+            if (std::filesystem::exists(topics_root)) {
+                for (const auto& entry : std::filesystem::directory_iterator(topics_root)) {
+                    if (!entry.is_directory()) {
+                        continue;
+                    }
+                    const auto marker = entry.path() / ".active";
+                    if (std::filesystem::exists(marker)) {
+                        add_active(read_text_file_path(marker));
+                    }
+                }
+            }
+
+            return active;
+        };
+
         auto topic_normalize_name = [](const std::string& raw) {
             return lower_copy(trim_copy(raw));
         };
 
         auto topic_validate_name = [](const std::string& raw) {
-            const auto name = trim_copy(raw);
-            if (name.empty()) {
-                throw std::runtime_error("Topic name cannot be empty");
+            TopicOps::validate_topic_name(trim_copy(raw));
+        };
+
+        auto topic_effective_date_prefix_policy = [](const BacklogContext& ctx) {
+            auto policy = lower_copy(ctx.product_def.topics_date_prefix_policy.empty()
+                ? std::string("warn")
+                : ctx.product_def.topics_date_prefix_policy);
+            if (policy != "off" && policy != "warn" && policy != "enforce") {
+                throw std::runtime_error("topics_date_prefix_policy must be one of: off, warn, enforce");
             }
-            if (name.size() > 64) {
-                throw std::runtime_error("Topic name too long (" + std::to_string(name.size()) + " chars, max 64)");
+            return policy;
+        };
+
+        auto topic_apply_date_prefix_policy = [&](const BacklogContext& ctx, const std::string& raw_topic_name) {
+            const auto name = trim_copy(raw_topic_name);
+            TopicOps::validate_topic_name(name);
+            if (TopicOps::has_date_prefix(name)) {
+                return;
             }
-            static const std::regex topic_name_re(R"(^[A-Za-z][A-Za-z0-9_-]*$)");
-            if (!std::regex_match(name, topic_name_re)) {
-                throw std::runtime_error("Topic name must start with a letter and contain only alphanumeric characters, hyphens, and underscores");
+            const auto policy = topic_effective_date_prefix_policy(ctx);
+            if (policy == "off") {
+                return;
             }
-            static const std::set<std::string> reserved = {"items", "topics", "cache", "index", "meta"};
-            if (reserved.count(lower_copy(name)) > 0) {
-                throw std::runtime_error("Topic name '" + name + "' is reserved");
+            const std::string message = "Topic name '" + name + "' is missing YYYY-MM-DD- prefix; configure topics_date_prefix_policy=off|warn|enforce.";
+            if (policy == "enforce") {
+                throw std::runtime_error(message);
             }
+            std::cerr << "Warning: " << message << "\n";
         };
 
         auto topic_json_array_to_strings = [](const Json::Value& values) {
@@ -11089,6 +11164,7 @@ int main(int InArgc, char* InArgv[]) {
 
             TopicOps::CreateResult result;
             const auto create_template_vars = topic_parse_template_vars(create_vars);
+            topic_apply_date_prefix_policy(ctx, name);
             if (!trim_copy(create_template).empty()) {
                 result = topic_apply_template_to_new_topic(ctx.backlog_root, name, create_template, agent, create_vars);
             } else {
@@ -12918,6 +12994,7 @@ int main(int InArgc, char* InArgv[]) {
 
             const auto cutoff = topic_cutoff_timestamp(ttl_days);
             const auto topics_root = ctx.backlog_root / "topics";
+            const auto active_topics = topic_active_topic_names(ctx.backlog_root);
             Json::Value deleted_paths(Json::arrayValue);
             int topics_scanned = 0;
             int topics_cleaned = 0;
@@ -12937,6 +13014,9 @@ int main(int InArgc, char* InArgv[]) {
                         continue;
                     }
                     const auto closed_at = manifest.get("closed_at", "").asString();
+                    if (active_topics.count(topic_name_local) > 0 || active_topics.count(lower_copy(topic_name_local)) > 0) {
+                        continue;
+                    }
                     if (manifest.get("status", "open").asString() != "closed" || closed_at.empty() || closed_at > cutoff) {
                         continue;
                     }
@@ -15293,6 +15373,7 @@ int main(int InArgc, char* InArgv[]) {
                     }
                     TopicOps::CreateResult result;
                     const auto create_template_vars = topic_parse_template_vars(create_vars);
+                    topic_apply_date_prefix_policy(ctx, name);
                     if (!trim_copy(create_template).empty()) {
                         result = topic_apply_template_to_new_topic(ctx.backlog_root, name, create_template, agent, create_vars);
                     } else {
@@ -15721,6 +15802,30 @@ int main(int InArgc, char* InArgv[]) {
                            << std::setw(8)  << (t.is_active ? "yes" : "no")
                            << t.created_at << "\n";
                     }
+                });
+            }
+
+            // topic audit
+            {
+                auto* auditCmd = topicCmd->add_subcommand("audit", "Audit topic lifecycle hygiene without mutating files");
+                int ttl_days = 14;
+                int stale_days = 30;
+                std::string as_of;
+                std::string output_format = "plain";
+                auditCmd->add_option("--ttl-days", ttl_days, "Closed-topic TTL in days for cleanup/delete recommendations");
+                auditCmd->add_option("--stale-days", stale_days, "Open-topic inactivity days for stale recommendations");
+                auditCmd->add_option("--as-of", as_of, "Audit date or timestamp for deterministic testing");
+                auditCmd->add_option("--format", output_format, "Output format: plain|json|markdown");
+                auditCmd->callback([&]() {
+                    auto ctx = resolve_topic_ctx();
+                    TopicOps::TopicAuditOptions options;
+                    options.ttl_days = ttl_days;
+                    options.stale_days = stale_days;
+                    if (!trim_copy(as_of).empty()) {
+                        options.as_of = trim_copy(as_of);
+                    }
+                    const auto report = TopicOps::audit_topics(ctx.backlog_root, options);
+                    std::cout << TopicOps::render_audit_report(report, output_format);
                 });
             }
 
@@ -16380,6 +16485,7 @@ int main(int InArgc, char* InArgv[]) {
                     }
                     const auto cutoff = topic_cutoff_timestamp(ttl_days);
                     const auto topics_root = ctx.backlog_root / "topics";
+                    const auto active_topics = topic_active_topic_names(ctx.backlog_root);
                     Json::Value deleted_paths(Json::arrayValue);
                     int topics_scanned = 0;
                     int topics_cleaned = 0;
@@ -16398,6 +16504,9 @@ int main(int InArgc, char* InArgv[]) {
                                 continue;
                             }
                             const auto closed_at = manifest.get("closed_at", "").asString();
+                            if (active_topics.count(topic_name_local) > 0 || active_topics.count(lower_copy(topic_name_local)) > 0) {
+                                continue;
+                            }
                             if (manifest.get("status", "open").asString() != "closed" || closed_at.empty() || closed_at > cutoff) {
                                 continue;
                             }

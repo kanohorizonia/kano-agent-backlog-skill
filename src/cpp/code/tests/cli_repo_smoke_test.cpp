@@ -960,10 +960,63 @@ int main(int argc, char** argv) {
             "--with-spec",
             "--format", "json"
         }, topic_create_output) == 0, "topic create with spec failed");
+        expect(read_text(topic_create_output).find("Warning: Topic name 'native-topic-smoke' is missing YYYY-MM-DD- prefix") != std::string::npos,
+               "topic create did not warn for legacy non-prefixed topic by default");
         const auto topic_path = backlog_root / "topics" / "native-topic-smoke";
         expect(std::filesystem::exists(topic_path / "manifest.json"), "topic create did not write manifest");
         expect(std::filesystem::exists(topic_path / "spec" / "requirements.md"), "topic create --with-spec did not write requirements");
         expect(read_text(topic_path / "manifest.json").find("\"has_spec\" : true") != std::string::npos, "topic create --with-spec did not mark manifest");
+
+        const auto topic_create_prefixed_output = temp_root / "topic-create-prefixed.json";
+        expect(run_command_capture(binary, {
+            "-P", "kano-ai-3d-asset-skill",
+            "topic", "create", "2026-02-01-native-prefixed",
+            "--agent", "tester",
+            "--format", "json"
+        }, topic_create_prefixed_output) == 0, "topic create date-prefixed failed");
+        expect(read_text(topic_create_prefixed_output).find("Warning: Topic name") == std::string::npos,
+               "topic create warned for date-prefixed topic");
+
+        const auto product_toml_config = product_root / "_config" / "config.toml";
+        write_text(product_toml_config,
+            "[product]\n"
+            "name = \"kano-ai-3d-asset-skill\"\n"
+            "prefix = \"KAI\"\n"
+            "topics_date_prefix_policy = \"enforce\"\n");
+        const auto topic_create_enforce_output = temp_root / "topic-create-enforce.txt";
+        expect_command_capture_failure(
+            run_command_capture(binary, {
+                "-P", "kano-ai-3d-asset-skill",
+                "topic", "create", "enforced-legacy-topic",
+                "--agent", "tester"
+            }, topic_create_enforce_output),
+            topic_create_enforce_output,
+            "topic create enforce should reject missing date prefix",
+            "missing YYYY-MM-DD- prefix"
+        );
+        expect(!std::filesystem::exists(backlog_root / "topics" / "enforced-legacy-topic"),
+               "topic create enforce created a rejected topic directory");
+
+        const auto topic_create_enforce_prefixed_output = temp_root / "topic-create-enforce-prefixed.txt";
+        expect(run_command_capture(binary, {
+            "-P", "kano-ai-3d-asset-skill",
+            "topic", "create", "2026-02-02-enforced-prefixed",
+            "--agent", "tester"
+        }, topic_create_enforce_prefixed_output) == 0, "topic create enforce rejected date-prefixed topic");
+
+        write_text(product_toml_config,
+            "[product]\n"
+            "name = \"kano-ai-3d-asset-skill\"\n"
+            "prefix = \"KAI\"\n"
+            "topics_date_prefix_policy = \"off\"\n");
+        const auto topic_create_off_output = temp_root / "topic-create-off.txt";
+        expect(run_command_capture(binary, {
+            "-P", "kano-ai-3d-asset-skill",
+            "topic", "create", "legacy-off-topic",
+            "--agent", "tester"
+        }, topic_create_off_output) == 0, "topic create policy off failed");
+        expect(read_text(topic_create_off_output).find("Warning: Topic name") == std::string::npos,
+               "topic create policy off emitted date-prefix warning");
 
         const auto topic_create_list_templates_output = temp_root / "topic-create-list-templates.json";
         expect(run_command_capture(binary, {
@@ -1021,6 +1074,45 @@ int main(int argc, char** argv) {
             "--format", "json"
         }, topic_template_validate_output) == 0, "topic template validate failed");
         expect(read_text(topic_template_validate_output).find("\"valid\" : true") != std::string::npos, "topic template validate did not report valid");
+
+        write_text(product_toml_config,
+            "[product]\n"
+            "name = \"kano-ai-3d-asset-skill\"\n"
+            "prefix = \"KAI\"\n"
+            "topics_date_prefix_policy = \"enforce\"\n");
+        const auto topic_create_template_enforce_output = temp_root / "topic-create-template-enforce.txt";
+        expect_command_capture_failure(
+            run_command_capture(binary, {
+                "-P", "kano-ai-3d-asset-skill",
+                "topic", "create", "templated-enforced-legacy",
+                "--agent", "tester",
+                "--template", "smoke",
+                "--var", "custom_title=Rejected template topic"
+            }, topic_create_template_enforce_output),
+            topic_create_template_enforce_output,
+            "topic create --template enforce should reject missing date prefix",
+            "missing YYYY-MM-DD- prefix"
+        );
+        expect(!std::filesystem::exists(backlog_root / "topics" / "templated-enforced-legacy"),
+               "topic create --template enforce created a rejected topic directory");
+
+        const auto topic_create_template_prefixed_output = temp_root / "topic-create-template-prefixed.json";
+        expect(run_command_capture(binary, {
+            "-P", "kano-ai-3d-asset-skill",
+            "topic", "create", "2026-02-03-templated-prefixed",
+            "--agent", "tester",
+            "--template", "smoke",
+            "--var", "custom_title=Accepted template topic",
+            "--format", "json"
+        }, topic_create_template_prefixed_output) == 0, "topic create --template date-prefixed failed under enforce policy");
+        expect(read_text(topic_create_template_prefixed_output).find("Warning: Topic name") == std::string::npos,
+               "topic create --template warned for date-prefixed topic");
+
+        write_text(product_toml_config,
+            "[product]\n"
+            "name = \"kano-ai-3d-asset-skill\"\n"
+            "prefix = \"KAI\"\n"
+            "topics_date_prefix_policy = \"off\"\n");
 
         const auto topic_create_template_output = temp_root / "topic-create-template.json";
         expect(run_command_capture(binary, {
@@ -1206,6 +1298,85 @@ int main(int argc, char** argv) {
             "--format", "json"
         }, topic_show_state_output) == 0, "topic show-state failed");
         expect(read_text(topic_show_state_output).find("\"agents\"") != std::string::npos, "topic show-state did not emit agents");
+
+        const auto cli_audit_closed_materials = backlog_root / "topics" / "2026-01-05-cli-audit-closed-materials";
+        write_text(cli_audit_closed_materials / "manifest.json",
+            "{\n"
+            "  \"topic\": \"2026-01-05-cli-audit-closed-materials\",\n"
+            "  \"agent\": \"tester\",\n"
+            "  \"created_at\": \"2026-01-05T00:00:00Z\",\n"
+            "  \"updated_at\": \"2026-01-05T00:00:00Z\",\n"
+            "  \"status\": \"closed\",\n"
+            "  \"closed_at\": \"2026-01-05T00:00:00Z\",\n"
+            "  \"seed_items\": [],\n"
+            "  \"pinned_docs\": [],\n"
+            "  \"snippet_refs\": [],\n"
+            "  \"related_topics\": [],\n"
+            "  \"has_spec\": false\n"
+            "}\n");
+        write_text(cli_audit_closed_materials / "materials" / "clips" / "old.txt", "old audit material\n");
+        const auto cli_audit_closed_empty = backlog_root / "topics" / "2026-01-06-cli-audit-closed-empty";
+        write_text(cli_audit_closed_empty / "manifest.json",
+            "{\n"
+            "  \"topic\": \"2026-01-06-cli-audit-closed-empty\",\n"
+            "  \"agent\": \"tester\",\n"
+            "  \"created_at\": \"2026-01-06T00:00:00Z\",\n"
+            "  \"updated_at\": \"2026-01-06T00:00:00Z\",\n"
+            "  \"status\": \"closed\",\n"
+            "  \"closed_at\": \"2026-01-06T00:00:00Z\",\n"
+            "  \"seed_items\": [],\n"
+            "  \"pinned_docs\": [],\n"
+            "  \"snippet_refs\": [],\n"
+            "  \"related_topics\": [],\n"
+            "  \"has_spec\": false\n"
+            "}\n");
+        const auto cli_audit_closed_manifest_before = read_text(cli_audit_closed_materials / "manifest.json");
+
+        const auto topic_audit_json_output = temp_root / "topic-audit.json";
+        expect(run_command_capture(binary, {
+            "-P", "kano-ai-3d-asset-skill",
+            "topic", "audit",
+            "--ttl-days", "14",
+            "--stale-days", "30",
+            "--as-of", "2026-03-01",
+            "--format", "json"
+        }, topic_audit_json_output) == 0, "topic audit json failed");
+        const auto topic_audit_json = read_text(topic_audit_json_output);
+        expect(topic_audit_json.find("\"mutated\" : false") != std::string::npos, "topic audit json did not report mutated=false");
+        expect(topic_audit_json.find("\"age_days\"") != std::string::npos, "topic audit json missing age_days");
+        expect(topic_audit_json.find("\"inactive_days\"") != std::string::npos, "topic audit json missing inactive_days");
+        expect(topic_audit_json.find("\"active_agents\"") != std::string::npos, "topic audit json missing active_agents");
+        expect(topic_audit_json.find("cleanup_materials_candidate") != std::string::npos, "topic audit json missing cleanup candidate");
+        expect(topic_audit_json.find("delete_topic_candidate") != std::string::npos, "topic audit json missing delete candidate");
+        expect(topic_audit_json.find("missing_date_prefix") != std::string::npos, "topic audit json missing date-prefix reason");
+        expect(read_text(cli_audit_closed_materials / "manifest.json") == cli_audit_closed_manifest_before,
+               "topic audit mutated closed topic manifest");
+        expect(!std::filesystem::exists(cli_audit_closed_materials / "publish" / "topic-audit.md"),
+               "topic audit wrote a report file");
+
+        const auto topic_audit_markdown_output = temp_root / "topic-audit.md";
+        expect(run_command_capture(binary, {
+            "-P", "kano-ai-3d-asset-skill",
+            "topic", "audit",
+            "--ttl-days", "14",
+            "--stale-days", "30",
+            "--as-of", "2026-03-01",
+            "--format", "markdown"
+        }, topic_audit_markdown_output) == 0, "topic audit markdown failed");
+        expect(read_text(topic_audit_markdown_output).find("# Topic Audit") != std::string::npos,
+               "topic audit markdown missing heading");
+
+        const auto topic_audit_plain_output = temp_root / "topic-audit.txt";
+        expect(run_command_capture(binary, {
+            "-P", "kano-ai-3d-asset-skill",
+            "topic", "audit",
+            "--ttl-days", "14",
+            "--stale-days", "30",
+            "--as-of", "2026-03-01",
+            "--format", "plain"
+        }, topic_audit_plain_output) == 0, "topic audit plain failed");
+        expect(read_text(topic_audit_plain_output).find("Topic audit as of 2026-03-01") != std::string::npos,
+               "topic audit plain missing heading");
 
         write_text(topic_path / "plan.md", "# Native Topic Plan\n\n- Keep the executable plan provider native.\n");
         const auto topic_resolve_opencode_output = temp_root / "topic-resolve-opencode.json";
@@ -1396,6 +1567,15 @@ int main(int argc, char** argv) {
         expect(read_text(topic_close_output).find("\"closed\" : true") != std::string::npos, "topic close did not report closed");
         expect(read_text(topic_path / "manifest.json").find("\"status\" : \"closed\"") != std::string::npos, "topic close did not update manifest status");
 
+        auto active_closed_manifest = read_text(topic_path / "manifest.json");
+        auto closed_at_pos = active_closed_manifest.find("\"closed_at\" : \"");
+        expect(closed_at_pos != std::string::npos, "closed active topic manifest missing closed_at");
+        closed_at_pos += std::string("\"closed_at\" : \"").size();
+        const auto closed_at_end = active_closed_manifest.find('"', closed_at_pos);
+        expect(closed_at_end != std::string::npos, "closed active topic manifest has malformed closed_at");
+        active_closed_manifest.replace(closed_at_pos, closed_at_end - closed_at_pos, "2026-01-01T00:00:00Z");
+        write_text(topic_path / "manifest.json", active_closed_manifest);
+
         const auto topic_cleanup_output = temp_root / "topic-cleanup.json";
         expect(run_command_capture(binary, {
             "-P", "kano-ai-3d-asset-skill",
@@ -1403,7 +1583,9 @@ int main(int argc, char** argv) {
             "--ttl-days", "1",
             "--format", "json"
         }, topic_cleanup_output) == 0, "topic cleanup dry-run failed");
-        expect(read_text(topic_cleanup_output).find("\"dry_run\" : true") != std::string::npos, "topic cleanup did not report dry-run");
+        const auto topic_cleanup_text = read_text(topic_cleanup_output);
+        expect(topic_cleanup_text.find("\"dry_run\" : true") != std::string::npos, "topic cleanup did not report dry-run");
+        expect(topic_cleanup_text.find("native-topic-smoke") == std::string::npos, "topic cleanup planned deletion for active topic");
 
         expect(run_command(binary, {
             "-P", "kano-ai-3d-asset-skill",

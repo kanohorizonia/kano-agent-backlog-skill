@@ -270,6 +270,7 @@ topic_commands=(
   pin
   add-snippet
   distill
+  audit
   decision-audit
   close
   cleanup
@@ -440,6 +441,7 @@ declare -A topic_status=(
   [pin]="native covered"
   [add-snippet]="native covered"
   [distill]="native covered"
+  [audit]="native covered"
   [decision-audit]="native covered"
   [close]="native covered"
   [cleanup]="native covered"

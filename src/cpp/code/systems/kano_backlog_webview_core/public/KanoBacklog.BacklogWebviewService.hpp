@@ -76,6 +76,8 @@ class BacklogWebviewService {
                                         bool forceRefresh = false);
   Json::Value BuildDoneCandidateDetector(const ItemQueryOptions& options);
   Json::Value BuildEvidenceQualityView(const ItemQueryOptions& options);
+  Json::Value BuildContextRecoverySummary(const std::string& area,
+                                          const ItemQueryOptions& options);
   Json::Value BuildReviewInbox(const ItemQueryOptions& options);
   Json::Value SaveReviewDecisionDraft(const Json::Value& request);
   Json::Value DiscardReviewDecisionDraft(const Json::Value& request);

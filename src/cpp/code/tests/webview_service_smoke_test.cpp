@@ -194,6 +194,15 @@ void expect_in_order(const std::string& text,
     }
 }
 
+void expect_context_section(const Json::Value& summary,
+                            const std::string& key) {
+    expect(summary[key].isObject(), "context recovery should include section " + key);
+    expect(!summary[key]["summary"].asString().empty(), key + " should include summary");
+    expect(summary[key]["refs"].isArray(), key + " should include refs");
+    expect(!summary[key]["confidence"].asString().empty(), key + " should include confidence");
+    expect(summary[key]["notes"].isArray(), key + " should include notes");
+}
+
 } // namespace
 
 int main() {
@@ -696,6 +705,53 @@ int main() {
         expect(!pagedQuality["truncated"].asBool(),
                "evidence quality view should report no truncation after internal pagination completes");
 
+        const auto recoveryFileCountBefore = count_regular_files(products);
+        const auto recoveryStateBefore = read_text(products / "product-alpha" / "items" / "task" / "0001" / "PRA-TSK-0001.md");
+        auto recovery = service.BuildContextRecoverySummary("Native Migration", allOptions);
+        expect(!recovery.isMember("error"), "context recovery query should not fail");
+        expect(recovery["schema"].asString() == "kob.context.recovery_summary.v1",
+               "context recovery should expose its schema id");
+        expect(recovery["area"].asString() == "Native Migration",
+               "context recovery should preserve requested area label");
+        expect(recovery["read_only"].asBool(), "context recovery must be read-only");
+        expect(!recovery["mutation_allowed"].asBool(), "context recovery must not allow mutations");
+        expect(!recovery["starts_agent"].asBool(), "context recovery must not start agents");
+        expect(!recovery["dispatches_work"].asBool(), "context recovery must not dispatch work");
+        expect(recovery["advisory_only"].asBool(), "context recovery must be advisory only");
+        expect(recovery["pagination_ignored_for_full_scan"].asBool(),
+               "context recovery should scan the selected set instead of one query page");
+        expect(recovery["scanned"].asUInt64() == recovery["query_total"].asUInt64(),
+               "context recovery full scan should visit every selected query match");
+        expect(!recovery["truncated"].asBool(), "unbounded context recovery query should not be truncated");
+        expect(recovery["counts"]["items"].asUInt64() >= 1,
+               "context recovery should count selected item records");
+        expect(recovery["counts"]["evidence_signals"].asUInt64() >= 1,
+               "context recovery should count evidence signals");
+        expect_context_section(recovery, "area_summary");
+        expect_context_section(recovery, "current_state");
+        expect_context_section(recovery, "key_decisions");
+        expect_context_section(recovery, "active_risks");
+        expect_context_section(recovery, "evidence");
+        expect_context_section(recovery, "next_actions");
+        expect_context_section(recovery, "do_not_touch");
+        expect(recovery["key_decisions"]["confidence"].asString() == "missing",
+               "context recovery should mark unsupported decision history as missing");
+        expect(recovery["do_not_touch"]["confidence"].asString() == "strong",
+               "context recovery should keep do-not-touch boundaries strong");
+        expect(recovery["do_not_touch"]["summary"].asString().find("private paths") != std::string::npos,
+               "context recovery should warn against private path exposure");
+        expect(count_regular_files(products) == recoveryFileCountBefore,
+               "context recovery must not create or delete files");
+        expect(read_text(products / "product-alpha" / "items" / "task" / "0001" / "PRA-TSK-0001.md") == recoveryStateBefore,
+               "context recovery must not mutate item markdown state");
+        webview::ItemQueryOptions pagedRecoveryOptions = allOptions;
+        pagedRecoveryOptions.limit = 1;
+        auto pagedRecovery = service.BuildContextRecoverySummary("Native Migration", pagedRecoveryOptions);
+        expect(pagedRecovery["counts"]["items"].asUInt64() == recovery["counts"]["items"].asUInt64(),
+               "context recovery should not miss rows beyond the first requested page");
+        expect(!pagedRecovery["truncated"].asBool(),
+               "context recovery should report no truncation after internal pagination completes");
+
         webview::ItemQueryOptions taskText;
         taskText.types = {"Task"};
         taskText.text = "migration evidence";
@@ -1104,6 +1160,8 @@ int main() {
                "webview README should list the done detector API route");
         expect(webviewReadme.find("/api/review/evidence-quality") != std::string::npos,
                "webview README should list the evidence quality API route");
+        expect(webviewReadme.find("/api/review/context-recovery") != std::string::npos,
+               "webview README should list the context recovery API route");
 
         const auto readme = read_text(locate_repo_file("README.md"));
         expect(readme.find("pixi run webview-smoke-artifacts") != std::string::npos,

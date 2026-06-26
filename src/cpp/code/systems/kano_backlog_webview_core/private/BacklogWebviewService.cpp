@@ -2377,6 +2377,36 @@ Json::Value EvidenceQualityRow(const Json::Value& item,
   return row;
 }
 
+Json::Value ContextRef(const Json::Value& item) {
+  Json::Value ref(Json::objectValue);
+  ref["product"] = item.get("product", "").asString();
+  ref["item_id"] = item.get("id", "").asString();
+  if (item.isMember("uid") && !item["uid"].asString().empty()) {
+    ref["uid"] = item["uid"].asString();
+  }
+  return ref;
+}
+
+Json::Value ContextSection(const std::string& summary,
+                           const Json::Value& refs,
+                           const std::string& confidence,
+                           const std::vector<std::string>& notes = {}) {
+  Json::Value section(Json::objectValue);
+  section["summary"] = summary;
+  section["refs"] = refs;
+  section["confidence"] = confidence;
+  section["notes"] = MakeArray(notes);
+  return section;
+}
+
+Json::Value FirstRefs(const Json::Value& refs, const Json::ArrayIndex limit) {
+  Json::Value out(Json::arrayValue);
+  for (Json::ArrayIndex i = 0; i < refs.size() && i < limit; ++i) {
+    out.append(refs[i]);
+  }
+  return out;
+}
+
 bool ItemMatchesTopic(const Json::Value& item, const std::string& topic) {
   if (topic.empty()) {
     return true;
@@ -4089,6 +4119,167 @@ Json::Value BacklogWebviewService::BuildEvidenceQualityView(
   return response;
 }
 
+Json::Value BacklogWebviewService::BuildContextRecoverySummary(
+    const std::string& area,
+    const ItemQueryOptions& options) {
+  Json::Value response(Json::objectValue);
+  response["schema"] = "kob.context.recovery_summary.v1";
+  response["area"] = area.empty() ? "Backboard context recovery" : area;
+  response["read_only"] = true;
+  response["mutation_allowed"] = false;
+  response["starts_agent"] = false;
+  response["dispatches_work"] = false;
+  response["advisory_only"] = true;
+
+  auto scanOptions = options;
+  scanOptions.limit = 1000;
+  scanOptions.offset = 0;
+  auto items = QueryItems(scanOptions);
+  if (items.isMember("error")) {
+    return items;
+  }
+  while (items["offset"].asUInt64() + items["items"].size() < items["total"].asUInt64()) {
+    scanOptions.offset = items["offset"].asUInt64() + items["items"].size();
+    auto page = QueryItems(scanOptions);
+    if (page.isMember("error")) {
+      return page;
+    }
+    for (const auto& item : page["items"]) {
+      items["items"].append(item);
+    }
+    items["warnings"] = MergeWarnings(items["warnings"], page["warnings"]);
+    items["limit"] = page["limit"];
+    items["offset"] = 0U;
+  }
+
+  Json::Value allRefs(Json::arrayValue);
+  Json::Value activeRefs(Json::arrayValue);
+  Json::Value riskRefs(Json::arrayValue);
+  Json::Value evidenceRefs(Json::arrayValue);
+  Json::Value nextRefs(Json::arrayValue);
+  Json::Value decisionRefs(Json::arrayValue);
+  Json::Value doNotRefs(Json::arrayValue);
+  Json::Value counts(Json::objectValue);
+  Json::Value stateCounts(Json::objectValue);
+  Json::Value typeCounts(Json::objectValue);
+  size_t evidenceSignals = 0;
+  size_t staleSignals = 0;
+  size_t riskSignals = 0;
+
+  for (const auto& itemSummary : items["items"]) {
+    if (itemSummary.get("source_kind", "").asString() != "Item") {
+      continue;
+    }
+    const auto product = itemSummary.get("product", "").asString();
+    const auto itemId = itemSummary.get("id", "").asString();
+    auto detail = GetEvidenceDetail(product, itemId, options.forceRefresh);
+    if (detail.isMember("error")) {
+      items["warnings"].append(product + ": " + itemId + ": " +
+                               detail.get("error", "unknown error").asString());
+      continue;
+    }
+    const auto item = detail["item"];
+    const auto evidence = detail["evidence"];
+    const auto ref = ContextRef(item);
+    allRefs.append(ref);
+
+    const auto state = text::ToLower(item.get("state", "").asString());
+    const auto type = item.get("type", "unknown").asString();
+    stateCounts[state.empty() ? "unknown" : state] = static_cast<Json::UInt64>(
+        stateCounts.get(state.empty() ? "unknown" : state, 0U).asUInt64() + 1U);
+    typeCounts[type] = static_cast<Json::UInt64>(typeCounts.get(type, 0U).asUInt64() + 1U);
+
+    if (state == "inprogress" || state == "review" || state == "blocked") {
+      activeRefs.append(ref);
+    }
+    if (state == "ready" || state == "inprogress" || state == "review") {
+      nextRefs.append(ref);
+    }
+    const auto content = item.get("content", "").asString();
+    if (ContentContainsAny(content, {"risk", "blocked", "blocker", "unsafe", "do not", "stale", "drift", "outdated"})) {
+      riskRefs.append(ref);
+      ++riskSignals;
+    }
+    if (ContentContainsAny(content, {"do not", "non-goal", "unsafe", "unrelated", "private", "secret"})) {
+      doNotRefs.append(ref);
+    }
+    if (JsonBoolAt(evidence["signals"], "validation") || JsonBoolAt(evidence["signals"], "artifact") ||
+        JsonBoolAt(evidence["signals"], "commit")) {
+      evidenceRefs.append(ref);
+      ++evidenceSignals;
+    }
+    const auto lastWorklog = LastRelevantWorklog(item);
+    if (HasStaleWorklogAfterDone(item, lastWorklog) ||
+        ContentContainsAny(content, {"stale", "drift", "outdated", "timed out"})) {
+      ++staleSignals;
+    }
+    if (type == "Decision" || type == "ADR" || !item["decisions"].empty()) {
+      decisionRefs.append(ref);
+    }
+  }
+
+  counts["items"] = static_cast<Json::UInt64>(allRefs.size());
+  counts["evidence_signals"] = static_cast<Json::UInt64>(evidenceSignals);
+  counts["risk_signals"] = static_cast<Json::UInt64>(riskSignals);
+  counts["stale_signals"] = static_cast<Json::UInt64>(staleSignals);
+  counts["states"] = stateCounts;
+  counts["types"] = typeCounts;
+  response["counts"] = counts;
+  response["products"] = items["products"];
+  response["warnings"] = items["warnings"];
+  response["requested_limit"] = static_cast<Json::UInt64>(options.limit);
+  response["requested_offset"] = static_cast<Json::UInt64>(options.offset);
+  response["scan_limit"] = items.get("limit", 0U);
+  response["scan_offset"] = 0U;
+  response["pagination_ignored_for_full_scan"] = true;
+  response["query_total"] = items.get("total", 0U);
+  response["scanned"] = static_cast<Json::UInt64>(items["items"].size());
+  response["truncated"] = response["scanned"].asUInt64() <
+                          response["query_total"].asUInt64();
+
+  const auto itemCount = allRefs.size();
+  response["area_summary"] = ContextSection(
+      response["area"].asString() + " covers " + std::to_string(itemCount) +
+          " selected backlog item records for recovery.",
+      FirstRefs(allRefs, 5), itemCount == 0 ? "missing" : "weak",
+      {"Summary is derived from selected backlog records, not generated from private context."});
+  response["current_state"] = ContextSection(
+      "Current state is represented by selected item state/type counts.",
+      FirstRefs(activeRefs.empty() ? allRefs : activeRefs, 5),
+      itemCount == 0 ? "missing" : "weak",
+      {"Use raw item refs for authoritative status before acting."});
+  response["key_decisions"] = ContextSection(
+      decisionRefs.empty()
+          ? "No explicit decision or ADR records were found in the selected set."
+          : "Decision-shaped records are available in the selected set.",
+      FirstRefs(decisionRefs, 5), decisionRefs.empty() ? "missing" : "weak",
+      {"Unsupported decision history is labeled missing instead of inferred."});
+  response["active_risks"] = ContextSection(
+      riskRefs.empty()
+          ? "No deterministic blocker, stale, drift, or unsafe-boundary terms were found."
+          : "Risk, blocker, stale, drift, or unsafe-boundary terms were found in selected records.",
+      FirstRefs(riskRefs, 5), riskRefs.empty() ? "unclear" : "weak",
+      {"Keyword risk signals require human review."});
+  response["evidence"] = ContextSection(
+      evidenceSignals == 0
+          ? "No durable validation, artifact, or commit evidence signals were found."
+          : "Validation, artifact, or commit evidence signals were found in selected records.",
+      FirstRefs(evidenceRefs, 5), evidenceSignals == 0 ? "missing" : "weak",
+      {"Evidence summaries are deterministic heuristics and must link back to raw records."});
+  response["next_actions"] = ContextSection(
+      nextRefs.empty()
+          ? "No Ready, InProgress, or Review records were found for immediate handoff."
+          : "Review Ready, InProgress, and Review records before starting or continuing work.",
+      FirstRefs(nextRefs, 5), nextRefs.empty() ? "unclear" : "weak",
+      {"This lens does not start agents or approve execution."});
+  response["do_not_touch"] = ContextSection(
+      "Do not mutate backlog state, expose private paths or secrets, or treat unsupported summaries as source records.",
+      FirstRefs(doNotRefs, 5), "strong",
+      {"Ark Console execution approval remains separate.",
+       "Use raw refs before touching unrelated dirty work."});
+  return response;
+}
+
 Json::Value BacklogWebviewService::SaveReviewDecisionDraft(
     const Json::Value& request) {
   try {
@@ -5629,6 +5820,24 @@ void RegisterBacklogWebviewRoutes(
       [metaAppender, &service, queryOptionsFromRequest](const HttpRequestPtr& request,
           std::function<void(const HttpResponsePtr&)>&& callback) {
         auto data = service.BuildEvidenceQualityView(queryOptionsFromRequest(request));
+        Json::Value body(Json::objectValue);
+        body["ok"] = !data.isMember("error");
+        body["data"] = data;
+        metaAppender(request, body);
+        auto response = HttpResponse::newHttpJsonResponse(body);
+        if (!body["ok"].asBool()) {
+          response->setStatusCode(k400BadRequest);
+        }
+        callback(response);
+      },
+      {Get});
+
+  app().registerHandler(
+      "/api/review/context-recovery",
+      [metaAppender, &service, queryOptionsFromRequest](const HttpRequestPtr& request,
+          std::function<void(const HttpResponsePtr&)>&& callback) {
+        auto data = service.BuildContextRecoverySummary(
+            request->getParameter("area"), queryOptionsFromRequest(request));
         Json::Value body(Json::objectValue);
         body["ok"] = !data.isMember("error");
         body["data"] = data;

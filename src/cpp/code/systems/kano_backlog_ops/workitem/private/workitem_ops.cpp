@@ -228,6 +228,26 @@ std::string value_or_missing(const std::optional<std::string>& value) {
     return value && !trim_text(*value).empty() ? trim_text(*value) : "<missing>";
 }
 
+bool has_metadata_text(const std::optional<std::string>& value) {
+    return value && !trim_text(*value).empty();
+}
+
+bool is_non_implementation_intent(const BacklogItem& item) {
+    if (!has_metadata_text(item.work_intent)) {
+        return false;
+    }
+    return trim_text(*item.work_intent) != "implementation";
+}
+
+std::vector<std::string> missing_non_implementation_contract_fields(const BacklogItem& item) {
+    std::vector<std::string> missing;
+    if (!has_metadata_text(item.result_contract)) missing.push_back("result_contract");
+    if (!has_metadata_text(item.evidence_requirement)) missing.push_back("evidence_requirement");
+    if (!has_metadata_text(item.follow_up_policy)) missing.push_back("follow_up_policy");
+    if (!has_metadata_text(item.no_go_or_defer_policy)) missing.push_back("no_go_or_defer_policy");
+    return missing;
+}
+
 std::vector<std::string> branch_convergence_diagnostics(const BacklogItem& item) {
     std::vector<std::string> diagnostics;
     const auto lines = branch_convergence_evidence_lines(item);
@@ -492,6 +512,16 @@ std::vector<std::string> intent_transition_diagnostics(
             worklog_contains_any(item, {"do not compliance report", "ok/warn/violation", "compliance"});
         if (!has_compliance) {
             diagnostics.push_back("InProgress->Review intent compliance: no Do Not Compliance Report evidence detected; include compliance findings in review evidence.");
+        }
+        if (is_non_implementation_intent(item)) {
+            const auto missing = missing_non_implementation_contract_fields(item);
+            if (!missing.empty()) {
+                diagnostics.push_back(
+                    "InProgress->Review work intent contract: non-implementation work_intent=" +
+                    trim_text(*item.work_intent) +
+                    " missing " + join_values(missing, ", ") +
+                    "; record result, evidence, follow-up, and no-go/defer policy before Review.");
+            }
         }
     }
 

@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <map>
 #include <fstream>
+#include <cctype>
+#include <optional>
 
 namespace {
 
@@ -71,6 +73,27 @@ std::string relative_link(const std::filesystem::path& target, const std::filesy
     return std::filesystem::relative(target, base).generic_string();
 }
 
+std::string trim_text(std::string value) {
+    const auto not_space = [](unsigned char ch) { return !std::isspace(ch); };
+    value.erase(value.begin(), std::find_if(value.begin(), value.end(), not_space));
+    value.erase(std::find_if(value.rbegin(), value.rend(), not_space).base(), value.end());
+    return value;
+}
+
+void add_metadata_indicator(
+    std::vector<std::string>& indicators,
+    const std::optional<std::string>& value,
+    const std::string& label
+) {
+    if (!value) {
+        return;
+    }
+    const auto trimmed = trim_text(*value);
+    if (!trimmed.empty()) {
+        indicators.push_back(label + ": " + trimmed);
+    }
+}
+
 std::string render_dashboard(
     const std::string& title,
     const std::string& group,
@@ -118,6 +141,8 @@ std::string render_dashboard(
             if (item.duplicate_of && !item.duplicate_of->empty()) {
                 indicators.push_back("Duplicate of: " + *item.duplicate_of);
             }
+            add_metadata_indicator(indicators, item.work_intent, "Intent");
+            add_metadata_indicator(indicators, item.result_contract, "Result");
             if (!indicators.empty()) {
                 ss << "- [" << description << " [";
                 for (size_t i = 0; i < indicators.size(); ++i) {

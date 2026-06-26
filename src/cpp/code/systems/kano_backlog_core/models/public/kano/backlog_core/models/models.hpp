@@ -77,6 +77,12 @@ struct BacklogItem {
     std::string updated;
     std::optional<std::string> area;
     std::optional<std::string> iteration;
+    std::optional<std::string> work_intent;
+    std::optional<std::string> execution_mode;
+    std::optional<std::string> result_contract;
+    std::optional<std::string> evidence_requirement;
+    std::optional<std::string> follow_up_policy;
+    std::optional<std::string> no_go_or_defer_policy;
     
     std::map<std::string, std::string> external; // Simplified from Dict[str, Any]
     ItemLinks links;

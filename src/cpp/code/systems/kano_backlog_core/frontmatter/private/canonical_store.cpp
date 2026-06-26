@@ -164,6 +164,12 @@ BacklogItem item_from_context(
         item.owner = parse_optional_string(ctx.metadata["owner"]);
         item.area = parse_optional_string(ctx.metadata["area"]);
         item.iteration = parse_optional_string(ctx.metadata["iteration"]);
+        item.work_intent = parse_optional_string(ctx.metadata["work_intent"]);
+        item.execution_mode = parse_optional_string(ctx.metadata["execution_mode"]);
+        item.result_contract = parse_optional_string(ctx.metadata["result_contract"]);
+        item.evidence_requirement = parse_optional_string(ctx.metadata["evidence_requirement"]);
+        item.follow_up_policy = parse_optional_string(ctx.metadata["follow_up_policy"]);
+        item.no_go_or_defer_policy = parse_optional_string(ctx.metadata["no_go_or_defer_policy"]);
         item.created = ctx.metadata["created"].as<std::string>();
         item.updated = ctx.metadata["updated"].as<std::string>();
 
@@ -329,6 +335,12 @@ void CanonicalStore::write(BacklogItem& item) const {
     metadata["owner"] = item.owner ? YAML::Node(*item.owner) : YAML::Node(YAML::NodeType::Null);
     metadata["area"] = item.area ? YAML::Node(*item.area) : YAML::Node(YAML::NodeType::Null);
     metadata["iteration"] = item.iteration ? YAML::Node(*item.iteration) : YAML::Node(YAML::NodeType::Null);
+    metadata["work_intent"] = item.work_intent ? YAML::Node(*item.work_intent) : YAML::Node(YAML::NodeType::Null);
+    metadata["execution_mode"] = item.execution_mode ? YAML::Node(*item.execution_mode) : YAML::Node(YAML::NodeType::Null);
+    metadata["result_contract"] = item.result_contract ? YAML::Node(*item.result_contract) : YAML::Node(YAML::NodeType::Null);
+    metadata["evidence_requirement"] = item.evidence_requirement ? YAML::Node(*item.evidence_requirement) : YAML::Node(YAML::NodeType::Null);
+    metadata["follow_up_policy"] = item.follow_up_policy ? YAML::Node(*item.follow_up_policy) : YAML::Node(YAML::NodeType::Null);
+    metadata["no_go_or_defer_policy"] = item.no_go_or_defer_policy ? YAML::Node(*item.no_go_or_defer_policy) : YAML::Node(YAML::NodeType::Null);
     metadata["created"] = item.created;
     metadata["updated"] = item.updated;
 
@@ -412,6 +424,7 @@ BacklogItem CanonicalStore::create(const std::string& prefix, ItemType type, con
     item.type = type;
     item.state = ItemState::New;
     item.parent = parent;
+    item.work_intent = "implementation";
 
     auto now_t = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
     struct tm buf;

@@ -86,6 +86,12 @@ std::string TemplateOps::render_frontmatter(const BacklogItem& item) {
     ss << "parent: " << (item.parent ? *item.parent : "null") << "\n";
     ss << "area: " << (item.area ? *item.area : "general") << "\n";
     ss << "iteration: " << (item.iteration ? *item.iteration : "backlog") << "\n";
+    ss << "work_intent: " << (item.work_intent ? *item.work_intent : "implementation") << "\n";
+    ss << "execution_mode: " << (item.execution_mode ? *item.execution_mode : "null") << "\n";
+    ss << "result_contract: " << (item.result_contract ? *item.result_contract : "null") << "\n";
+    ss << "evidence_requirement: " << (item.evidence_requirement ? *item.evidence_requirement : "null") << "\n";
+    ss << "follow_up_policy: " << (item.follow_up_policy ? *item.follow_up_policy : "null") << "\n";
+    ss << "no_go_or_defer_policy: " << (item.no_go_or_defer_policy ? *item.no_go_or_defer_policy : "null") << "\n";
     
     ss << "tags: [";
     for (size_t i = 0; i < item.tags.size(); ++i) {

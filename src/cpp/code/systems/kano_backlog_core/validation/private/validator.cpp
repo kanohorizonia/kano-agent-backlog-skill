@@ -1,7 +1,37 @@
 #include "kano/backlog_core/validation/validator.hpp"
+#include <algorithm>
+#include <array>
 #include <regex>
 
 namespace kano::backlog_core {
+
+namespace {
+
+bool is_blank_text(const std::string& value) {
+    return value.find_first_not_of(" \n\r\t") == std::string::npos;
+}
+
+bool is_allowed_work_intent(const std::string& value) {
+    static constexpr std::array<const char*, 12> allowed = {
+        "implementation",
+        "investigation",
+        "spike",
+        "decision",
+        "experiment",
+        "validation",
+        "audit",
+        "migration",
+        "policy_contract",
+        "runbook",
+        "incident",
+        "deprecation"
+    };
+    return std::any_of(allowed.begin(), allowed.end(), [&](const char* allowed_value) {
+        return value == allowed_value;
+    });
+}
+
+} // namespace
 
 std::pair<bool, std::vector<std::string>> Validator::is_ready(const BacklogItem& item) {
     std::vector<std::string> missing;
@@ -77,6 +107,12 @@ std::vector<std::string> Validator::validate_schema(const BacklogItem& item) {
         } else if (*item.duplicate_of == item.id || *item.duplicate_of == item.uid) {
             errors.push_back("Duplicate item cannot reference itself in duplicate_of");
         }
+    }
+
+    if (item.work_intent && !is_blank_text(*item.work_intent) && !is_allowed_work_intent(*item.work_intent)) {
+        errors.push_back(
+            "Invalid work_intent: " + *item.work_intent +
+            " (expected one of: implementation, investigation, spike, decision, experiment, validation, audit, migration, policy_contract, runbook, incident, deprecation)");
     }
 
     return errors;

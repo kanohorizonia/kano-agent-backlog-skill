@@ -9,7 +9,9 @@
 #include "kano/backlog_core/frontmatter/canonical_store.hpp"
 #include "kano/backlog_core/models/models.hpp"
 #include "kano/backlog_core/process/noninteractive_errors.hpp"
+#include "kano/backlog_core/validation/validator.hpp"
 #include "kano/backlog_ops/index/backlog_index.hpp"
+#include "kano/backlog_ops/view/view_ops.hpp"
 #include "kano/backlog_ops/workitem/workitem_ops.hpp"
 
 namespace {
@@ -168,6 +170,12 @@ int main() {
             const auto created_text = read_text(created.path);
             expect(created_text.find("# Non-Goals / Do Not") != std::string::npos, "created item template should include Non-Goals / Do Not");
             expect(created_text.find("# Intent Amendments") != std::string::npos, "created item template should include Intent Amendments");
+            expect(created_text.find("work_intent: implementation") != std::string::npos, "created item template should include default work_intent");
+            expect(created_text.find("execution_mode: null") != std::string::npos, "created item template should include execution_mode placeholder");
+            expect(created_text.find("result_contract: null") != std::string::npos, "created item template should include result_contract placeholder");
+            expect(created_text.find("evidence_requirement: null") != std::string::npos, "created item template should include evidence_requirement placeholder");
+            expect(created_text.find("follow_up_policy: null") != std::string::npos, "created item template should include follow_up_policy placeholder");
+            expect(created_text.find("no_go_or_defer_policy: null") != std::string::npos, "created item template should include no_go_or_defer_policy placeholder");
 
             auto queried = index.query_items(ItemType::Task, std::nullopt);
             expect(!queried.empty(), "task item should appear in index query");
@@ -226,6 +234,36 @@ int main() {
             auto metadata_only = store.read_metadata(created.path);
             expect(metadata_only.id == created.id, "metadata-only read should preserve id");
             expect(metadata_only.worklog.empty(), "metadata-only read should not parse body worklog");
+
+            auto intent_roundtrip = store.read(created.path);
+            intent_roundtrip.work_intent = "investigation";
+            intent_roundtrip.execution_mode = "no-code";
+            intent_roundtrip.result_contract = "decision-record";
+            intent_roundtrip.evidence_requirement = "notes-and-links";
+            intent_roundtrip.follow_up_policy = "create-implementation-ticket-if-needed";
+            intent_roundtrip.no_go_or_defer_policy = "record-no-change-rationale";
+            store.write(intent_roundtrip);
+            auto intent_roundtrip_full = store.read(created.path);
+            auto intent_roundtrip_metadata = store.read_metadata(created.path);
+            expect(intent_roundtrip_full.work_intent && *intent_roundtrip_full.work_intent == "investigation", "full read should round-trip work_intent metadata");
+            expect(intent_roundtrip_full.execution_mode && *intent_roundtrip_full.execution_mode == "no-code", "full read should round-trip execution_mode metadata");
+            expect(intent_roundtrip_full.result_contract && *intent_roundtrip_full.result_contract == "decision-record", "full read should round-trip result_contract metadata");
+            expect(intent_roundtrip_metadata.work_intent && *intent_roundtrip_metadata.work_intent == "investigation", "metadata-only read should preserve work_intent");
+            expect(intent_roundtrip_metadata.evidence_requirement && *intent_roundtrip_metadata.evidence_requirement == "notes-and-links", "metadata-only read should preserve evidence_requirement");
+            expect(intent_roundtrip_metadata.follow_up_policy && *intent_roundtrip_metadata.follow_up_policy == "create-implementation-ticket-if-needed", "metadata-only read should preserve follow_up_policy");
+            expect(intent_roundtrip_metadata.no_go_or_defer_policy && *intent_roundtrip_metadata.no_go_or_defer_policy == "record-no-change-rationale", "metadata-only read should preserve no_go_or_defer_policy");
+
+            auto invalid_intent = intent_roundtrip_full;
+            invalid_intent.work_intent = "research";
+            auto schema_errors = kano::backlog_core::Validator::validate_schema(invalid_intent);
+            bool saw_invalid_intent = false;
+            for (const auto& error : schema_errors) {
+                if (error.find("Invalid work_intent: research") != std::string::npos) {
+                    saw_invalid_intent = true;
+                    break;
+                }
+            }
+            expect(saw_invalid_intent, "schema validation should reject invalid non-blank work_intent values");
 
             auto initiative_created = create_item_with_admission(
                 index,
@@ -428,6 +466,70 @@ int main() {
             auto orphan_stack = WorkitemOps::resolve_intent_stack(root, created.id);
             expect(orphan_stack.chain.size() == 1, "orphan item stack should contain only the current item");
             expect(orphan_stack.warnings.empty(), "orphan item stack should not warn");
+
+            auto incomplete_contract_created = create_item_with_admission(
+                index,
+                root,
+                "TST",
+                ItemType::Task,
+                "Incomplete non implementation contract smoke",
+                "opencode");
+            auto incomplete_contract = store.read(incomplete_contract_created.path);
+            set_ready_fields(incomplete_contract);
+            incomplete_contract.state = ItemState::InProgress;
+            incomplete_contract.work_intent = "decision";
+            incomplete_contract.execution_mode = "no-code";
+            incomplete_contract.worklog = {"Do Not Compliance Report: ok/warn/violation none."};
+            store.write(incomplete_contract);
+            index.index_item(incomplete_contract);
+            auto incomplete_contract_review = WorkitemOps::update_state(
+                index,
+                root,
+                incomplete_contract_created.id,
+                ItemState::Review,
+                "opencode",
+                std::string("Review incomplete non implementation result contract"));
+            expect(incomplete_contract_review.new_state == ItemState::Review, "incomplete non-implementation contract warning should remain advisory");
+            expect_diagnostic_contains(
+                incomplete_contract_review,
+                "InProgress->Review work intent contract: non-implementation work_intent=decision missing result_contract, evidence_requirement, follow_up_policy, no_go_or_defer_policy",
+                "incomplete non-implementation result contract should warn with missing metadata fields");
+
+            auto complete_contract_created = create_item_with_admission(
+                index,
+                root,
+                "TST",
+                ItemType::Task,
+                "Complete non implementation contract smoke",
+                "opencode");
+            auto complete_contract = store.read(complete_contract_created.path);
+            set_ready_fields(complete_contract);
+            complete_contract.state = ItemState::InProgress;
+            complete_contract.work_intent = "investigation";
+            complete_contract.execution_mode = "no-code";
+            complete_contract.result_contract = "decision-record";
+            complete_contract.evidence_requirement = "investigation-notes-and-links";
+            complete_contract.follow_up_policy = "create-follow-up-implementation-ticket";
+            complete_contract.no_go_or_defer_policy = "record-no-go-or-defer-rationale";
+            complete_contract.worklog = {"Do Not Compliance Report: ok/warn/violation none."};
+            store.write(complete_contract);
+            index.index_item(complete_contract);
+            auto complete_contract_review = WorkitemOps::update_state(
+                index,
+                root,
+                complete_contract_created.id,
+                ItemState::Review,
+                "opencode",
+                std::string("Review complete non implementation result contract"));
+            expect_no_diagnostic_contains(
+                complete_contract_review,
+                "InProgress->Review work intent contract",
+                "complete non-implementation result contract should not warn");
+
+            kano::backlog_ops::ViewOps::refresh_dashboards(root, "opencode");
+            const auto active_dashboard = read_text(root / "views" / "Dashboard_PlainMarkdown_Active.md");
+            expect(active_dashboard.find("Intent: investigation") != std::string::npos, "plain Markdown dashboard should show Work Intent indicator");
+            expect(active_dashboard.find("Result: decision-record") != std::string::npos, "plain Markdown dashboard should show result contract indicator");
 
             const auto create_review_task = [&](const std::string& title,
                                                 const std::vector<std::string>& worklog,

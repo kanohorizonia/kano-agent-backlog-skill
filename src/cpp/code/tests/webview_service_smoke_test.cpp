@@ -124,6 +124,18 @@ std::optional<Json::Value> find_finding(const Json::Value& findings,
     return std::nullopt;
 }
 
+std::optional<Json::Value> find_quality_row(const Json::Value& rows,
+                                            const std::string& product,
+                                            const std::string& item_id) {
+    for (const auto& row : rows) {
+        if (row["product"].asString() == product &&
+            row["item_id"].asString() == item_id) {
+            return row;
+        }
+    }
+    return std::nullopt;
+}
+
 bool has_edge(const Json::Value& edges,
               const std::string& from,
               const std::string& to,
@@ -604,6 +616,86 @@ int main() {
         expect(doneDetector["counts_by_reason"]["branch_convergence_missing_or_unknown"].asUInt64() >= 1,
                "detector should count branch convergence findings by reason");
 
+        const auto qualityFileCountBefore = count_regular_files(products);
+        const auto qualityStateBefore = read_text(products / "product-beta" / "items" / "bug" / "0002" / "PRB-BUG-0002.md");
+        auto qualityView = service.BuildEvidenceQualityView(allOptions);
+        expect(!qualityView.isMember("error"), "evidence quality view query should not fail");
+        expect(qualityView["schema"].asString() == "kob.evidence.quality_view.v1",
+               "evidence quality view should expose its view schema");
+        expect(qualityView["read_only"].asBool(), "evidence quality view must be read-only");
+        expect(!qualityView["mutation_allowed"].asBool(), "evidence quality view must not allow mutations");
+        expect(!qualityView["starts_agent"].asBool(), "evidence quality view must not start agents");
+        expect(!qualityView["dispatches_work"].asBool(), "evidence quality view must not dispatch work");
+        expect(qualityView["advisory_only"].asBool(), "evidence quality view must be advisory only");
+        expect(qualityView["row_count"].asUInt64() == qualityView["rows"].size(),
+               "evidence quality view should expose bounded row_count metadata");
+        expect(qualityView["pagination_ignored_for_full_scan"].asBool(),
+               "evidence quality view should scan the selected set instead of one query page");
+        expect(qualityView["scanned"].asUInt64() == qualityView["query_total"].asUInt64(),
+               "evidence quality full scan should visit every selected query match");
+        expect(!qualityView["truncated"].asBool(), "unbounded evidence quality query should not be truncated");
+        expect(count_regular_files(products) == qualityFileCountBefore,
+               "evidence quality view must not create or delete files");
+        expect(read_text(products / "product-beta" / "items" / "bug" / "0002" / "PRB-BUG-0002.md") == qualityStateBefore,
+               "evidence quality view must not mutate item markdown state");
+        for (const auto& row : qualityView["rows"]) {
+            expect(row["schema"].asString() == "kob.evidence.quality_classification.v1",
+                   "evidence quality rows should match the classification schema id");
+            expect(!row["claim"].asString().empty(), "evidence quality row should include claim");
+            expect(!row["falsifier"].asString().empty(), "evidence quality row should include falsifier");
+            expect(row["evidence"].isArray(), "evidence quality row should include evidence refs");
+            expect(!row["verdict"].asString().empty(), "evidence quality row should include verdict");
+            expect(!row["gap"].asString().empty(), "evidence quality row should include gap");
+            expect(!row["suggested_action"].asString().empty(), "evidence quality row should include suggested action");
+            expect(row["claim_ref"].isObject(), "evidence quality row should include claim_ref");
+            expect(!row["quality_state"].asString().empty(), "evidence quality row should include quality_state");
+            expect(row["inputs"].isObject(), "evidence quality row should include inputs");
+            expect(!row["human_wording"].asString().empty(), "evidence quality row should include human wording");
+            expect(!row["fallback_behavior"].asString().empty(), "evidence quality row should include fallback behavior");
+            expect(row["diagnostics"].isArray(), "evidence quality row should include diagnostics");
+            expect(row["read_only"].asBool(), "evidence quality rows should be read-only");
+            expect(!row["mutation_allowed"].asBool(), "evidence quality rows should not allow mutation");
+            expect(!row["starts_agent"].asBool(), "evidence quality rows should not start agents");
+            expect(!row["dispatches_work"].asBool(), "evidence quality rows should not dispatch work");
+        }
+        auto strongQuality = find_quality_row(qualityView["rows"], "product-beta", "PRB-BUG-0002");
+        expect(strongQuality.has_value(), "done item with strong evidence should have a quality row");
+        expect((*strongQuality)["quality_state"].asString() == "strong",
+               "done item with validation, artifact, commit, and branch convergence should be strong");
+        auto missingQuality = find_quality_row(qualityView["rows"], "product-beta", "PRB-BUG-0003");
+        expect(missingQuality.has_value(), "closed item without evidence should have a quality row");
+        expect((*missingQuality)["quality_state"].asString() == "missing",
+               "closed item without durable evidence should be missing");
+        auto weakQuality = find_quality_row(qualityView["rows"], "product-beta", "PRB-BUG-0005");
+        expect(weakQuality.has_value(), "done item missing source-control proof should have a quality row");
+        expect((*weakQuality)["quality_state"].asString() == "weak",
+               "partial evidence without source-control proof should be weak");
+        auto staleQuality = find_quality_row(qualityView["rows"], "product-beta", "PRB-BUG-0006");
+        expect(staleQuality.has_value(), "done item with stale worklog should have a quality row");
+        expect((*staleQuality)["quality_state"].asString() == "stale",
+               "done item updated after worklog evidence should be stale");
+        auto unclearQuality = find_quality_row(qualityView["rows"], "product-beta", "PRB-BUG-0007");
+        expect(unclearQuality.has_value(), "done item with unclear branch convergence should have a quality row");
+        expect((*unclearQuality)["quality_state"].asString() == "unclear",
+               "done item with commit evidence but unknown branch convergence should be unclear");
+        expect(qualityView["counts_by_quality_state"]["strong"].asUInt64() >= 1,
+               "evidence quality view should count strong rows");
+        expect(qualityView["counts_by_quality_state"]["weak"].asUInt64() >= 1,
+               "evidence quality view should count weak rows");
+        expect(qualityView["counts_by_quality_state"]["missing"].asUInt64() >= 1,
+               "evidence quality view should count missing rows");
+        expect(qualityView["counts_by_quality_state"]["stale"].asUInt64() >= 1,
+               "evidence quality view should count stale rows");
+        expect(qualityView["counts_by_quality_state"]["unclear"].asUInt64() >= 1,
+               "evidence quality view should count unclear rows");
+        webview::ItemQueryOptions pagedQualityOptions = allOptions;
+        pagedQualityOptions.limit = 1;
+        auto pagedQuality = service.BuildEvidenceQualityView(pagedQualityOptions);
+        expect(find_quality_row(pagedQuality["rows"], "product-beta", "PRB-BUG-0007").has_value(),
+               "evidence quality view should not miss rows beyond the first requested page");
+        expect(!pagedQuality["truncated"].asBool(),
+               "evidence quality view should report no truncation after internal pagination completes");
+
         webview::ItemQueryOptions taskText;
         taskText.types = {"Task"};
         taskText.text = "migration evidence";
@@ -1010,6 +1102,8 @@ int main() {
         const auto webviewReadme = read_text(webviewAppRoot / "README.md");
         expect(webviewReadme.find("/api/review/done-detector") != std::string::npos,
                "webview README should list the done detector API route");
+        expect(webviewReadme.find("/api/review/evidence-quality") != std::string::npos,
+               "webview README should list the evidence quality API route");
 
         const auto readme = read_text(locate_repo_file("README.md"));
         expect(readme.find("pixi run webview-smoke-artifacts") != std::string::npos,

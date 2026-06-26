@@ -2241,6 +2241,142 @@ Json::Value DoneDetectorFinding(const Json::Value& item,
   return finding;
 }
 
+Json::Value EvidenceQualityInputs(const Json::Value& item,
+                                  const Json::Value& evidence,
+                                  const Json::Value& evidenceRefs) {
+  Json::Value inputs(Json::objectValue);
+  inputs["commits"] = Json::arrayValue;
+  inputs["validation"] = Json::arrayValue;
+  inputs["artifacts"] = Json::arrayValue;
+  inputs["worklogs"] = Json::arrayValue;
+  inputs["dogfood"] = Json::arrayValue;
+  inputs["falsifiers"] = Json::arrayValue;
+
+  const auto& signals = evidence["signals"];
+  if (JsonBoolAt(signals, "commit")) {
+    inputs["commits"].append("commit signal in " + WorklogRef(item));
+  }
+  for (const auto& ref : evidenceRefs) {
+    const auto kind = ref.get("kind", "").asString();
+    Json::Value inputRef(Json::objectValue);
+    inputRef["product"] = item.get("product", "").asString();
+    inputRef["item_id"] = item.get("id", "").asString();
+    inputRef["evidence_id"] = kind.empty() ? ref.get("ref", "").asString() : kind;
+    if (kind == "validation") {
+      inputs["validation"].append(inputRef);
+    } else if (kind == "artifact") {
+      inputs["artifacts"].append(inputRef);
+    } else if (kind == "worklog" || kind == "push" || kind == "branch_convergence") {
+      inputs["worklogs"].append(inputRef);
+    }
+  }
+  return inputs;
+}
+
+std::string MissingEvidenceText(const Json::Value& missing) {
+  std::vector<std::string> parts;
+  if (missing.isArray()) {
+    for (const auto& value : missing) {
+      parts.push_back(value.asString());
+    }
+  }
+  if (parts.empty()) {
+    return "No deterministic evidence gap detected.";
+  }
+  std::ostringstream out;
+  for (size_t i = 0; i < parts.size(); ++i) {
+    if (i > 0) {
+      out << ", ";
+    }
+    out << parts[i];
+  }
+  return out.str();
+}
+
+Json::Value EvidenceQualityRow(const Json::Value& item,
+                               const Json::Value& evidence,
+                               const Json::Value& lastWorklog,
+                               const Json::Value& evidenceRefs,
+                               const Json::Value& branchConvergence) {
+  const auto state = text::ToLower(item.get("state", "").asString());
+  const auto content = item.get("content", "").asString();
+  const auto score = evidence.get("score", 0U).asUInt64();
+  const bool done = state == "done" || state == "closed";
+  const bool stale = HasStaleWorklogAfterDone(item, lastWorklog) ||
+                     ContentContainsAny(content, {"stale", "drift", "outdated", "timed out"});
+  const bool branchComplete = branchConvergence.get("complete", false).asBool();
+  const bool hasBranchSignal = branchConvergence.get("status", "unknown").asString() != "unknown";
+
+  std::string quality = "weak";
+  std::string gap = "Evidence exists but is incomplete for the claim.";
+  std::string action = "request_better_evidence";
+  std::string wording = "Evidence exists, but a reviewer should request stronger proof before accepting high-risk claims.";
+  std::string fallback = "Show weak evidence and link back to the worklog or artifact records.";
+  Json::Value diagnostics(Json::arrayValue);
+  diagnostics.append("Deterministic heuristic; not a proof or hidden score.");
+
+  if (score == 0 && evidenceRefs.empty()) {
+    quality = "missing";
+    gap = "No durable validation, artifact, commit, or worklog evidence was found.";
+    action = "request_evidence";
+    wording = "Do not treat the claim as proven until durable evidence is attached.";
+    fallback = "Surface the item for human evidence review.";
+  } else if (stale) {
+    quality = "stale";
+    gap = "Evidence appears older than the item update or the text signals stale/drift risk.";
+    action = "refresh_evidence";
+    wording = "Evidence exists but should be refreshed before accepting the claim.";
+    fallback = "Ask for current validation or an explicit accepted-risk note.";
+  } else if (done && evidence.get("complete", false).asBool() && branchComplete) {
+    quality = "strong";
+    gap = "No deterministic evidence gap detected.";
+    action = "review_as_sufficient";
+    wording = "Evidence is sufficient for review unless new risks are known.";
+    fallback = "Keep raw evidence refs visible so humans can challenge the classification.";
+  } else if (done && !branchComplete && (JsonBoolAt(evidence["signals"], "commit") || hasBranchSignal)) {
+    quality = "unclear";
+    gap = "Source-control evidence exists, but branch convergence is incomplete or unknown: " +
+          MissingEvidenceText(branchConvergence["missing"]);
+    action = "ask_for_interpretation_or_narrower_claim";
+    wording = "Evidence exists but does not clearly prove or disprove the claim.";
+    fallback = "Ask for target branch, reachability, and remote publication evidence.";
+  } else if (!evidence.get("complete", false).asBool()) {
+    quality = score == 0 ? "missing" : "weak";
+    gap = "Missing evidence: " + MissingEvidenceText(evidence["missing"]);
+    action = quality == "missing" ? "request_evidence" : "request_better_evidence";
+  }
+
+  Json::Value row(Json::objectValue);
+  row["schema"] = "kob.evidence.quality_classification.v1";
+  row["product"] = item.get("product", "").asString();
+  row["item_id"] = item.get("id", "").asString();
+  row["title"] = item.get("title", "").asString();
+  row["state"] = item.get("state", "").asString();
+  row["claim"] = item.get("state", "").asString() + " claim for " +
+                  item.get("id", "").asString() + ": " + item.get("title", "").asString();
+  row["falsifier"] = "Can a reviewer find current validation, artifact/worklog, and source-control evidence for this claim?";
+  row["evidence"] = evidenceRefs;
+  row["evidence_summary"] = evidence;
+  row["branch_convergence_evidence"] = branchConvergence;
+  row["last_relevant_worklog"] = lastWorklog;
+  row["verdict"] = quality;
+  row["quality_state"] = quality;
+  row["gap"] = gap;
+  row["suggested_action"] = action;
+  row["claim_ref"]["product"] = item.get("product", "").asString();
+  row["claim_ref"]["item_id"] = item.get("id", "").asString();
+  row["inputs"] = EvidenceQualityInputs(item, evidence, evidenceRefs);
+  row["human_wording"] = wording;
+  row["fallback_behavior"] = fallback;
+  row["diagnostics"] = diagnostics;
+  row["read_only"] = true;
+  row["advisory"] = true;
+  row["mutation_allowed"] = false;
+  row["starts_agent"] = false;
+  row["dispatches_work"] = false;
+  return row;
+}
+
 bool ItemMatchesTopic(const Json::Value& item, const std::string& topic) {
   if (topic.empty()) {
     return true;
@@ -3870,6 +4006,89 @@ Json::Value BacklogWebviewService::BuildDoneCandidateDetector(
   return response;
 }
 
+Json::Value BacklogWebviewService::BuildEvidenceQualityView(
+    const ItemQueryOptions& options) {
+  Json::Value response(Json::objectValue);
+  response["schema"] = "kob.evidence.quality_view.v1";
+  response["rows"] = Json::arrayValue;
+  response["counts_by_quality_state"] = Json::objectValue;
+  response["read_only"] = true;
+  response["mutation_allowed"] = false;
+  response["starts_agent"] = false;
+  response["dispatches_work"] = false;
+  response["advisory_only"] = true;
+  response["empty_state"] =
+      "No evidence-quality rows need reviewer attention for the current filters.";
+
+  auto scanOptions = options;
+  scanOptions.limit = 1000;
+  scanOptions.offset = 0;
+  auto items = QueryItems(scanOptions);
+  if (items.isMember("error")) {
+    return items;
+  }
+  while (items["offset"].asUInt64() + items["items"].size() < items["total"].asUInt64()) {
+    scanOptions.offset = items["offset"].asUInt64() + items["items"].size();
+    auto page = QueryItems(scanOptions);
+    if (page.isMember("error")) {
+      return page;
+    }
+    for (const auto& item : page["items"]) {
+      items["items"].append(item);
+    }
+    items["warnings"] = MergeWarnings(items["warnings"], page["warnings"]);
+    items["limit"] = page["limit"];
+    items["offset"] = 0U;
+  }
+
+  response["products"] = items["products"];
+  response["warnings"] = items["warnings"];
+  response["requested_limit"] = static_cast<Json::UInt64>(options.limit);
+  response["requested_offset"] = static_cast<Json::UInt64>(options.offset);
+  response["scan_limit"] = items.get("limit", 0U);
+  response["scan_offset"] = 0U;
+  response["pagination_ignored_for_full_scan"] = true;
+  response["query_total"] = items.get("total", 0U);
+  response["scanned"] = static_cast<Json::UInt64>(items["items"].size());
+  response["truncated"] = response["scanned"].asUInt64() <
+                          response["query_total"].asUInt64();
+
+  auto appendRow = [&](const Json::Value& row) {
+    response["rows"].append(row);
+    const auto quality = row.get("quality_state", "unclear").asString();
+    response["counts_by_quality_state"][quality] = static_cast<Json::UInt64>(
+        response["counts_by_quality_state"].get(quality, 0U).asUInt64() + 1U);
+  };
+
+  for (const auto& itemSummary : items["items"]) {
+    if (itemSummary.get("source_kind", "").asString() != "Item") {
+      continue;
+    }
+    const auto product = itemSummary.get("product", "").asString();
+    const auto itemId = itemSummary.get("id", "").asString();
+    auto detail = GetEvidenceDetail(product, itemId, options.forceRefresh);
+    if (detail.isMember("error")) {
+      response["warnings"].append(product + ": " + itemId + ": " +
+                                  detail.get("error", "unknown error").asString());
+      continue;
+    }
+
+    const auto item = detail["item"];
+    const auto evidence = detail["evidence"];
+    const auto content = item.get("content", "").asString();
+    const auto lastWorklog = LastRelevantWorklog(item);
+    const bool hasPush = HasPushEvidence(content);
+    const auto branchConvergence = BranchConvergenceEvidence(content);
+    const auto refs = AvailableEvidenceRefs(
+        item, evidence, hasPush, branchConvergence.get("complete", false).asBool());
+    appendRow(EvidenceQualityRow(item, evidence, lastWorklog, refs, branchConvergence));
+  }
+
+  response["empty"] = response["rows"].empty();
+  response["row_count"] = static_cast<Json::UInt64>(response["rows"].size());
+  return response;
+}
+
 Json::Value BacklogWebviewService::SaveReviewDecisionDraft(
     const Json::Value& request) {
   try {
@@ -5393,6 +5612,23 @@ void RegisterBacklogWebviewRoutes(
       [metaAppender, &service, queryOptionsFromRequest](const HttpRequestPtr& request,
           std::function<void(const HttpResponsePtr&)>&& callback) {
         auto data = service.BuildDoneCandidateDetector(queryOptionsFromRequest(request));
+        Json::Value body(Json::objectValue);
+        body["ok"] = !data.isMember("error");
+        body["data"] = data;
+        metaAppender(request, body);
+        auto response = HttpResponse::newHttpJsonResponse(body);
+        if (!body["ok"].asBool()) {
+          response->setStatusCode(k400BadRequest);
+        }
+        callback(response);
+      },
+      {Get});
+
+  app().registerHandler(
+      "/api/review/evidence-quality",
+      [metaAppender, &service, queryOptionsFromRequest](const HttpRequestPtr& request,
+          std::function<void(const HttpResponsePtr&)>&& callback) {
+        auto data = service.BuildEvidenceQualityView(queryOptionsFromRequest(request));
         Json::Value body(Json::objectValue);
         body["ok"] = !data.isMember("error");
         body["data"] = data;

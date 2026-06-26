@@ -78,6 +78,7 @@ struct ProductDefinition {
     std::optional<std::string> tokenizer_model;
     std::optional<std::string> default_assignee;
     std::optional<std::string> default_bug_reviewer;
+    std::string topics_date_prefix_policy = "warn";
 };
 
 struct ProductPrefixCollision {

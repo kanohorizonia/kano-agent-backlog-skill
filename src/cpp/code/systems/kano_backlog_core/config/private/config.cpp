@@ -118,6 +118,19 @@ std::optional<int> parse_toml_int(const std::string& value) {
     }
 }
 
+std::string parse_topics_date_prefix_policy(const std::string& value) {
+    auto parsed = parse_toml_string_value(value);
+    std::transform(parsed.begin(), parsed.end(), parsed.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+    if (parsed != "off" && parsed != "warn" && parsed != "enforce") {
+        throw kano::backlog_core::ConfigError(
+            "topics_date_prefix_policy must be one of: off, warn, enforce"
+        );
+    }
+    return parsed;
+}
+
 std::optional<std::string> parse_products_section(const std::string& section) {
     constexpr std::string_view prefix = "products.";
     if (!section.starts_with(prefix)) {
@@ -150,6 +163,7 @@ void apply_product_value(ProductDefinition& product, const std::string& key, con
     else if (key == "tokenizer_model") product.tokenizer_model = parse_toml_string_value(value);
     else if (key == "default_assignee") product.default_assignee = parse_toml_string_value(value);
     else if (key == "default_bug_reviewer") product.default_bug_reviewer = parse_toml_string_value(value);
+    else if (key == "topics_date_prefix_policy") product.topics_date_prefix_policy = parse_topics_date_prefix_policy(value);
 }
 
 void apply_product_local_config_file(ProductDefinition& product, const std::filesystem::path& file_path) {

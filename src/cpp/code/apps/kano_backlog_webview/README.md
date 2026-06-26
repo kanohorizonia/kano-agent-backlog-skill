@@ -26,6 +26,7 @@ Design contracts:
   - `GET /api/kanban?product=all|<name>[&products=a,b][&q=...][&state=...][&type=...][&limit=...]`
   - `GET /api/refresh[?product=all|<name>][&products=a,b]`
   - `GET /api/review/done-detector?product=all|<name>[&products=a,b][&q=...][&state=...][&type=...]`
+  - `GET /api/review/evidence-quality?product=all|<name>[&products=a,b][&q=...][&state=...][&type=...]`
   - `POST /api/review/decision/draft`
   - `POST /api/review/decision/draft/discard`
   - `POST /api/review/decision/submit`

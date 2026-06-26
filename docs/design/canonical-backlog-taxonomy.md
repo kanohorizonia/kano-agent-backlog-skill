@@ -25,7 +25,9 @@ explicitly accepted.
 
 Work Intent is metadata on those item types, not another taxonomy tier. The
 accepted metadata fields are `work_intent`, `execution_mode`, `result_contract`,
-`evidence_requirement`, `follow_up_policy`, and `no_go_or_defer_policy`.
+`evidence_requirement`, `follow_up_policy`, and `no_go_or_defer_policy`, plus
+passive provenance fields `intent.author`, `intent.source`, `intent.owner`,
+`intent.reviewers`, `intent.conflicts_with`, and `intent.supersedes`.
 Allowed `work_intent` values are `implementation`, `investigation`, `spike`,
 `decision`, `experiment`, `validation`, `audit`, `migration`,
 `policy_contract`, `runbook`, `incident`, and `deprecation`.
@@ -72,6 +74,11 @@ policy says whether implementation tickets were created; and the no-go/defer
 policy records why no change follows. If implementation is required, create or
 link a follow-up Task/Bug/Feature and keep the original no-code item as the
 decision or investigation record.
+
+`KOB-TSK-0071` reserves the `intent.*` fields for future multi-human provenance
+and conflict visibility. They are optional extension points only; this taxonomy
+does not add governance, voting, authority rules, permission policy, or automated
+intent conflict resolution.
 
 ## Flexible Parent Model
 

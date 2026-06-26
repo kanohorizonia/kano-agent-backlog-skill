@@ -111,6 +111,20 @@ Fields:
 - `no_go_or_defer_policy`: optional rule for recording no-change, no-go, defer,
   or blocked outcomes.
 
+Passive provenance extension fields reserved for future multi-human workflows:
+
+- `intent.author`: optional human or agent originator label for the current intent.
+- `intent.source`: optional source channel, document, conversation, or import label.
+- `intent.owner`: optional current intent steward label; this is not an authority rule.
+- `intent.reviewers`: optional list of people or agents asked to review intent.
+- `intent.conflicts_with`: optional list of item refs that may conflict with this intent.
+- `intent.supersedes`: optional list of item refs whose intent this item supersedes.
+
+These `intent.*` fields are passive metadata only. They do not implement voting,
+approval matrices, permission checks, ownership transfer, or automated conflict
+resolution. They are safe to omit, and current KOB workflow remains focused on
+single-maintainer and small-team review.
+
 `implementation` is the default work intent for newly rendered item templates.
 For non-implementation intents, moving from InProgress to Review emits advisory
 diagnostics when `result_contract`, `evidence_requirement`, `follow_up_policy`,
@@ -210,6 +224,12 @@ result_contract: null
 evidence_requirement: null
 follow_up_policy: null
 no_go_or_defer_policy: null
+intent.author: null
+intent.source: null
+intent.owner: null
+intent.reviewers: []
+intent.conflicts_with: []
+intent.supersedes: []
 tags: []
 created: 2026-01-02
 updated: 2026-01-02

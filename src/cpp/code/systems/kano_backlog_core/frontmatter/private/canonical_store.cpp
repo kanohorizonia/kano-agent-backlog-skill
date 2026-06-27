@@ -173,7 +173,9 @@ BacklogItem item_from_context(
         item.intent_author = parse_optional_string(ctx.metadata["intent.author"]);
         item.intent_source = parse_optional_string(ctx.metadata["intent.source"]);
         item.intent_owner = parse_optional_string(ctx.metadata["intent.owner"]);
+        item.intent_rationale = parse_optional_string(ctx.metadata["intent.rationale"]);
         item.intent_reviewers = parse_string_list(ctx.metadata["intent.reviewers"]);
+        item.intent_provenance_refs = parse_string_list(ctx.metadata["intent.provenance_refs"]);
         item.intent_conflicts_with = parse_string_list(ctx.metadata["intent.conflicts_with"]);
         item.intent_supersedes = parse_string_list(ctx.metadata["intent.supersedes"]);
         item.created = ctx.metadata["created"].as<std::string>();
@@ -350,9 +352,13 @@ void CanonicalStore::write(BacklogItem& item) const {
     metadata["intent.author"] = item.intent_author ? YAML::Node(*item.intent_author) : YAML::Node(YAML::NodeType::Null);
     metadata["intent.source"] = item.intent_source ? YAML::Node(*item.intent_source) : YAML::Node(YAML::NodeType::Null);
     metadata["intent.owner"] = item.intent_owner ? YAML::Node(*item.intent_owner) : YAML::Node(YAML::NodeType::Null);
+    metadata["intent.rationale"] = item.intent_rationale ? YAML::Node(*item.intent_rationale) : YAML::Node(YAML::NodeType::Null);
     YAML::Node intent_reviewers(YAML::NodeType::Sequence);
     for (const auto& value : item.intent_reviewers) intent_reviewers.push_back(value);
     metadata["intent.reviewers"] = intent_reviewers;
+    YAML::Node intent_provenance_refs(YAML::NodeType::Sequence);
+    for (const auto& value : item.intent_provenance_refs) intent_provenance_refs.push_back(value);
+    metadata["intent.provenance_refs"] = intent_provenance_refs;
     YAML::Node intent_conflicts_with(YAML::NodeType::Sequence);
     for (const auto& value : item.intent_conflicts_with) intent_conflicts_with.push_back(value);
     metadata["intent.conflicts_with"] = intent_conflicts_with;

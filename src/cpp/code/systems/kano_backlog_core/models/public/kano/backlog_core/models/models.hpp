@@ -86,7 +86,9 @@ struct BacklogItem {
     std::optional<std::string> intent_author;
     std::optional<std::string> intent_source;
     std::optional<std::string> intent_owner;
+    std::optional<std::string> intent_rationale;
     std::vector<std::string> intent_reviewers;
+    std::vector<std::string> intent_provenance_refs;
     std::vector<std::string> intent_conflicts_with;
     std::vector<std::string> intent_supersedes;
 

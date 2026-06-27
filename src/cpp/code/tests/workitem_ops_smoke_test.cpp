@@ -192,7 +192,9 @@ int main() {
             expect(created_text.find("intent.author: null") != std::string::npos, "created item template should include intent.author placeholder");
             expect(created_text.find("intent.source: null") != std::string::npos, "created item template should include intent.source placeholder");
             expect(created_text.find("intent.owner: null") != std::string::npos, "created item template should include intent.owner placeholder");
+            expect(created_text.find("intent.rationale: null") != std::string::npos, "created item template should include intent.rationale placeholder");
             expect(created_text.find("intent.reviewers: []") != std::string::npos, "created item template should include intent.reviewers placeholder");
+            expect(created_text.find("intent.provenance_refs: []") != std::string::npos, "created item template should include intent.provenance_refs placeholder");
             expect(created_text.find("intent.conflicts_with: []") != std::string::npos, "created item template should include intent.conflicts_with placeholder");
             expect(created_text.find("intent.supersedes: []") != std::string::npos, "created item template should include intent.supersedes placeholder");
 
@@ -264,7 +266,9 @@ int main() {
             intent_roundtrip.intent_author = "human-requester";
             intent_roundtrip.intent_source = "chat-session";
             intent_roundtrip.intent_owner = "maintainer-owner";
+            intent_roundtrip.intent_rationale = "Preserve why the request should remain durable";
             intent_roundtrip.intent_reviewers = {"reviewer-a", "reviewer-b"};
+            intent_roundtrip.intent_provenance_refs = {"chat://session/123", "doc://decision-log"};
             intent_roundtrip.intent_conflicts_with = {"TST-TSK-0098"};
             intent_roundtrip.intent_supersedes = {"TST-TSK-0097"};
             store.write(intent_roundtrip);
@@ -280,8 +284,12 @@ int main() {
             expect(intent_roundtrip_full.intent_author && *intent_roundtrip_full.intent_author == "human-requester", "full read should round-trip intent.author metadata");
             expect(intent_roundtrip_full.intent_source && *intent_roundtrip_full.intent_source == "chat-session", "full read should round-trip intent.source metadata");
             expect(intent_roundtrip_full.intent_owner && *intent_roundtrip_full.intent_owner == "maintainer-owner", "full read should round-trip intent.owner metadata");
+            expect(intent_roundtrip_full.intent_rationale && *intent_roundtrip_full.intent_rationale == "Preserve why the request should remain durable", "full read should round-trip intent.rationale metadata");
             expect(intent_roundtrip_full.intent_reviewers.size() == 2 && intent_roundtrip_full.intent_reviewers[1] == "reviewer-b", "full read should round-trip intent.reviewers metadata");
+            expect(intent_roundtrip_full.intent_provenance_refs.size() == 2 && intent_roundtrip_full.intent_provenance_refs[1] == "doc://decision-log", "full read should round-trip intent.provenance_refs metadata");
+            expect(intent_roundtrip_metadata.intent_rationale && *intent_roundtrip_metadata.intent_rationale == "Preserve why the request should remain durable", "metadata-only read should preserve intent.rationale");
             expect(intent_roundtrip_metadata.intent_reviewers.size() == 2 && intent_roundtrip_metadata.intent_reviewers[0] == "reviewer-a", "metadata-only read should preserve intent.reviewers");
+            expect(intent_roundtrip_metadata.intent_provenance_refs.size() == 2 && intent_roundtrip_metadata.intent_provenance_refs[0] == "chat://session/123", "metadata-only read should preserve intent.provenance_refs");
             expect(intent_roundtrip_metadata.intent_conflicts_with.size() == 1 && intent_roundtrip_metadata.intent_conflicts_with[0] == "TST-TSK-0098", "metadata-only read should preserve intent.conflicts_with");
             expect(intent_roundtrip_metadata.intent_supersedes.size() == 1 && intent_roundtrip_metadata.intent_supersedes[0] == "TST-TSK-0097", "metadata-only read should preserve intent.supersedes");
 

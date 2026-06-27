@@ -1160,6 +1160,53 @@ Json::Value MakeArray(const std::vector<std::string>& values) {
   return out;
 }
 
+Json::Value MakeLogicalRef(const std::string& product,
+                           const std::string& itemId,
+                           const std::string& adrId = "") {
+  Json::Value ref(Json::objectValue);
+  ref["product"] = product;
+  if (!itemId.empty()) {
+    ref["item_id"] = itemId;
+  }
+  if (!adrId.empty()) {
+    ref["adr_id"] = adrId;
+  }
+  return ref;
+}
+
+Json::Value ProductMapNode(const Json::Value& item,
+                           const std::string& nodeType) {
+  const auto product = item.get("product", "").asString();
+  const auto id = item.get("id", "").asString();
+  Json::Value node(Json::objectValue);
+  node["id"] = nodeType + ":" + id;
+  node["node_type"] = nodeType;
+  node["title"] = item.get("title", id).asString();
+  node["summary"] = "Backboard navigation record for " + id;
+  node["ref"] = nodeType == "adr" ? MakeLogicalRef(product, "", id)
+                                    : MakeLogicalRef(product, id);
+  node["evidence_refs"] = Json::arrayValue;
+  for (const auto& evidence : item["evidence_refs"]) {
+    const auto evidenceId = evidence.asString();
+    if (!evidenceId.empty()) {
+      node["evidence_refs"].append(MakeLogicalRef(product, evidenceId));
+    }
+  }
+  return node;
+}
+
+Json::Value ProductMapEdge(const std::string& from,
+                           const std::string& to,
+                           const std::string& edgeType,
+                           const Json::Value& sourceRef) {
+  Json::Value edge(Json::objectValue);
+  edge["from"] = from;
+  edge["to"] = to;
+  edge["edge_type"] = edgeType;
+  edge["source_ref"] = sourceRef;
+  return edge;
+}
+
 Json::Value MakeEvidenceItem(const ItemRecord& item) {
   Json::Value value(Json::objectValue);
   value["id"] = item.id;
@@ -2805,6 +2852,16 @@ ItemRecord BacklogWebviewService::ParseDecision(
   if (item.state.empty()) {
     item.state = "Proposed";
   }
+  item.decisionStatus = map["decision_status"];
+  if (!item.decisionStatus.empty()) {
+    item.state = item.decisionStatus;
+  }
+  item.featureRefs = ExtractFrontmatterList(content, "feature_refs");
+  item.acceptedOption = map["accepted_option"];
+  item.rejectedOptions = ExtractFrontmatterList(content, "rejected_options");
+  item.evidenceRefs = ExtractFrontmatterList(content, "evidence_refs");
+  item.supersededBy = ExtractFrontmatterList(content, "superseded_by");
+  item.revisitCondition = map["revisit_condition"];
   item.created = map["date"];
   item.updated = map["date"];
   item.valid = true;
@@ -2932,6 +2989,13 @@ Json::Value BacklogWebviewService::ItemToJson(const ItemRecord& item,
   value["gate_status"] = BuildGateStatus(item);
   value["tags"] = MakeArray(item.tags);
   value["decisions"] = MakeArray(item.decisions);
+  value["decision_status"] = item.decisionStatus;
+  value["feature_refs"] = MakeArray(item.featureRefs);
+  value["accepted_option"] = item.acceptedOption;
+  value["rejected_options"] = MakeArray(item.rejectedOptions);
+  value["evidence_refs"] = MakeArray(item.evidenceRefs);
+  value["superseded_by"] = MakeArray(item.supersededBy);
+  value["revisit_condition"] = item.revisitCondition;
   value["external"] = Json::objectValue;
   for (const auto& [key, entry] : item.external) {
     value["external"][key] = entry;
@@ -4277,6 +4341,120 @@ Json::Value BacklogWebviewService::BuildContextRecoverySummary(
       FirstRefs(doNotRefs, 5), "strong",
       {"Ark Console execution approval remains separate.",
        "Use raw refs before touching unrelated dirty work."});
+  return response;
+}
+
+Json::Value BacklogWebviewService::BuildProductMapNavigation(
+    const ItemQueryOptions& options) {
+  Json::Value response(Json::objectValue);
+  response["schema"] = "kob.backboard.product_map_navigation.v1";
+  response["read_only"] = true;
+  response["mutation_allowed"] = false;
+  response["starts_agent"] = false;
+  response["dispatches_work"] = false;
+  response["nodes"] = Json::arrayValue;
+  response["edges"] = Json::arrayValue;
+  response["diagnostics"] = Json::arrayValue;
+
+  auto items = QueryItems(options);
+  if (items.isMember("error")) {
+    response["error"] = items["error"];
+    return response;
+  }
+
+  std::set<std::string> nodeIds;
+  std::map<std::string, std::vector<Json::Value>> featureRefsToAdrs;
+  std::map<std::string, Json::Value> itemById;
+  std::map<std::string, Json::Value> adrById;
+
+  auto appendNode = [&](const Json::Value& node) {
+    const auto id = node.get("id", "").asString();
+    if (!id.empty() && nodeIds.insert(id).second) {
+      response["nodes"].append(node);
+    }
+  };
+
+  for (const auto& item : items["items"]) {
+    const auto id = item.get("id", "").asString();
+    const auto type = item.get("type", "").asString();
+    if (id.empty()) {
+      continue;
+    }
+    itemById[id] = item;
+    if (type == "ADR") {
+      adrById[id] = item;
+      appendNode(ProductMapNode(item, "adr"));
+      for (const auto& featureRef : item["feature_refs"]) {
+        const auto featureId = featureRef.asString();
+        if (!featureId.empty()) {
+          featureRefsToAdrs[featureId].push_back(item);
+        }
+      }
+      continue;
+    }
+    if (type == "Initiative") {
+      appendNode(ProductMapNode(item, "initiative"));
+    } else if (type == "Epic") {
+      appendNode(ProductMapNode(item, "epic"));
+    } else if (type == "Feature") {
+      appendNode(ProductMapNode(item, "feature"));
+    } else if (type == "Topic") {
+      appendNode(ProductMapNode(item, "topic"));
+    }
+  }
+
+  for (const auto& [featureId, adrs] : featureRefsToAdrs) {
+    const auto featureIt = itemById.find(featureId);
+    if (featureIt == itemById.end()) {
+      for (const auto& adr : adrs) {
+        Json::Value diagnostic(Json::objectValue);
+        diagnostic["code"] = "missing_ref";
+        diagnostic["target"] = "feature:" + featureId;
+        diagnostic["message"] = "ADR references a feature or work item that is not present in the selected Product Map scope.";
+        diagnostic["evidence_refs"].append(MakeLogicalRef(adr.get("product", "").asString(), "", adr.get("id", "").asString()));
+        response["diagnostics"].append(diagnostic);
+      }
+      continue;
+    }
+
+    appendNode(ProductMapNode(featureIt->second, "feature"));
+    const auto featureNodeId = "feature:" + featureId;
+    for (const auto& adr : adrs) {
+      const auto adrId = adr.get("id", "").asString();
+      const auto adrNodeId = "adr:" + adrId;
+      response["edges"].append(ProductMapEdge(
+          featureNodeId, adrNodeId, "decided_by",
+          MakeLogicalRef(featureIt->second.get("product", "").asString(), featureId)));
+      response["edges"].append(ProductMapEdge(
+          adrNodeId, featureNodeId, "impacts_feature",
+          MakeLogicalRef(adr.get("product", "").asString(), "", adrId)));
+    }
+  }
+
+  for (const auto& [adrId, adr] : adrById) {
+    if (adr["evidence_refs"].empty()) {
+      Json::Value diagnostic(Json::objectValue);
+      diagnostic["code"] = "evidence_gap";
+      diagnostic["target"] = "adr:" + adrId;
+      diagnostic["message"] = "ADR lifecycle metadata has no evidence refs; Backboard should show this as a review gap, not infer support.";
+      diagnostic["evidence_refs"] = Json::arrayValue;
+      response["diagnostics"].append(diagnostic);
+    }
+    for (const auto& supersededBy : adr["superseded_by"]) {
+      const auto targetAdrId = supersededBy.asString();
+      if (!targetAdrId.empty()) {
+        response["edges"].append(ProductMapEdge(
+            "adr:" + adrId, "adr:" + targetAdrId, "superseded_by",
+            MakeLogicalRef(adr.get("product", "").asString(), "", adrId)));
+      }
+    }
+  }
+
+  response["node_count"] = static_cast<Json::UInt64>(response["nodes"].size());
+  response["edge_count"] = static_cast<Json::UInt64>(response["edges"].size());
+  response["diagnostic_count"] = static_cast<Json::UInt64>(response["diagnostics"].size());
+  response["products"] = items["products"];
+  response["warnings"] = items["warnings"];
   return response;
 }
 
@@ -5838,6 +6016,23 @@ void RegisterBacklogWebviewRoutes(
           std::function<void(const HttpResponsePtr&)>&& callback) {
         auto data = service.BuildContextRecoverySummary(
             request->getParameter("area"), queryOptionsFromRequest(request));
+        Json::Value body(Json::objectValue);
+        body["ok"] = !data.isMember("error");
+        body["data"] = data;
+        metaAppender(request, body);
+        auto response = HttpResponse::newHttpJsonResponse(body);
+        if (!body["ok"].asBool()) {
+          response->setStatusCode(k400BadRequest);
+        }
+        callback(response);
+      },
+      {Get});
+
+  app().registerHandler(
+      "/api/review/product-map-navigation",
+      [metaAppender, &service, queryOptionsFromRequest](const HttpRequestPtr& request,
+          std::function<void(const HttpResponsePtr&)>&& callback) {
+        auto data = service.BuildProductMapNavigation(queryOptionsFromRequest(request));
         Json::Value body(Json::objectValue);
         body["ok"] = !data.isMember("error");
         body["data"] = data;

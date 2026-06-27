@@ -30,6 +30,13 @@ struct ItemRecord {
   std::string rawContent;
   std::vector<std::string> tags;
   std::vector<std::string> decisions;
+  std::string decisionStatus;
+  std::vector<std::string> featureRefs;
+  std::string acceptedOption;
+  std::vector<std::string> rejectedOptions;
+  std::vector<std::string> evidenceRefs;
+  std::vector<std::string> supersededBy;
+  std::string revisitCondition;
   std::vector<std::string> relates;
   std::vector<std::string> blocks;
   std::vector<std::string> blockedBy;
@@ -78,6 +85,7 @@ class BacklogWebviewService {
   Json::Value BuildEvidenceQualityView(const ItemQueryOptions& options);
   Json::Value BuildContextRecoverySummary(const std::string& area,
                                           const ItemQueryOptions& options);
+  Json::Value BuildProductMapNavigation(const ItemQueryOptions& options);
   Json::Value BuildReviewInbox(const ItemQueryOptions& options);
   Json::Value SaveReviewDecisionDraft(const Json::Value& request);
   Json::Value DiscardReviewDecisionDraft(const Json::Value& request);

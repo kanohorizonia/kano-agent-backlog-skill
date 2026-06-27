@@ -101,7 +101,9 @@ or blocked outcomes.</li>
 <li><code>intent.author</code>: optional human or agent originator label for the current intent.</li>
 <li><code>intent.source</code>: optional source channel, document, conversation, or import label.</li>
 <li><code>intent.owner</code>: optional current intent steward label; this is not an authority rule.</li>
+<li><code>intent.rationale</code>: optional brief rationale for why the current intent was captured or amended.</li>
 <li><code>intent.reviewers</code>: optional list of people or agents asked to review intent.</li>
+<li><code>intent.provenance_refs</code>: optional list of source refs, notes, or artifacts that preserve intent provenance.</li>
 <li><code>intent.conflicts_with</code>: optional list of item refs that may conflict with this intent.</li>
 <li><code>intent.supersedes</code>: optional list of item refs whose intent this item supersedes.</li>
 </ul>
@@ -212,7 +214,9 @@ no_go_or_defer_policy: null
 intent.author: null
 intent.source: null
 intent.owner: null
+intent.rationale: null
 intent.reviewers: []
+intent.provenance_refs: []
 intent.conflicts_with: []
 intent.supersedes: []
 tags: []

@@ -95,7 +95,9 @@ std::string TemplateOps::render_frontmatter(const BacklogItem& item) {
     ss << "intent.author: " << (item.intent_author ? *item.intent_author : "null") << "\n";
     ss << "intent.source: " << (item.intent_source ? *item.intent_source : "null") << "\n";
     ss << "intent.owner: " << (item.intent_owner ? *item.intent_owner : "null") << "\n";
+    ss << "intent.rationale: " << (item.intent_rationale ? *item.intent_rationale : "null") << "\n";
     ss << "intent.reviewers: []\n";
+    ss << "intent.provenance_refs: []\n";
     ss << "intent.conflicts_with: []\n";
     ss << "intent.supersedes: []\n";
 

@@ -173,8 +173,12 @@ public:
     );
 
     static TopicAuditReport audit_topics(
+        const std::filesystem::path& backlog_root
+    );
+
+    static TopicAuditReport audit_topics(
         const std::filesystem::path& backlog_root,
-        const TopicAuditOptions& options = {}
+        const TopicAuditOptions& options
     );
 
     static std::string render_audit_report(

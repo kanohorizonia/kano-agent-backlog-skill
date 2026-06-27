@@ -761,6 +761,12 @@ std::vector<TopicOps::TopicStatus> TopicOps::list_topics(
 }
 
 TopicOps::TopicAuditReport TopicOps::audit_topics(
+    const std::filesystem::path& backlog_root
+) {
+    return audit_topics(backlog_root, TopicAuditOptions{});
+}
+
+TopicOps::TopicAuditReport TopicOps::audit_topics(
     const std::filesystem::path& backlog_root,
     const TopicAuditOptions& options
 ) {

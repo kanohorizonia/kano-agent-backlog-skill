@@ -21,6 +21,31 @@ struct IntentStackResult {
     std::vector<std::string> evidence_refs;
 };
 
+struct WorkOrderAdmissionCandidateChild {
+    std::string id;
+    std::string type;
+    std::string state;
+    std::string title;
+    std::string work_intent;
+    std::string recommendation;
+};
+
+struct WorkOrderAdmissionResult {
+    std::string item_id;
+    std::string item_type;
+    std::string requested_intent;
+    std::string effective_intent;
+    bool admitted = false;
+    std::string reason_code;
+    std::string message;
+    bool requires_explicit_intent = false;
+    bool would_create_work_order = false;
+    bool would_dispatch = false;
+    bool starts_agent = false;
+    bool dispatches_work = false;
+    std::vector<WorkOrderAdmissionCandidateChild> candidate_children;
+};
+
 struct DuplicateAdmissionEvidence {
     std::string search_query;
     std::string search_scope;
@@ -122,6 +147,16 @@ public:
         const std::filesystem::path& backlog_root,
         const std::string& item_ref,
         int max_depth = 8
+    );
+
+    /**
+     * Evaluate read-only work-order admission policy for an item.
+     */
+    static WorkOrderAdmissionResult evaluate_work_order_admission(
+        const std::filesystem::path& backlog_root,
+        const std::string& item_ref,
+        std::optional<std::string> requested_intent = std::nullopt,
+        bool source_changing_hint = false
     );
 };
 

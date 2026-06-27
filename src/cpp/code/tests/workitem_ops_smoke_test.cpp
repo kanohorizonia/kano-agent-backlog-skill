@@ -84,6 +84,19 @@ void expect_no_diagnostic_contains(
     expect(!diagnostics_contain(result, needle), message);
 }
 
+bool admission_has_child_recommendation(
+    const kano::backlog_ops::WorkOrderAdmissionResult& result,
+    const std::string& child_id,
+    const std::string& recommendation
+) {
+    for (const auto& child : result.candidate_children) {
+        if (child.id == child_id && child.recommendation == recommendation) {
+            return true;
+        }
+    }
+    return false;
+}
+
 template <typename Fn>
 void expect_throws_contains(Fn&& fn, const std::string& needle, const std::string& message) {
     try {
@@ -284,6 +297,22 @@ int main() {
             }
             expect(saw_invalid_intent, "schema validation should reject invalid non-blank work_intent values");
 
+            for (const auto& allowed_parent_intent : {
+                "decomposition",
+                "planning",
+                "decision",
+                "docs_only",
+                "policy_contract",
+                "review_admission",
+                "parent_reconciliation"
+            }) {
+                auto valid_parent_intent = intent_roundtrip_full;
+                valid_parent_intent.work_intent = allowed_parent_intent;
+                expect(
+                    kano::backlog_core::Validator::validate_schema(valid_parent_intent).empty(),
+                    std::string("schema validation should accept parent work_intent ") + allowed_parent_intent);
+            }
+
             auto initiative_created = create_item_with_admission(
                 index,
                 root,
@@ -299,6 +328,25 @@ int main() {
             expect(initiative_exact_path.has_value(), "initiative exact id lookup should resolve deterministic bucket path");
             auto initiative_queried = index.query_items(ItemType::Initiative, std::nullopt);
             expect(!initiative_queried.empty(), "initiative item should appear in index query");
+
+            auto initiative_child_created = create_item_with_admission(
+                index,
+                root,
+                "TST",
+                ItemType::Task,
+                "Initiative child admission smoke",
+                "opencode",
+                initiative_created.id);
+            auto initiative_child = store.read(initiative_child_created.path);
+            set_ready_fields(initiative_child);
+            initiative_child.state = ItemState::Ready;
+            store.write(initiative_child);
+            index.index_item(initiative_child);
+            auto initiative_implementation_admission = WorkitemOps::evaluate_work_order_admission(root, initiative_created.id, std::string("implementation"));
+            expect(!initiative_implementation_admission.admitted, "initiative implementation admission should be blocked");
+            expect(initiative_implementation_admission.reason_code == "parent_implementation_blocked_ready_child", "initiative implementation should route to ready child work");
+            expect(admission_has_child_recommendation(initiative_implementation_admission, initiative_child_created.id, "route_ready_child"),
+                "initiative implementation admission should list ready child route recommendation");
 
             auto issue_created = create_item_with_admission(
                 index,
@@ -404,8 +452,112 @@ int main() {
                 parent_created.id);
             auto child_item = store.read(child_created.path);
             set_ready_fields(child_item);
+            child_item.state = ItemState::Ready;
             store.write(child_item);
             index.index_item(child_item);
+
+            auto proposed_child_created = create_item_with_admission(
+                index,
+                root,
+                "TST",
+                ItemType::Task,
+                "Provider proposed child admission smoke",
+                "opencode",
+                parent_created.id);
+
+            auto parent_missing_intent_admission = WorkitemOps::evaluate_work_order_admission(root, parent_created.id);
+            expect(!parent_missing_intent_admission.admitted, "parent admission without explicit intent should be blocked");
+            expect(parent_missing_intent_admission.requires_explicit_intent, "parent admission without intent should require explicit intent");
+            expect(parent_missing_intent_admission.reason_code == "parent_explicit_intent_required", "parent missing intent should use explicit-intent reason code");
+            expect(!parent_missing_intent_admission.starts_agent, "read-only parent admission should not start agents");
+            expect(!parent_missing_intent_admission.dispatches_work, "read-only parent admission should not dispatch work");
+
+            auto parent_ambiguous_intent_admission = WorkitemOps::evaluate_work_order_admission(root, parent_created.id, std::string("auto"));
+            expect(!parent_ambiguous_intent_admission.admitted, "parent admission with ambiguous intent should be blocked");
+            expect(parent_ambiguous_intent_admission.requires_explicit_intent, "parent ambiguous intent should require explicit intent");
+
+            for (const auto& allowed_parent_intent : {
+                "decomposition",
+                "planning",
+                "decision",
+                "docs_only",
+                "policy_contract",
+                "review_admission"
+            }) {
+                auto allowed_parent_admission = WorkitemOps::evaluate_work_order_admission(root, parent_created.id, std::string(allowed_parent_intent));
+                expect(allowed_parent_admission.admitted, std::string("parent ") + allowed_parent_intent + " admission should be allowed");
+                expect(allowed_parent_admission.reason_code == "parent_intent_allowed", std::string("parent ") + allowed_parent_intent + " should use allowed reason code");
+                expect(allowed_parent_admission.would_create_work_order, std::string("allowed parent ") + allowed_parent_intent + " should report would_create_work_order");
+                expect(allowed_parent_admission.would_dispatch, std::string("allowed parent ") + allowed_parent_intent + " should report would_dispatch");
+                expect(!allowed_parent_admission.starts_agent, std::string("parent ") + allowed_parent_intent + " diagnostic should not start agents");
+                expect(!allowed_parent_admission.dispatches_work, std::string("parent ") + allowed_parent_intent + " diagnostic should not dispatch work");
+            }
+
+            auto parent_reconciliation_admission = WorkitemOps::evaluate_work_order_admission(root, parent_created.id, std::string("parent_reconciliation"));
+            expect(parent_reconciliation_admission.admitted, "parent reconciliation should be allowed for evidence/worklog/state summary");
+            expect(parent_reconciliation_admission.message.find("evidence, worklog, or state-summary") != std::string::npos,
+                "parent reconciliation message should state conservative non-source boundary");
+            auto parent_reconciliation_source_admission = WorkitemOps::evaluate_work_order_admission(root, parent_created.id, std::string("parent_reconciliation"), true);
+            expect(!parent_reconciliation_source_admission.admitted, "source-changing parent reconciliation should be blocked");
+            expect(parent_reconciliation_source_admission.reason_code == "parent_reconciliation_source_changes_blocked",
+                "source-changing parent reconciliation should explain reconciliation source boundary");
+            expect(admission_has_child_recommendation(parent_reconciliation_source_admission, child_created.id, "route_ready_child"),
+                "source-changing parent reconciliation should still list ready child candidates");
+
+            auto parent_implementation_admission = WorkitemOps::evaluate_work_order_admission(root, parent_created.id, std::string("implementation"));
+            expect(!parent_implementation_admission.admitted, "parent implementation admission should be blocked");
+            expect(parent_implementation_admission.reason_code == "parent_implementation_blocked_ready_child", "ready child should be preferred over parent implementation");
+            expect(admission_has_child_recommendation(parent_implementation_admission, child_created.id, "route_ready_child"),
+                "parent implementation admission should list ready child route recommendation");
+            expect(admission_has_child_recommendation(parent_implementation_admission, proposed_child_created.id, "ready_gate_child"),
+                "parent implementation admission should list proposed child Ready-gate recommendation");
+            expect(parent_implementation_admission.candidate_children.size() >= 2, "parent implementation admission should list candidate children");
+            expect(parent_implementation_admission.candidate_children[0].id < parent_implementation_admission.candidate_children[1].id,
+                "candidate children should be sorted deterministically by id");
+
+            auto no_child_parent_created = create_item_with_admission(
+                index,
+                root,
+                "TST",
+                ItemType::Feature,
+                "No child parent admission smoke",
+                "opencode");
+            auto no_child_parent_admission = WorkitemOps::evaluate_work_order_admission(root, no_child_parent_created.id, std::string("implementation"));
+            expect(!no_child_parent_admission.admitted, "parent implementation without children should be blocked");
+            expect(no_child_parent_admission.reason_code == "parent_implementation_blocked_decompose", "parent without children should recommend decomposition");
+            expect(no_child_parent_admission.message.find("decompose") != std::string::npos, "parent without children should mention decomposition");
+
+            auto proposed_only_parent_created = create_item_with_admission(
+                index,
+                root,
+                "TST",
+                ItemType::Feature,
+                "Proposed only parent admission smoke",
+                "opencode");
+            auto proposed_only_child_created = create_item_with_admission(
+                index,
+                root,
+                "TST",
+                ItemType::Task,
+                "Proposed only child admission smoke",
+                "opencode",
+                proposed_only_parent_created.id);
+            auto proposed_only_parent_admission = WorkitemOps::evaluate_work_order_admission(root, proposed_only_parent_created.id, std::string("implementation"));
+            expect(!proposed_only_parent_admission.admitted, "parent implementation with proposed child should be blocked");
+            expect(proposed_only_parent_admission.reason_code == "parent_implementation_blocked_ready_gate_child", "proposed child should route through Ready gate before execution");
+            expect(admission_has_child_recommendation(proposed_only_parent_admission, proposed_only_child_created.id, "ready_gate_child"),
+                "parent implementation should recommend Ready gating for proposed child");
+
+            auto task_admission = WorkitemOps::evaluate_work_order_admission(root, child_created.id, std::string("implementation"));
+            expect(task_admission.admitted, "task implementation admission should remain allowed");
+            expect(task_admission.would_create_work_order, "task implementation should report would_create_work_order");
+            expect(task_admission.would_dispatch, "task implementation should report would_dispatch");
+            expect(!task_admission.starts_agent, "task admission diagnostic should not start agents");
+            expect(!task_admission.dispatches_work, "task admission diagnostic should not dispatch work");
+            expect(WorkitemOps::evaluate_work_order_admission(root, issue_created.id, std::string("implementation")).admitted,
+                "issue implementation admission should remain allowed");
+            expect(WorkitemOps::evaluate_work_order_admission(root, assigned_bug_created.id, std::string("implementation")).admitted,
+                "bug implementation admission should remain allowed");
 
             auto epic_created = create_item_with_admission(
                 index,
@@ -438,6 +590,12 @@ int main() {
             store.write(feature_item);
             index.index_item(feature_item);
 
+            auto epic_implementation_admission = WorkitemOps::evaluate_work_order_admission(root, epic_created.id, std::string("implementation"));
+            expect(!epic_implementation_admission.admitted, "epic implementation admission should be blocked");
+            expect(epic_implementation_admission.reason_code == "parent_implementation_blocked_candidate_children", "epic implementation should route to candidate child items");
+            expect(admission_has_child_recommendation(epic_implementation_admission, feature_created.id, "consider_child"),
+                "epic implementation admission should list feature child candidate");
+
             auto story_created = create_item_with_admission(
                 index,
                 root,
@@ -453,6 +611,8 @@ int main() {
             story_item.intent_amendments = "2026-06-20: Story amendment.";
             store.write(story_item);
             index.index_item(story_item);
+            expect(WorkitemOps::evaluate_work_order_admission(root, story_created.id, std::string("implementation")).admitted,
+                "user story implementation admission should remain allowed");
 
             auto stack_task_created = create_item_with_admission(
                 index,

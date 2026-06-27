@@ -14,6 +14,7 @@
 #include <sstream>
 #include <cctype>
 #include <set>
+#include <array>
 
 namespace kano::backlog_ops {
 
@@ -549,6 +550,108 @@ std::string intent_stack_role_for_type(ItemType type) {
         case ItemType::Issue: return "issue";
     }
     return "item";
+}
+
+bool is_parent_work_order_type(ItemType type) {
+    return type == ItemType::Initiative || type == ItemType::Epic || type == ItemType::Feature;
+}
+
+bool is_implementation_work_order_type(ItemType type) {
+    return type == ItemType::Task || type == ItemType::Bug || type == ItemType::Issue || type == ItemType::UserStory;
+}
+
+bool is_allowed_parent_work_order_intent(const std::string& intent) {
+    static constexpr std::array<const char*, 7> allowed = {
+        "decomposition",
+        "planning",
+        "decision",
+        "docs_only",
+        "policy_contract",
+        "review_admission",
+        "parent_reconciliation"
+    };
+    return std::any_of(allowed.begin(), allowed.end(), [&](const char* allowed_intent) {
+        return intent == allowed_intent;
+    });
+}
+
+bool is_ambiguous_work_order_intent(const std::string& intent) {
+    return intent == "auto" || intent == "default" || intent == "unspecified" || intent == "unknown" || intent == "?";
+}
+
+bool is_source_changing_work_order_intent(const std::string& intent) {
+    return intent == "implementation" || intent == "source_change" || intent == "source-changing" || intent == "code";
+}
+
+bool is_item_index_markdown(const std::filesystem::path& path) {
+    return path.filename().generic_string().find(".index.md") != std::string::npos;
+}
+
+std::string candidate_recommendation_for(const BacklogItem& child) {
+    if (is_implementation_work_order_type(child.type) && child.state == ItemState::Ready) {
+        return "route_ready_child";
+    }
+    if (is_implementation_work_order_type(child.type) && child.state == ItemState::Proposed) {
+        return "ready_gate_child";
+    }
+    return "consider_child";
+}
+
+std::vector<WorkOrderAdmissionCandidateChild> collect_work_order_candidate_children(
+    const CanonicalStore& store,
+    const BacklogItem& parent
+) {
+    std::vector<WorkOrderAdmissionCandidateChild> children;
+    for (const auto& path : store.list_items()) {
+        if (is_item_index_markdown(path)) {
+            continue;
+        }
+        const auto child = store.read_metadata(path);
+        if (!child.parent) {
+            continue;
+        }
+        const auto parent_ref = trim_text(*child.parent);
+        if (parent_ref != parent.id && parent_ref != parent.uid) {
+            continue;
+        }
+
+        WorkOrderAdmissionCandidateChild candidate;
+        candidate.id = child.id;
+        candidate.type = to_string(child.type);
+        candidate.state = to_string(child.state);
+        candidate.title = child.title;
+        candidate.work_intent = child.work_intent ? trim_text(*child.work_intent) : "";
+        candidate.recommendation = candidate_recommendation_for(child);
+        children.push_back(candidate);
+    }
+    std::sort(children.begin(), children.end(), [](const auto& left, const auto& right) {
+        return left.id < right.id;
+    });
+    return children;
+}
+
+bool has_candidate_recommendation(
+    const std::vector<WorkOrderAdmissionCandidateChild>& children,
+    const std::string& recommendation
+) {
+    return std::any_of(children.begin(), children.end(), [&](const auto& child) {
+        return child.recommendation == recommendation;
+    });
+}
+
+WorkOrderAdmissionResult make_admission_result(
+    const BacklogItem& item,
+    const std::string& requested_intent,
+    const std::string& effective_intent
+) {
+    WorkOrderAdmissionResult result;
+    result.item_id = item.id;
+    result.item_type = to_string(item.type);
+    result.requested_intent = requested_intent;
+    result.effective_intent = effective_intent;
+    result.starts_agent = false;
+    result.dispatches_work = false;
+    return result;
 }
 
 std::string path_for_diagnostic(
@@ -1221,6 +1324,110 @@ IntentStackResult WorkitemOps::resolve_intent_stack(
     }
 
     result.evidence_refs.assign(evidence_refs.begin(), evidence_refs.end());
+    return result;
+}
+
+WorkOrderAdmissionResult WorkitemOps::evaluate_work_order_admission(
+    const std::filesystem::path& backlog_root,
+    const std::string& item_ref,
+    std::optional<std::string> requested_intent,
+    bool source_changing_hint
+) {
+    if (looks_like_path_ref(item_ref)) {
+        throw std::runtime_error("Work-order admission item ref must be an item id or uid, not a path-like ref");
+    }
+
+    CanonicalStore store(backlog_root);
+    RefResolver resolver(store);
+    const auto item = resolver.resolve(item_ref);
+
+    const std::string requested = requested_intent ? lower_copy(trim_text(*requested_intent)) : "";
+    std::string effective = requested;
+    if (effective.empty() && !is_parent_work_order_type(item.type) && item.work_intent && !trim_text(*item.work_intent).empty()) {
+        effective = lower_copy(trim_text(*item.work_intent));
+    }
+    if (effective.empty() && is_implementation_work_order_type(item.type)) {
+        effective = "implementation";
+    }
+
+    auto result = make_admission_result(item, requested, effective);
+
+    if (is_parent_work_order_type(item.type)) {
+        result.candidate_children = collect_work_order_candidate_children(store, item);
+        if (requested.empty() || is_ambiguous_work_order_intent(requested)) {
+            result.admitted = false;
+            result.requires_explicit_intent = true;
+            result.reason_code = "parent_explicit_intent_required";
+            result.message = "Parent item work-order admission requires an explicit work_intent such as decomposition, planning, decision, docs_only, policy_contract, review_admission, or parent_reconciliation; missing, blank, and ambiguous intents are blocked.";
+            return result;
+        }
+
+        if (requested == "parent_reconciliation" && source_changing_hint) {
+            result.admitted = false;
+            result.reason_code = "parent_reconciliation_source_changes_blocked";
+            result.message = "Parent reconciliation is admitted only for evidence, worklog, or state-summary reconciliation; source implementation must be routed to executable child work.";
+            return result;
+        }
+
+        if (is_source_changing_work_order_intent(requested) || source_changing_hint) {
+            result.admitted = false;
+            if (has_candidate_recommendation(result.candidate_children, "route_ready_child")) {
+                result.reason_code = "parent_implementation_blocked_ready_child";
+                result.message = "Parent implementation/source-changing dispatch is blocked; route the work to a Ready child item instead.";
+            } else if (has_candidate_recommendation(result.candidate_children, "ready_gate_child")) {
+                result.reason_code = "parent_implementation_blocked_ready_gate_child";
+                result.message = "Parent implementation/source-changing dispatch is blocked; move a proposed child item through the Ready gate before execution.";
+            } else if (!result.candidate_children.empty()) {
+                result.reason_code = "parent_implementation_blocked_candidate_children";
+                result.message = "Parent implementation/source-changing dispatch is blocked; review candidate child items and route executable work to a child.";
+            } else {
+                result.reason_code = "parent_implementation_blocked_decompose";
+                result.message = "Parent implementation/source-changing dispatch is blocked and no child items exist; decompose the parent into executable child work before implementation.";
+            }
+            return result;
+        }
+
+        if (!is_allowed_parent_work_order_intent(requested)) {
+            result.admitted = false;
+            result.reason_code = "parent_intent_not_allowed";
+            result.message = "Parent item intent is not admitted for work-order dispatch; use decomposition, planning, decision, docs_only, policy_contract, review_admission, or parent_reconciliation.";
+            return result;
+        }
+
+        if (requested == "parent_reconciliation") {
+            result.admitted = true;
+            result.reason_code = "parent_reconciliation_allowed";
+            result.message = "Parent reconciliation is admitted only for evidence, worklog, or state-summary reconciliation; source implementation remains blocked.";
+        } else {
+            result.admitted = true;
+            result.reason_code = "parent_intent_allowed";
+            result.message = "Parent item work-order admission is allowed for non-source-changing intent: " + requested + ".";
+        }
+        result.would_create_work_order = true;
+        result.would_dispatch = true;
+        return result;
+    }
+
+    if (is_ambiguous_work_order_intent(effective)) {
+        result.admitted = false;
+        result.requires_explicit_intent = true;
+        result.reason_code = "explicit_intent_required";
+        result.message = "Work-order admission requires an explicit non-ambiguous work_intent.";
+        return result;
+    }
+
+    if (is_implementation_work_order_type(item.type)) {
+        result.admitted = true;
+        result.reason_code = "item_intent_allowed";
+        result.message = "Work-order admission is allowed for executable item type " + to_string(item.type) + " with intent " + result.effective_intent + ".";
+        result.would_create_work_order = true;
+        result.would_dispatch = true;
+        return result;
+    }
+
+    result.admitted = false;
+    result.reason_code = "item_type_not_supported";
+    result.message = "Work-order admission does not support this item type.";
     return result;
 }
 

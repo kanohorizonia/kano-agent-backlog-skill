@@ -12,7 +12,7 @@ bool is_blank_text(const std::string& value) {
 }
 
 bool is_allowed_work_intent(const std::string& value) {
-    static constexpr std::array<const char*, 12> allowed = {
+    static constexpr std::array<const char*, 17> allowed = {
         "implementation",
         "investigation",
         "spike",
@@ -22,6 +22,11 @@ bool is_allowed_work_intent(const std::string& value) {
         "audit",
         "migration",
         "policy_contract",
+        "decomposition",
+        "planning",
+        "docs_only",
+        "review_admission",
+        "parent_reconciliation",
         "runbook",
         "incident",
         "deprecation"
@@ -112,7 +117,7 @@ std::vector<std::string> Validator::validate_schema(const BacklogItem& item) {
     if (item.work_intent && !is_blank_text(*item.work_intent) && !is_allowed_work_intent(*item.work_intent)) {
         errors.push_back(
             "Invalid work_intent: " + *item.work_intent +
-            " (expected one of: implementation, investigation, spike, decision, experiment, validation, audit, migration, policy_contract, runbook, incident, deprecation)");
+            " (expected one of: implementation, investigation, spike, decision, experiment, validation, audit, migration, policy_contract, decomposition, planning, docs_only, review_admission, parent_reconciliation, runbook, incident, deprecation)");
     }
 
     return errors;

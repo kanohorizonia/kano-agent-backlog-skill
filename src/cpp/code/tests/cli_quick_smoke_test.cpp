@@ -309,6 +309,63 @@ int main(int argc, char** argv) {
         expect(run_command(binary, with_duplicate_admission({"-P", "quick-smoke-product", "workitem", "create", "-t", "task", "--title", "Quick smoke child task", "--parent", "QS-FTR-0001", "--agent", "tester"}, "Quick smoke child task")) == 0,
             "workitem create child task failed");
 
+        const auto parent_missing_admission_output = temp_root / "work-order-admission-parent-missing.json";
+        expect_command_capture_success(
+            run_command_capture(binary, {
+                "-P", "quick-smoke-product", "workitem", "work-order-admission", "QS-FTR-0001", "--format", "json"
+            }, parent_missing_admission_output),
+            parent_missing_admission_output,
+            "parent missing work-order-admission json failed"
+        );
+        const auto parent_missing_admission_json = read_text(parent_missing_admission_output);
+        expect(parent_missing_admission_json.find("\"admitted\" : false") != std::string::npos, "parent missing admission should be blocked");
+        expect(parent_missing_admission_json.find("\"requires_explicit_intent\" : true") != std::string::npos, "parent missing admission should require explicit intent");
+        expect(parent_missing_admission_json.find("parent_explicit_intent_required") != std::string::npos, "parent missing admission should explain explicit intent requirement");
+        expect(parent_missing_admission_json.find("\"starts_agent\" : false") != std::string::npos, "parent missing admission should not start agents");
+        expect(parent_missing_admission_json.find("\"dispatches_work\" : false") != std::string::npos, "parent missing admission should not dispatch work");
+
+        const auto parent_implementation_admission_output = temp_root / "work-order-admission-parent-implementation.json";
+        expect_command_capture_success(
+            run_command_capture(binary, {
+                "-P", "quick-smoke-product", "workitem", "work-order-admission", "QS-FTR-0001", "--intent", "implementation", "--format", "json"
+            }, parent_implementation_admission_output),
+            parent_implementation_admission_output,
+            "parent implementation work-order-admission json failed"
+        );
+        const auto parent_implementation_admission_json = read_text(parent_implementation_admission_output);
+        expect(parent_implementation_admission_json.find("parent_implementation_blocked_ready_gate_child") != std::string::npos,
+            "parent implementation admission should route proposed child through Ready gate");
+        expect(parent_implementation_admission_json.find("QS-TSK-0002") != std::string::npos,
+            "parent implementation admission should list child task candidate");
+        expect(parent_implementation_admission_json.find("ready_gate_child") != std::string::npos,
+            "parent implementation admission should include child recommendation");
+
+        const auto parent_planning_admission_output = temp_root / "work-order-admission-parent-planning.txt";
+        expect_command_capture_success(
+            run_command_capture(binary, {
+                "-P", "quick-smoke-product", "workitem", "work-order-admission", "QS-FTR-0001", "--intent", "planning"
+            }, parent_planning_admission_output),
+            parent_planning_admission_output,
+            "parent planning work-order-admission text failed"
+        );
+        const auto parent_planning_admission_text = read_text(parent_planning_admission_output);
+        expect(parent_planning_admission_text.find("admitted: true") != std::string::npos, "parent planning admission text should allow planning");
+        expect(parent_planning_admission_text.find("starts_agent: false") != std::string::npos, "parent planning admission text should remain read-only");
+
+        const auto task_admission_output = temp_root / "work-order-admission-task.json";
+        expect_command_capture_success(
+            run_command_capture(binary, {
+                "-P", "quick-smoke-product", "workitem", "work-order-admission", "QS-TSK-0002", "--intent", "implementation", "--format", "json"
+            }, task_admission_output),
+            task_admission_output,
+            "task work-order-admission json failed"
+        );
+        const auto task_admission_json = read_text(task_admission_output);
+        expect(task_admission_json.find("\"admitted\" : true") != std::string::npos, "task implementation admission should be allowed");
+        expect(task_admission_json.find("\"would_dispatch\" : true") != std::string::npos, "task implementation admission should report would_dispatch");
+        expect(task_admission_json.find("\"starts_agent\" : false") != std::string::npos, "task implementation admission should not start an agent during diagnostic");
+        expect(task_admission_json.find("\"dispatches_work\" : false") != std::string::npos, "task implementation admission should not dispatch work during diagnostic");
+
         const auto intent_stack_json_output = temp_root / "intent-stack.json";
         expect_command_capture_success(
             run_command_capture(binary, {
@@ -426,6 +483,13 @@ int main(int argc, char** argv) {
         }, outside_template_output);
         expect(outside_template_rc != 0, "outside product-root path should be rejected for intent-template");
         expect(read_text(outside_template_output).find("outside active product root") != std::string::npos, "outside intent-template rejection should explain product-root boundary");
+
+        const auto outside_admission_output = temp_root / "outside-work-order-admission.txt";
+        const auto outside_admission_rc = run_command_capture(binary, {
+            "-P", "quick-smoke-product", "workitem", "work-order-admission", outside_item_path.string(), "--intent", "implementation"
+        }, outside_admission_output);
+        expect(outside_admission_rc != 0, "outside product-root path should be rejected for work-order-admission");
+        expect(read_text(outside_admission_output).find("outside active product root") != std::string::npos, "outside work-order-admission rejection should explain product-root boundary");
 
         const auto outside_apply_output = temp_root / "outside-create-drift-resolution-apply.txt";
         const auto outside_apply_rc = run_command_capture(binary, {

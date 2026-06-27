@@ -3238,6 +3238,60 @@ Json::Value intent_stack_json(const IntentStackResult& stack, std::size_t max_se
     return payload;
 }
 
+Json::Value work_order_admission_json(const WorkOrderAdmissionResult& result) {
+    Json::Value payload(Json::objectValue);
+    payload["item_id"] = result.item_id;
+    payload["item_type"] = result.item_type;
+    payload["requested_intent"] = result.requested_intent;
+    payload["effective_intent"] = result.effective_intent;
+    payload["admitted"] = result.admitted;
+    payload["reason_code"] = result.reason_code;
+    payload["message"] = result.message;
+    payload["requires_explicit_intent"] = result.requires_explicit_intent;
+    payload["would_create_work_order"] = result.would_create_work_order;
+    payload["would_dispatch"] = result.would_dispatch;
+    payload["starts_agent"] = result.starts_agent;
+    payload["dispatches_work"] = result.dispatches_work;
+    payload["candidate_children"] = Json::Value(Json::arrayValue);
+    for (const auto& child : result.candidate_children) {
+        Json::Value row(Json::objectValue);
+        row["id"] = child.id;
+        row["type"] = child.type;
+        row["state"] = child.state;
+        row["title"] = child.title;
+        row["work_intent"] = child.work_intent;
+        row["recommendation"] = child.recommendation;
+        payload["candidate_children"].append(row);
+    }
+    return payload;
+}
+
+void print_work_order_admission_text(const WorkOrderAdmissionResult& result) {
+    std::cout << "# Work Order Admission\n\n";
+    std::cout << "item_id: " << result.item_id << "\n";
+    std::cout << "item_type: " << result.item_type << "\n";
+    std::cout << "requested_intent: " << (result.requested_intent.empty() ? "<missing>" : result.requested_intent) << "\n";
+    std::cout << "effective_intent: " << (result.effective_intent.empty() ? "<none>" : result.effective_intent) << "\n";
+    std::cout << "admitted: " << (result.admitted ? "true" : "false") << "\n";
+    std::cout << "reason_code: " << result.reason_code << "\n";
+    std::cout << "message: " << result.message << "\n";
+    std::cout << "requires_explicit_intent: " << (result.requires_explicit_intent ? "true" : "false") << "\n";
+    std::cout << "would_create_work_order: " << (result.would_create_work_order ? "true" : "false") << "\n";
+    std::cout << "would_dispatch: " << (result.would_dispatch ? "true" : "false") << "\n";
+    std::cout << "starts_agent: " << (result.starts_agent ? "true" : "false") << "\n";
+    std::cout << "dispatches_work: " << (result.dispatches_work ? "true" : "false") << "\n";
+    std::cout << "\n## Candidate Children\n";
+    if (result.candidate_children.empty()) {
+        std::cout << "- none\n";
+        return;
+    }
+    for (const auto& child : result.candidate_children) {
+        std::cout << "- " << child.id << " (" << child.type << ", state=" << child.state << ", work_intent=" << (child.work_intent.empty() ? "<none>" : child.work_intent) << ")\n";
+        std::cout << "  title: " << child.title << "\n";
+        std::cout << "  recommendation: " << child.recommendation << "\n";
+    }
+}
+
 void print_intent_stack_text(const IntentStackResult& stack, std::size_t max_section_chars) {
     std::cout << "# Intent Stack\n\n";
     std::cout << "status: " << (stack.warnings.empty() ? "complete" : "warning") << "\n";
@@ -8559,6 +8613,49 @@ int main(int InArgc, char* InArgv[]) {
                     print_intent_stack_text(stack, max_section_chars);
                 } else {
                     throw std::runtime_error("Unsupported intent-stack format: " + intent_format + " (expected text or json)");
+                }
+            });
+        }
+
+        // workitem work-order-admission
+        {
+            auto* admissionCmd = workitemCmd->add_subcommand("work-order-admission", "Evaluate read-only work-order admission for an item");
+            std::string admission_ref;
+            std::string admission_intent;
+            std::string admission_format = "text";
+            bool admission_source_changing = false;
+            admissionCmd->add_option("ref", admission_ref, "Item ID or UID")->required();
+            auto* admissionIntentOption = admissionCmd->add_option("--intent", admission_intent, "Requested work intent for admission");
+            admissionCmd->add_option("--format", admission_format, "Output format: text or json");
+            admissionCmd->add_flag("--source-changing", admission_source_changing, "Mark the requested work as source-changing for parent-item admission diagnostics");
+
+            admissionCmd->callback([&, admissionIntentOption]() {
+                auto ctx = resolve_ctx();
+                reject_outside_product_path_ref(admission_ref, ctx.product_root);
+                CanonicalStore store(ctx.product_root);
+                RefResolver resolver(store);
+                const auto source = resolver.resolve(admission_ref);
+                require_item_file_inside_product(source, ctx.product_root);
+                admission_format = lower_copy(trim_copy(admission_format));
+                if (admission_format.empty()) {
+                    admission_format = "text";
+                }
+                if (admission_format != "text" && admission_format != "json") {
+                    throw std::runtime_error("Unsupported work-order-admission format: " + admission_format + " (expected text or json)");
+                }
+                std::optional<std::string> requested_intent = std::nullopt;
+                if (admissionIntentOption->count() > 0) {
+                    requested_intent = admission_intent;
+                }
+                const auto admission = WorkitemOps::evaluate_work_order_admission(
+                    ctx.product_root,
+                    source.id,
+                    requested_intent,
+                    admission_source_changing);
+                if (admission_format == "json") {
+                    std::cout << json_to_string(work_order_admission_json(admission), true) << "\n";
+                } else {
+                    print_work_order_admission_text(admission);
                 }
             });
         }

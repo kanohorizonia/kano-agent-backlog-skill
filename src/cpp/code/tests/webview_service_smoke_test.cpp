@@ -141,9 +141,10 @@ bool has_edge(const Json::Value& edges,
               const std::string& to,
               const std::string& kind) {
     for (const auto& edge : edges) {
+        const auto edgeKind = edge.isMember("edge_type") ? edge["edge_type"].asString() : edge["kind"].asString();
         if (edge["from"].asString() == from &&
             edge["to"].asString() == to &&
-            edge["kind"].asString() == kind) {
+            edgeKind == kind) {
             return true;
         }
     }
@@ -434,9 +435,43 @@ int main() {
                      "Alpha explicit docs capability",
                      "Ready",
                      "",
-                     "Route this feature through explicit capability metadata.",
-                     "external:\n"
-                     "  capability_route: docs\n"));
+                      "Route this feature through explicit capability metadata.",
+                      "external:\n"
+                      "  capability_route: docs\n"));
+        write_text(
+            products / "product-alpha" / "decisions" / "PRA-ADR-0001_product-map-navigation.md",
+            "---\n"
+            "id: PRA-ADR-0001\n"
+            "title: Product Map navigation model\n"
+            "decision_status: accepted\n"
+            "feature_refs:\n"
+            "  - PRA-FTR-0002\n"
+            "accepted_option: Read-only Product Map projection over durable refs\n"
+            "rejected_options:\n"
+            "  - Canvas-first mutation surface\n"
+            "evidence_refs:\n"
+            "  - PRA-TSK-0001\n"
+            "superseded_by: []\n"
+            "revisit_condition: Product Map needs write behavior\n"
+            "date: 2026-06-14\n"
+            "---\n\n"
+            "# Product Map navigation model\n\n"
+            "Use Backboard navigation to connect features, ADRs, and evidence.\n");
+        write_text(
+            products / "product-alpha" / "decisions" / "PRA-ADR-0002_missing-evidence-gap.md",
+            "---\n"
+            "id: PRA-ADR-0002\n"
+            "title: ADR without evidence refs\n"
+            "decision_status: stale\n"
+            "feature_refs:\n"
+            "  - PRA-FTR-0002\n"
+            "evidence_refs: []\n"
+            "superseded_by:\n"
+            "  - PRA-ADR-0001\n"
+            "date: 2026-06-14\n"
+            "---\n\n"
+            "# ADR without evidence refs\n\n"
+            "This legacy ADR intentionally lacks evidence refs for diagnostics coverage.\n");
         write_text(
             products / "product-alpha" / "items" / "feature" / "0003" / "PRA-FTR-0003.md",
             item_doc("PRA-FTR-0003",
@@ -482,7 +517,7 @@ int main() {
         auto all = service.QueryItems(allOptions);
         expect(!all.isMember("error"), "all-products query should not fail");
         expect(all["products"].size() == 2, "all-products query should include both products");
-        expect(all["total"].asUInt64() == 18, "all-products query should include items plus unique topic pseudo-items");
+        expect(all["total"].asUInt64() == 20, "all-products query should include items, ADRs, plus unique topic pseudo-items");
         for (const auto& item : all["items"]) {
             expect(item.isMember("gate_status"), "all-products items should include gate_status");
             expect(item["gate_status"].isMember("ready"), "gate_status should include ready gate");
@@ -866,6 +901,30 @@ int main() {
                "capability route response must not start agents");
         expect(!exactRoute["dispatches_work"].asBool(),
                "capability route response must not dispatch work");
+
+        auto productMapNavigation = service.BuildProductMapNavigation(allOptions);
+        expect(!productMapNavigation.isMember("error"), "product map navigation query should not fail");
+        expect(productMapNavigation["schema"].asString() == "kob.backboard.product_map_navigation.v1",
+               "product map navigation should expose a stable schema marker");
+        expect(productMapNavigation["read_only"].asBool(), "product map navigation must be read-only");
+        expect(!productMapNavigation["mutation_allowed"].asBool(), "product map navigation must not allow mutations");
+        expect(!productMapNavigation["starts_agent"].asBool(), "product map navigation must not start agents");
+        expect(!productMapNavigation["dispatches_work"].asBool(), "product map navigation must not dispatch work");
+        expect(productMapNavigation["node_count"].asUInt64() >= 4,
+               "product map navigation should expose feature and ADR nodes");
+        expect(has_edge(productMapNavigation["edges"], "feature:PRA-FTR-0002", "adr:PRA-ADR-0001", "decided_by"),
+               "product map navigation should link feature to ADR decisions");
+        expect(has_edge(productMapNavigation["edges"], "adr:PRA-ADR-0001", "feature:PRA-FTR-0002", "impacts_feature"),
+               "product map navigation should link ADRs back to impacted features");
+        expect(has_edge(productMapNavigation["edges"], "adr:PRA-ADR-0002", "adr:PRA-ADR-0001", "superseded_by"),
+               "product map navigation should expose ADR supersession edges");
+        bool sawAdrEvidenceGap = false;
+        for (const auto& diagnostic : productMapNavigation["diagnostics"]) {
+            sawAdrEvidenceGap = sawAdrEvidenceGap ||
+                (diagnostic["code"].asString() == "evidence_gap" &&
+                 diagnostic["target"].asString() == "adr:PRA-ADR-0002");
+        }
+        expect(sawAdrEvidenceGap, "product map navigation should report ADR evidence gaps without inferring support");
 
         auto fallbackRoute = service.RecommendCapabilityRoute("product-alpha", "PRA-FTR-0003");
         expect(!fallbackRoute.isMember("error"), "fallback capability route should not fail");

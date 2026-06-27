@@ -30,7 +30,9 @@ passive provenance fields `intent.author`, `intent.source`, `intent.owner`,
 `intent.reviewers`, `intent.conflicts_with`, and `intent.supersedes`.
 Allowed `work_intent` values are `implementation`, `investigation`, `spike`,
 `decision`, `experiment`, `validation`, `audit`, `migration`,
-`policy_contract`, `runbook`, `incident`, and `deprecation`.
+`policy_contract`, `decomposition`, `planning`, `docs_only`,
+`review_admission`, `parent_reconciliation`, `runbook`, `incident`, and
+`deprecation`.
 
 ## Relationship Axes
 

@@ -99,7 +99,8 @@ Fields:
 
 - `work_intent`: one of `implementation`, `investigation`, `spike`, `decision`,
   `experiment`, `validation`, `audit`, `migration`, `policy_contract`,
-  `runbook`, `incident`, or `deprecation`.
+  `decomposition`, `planning`, `docs_only`, `review_admission`,
+  `parent_reconciliation`, `runbook`, `incident`, or `deprecation`.
 - `execution_mode`: optional compact execution mode, for example `code`,
   `no-code`, `docs-only`, `analysis-only`, or `ops`.
 - `result_contract`: optional expected result shape, such as `decision-record`,

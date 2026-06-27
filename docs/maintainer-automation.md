@@ -77,11 +77,12 @@ UserStory, Task, Bug, or Issue. Non-implementation items should also state:
 - `follow_up_policy`: whether and how implementation/remediation tickets are created
 - `no_go_or_defer_policy`: how no-change, no-go, defer, or blocked outcomes are recorded
 
-Optional `intent.author`, `intent.source`, `intent.owner`, `intent.reviewers`,
-`intent.conflicts_with`, and `intent.supersedes` fields may preserve provenance
-or flag visible intent conflicts for future review. They are not governance
-controls: they do not assign authority, require voting, enforce permissions, or
-merge conflicting human requests.
+Optional `intent.author`, `intent.source`, `intent.owner`,
+`intent.rationale`, `intent.reviewers`, `intent.provenance_refs`,
+`intent.conflicts_with`, and `intent.supersedes` fields may preserve
+provenance, capture why intent changed, or flag visible intent conflicts for
+future review. They are not governance controls: they do not assign authority,
+require voting, enforce permissions, or merge conflicting human requests.
 
 For no-code investigations and decisions, Done means the recorded result and
 evidence satisfy that contract. If code or operational work follows, create a

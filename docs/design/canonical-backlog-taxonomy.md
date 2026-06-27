@@ -27,7 +27,8 @@ Work Intent is metadata on those item types, not another taxonomy tier. The
 accepted metadata fields are `work_intent`, `execution_mode`, `result_contract`,
 `evidence_requirement`, `follow_up_policy`, and `no_go_or_defer_policy`, plus
 passive provenance fields `intent.author`, `intent.source`, `intent.owner`,
-`intent.reviewers`, `intent.conflicts_with`, and `intent.supersedes`.
+`intent.rationale`, `intent.reviewers`, `intent.provenance_refs`,
+`intent.conflicts_with`, and `intent.supersedes`.
 Allowed `work_intent` values are `implementation`, `investigation`, `spike`,
 `decision`, `experiment`, `validation`, `audit`, `migration`,
 `policy_contract`, `decomposition`, `planning`, `docs_only`,

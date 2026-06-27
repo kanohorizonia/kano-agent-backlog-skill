@@ -86,7 +86,9 @@ no_go_or_defer_policy: null
 intent.author: null
 intent.source: null
 intent.owner: null
+intent.rationale: null
 intent.reviewers: []
+intent.provenance_refs: []
 intent.conflicts_with: []
 intent.supersedes: []
 ```
@@ -96,8 +98,10 @@ investigation or decision work, set a non-implementation intent and fill the
 result contract fields so Review can verify the outcome. If the finding requires
 implementation, create a linked Task/Bug/Feature follow-up instead of inventing a
 new item type. The optional `intent.*` fields are passive provenance hints for
-small-team review and future conflict visibility; they do not enable governance,
-voting, permissions, or automated conflict handling.
+small-team review and future conflict visibility across `author`, `source`,
+`owner`, `rationale`, `reviewers`, `provenance_refs`, `conflicts_with`, and
+`supersedes`; they do not enable governance, voting, permissions, or automated
+conflict handling.
 
 ## 4. Satisfy the Ready Gate
 

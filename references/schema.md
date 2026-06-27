@@ -117,7 +117,9 @@ Passive provenance extension fields reserved for future multi-human workflows:
 - `intent.author`: optional human or agent originator label for the current intent.
 - `intent.source`: optional source channel, document, conversation, or import label.
 - `intent.owner`: optional current intent steward label; this is not an authority rule.
+- `intent.rationale`: optional brief rationale for why the current intent was captured or amended.
 - `intent.reviewers`: optional list of people or agents asked to review intent.
+- `intent.provenance_refs`: optional list of source refs, notes, or artifacts that preserve intent provenance.
 - `intent.conflicts_with`: optional list of item refs that may conflict with this intent.
 - `intent.supersedes`: optional list of item refs whose intent this item supersedes.
 
@@ -228,7 +230,9 @@ no_go_or_defer_policy: null
 intent.author: null
 intent.source: null
 intent.owner: null
+intent.rationale: null
 intent.reviewers: []
+intent.provenance_refs: []
 intent.conflicts_with: []
 intent.supersedes: []
 tags: []

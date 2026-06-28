@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentskill-backlog.kanohorizonia.com/references/actor-alias-and-assignment-policy.schema.json",
+  "title": "KOB Actor Alias And Assignment Policy Examples",
+  "type": "object",
+  "required": ["schema", "aliases", "local_first_defaults", "non_goals"],
+  "properties": {
+    "schema": { "const": "kob.actor_alias_policy_examples.v1" },
+    "aliases": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/actor_alias_record" }
+    },
+    "local_first_defaults": {
+      "type": "object",
+      "required": [
+        "auth_provider_required",
+        "private_identity_mapping_required",
+        "omitted_actor_type_blocks_local_operation"
+      ],
+      "properties": {
+        "auth_provider_required": { "const": false },
+        "private_identity_mapping_required": { "const": false },
+        "omitted_actor_type_blocks_local_operation": { "const": false }
+      },
+      "additionalProperties": false
+    },
+    "future_private_identity_mapping": {
+      "type": "string",
+      "minLength": 1
+    },
+    "non_goals": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    }
+  },
+  "$defs": {
+    "actor_alias": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9._-]*$"
+    },
+    "actor_type": {
+      "enum": ["human", "agent", "service", "runner", "role"]
+    },
+    "actor_alias_record": {
+      "type": "object",
+      "required": [
+        "alias",
+        "actor_type",
+        "summary",
+        "repo_visible",
+        "private_identity_data",
+        "permission_grant"
+      ],
+      "properties": {
+        "alias": { "$ref": "#/$defs/actor_alias" },
+        "actor_type": { "$ref": "#/$defs/actor_type" },
+        "summary": { "type": "string", "minLength": 1 },
+        "repo_visible": { "const": true },
+        "private_identity_data": { "const": false },
+        "permission_grant": { "const": false },
+        "distinct_from": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/actor_type" }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

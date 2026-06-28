@@ -52,7 +52,8 @@ inline constexpr std::string_view kBackboardCss = R"CSS(
     .tree details { margin: 2px 0; }
     .tree summary { cursor: pointer; }
     .tree summary::marker { color: #5a6d8f; }
-    .tree .node-line { display: inline-flex; gap: 6px; align-items: center; }
+    .tree .node-line { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+    .tree .tree-nav { display: inline-flex; gap: 4px; align-items: center; flex-wrap: wrap; margin-left: 8px; }
     .tree .leaf-spacer { display: inline-block; width: 12px; }
     .btn { border: 1px solid #cfd9ea; background: #fff; border-radius: 6px; padding: 4px 10px; cursor: pointer; }
     .btn:hover { background: #f2f6ff; }

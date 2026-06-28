@@ -219,6 +219,8 @@ std::string RenderItemCardPartial(const Json::Value& item) {
          RenderItemCardSummary(item) + "</div>";
 }
 
+std::string RenderTreeNavigationSummary(const Json::Value& node);
+
 std::string RenderTreeNodePartial(const Json::Value& node, int depth) {
   const auto nodeKey =
       node.get("product", "").asString() + "::" + node.get("id", "").asString();
@@ -227,7 +229,8 @@ std::string RenderTreeNodePartial(const Json::Value& node, int depth) {
       HtmlEscape(node.get("type", "").asString()) + "]</span><code>" +
       HtmlEscape(node.get("id", "").asString()) + "</code>" +
       RenderItemLink(node) + "<span class=\"muted\">(" +
-      HtmlEscape(ItemMetaText(node)) + ")</span></span>";
+      HtmlEscape(ItemMetaText(node)) + ")</span>" +
+      RenderTreeNavigationSummary(node) + "</span>";
   const auto& children = node["children"];
   if (children.empty()) {
     return "<li><span class=\"leaf-spacer\"></span>" + label + "</li>";
@@ -1161,8 +1164,10 @@ Json::Value MakeArray(const std::vector<std::string>& values) {
 }
 
 Json::Value MakeLogicalRef(const std::string& product,
-                           const std::string& itemId,
-                           const std::string& adrId = "") {
+                           const std::string& itemId = "",
+                           const std::string& adrId = "",
+                           const std::string& evidenceId = "",
+                           const std::string& topicId = "") {
   Json::Value ref(Json::objectValue);
   ref["product"] = product;
   if (!itemId.empty()) {
@@ -1171,7 +1176,128 @@ Json::Value MakeLogicalRef(const std::string& product,
   if (!adrId.empty()) {
     ref["adr_id"] = adrId;
   }
+  if (!evidenceId.empty()) {
+    ref["evidence_id"] = evidenceId;
+  }
+  if (!topicId.empty()) {
+    ref["topic_id"] = topicId;
+  }
   return ref;
+}
+
+std::string ProductItemKey(const std::string& product,
+                           const std::string& id) {
+  return product + "\n" + id;
+}
+
+std::optional<std::string> ProductMapNodeTypeForItemType(
+    const std::string& type) {
+  if (type == "Theme") return "vision";
+  if (type == "Initiative") return "initiative";
+  if (type == "Epic") return "epic";
+  if (type == "Feature") return "feature";
+  if (type == "Topic") return "topic";
+  if (type == "UserStory" || type == "Task" || type == "Bug" ||
+      type == "Issue") {
+    return "work_order";
+  }
+  if (type == "ADR") return "adr";
+  return std::nullopt;
+}
+
+std::string ProductMapNodeId(const std::string& nodeType,
+                             const std::string& id) {
+  return nodeType + ":" + id;
+}
+
+std::string ProductMapNodeIdForItem(const Json::Value& item) {
+  const auto nodeType =
+      ProductMapNodeTypeForItemType(item.get("type", "").asString());
+  if (!nodeType.has_value()) {
+    return "";
+  }
+  const auto id = item.get("id", "").asString();
+  if (id.empty()) {
+    return "";
+  }
+  return ProductMapNodeId(*nodeType, id);
+}
+
+void AppendUniqueJson(Json::Value& array, const Json::Value& value) {
+  if (!array.isArray()) {
+    array = Json::arrayValue;
+  }
+  const auto encoded = JsonCompactString(value);
+  for (const auto& existing : array) {
+    if (JsonCompactString(existing) == encoded) {
+      return;
+    }
+  }
+  array.append(value);
+}
+
+void AppendNavigationRef(Json::Value& navigation,
+                         const std::string& key,
+                         const Json::Value& ref) {
+  if (!navigation.isObject()) {
+    navigation = Json::objectValue;
+  }
+  AppendUniqueJson(navigation[key], ref);
+}
+
+Json::Value ProductMapDiagnostic(const std::string& code,
+                                 const std::string& target,
+                                 const std::string& message,
+                                 const std::vector<Json::Value>& evidenceRefs = {}) {
+  Json::Value diagnostic(Json::objectValue);
+  diagnostic["code"] = code;
+  diagnostic["target"] = target;
+  diagnostic["message"] = message;
+  diagnostic["evidence_refs"] = Json::arrayValue;
+  for (const auto& ref : evidenceRefs) {
+    AppendUniqueJson(diagnostic["evidence_refs"], ref);
+  }
+  return diagnostic;
+}
+
+Json::Value NormalizeNavigation(Json::Value navigation) {
+  if (!navigation.isObject()) {
+    navigation = Json::objectValue;
+  }
+  for (const auto& key : {"adr_refs", "evidence_refs", "related_item_refs",
+                         "topic_refs", "diagnostics"}) {
+    if (!navigation.isMember(key) || !navigation[key].isArray()) {
+      navigation[key] = Json::arrayValue;
+    }
+  }
+  return navigation;
+}
+
+bool NavigationHasContent(const Json::Value& navigation) {
+  if (!navigation.isObject()) {
+    return false;
+  }
+  for (const auto& key : {"adr_refs", "evidence_refs", "related_item_refs",
+                         "topic_refs", "diagnostics"}) {
+    if (navigation.isMember(key) && navigation[key].isArray() &&
+        !navigation[key].empty()) {
+      return true;
+    }
+  }
+  return false;
+}
+
+Json::Value ProductMapEvidenceNode(const std::string& product,
+                                   const std::string& evidenceId,
+                                   const std::string& title) {
+  Json::Value node(Json::objectValue);
+  node["id"] = ProductMapNodeId("evidence", evidenceId);
+  node["node_type"] = "evidence";
+  node["title"] = title.empty() ? evidenceId : title;
+  node["summary"] = "Evidence record linked by durable Product Map refs.";
+  node["ref"] = MakeLogicalRef(product, evidenceId, "", evidenceId);
+  node["evidence_refs"] = Json::arrayValue;
+  return node;
 }
 
 Json::Value ProductMapNode(const Json::Value& item,
@@ -1179,12 +1305,17 @@ Json::Value ProductMapNode(const Json::Value& item,
   const auto product = item.get("product", "").asString();
   const auto id = item.get("id", "").asString();
   Json::Value node(Json::objectValue);
-  node["id"] = nodeType + ":" + id;
+  node["id"] = ProductMapNodeId(nodeType, id);
   node["node_type"] = nodeType;
   node["title"] = item.get("title", id).asString();
   node["summary"] = "Backboard navigation record for " + id;
-  node["ref"] = nodeType == "adr" ? MakeLogicalRef(product, "", id)
-                                    : MakeLogicalRef(product, id);
+  if (nodeType == "adr") {
+    node["ref"] = MakeLogicalRef(product, "", id);
+  } else if (nodeType == "topic") {
+    node["ref"] = MakeLogicalRef(product, "", "", "", id);
+  } else {
+    node["ref"] = MakeLogicalRef(product, id);
+  }
   node["evidence_refs"] = Json::arrayValue;
   for (const auto& evidence : item["evidence_refs"]) {
     const auto evidenceId = evidence.asString();
@@ -1411,6 +1542,90 @@ std::string RenderReferenceChip(const std::string& rawRef,
          HtmlEscape(product) + "\">" + HtmlEscape(cleaned) + "</a>";
 }
 
+std::string LogicalRefLabel(const Json::Value& ref) {
+  for (const auto& key : {"adr_id", "item_id", "evidence_id", "topic_id",
+                         "uid", "vision_id"}) {
+    if (ref.isMember(key) && !ref[key].asString().empty()) {
+      return ref[key].asString();
+    }
+  }
+  return ref.get("product", "").asString();
+}
+
+std::string RenderLogicalRefChip(const Json::Value& ref,
+                                 const std::string& labelPrefix = "") {
+  const auto label = labelPrefix.empty()
+      ? LogicalRefLabel(ref)
+      : labelPrefix + ": " + LogicalRefLabel(ref);
+  if (label.empty()) {
+    return "";
+  }
+  const auto product = ref.get("product", "").asString();
+  if (ref.isMember("adr_id") && !ref["adr_id"].asString().empty()) {
+    return "<a href=\"#\" class=\"pill item-link\" data-item-id=\"" +
+           HtmlEscape(ref["adr_id"].asString()) + "\" data-item-product=\"" +
+           HtmlEscape(product) + "\">" + HtmlEscape(label) + "</a>";
+  }
+  if (ref.isMember("item_id") && !ref["item_id"].asString().empty()) {
+    return "<a href=\"#\" class=\"pill item-link\" data-item-id=\"" +
+           HtmlEscape(ref["item_id"].asString()) + "\" data-item-product=\"" +
+           HtmlEscape(product) + "\">" + HtmlEscape(label) + "</a>";
+  }
+  return "<span class=\"pill\">" + HtmlEscape(label) + "</span>";
+}
+
+std::string RenderLogicalRefList(const Json::Value& refs,
+                                 const std::string& emptyText = "No refs") {
+  std::string html;
+  for (const auto& ref : refs) {
+    html += RenderLogicalRefChip(ref);
+  }
+  if (html.empty()) {
+    return "<div class=\"muted\">" + HtmlEscape(emptyText) + "</div>";
+  }
+  return "<div class=\"detail-links\">" + html + "</div>";
+}
+
+std::string RenderDiagnosticList(const Json::Value& diagnostics) {
+  std::string html;
+  for (const auto& diagnostic : diagnostics) {
+    html += "<div class=\"card gap-card\"><strong>" +
+            HtmlEscape(diagnostic.get("code", "gap").asString()) +
+            "</strong><div>" +
+            HtmlEscape(diagnostic.get("message", "").asString()) +
+            "</div><div class=\"muted\">" +
+            HtmlEscape(diagnostic.get("target", "").asString()) +
+            "</div></div>";
+  }
+  return html;
+}
+
+std::string RenderTreeNavigationSummary(const Json::Value& node) {
+  const auto& navigation = node["navigation"];
+  if (!NavigationHasContent(navigation)) {
+    return "";
+  }
+  std::string html = "<span class=\"tree-nav\" aria-label=\"Product Map refs\">";
+  if (!navigation["adr_refs"].empty()) {
+    html += "<span class=\"muted\">ADR</span>";
+    for (const auto& ref : navigation["adr_refs"]) {
+      html += RenderLogicalRefChip(ref);
+    }
+  }
+  if (!navigation["evidence_refs"].empty()) {
+    html += "<span class=\"muted\">Evidence</span>";
+    for (const auto& ref : navigation["evidence_refs"]) {
+      html += RenderLogicalRefChip(ref);
+    }
+  }
+  if (!navigation["diagnostics"].empty()) {
+    html += "<span class=\"pill missing\">Gaps " +
+            std::to_string(navigation["diagnostics"].size()) + "</span>";
+  }
+  html += "</span>";
+  return html;
+}
+
 std::string RenderTextChip(const std::string& value) {
   const auto cleaned = CleanListToken(value);
   if (cleaned.empty()) {
@@ -1449,6 +1664,188 @@ std::string RenderKeyValueRows(
     return "";
   }
   return "<div class=\"detail-kv-list\">" + html + "</div>";
+}
+
+std::optional<Json::Value> FindProductMapNode(const Json::Value& navigation,
+                                              const std::string& nodeId) {
+  for (const auto& node : navigation["nodes"]) {
+    if (node.get("id", "").asString() == nodeId) {
+      return node;
+    }
+  }
+  return std::nullopt;
+}
+
+Json::Value ProductMapRefsFromEdges(const Json::Value& navigation,
+                                    const std::string& fromNodeId,
+                                    const std::set<std::string>& edgeTypes) {
+  Json::Value refs(Json::arrayValue);
+  for (const auto& edge : navigation["edges"]) {
+    if (edge.get("from", "").asString() != fromNodeId ||
+        !edgeTypes.count(edge.get("edge_type", "").asString())) {
+      continue;
+    }
+    const auto targetNode =
+        FindProductMapNode(navigation, edge.get("to", "").asString());
+    if (targetNode.has_value()) {
+      AppendUniqueJson(refs, (*targetNode)["ref"]);
+    }
+  }
+  return refs;
+}
+
+bool DiagnosticHasEvidenceRef(const Json::Value& diagnostic,
+                              const Json::Value& ref) {
+  const auto encoded = JsonCompactString(ref);
+  for (const auto& candidate : diagnostic["evidence_refs"]) {
+    if (JsonCompactString(candidate) == encoded) {
+      return true;
+    }
+  }
+  return false;
+}
+
+Json::Value ProductMapDiagnosticsForTarget(
+    const Json::Value& navigation,
+    const std::string& target,
+    const Json::Value& sourceRef = Json::Value(Json::nullValue)) {
+  Json::Value diagnostics(Json::arrayValue);
+  for (const auto& diagnostic : navigation["diagnostics"]) {
+    if (diagnostic.get("target", "").asString() == target ||
+        (sourceRef.isObject() && DiagnosticHasEvidenceRef(diagnostic, sourceRef))) {
+      AppendUniqueJson(diagnostics, diagnostic);
+    }
+  }
+  return diagnostics;
+}
+
+std::string RenderProductMapItemNavigationPartial(
+    const Json::Value& item,
+    const Json::Value& navigation) {
+  const auto nodeId = ProductMapNodeIdForItem(item);
+  if (nodeId.empty() || item.get("type", "").asString() == "ADR") {
+    return "";
+  }
+
+  const auto adrRefs =
+      ProductMapRefsFromEdges(navigation, nodeId, {"decided_by"});
+  const auto evidenceRefs =
+      ProductMapRefsFromEdges(navigation, nodeId, {"has_evidence", "supported_by"});
+  const auto relatedRefs =
+      ProductMapRefsFromEdges(navigation, nodeId, {"contains", "contextualizes"});
+  const auto diagnostics = ProductMapDiagnosticsForTarget(navigation, nodeId);
+  if (adrRefs.empty() && evidenceRefs.empty() && relatedRefs.empty() &&
+      diagnostics.empty()) {
+    return "";
+  }
+
+  std::string html =
+      "<section class=\"panel detail-section product-map-navigation\" data-navigation-model=\"product-map\"><h4>Product Map navigation</h4>";
+  html += "<div class=\"detail-stack\">";
+  if (!adrRefs.empty()) {
+    html += "<div><div class=\"detail-label\">ADRs</div>" +
+            RenderLogicalRefList(adrRefs) + "</div>";
+  }
+  if (!evidenceRefs.empty()) {
+    html += "<div><div class=\"detail-label\">Evidence</div>" +
+            RenderLogicalRefList(evidenceRefs) + "</div>";
+  }
+  if (!relatedRefs.empty()) {
+    html += "<div><div class=\"detail-label\">Related backlog items</div>" +
+            RenderLogicalRefList(relatedRefs) + "</div>";
+  }
+  if (!diagnostics.empty()) {
+    html += "<div><div class=\"detail-label\">Gaps</div>" +
+            RenderDiagnosticList(diagnostics) + "</div>";
+  }
+  html += "</div></section>";
+  return html;
+}
+
+std::string RenderAdrLifecyclePartial(const Json::Value& item,
+                                      const Json::Value& navigation) {
+  if (item.get("type", "").asString() != "ADR") {
+    return "";
+  }
+
+  const auto product = item.get("product", "").asString();
+  const auto adrId = item.get("id", "").asString();
+  const auto adrNodeId = ProductMapNodeId("adr", adrId);
+  const auto adrRef = MakeLogicalRef(product, "", adrId);
+  Json::Value featureRefs(Json::arrayValue);
+  Json::Value evidenceRefs(Json::arrayValue);
+  Json::Value supersededRefs(Json::arrayValue);
+
+  for (const auto& rawRef : item["feature_refs"]) {
+    const auto [refProduct, refId] =
+        SplitReferenceProduct(rawRef.asString(), product);
+    if (!refId.empty()) {
+      AppendUniqueJson(featureRefs, MakeLogicalRef(refProduct, refId));
+    }
+  }
+  for (const auto& rawRef : item["evidence_refs"]) {
+    const auto [refProduct, refId] =
+        SplitReferenceProduct(rawRef.asString(), product);
+    if (!refId.empty()) {
+      AppendUniqueJson(evidenceRefs, MakeLogicalRef(refProduct, refId, "", refId));
+    }
+  }
+  for (const auto& rawRef : item["superseded_by"]) {
+    const auto [refProduct, refId] =
+        SplitReferenceProduct(rawRef.asString(), product);
+    if (!refId.empty()) {
+      AppendUniqueJson(supersededRefs, MakeLogicalRef(refProduct, "", refId));
+    }
+  }
+
+  const auto diagnostics =
+      ProductMapDiagnosticsForTarget(navigation, adrNodeId, adrRef);
+  std::string html =
+      "<section class=\"panel detail-section adr-navigation\" data-navigation-model=\"adr-lifecycle\"><h4>ADR decision navigation</h4>";
+  html += "<div class=\"detail-facts\">" +
+          RenderDetailFact("Decision status",
+                           item.get("decision_status", "").asString().empty()
+                               ? "metadata gap"
+                               : item.get("decision_status", "").asString()) +
+          RenderDetailFact("Revisit condition",
+                           item.get("revisit_condition", "").asString().empty()
+                               ? "none recorded"
+                               : item.get("revisit_condition", "").asString()) +
+          "</div>";
+  html += "<div class=\"detail-stack\">";
+  html += "<div><div class=\"detail-label\">Impacted features / follow-up work</div>" +
+          RenderLogicalRefList(featureRefs, "No impacted feature refs recorded") +
+          "</div>";
+  if (!item.get("accepted_option", "").asString().empty()) {
+    html += "<div><div class=\"detail-label\">Accepted option</div><div class=\"detail-value\">" +
+            HtmlEscape(item.get("accepted_option", "").asString()) +
+            "</div></div>";
+  }
+  if (!item["rejected_options"].empty()) {
+    html += "<div><div class=\"detail-label\">Rejected options</div>" +
+            RenderPillRow(
+                [&]() {
+                  std::vector<std::string> values;
+                  for (const auto& rejected : item["rejected_options"]) {
+                    values.push_back(rejected.asString());
+                  }
+                  return values;
+                }(),
+                [](const std::string& value) { return RenderTextChip(value); }) +
+            "</div>";
+  }
+  html += "<div><div class=\"detail-label\">Superseded by</div>" +
+          RenderLogicalRefList(supersededRefs, "No supersession refs recorded") +
+          "</div>";
+  html += "<div><div class=\"detail-label\">Linked evidence</div>" +
+          RenderLogicalRefList(evidenceRefs, "No evidence refs recorded") +
+          "</div>";
+  if (!diagnostics.empty()) {
+    html += "<div><div class=\"detail-label\">Gaps</div>" +
+            RenderDiagnosticList(diagnostics) + "</div>";
+  }
+  html += "</div></section>";
+  return html;
 }
 
 std::string RenderGateStatusCard(const Json::Value& gate) {
@@ -3505,11 +3902,88 @@ Json::Value BacklogWebviewService::BuildTree(const ItemQueryOptions& options) {
     return response;
   }
 
+  std::map<std::string, Json::Value> selectedItemsByKey;
+  std::map<std::string, Json::Value> navigationByKey;
+  for (const auto& item : itemsResponse["items"]) {
+    const auto id = item.get("id", "").asString();
+    const auto product = item.get("product", "").asString();
+    if (!id.empty() && !product.empty()) {
+      selectedItemsByKey[ProductItemKey(product, id)] = item;
+    }
+  }
+
+  for (const auto& item : itemsResponse["items"]) {
+    const auto id = item.get("id", "").asString();
+    const auto product = item.get("product", "").asString();
+    const auto parent = item.get("parent", "").asString();
+    if (id.empty() || product.empty() || parent.empty()) {
+      continue;
+    }
+    const auto parentKey = ProductItemKey(product, parent);
+    if (selectedItemsByKey.find(parentKey) != selectedItemsByKey.end()) {
+      AppendNavigationRef(navigationByKey[parentKey], "related_item_refs",
+                          MakeLogicalRef(product, id));
+    }
+  }
+
+  for (const auto& item : itemsResponse["items"]) {
+    if (item.get("type", "").asString() != "ADR") {
+      continue;
+    }
+    const auto adrId = item.get("id", "").asString();
+    const auto adrProduct = item.get("product", "").asString();
+    if (adrId.empty() || adrProduct.empty()) {
+      continue;
+    }
+    const auto adrRef = MakeLogicalRef(adrProduct, "", adrId);
+    for (const auto& featureRefValue : item["feature_refs"]) {
+      const auto [featureProduct, featureId] =
+          SplitReferenceProduct(featureRefValue.asString(), adrProduct);
+      if (featureId.empty()) {
+        continue;
+      }
+      const auto featureKey = ProductItemKey(featureProduct, featureId);
+      const auto featureIt = selectedItemsByKey.find(featureKey);
+      if (featureIt == selectedItemsByKey.end()) {
+        continue;
+      }
+      AppendNavigationRef(navigationByKey[featureKey], "adr_refs", adrRef);
+      for (const auto& evidenceRefValue : item["evidence_refs"]) {
+        const auto [evidenceProduct, evidenceId] =
+            SplitReferenceProduct(evidenceRefValue.asString(), adrProduct);
+        if (evidenceId.empty()) {
+          continue;
+        }
+        const auto evidenceKey = ProductItemKey(evidenceProduct, evidenceId);
+        if (selectedItemsByKey.find(evidenceKey) != selectedItemsByKey.end()) {
+          AppendNavigationRef(navigationByKey[featureKey], "evidence_refs",
+                              MakeLogicalRef(evidenceProduct, evidenceId));
+        } else {
+          AppendNavigationRef(
+              navigationByKey[featureKey], "diagnostics",
+              ProductMapDiagnostic(
+                  "missing_ref", ProductMapNodeId("evidence", evidenceId),
+                  "ADR evidence ref is not present in the selected Product Map scope.",
+                  {adrRef}));
+        }
+      }
+      const auto decisionStatus = text::ToLower(item.get("decision_status", "").asString());
+      if (decisionStatus == "stale" || decisionStatus == "revisit_needed") {
+        AppendNavigationRef(
+            navigationByKey[featureKey], "diagnostics",
+            ProductMapDiagnostic(
+                "stale_ref", ProductMapNodeId("adr", adrId),
+                "ADR lifecycle status requires review before trusting this Product Map link.",
+                {adrRef}));
+      }
+    }
+  }
+
   auto makeKey = [](const Json::Value& item) {
-    return item["product"].asString() + "\n" + item["id"].asString();
+    return ProductItemKey(item["product"].asString(), item["id"].asString());
   };
   auto makeParentKey = [](const Json::Value& item) {
-    return item["product"].asString() + "\n" + item["parent"].asString();
+    return ProductItemKey(item["product"].asString(), item["parent"].asString());
   };
 
   std::unordered_map<std::string, Json::Value> byId;
@@ -3519,7 +3993,8 @@ Json::Value BacklogWebviewService::BuildTree(const ItemQueryOptions& options) {
   for (const auto& item : itemsResponse["items"]) {
     const auto type = item["type"].asString();
     if (type != "Initiative" && type != "Epic" && type != "Feature" && type != "UserStory" &&
-        type != "Task" && type != "Bug" && type != "Issue" && type != "Theme") {
+        type != "Task" && type != "Bug" && type != "Issue" && type != "Theme" &&
+        type != "Topic") {
       continue;
     }
     const auto id = item["id"].asString();
@@ -3537,13 +4012,18 @@ Json::Value BacklogWebviewService::BuildTree(const ItemQueryOptions& options) {
     node["parent"] = item["parent"].asString();
     node["topic"] = item["topic"];
     node["children"] = Json::arrayValue;
+    const auto navIt = navigationByKey.find(key);
+    if (navIt != navigationByKey.end() && NavigationHasContent(navIt->second)) {
+      node["navigation"] = NormalizeNavigation(navIt->second);
+    }
     byId[key] = node;
   }
 
   for (const auto& item : itemsResponse["items"]) {
     const auto type = item["type"].asString();
     if (type != "Initiative" && type != "Epic" && type != "Feature" && type != "UserStory" &&
-        type != "Task" && type != "Bug" && type != "Issue" && type != "Theme") {
+        type != "Task" && type != "Bug" && type != "Issue" && type != "Theme" &&
+        type != "Topic") {
       continue;
     }
     const auto id = item["id"].asString();
@@ -3586,7 +4066,8 @@ Json::Value BacklogWebviewService::BuildTree(const ItemQueryOptions& options) {
   for (const auto& item : itemsResponse["items"]) {
     const auto type = item["type"].asString();
     if (type != "Initiative" && type != "Epic" && type != "Feature" && type != "UserStory" &&
-        type != "Task" && type != "Bug" && type != "Issue" && type != "Theme") {
+        type != "Task" && type != "Bug" && type != "Issue" && type != "Theme" &&
+        type != "Topic") {
       continue;
     }
     const auto id = item["id"].asString();
@@ -4363,9 +4844,11 @@ Json::Value BacklogWebviewService::BuildProductMapNavigation(
   }
 
   std::set<std::string> nodeIds;
-  std::map<std::string, std::vector<Json::Value>> featureRefsToAdrs;
-  std::map<std::string, Json::Value> itemById;
-  std::map<std::string, Json::Value> adrById;
+  std::set<std::string> edgeKeys;
+  std::map<std::string, Json::Value> itemByKey;
+  std::map<std::string, Json::Value> adrByKey;
+  std::map<std::string, std::string> nodeIdByKey;
+  std::map<std::string, std::string> topicNodeByTitle;
 
   auto appendNode = [&](const Json::Value& node) {
     const auto id = node.get("id", "").asString();
@@ -4374,79 +4857,175 @@ Json::Value BacklogWebviewService::BuildProductMapNavigation(
     }
   };
 
+  auto appendEdge = [&](const Json::Value& edge) {
+    const auto key = edge.get("from", "").asString() + "\n" +
+                     edge.get("to", "").asString() + "\n" +
+                     edge.get("edge_type", "").asString();
+    if (edgeKeys.insert(key).second) {
+      response["edges"].append(edge);
+    }
+  };
+
+  auto appendDiagnostic = [&](const Json::Value& diagnostic) {
+    response["diagnostics"].append(diagnostic);
+  };
+
   for (const auto& item : items["items"]) {
     const auto id = item.get("id", "").asString();
+    const auto product = item.get("product", "").asString();
     const auto type = item.get("type", "").asString();
-    if (id.empty()) {
+    if (id.empty() || product.empty()) {
       continue;
     }
-    itemById[id] = item;
+    const auto key = ProductItemKey(product, id);
+    itemByKey[key] = item;
     if (type == "ADR") {
-      adrById[id] = item;
-      appendNode(ProductMapNode(item, "adr"));
-      for (const auto& featureRef : item["feature_refs"]) {
-        const auto featureId = featureRef.asString();
-        if (!featureId.empty()) {
-          featureRefsToAdrs[featureId].push_back(item);
+      adrByKey[key] = item;
+    }
+    const auto nodeType = ProductMapNodeTypeForItemType(type);
+    if (!nodeType.has_value()) {
+      continue;
+    }
+    const auto nodeId = ProductMapNodeId(*nodeType, id);
+    nodeIdByKey[key] = nodeId;
+    appendNode(ProductMapNode(item, *nodeType));
+    if (*nodeType == "topic") {
+      topicNodeByTitle[item.get("title", id).asString()] = nodeId;
+    }
+  }
+
+  for (const auto& [key, item] : itemByKey) {
+    const auto nodeIdIt = nodeIdByKey.find(key);
+    if (nodeIdIt == nodeIdByKey.end()) {
+      continue;
+    }
+    const auto product = item.get("product", "").asString();
+    const auto id = item.get("id", "").asString();
+    const auto parent = item.get("parent", "").asString();
+    if (!parent.empty()) {
+      const auto parentKey = ProductItemKey(product, parent);
+      const auto parentNodeIt = nodeIdByKey.find(parentKey);
+      if (parentNodeIt != nodeIdByKey.end()) {
+        appendEdge(ProductMapEdge(parentNodeIt->second, nodeIdIt->second,
+                                  "contains", MakeLogicalRef(product, parent)));
+      }
+    }
+    for (const auto& topicValue : SplitCsv(item.get("topic", "").asString())) {
+      const auto topicIt = topicNodeByTitle.find(topicValue);
+      if (topicIt != topicNodeByTitle.end()) {
+        appendEdge(ProductMapEdge(topicIt->second, nodeIdIt->second,
+                                  "contextualizes",
+                                  MakeLogicalRef(product, "", "", "", topicValue)));
+      }
+    }
+  }
+
+  for (const auto& [adrKey, adr] : adrByKey) {
+    const auto adrId = adr.get("id", "").asString();
+    const auto adrProduct = adr.get("product", "").asString();
+    const auto adrNodeId = ProductMapNodeId("adr", adrId);
+    const auto adrRef = MakeLogicalRef(adrProduct, "", adrId);
+
+    if (adr["feature_refs"].empty()) {
+      appendDiagnostic(ProductMapDiagnostic(
+          "missing_ref", adrNodeId,
+          "ADR lifecycle metadata has no impacted feature or follow-up work refs.",
+          {adrRef}));
+    }
+    for (const auto& featureRef : adr["feature_refs"]) {
+      const auto [featureProduct, featureId] =
+          SplitReferenceProduct(featureRef.asString(), adrProduct);
+      if (featureId.empty()) {
+        continue;
+      }
+      const auto featureKey = ProductItemKey(featureProduct, featureId);
+      const auto featureIt = itemByKey.find(featureKey);
+      const auto featureNodeIt = nodeIdByKey.find(featureKey);
+      if (featureIt == itemByKey.end() || featureNodeIt == nodeIdByKey.end()) {
+        appendDiagnostic(ProductMapDiagnostic(
+            "missing_ref", ProductMapNodeId("feature", featureId),
+            "ADR references a feature or work item that is not present in the selected Product Map scope.",
+            {adrRef}));
+        continue;
+      }
+
+      const auto featureNodeId = featureNodeIt->second;
+      appendEdge(ProductMapEdge(
+          featureNodeId, adrNodeId, "decided_by",
+          MakeLogicalRef(featureProduct, featureId)));
+      appendEdge(ProductMapEdge(
+          adrNodeId, featureNodeId, "impacts_feature", adrRef));
+      if (featureIt->second.get("type", "").asString() != "Feature") {
+        appendEdge(ProductMapEdge(
+            adrNodeId, featureNodeId, "follow_up_work", adrRef));
+      }
+    }
+
+    if (adr["evidence_refs"].empty()) {
+      appendDiagnostic(ProductMapDiagnostic(
+          "evidence_gap", adrNodeId,
+          "ADR lifecycle metadata has no evidence refs; Backboard should show this as a review gap, not infer support."));
+    }
+    for (const auto& evidenceRef : adr["evidence_refs"]) {
+      const auto [evidenceProduct, evidenceId] =
+          SplitReferenceProduct(evidenceRef.asString(), adrProduct);
+      if (evidenceId.empty()) {
+        continue;
+      }
+      const auto evidenceKey = ProductItemKey(evidenceProduct, evidenceId);
+      const auto evidenceIt = itemByKey.find(evidenceKey);
+      if (evidenceIt == itemByKey.end()) {
+        appendDiagnostic(ProductMapDiagnostic(
+            "missing_ref", ProductMapNodeId("evidence", evidenceId),
+            "ADR evidence ref is not present in the selected Product Map scope.",
+            {adrRef}));
+        continue;
+      }
+      const auto evidenceNodeId = ProductMapNodeId("evidence", evidenceId);
+      appendNode(ProductMapEvidenceNode(
+          evidenceProduct, evidenceId,
+          evidenceIt->second.get("title", evidenceId).asString()));
+      appendEdge(ProductMapEdge(
+          adrNodeId, evidenceNodeId, "supported_by", adrRef));
+
+      for (const auto& featureRef : adr["feature_refs"]) {
+        const auto [featureProduct, featureId] =
+            SplitReferenceProduct(featureRef.asString(), adrProduct);
+        const auto featureNodeIt =
+            nodeIdByKey.find(ProductItemKey(featureProduct, featureId));
+        if (featureNodeIt != nodeIdByKey.end()) {
+          appendEdge(ProductMapEdge(
+              featureNodeIt->second, evidenceNodeId, "has_evidence",
+              MakeLogicalRef(featureProduct, featureId)));
         }
       }
-      continue;
-    }
-    if (type == "Initiative") {
-      appendNode(ProductMapNode(item, "initiative"));
-    } else if (type == "Epic") {
-      appendNode(ProductMapNode(item, "epic"));
-    } else if (type == "Feature") {
-      appendNode(ProductMapNode(item, "feature"));
-    } else if (type == "Topic") {
-      appendNode(ProductMapNode(item, "topic"));
-    }
-  }
-
-  for (const auto& [featureId, adrs] : featureRefsToAdrs) {
-    const auto featureIt = itemById.find(featureId);
-    if (featureIt == itemById.end()) {
-      for (const auto& adr : adrs) {
-        Json::Value diagnostic(Json::objectValue);
-        diagnostic["code"] = "missing_ref";
-        diagnostic["target"] = "feature:" + featureId;
-        diagnostic["message"] = "ADR references a feature or work item that is not present in the selected Product Map scope.";
-        diagnostic["evidence_refs"].append(MakeLogicalRef(adr.get("product", "").asString(), "", adr.get("id", "").asString()));
-        response["diagnostics"].append(diagnostic);
-      }
-      continue;
     }
 
-    appendNode(ProductMapNode(featureIt->second, "feature"));
-    const auto featureNodeId = "feature:" + featureId;
-    for (const auto& adr : adrs) {
-      const auto adrId = adr.get("id", "").asString();
-      const auto adrNodeId = "adr:" + adrId;
-      response["edges"].append(ProductMapEdge(
-          featureNodeId, adrNodeId, "decided_by",
-          MakeLogicalRef(featureIt->second.get("product", "").asString(), featureId)));
-      response["edges"].append(ProductMapEdge(
-          adrNodeId, featureNodeId, "impacts_feature",
-          MakeLogicalRef(adr.get("product", "").asString(), "", adrId)));
-    }
-  }
-
-  for (const auto& [adrId, adr] : adrById) {
-    if (adr["evidence_refs"].empty()) {
-      Json::Value diagnostic(Json::objectValue);
-      diagnostic["code"] = "evidence_gap";
-      diagnostic["target"] = "adr:" + adrId;
-      diagnostic["message"] = "ADR lifecycle metadata has no evidence refs; Backboard should show this as a review gap, not infer support.";
-      diagnostic["evidence_refs"] = Json::arrayValue;
-      response["diagnostics"].append(diagnostic);
-    }
     for (const auto& supersededBy : adr["superseded_by"]) {
-      const auto targetAdrId = supersededBy.asString();
+      const auto [targetProduct, targetAdrId] =
+          SplitReferenceProduct(supersededBy.asString(), adrProduct);
       if (!targetAdrId.empty()) {
-        response["edges"].append(ProductMapEdge(
-            "adr:" + adrId, "adr:" + targetAdrId, "superseded_by",
-            MakeLogicalRef(adr.get("product", "").asString(), "", adrId)));
+        const auto targetAdrKey = ProductItemKey(targetProduct, targetAdrId);
+        if (adrByKey.find(targetAdrKey) != adrByKey.end()) {
+          appendEdge(ProductMapEdge(
+              adrNodeId, ProductMapNodeId("adr", targetAdrId), "superseded_by",
+              adrRef));
+        } else {
+          appendDiagnostic(ProductMapDiagnostic(
+              "missing_ref", ProductMapNodeId("adr", targetAdrId),
+              "ADR supersession ref is not present in the selected Product Map scope.",
+              {adrRef}));
+        }
       }
+    }
+
+    const auto decisionStatus =
+        text::ToLower(adr.get("decision_status", "").asString());
+    if (decisionStatus == "stale" || decisionStatus == "revisit_needed") {
+      appendDiagnostic(ProductMapDiagnostic(
+          "stale_ref", adrNodeId,
+          "ADR lifecycle status requires review before trusting this Product Map link.",
+          {adrRef}));
     }
   }
 
@@ -5402,6 +5981,13 @@ std::string BacklogWebviewService::RenderItemPartial(const std::string& product,
 
   const auto& item = detail["item"];
   const auto reviewSections = ExtractReviewSections(item.get("content", "").asString());
+  ItemQueryOptions navigationOptions;
+  const auto itemProduct = item.get("product", "").asString();
+  if (!itemProduct.empty()) {
+    navigationOptions.products = {itemProduct};
+  }
+  navigationOptions.limit = 2000;
+  const auto productMapNavigation = BuildProductMapNavigation(navigationOptions);
 
   std::string html = "<section class=\"detail-shell\" data-item-title=\"" +
                      HtmlEscape(item.get("title", item.get("id", "")).asString()) + "\">";
@@ -5422,10 +6008,15 @@ std::string BacklogWebviewService::RenderItemPartial(const std::string& product,
           RenderDetailFact("Updated", item.get("updated", "").asString().empty()
                                           ? "Unknown"
                                           : item.get("updated", "").asString()) +
-          RenderDetailFact("Path", item.get("path", "").asString().empty()
-                                       ? "Unknown"
-                                       : item.get("path", "").asString()) +
           "</div></section>";
+
+  if (!productMapNavigation.isMember("error")) {
+    if (item.get("type", "").asString() == "ADR") {
+      html += RenderAdrLifecyclePartial(item, productMapNavigation);
+    } else {
+      html += RenderProductMapItemNavigationPartial(item, productMapNavigation);
+    }
+  }
 
   html += "<section class=\"panel detail-section\"><h4>Gate status</h4><div class=\"review-grid\">" +
           RenderGateStatusCard(item["gate_status"]["ready"]) +

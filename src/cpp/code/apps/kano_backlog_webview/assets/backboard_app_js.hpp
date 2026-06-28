@@ -726,6 +726,42 @@ inline constexpr std::string_view kBackboardAppJsPart1b = R"JS(
       return `${node.product || ''}::${node.id || ''}`;
     }
 
+    function logicalRefLabel(ref) {
+      return ref?.adr_id || ref?.item_id || ref?.evidence_id || ref?.topic_id || ref?.uid || ref?.vision_id || ref?.product || '';
+    }
+
+    function renderTreeRefChip(ref) {
+      const label = logicalRefLabel(ref);
+      if (!label) return '';
+      const product = ref?.product || '';
+      const itemId = ref?.adr_id || ref?.item_id || '';
+      if (itemId) {
+        return `<a href="#" class="pill item-link" data-item-id="${escAttr(itemId)}" data-item-product="${escAttr(product)}">${esc(label)}</a>`;
+      }
+      return `<span class="pill">${esc(label)}</span>`;
+    }
+
+    function renderTreeNavigation(node) {
+      const nav = node.navigation || {};
+      const adrRefs = nav.adr_refs || [];
+      const evidenceRefs = nav.evidence_refs || [];
+      const diagnostics = nav.diagnostics || [];
+      if (!adrRefs.length && !evidenceRefs.length && !diagnostics.length) return '';
+      const chips = [];
+      if (adrRefs.length) {
+        chips.push('<span class="muted">ADR</span>');
+        chips.push(...adrRefs.map(renderTreeRefChip));
+      }
+      if (evidenceRefs.length) {
+        chips.push('<span class="muted">Evidence</span>');
+        chips.push(...evidenceRefs.map(renderTreeRefChip));
+      }
+      if (diagnostics.length) {
+        chips.push(`<span class="pill missing">Gaps ${diagnostics.length}</span>`);
+      }
+      return `<span class="tree-nav" aria-label="Product Map refs">${chips.join('')}</span>`;
+    }
+
     function safeHref(href) {
       const value = String(href || '').trim();
       if (!value) return '#';
@@ -1103,7 +1139,7 @@ inline constexpr std::string_view kBackboardAppJsPart3 = R"JS(
     function renderTreeNode(node, depth = 0) {
       const children = node.children || [];
       const nodeKey = treeNodeKey(node);
-      const label = `<span class="node-line"><span>${typeIcon(node.type)}</span><code>${esc(node.id)}</code><a href="#" class="item-link" data-item-id="${escAttr(node.id)}" data-item-product="${escAttr(node.product || '')}">${esc(node.title)}</a><span class="muted">(${esc(renderMeta(node))})</span></span>`;
+      const label = `<span class="node-line"><span>${typeIcon(node.type)}</span><code>${esc(node.id)}</code><a href="#" class="item-link" data-item-id="${escAttr(node.id)}" data-item-product="${escAttr(node.product || '')}">${esc(node.title)}</a><span class="muted">(${esc(renderMeta(node))})</span>${renderTreeNavigation(node)}</span>`;
       if (!children.length) {
         return `<li><span class="leaf-spacer"></span>${label}</li>`;
       }

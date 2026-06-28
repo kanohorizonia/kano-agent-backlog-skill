@@ -151,6 +151,36 @@ bool has_edge(const Json::Value& edges,
     return false;
 }
 
+bool has_node(const Json::Value& nodes,
+              const std::string& id,
+              const std::string& node_type) {
+    for (const auto& node : nodes) {
+        if (node["id"].asString() == id &&
+            node["node_type"].asString() == node_type) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool has_diagnostic(const Json::Value& diagnostics,
+                    const std::string& code,
+                    const std::string& target) {
+    for (const auto& diagnostic : diagnostics) {
+        if (diagnostic["code"].asString() == code &&
+            diagnostic["target"].asString() == target) {
+            return true;
+        }
+    }
+    return false;
+}
+
+std::string json_to_string(const Json::Value& value) {
+    Json::StreamWriterBuilder builder;
+    builder["indentation"] = "";
+    return Json::writeString(builder, value);
+}
+
 std::size_t count_regular_files(const std::filesystem::path& root) {
     if (!std::filesystem::exists(root)) {
         return 0;
@@ -473,6 +503,23 @@ int main() {
             "# ADR without evidence refs\n\n"
             "This legacy ADR intentionally lacks evidence refs for diagnostics coverage.\n");
         write_text(
+            products / "product-alpha" / "decisions" / "PRA-ADR-0003_missing-stale-refs.md",
+            "---\n"
+            "id: PRA-ADR-0003\n"
+            "title: ADR with missing stale refs\n"
+            "decision_status: stale\n"
+            "feature_refs:\n"
+            "  - PRA-FTR-9999\n"
+            "evidence_refs:\n"
+            "  - PRA-TSK-9999\n"
+            "superseded_by:\n"
+            "  - PRA-ADR-9999\n"
+            "revisit_condition: Missing Product Map refs must be reconciled\n"
+            "date: 2026-06-14\n"
+            "---\n\n"
+            "# ADR with missing stale refs\n\n"
+            "This ADR intentionally points at missing refs for Product Map diagnostics.\n");
+        write_text(
             products / "product-alpha" / "items" / "feature" / "0003" / "PRA-FTR-0003.md",
             item_doc("PRA-FTR-0003",
                      "019ec100-0000-7000-8000-000000000012",
@@ -517,7 +564,7 @@ int main() {
         auto all = service.QueryItems(allOptions);
         expect(!all.isMember("error"), "all-products query should not fail");
         expect(all["products"].size() == 2, "all-products query should include both products");
-        expect(all["total"].asUInt64() == 20, "all-products query should include items, ADRs, plus unique topic pseudo-items");
+        expect(all["total"].asUInt64() == 21, "all-products query should include items, ADRs, plus unique topic pseudo-items");
         for (const auto& item : all["items"]) {
             expect(item.isMember("gate_status"), "all-products items should include gate_status");
             expect(item["gate_status"].isMember("ready"), "gate_status should include ready gate");
@@ -923,19 +970,36 @@ int main() {
         expect(!productMapNavigation["dispatches_work"].asBool(), "product map navigation must not dispatch work");
         expect(productMapNavigation["node_count"].asUInt64() >= 4,
                "product map navigation should expose feature and ADR nodes");
+        expect(has_node(productMapNavigation["nodes"], "work_order:PRA-TSK-0001", "work_order"),
+               "product map navigation should expose work-order nodes");
+        expect(has_node(productMapNavigation["nodes"], "evidence:PRA-TSK-0001", "evidence"),
+               "product map navigation should expose linked evidence nodes");
         expect(has_edge(productMapNavigation["edges"], "feature:PRA-FTR-0002", "adr:PRA-ADR-0001", "decided_by"),
                "product map navigation should link feature to ADR decisions");
         expect(has_edge(productMapNavigation["edges"], "adr:PRA-ADR-0001", "feature:PRA-FTR-0002", "impacts_feature"),
                "product map navigation should link ADRs back to impacted features");
+        expect(has_edge(productMapNavigation["edges"], "adr:PRA-ADR-0001", "evidence:PRA-TSK-0001", "supported_by"),
+               "product map navigation should link ADRs to evidence");
+        expect(has_edge(productMapNavigation["edges"], "feature:PRA-FTR-0002", "evidence:PRA-TSK-0001", "has_evidence"),
+               "product map navigation should link Product Map nodes to evidence through ADR refs");
         expect(has_edge(productMapNavigation["edges"], "adr:PRA-ADR-0002", "adr:PRA-ADR-0001", "superseded_by"),
                "product map navigation should expose ADR supersession edges");
-        bool sawAdrEvidenceGap = false;
-        for (const auto& diagnostic : productMapNavigation["diagnostics"]) {
-            sawAdrEvidenceGap = sawAdrEvidenceGap ||
-                (diagnostic["code"].asString() == "evidence_gap" &&
-                 diagnostic["target"].asString() == "adr:PRA-ADR-0002");
-        }
-        expect(sawAdrEvidenceGap, "product map navigation should report ADR evidence gaps without inferring support");
+        expect(has_diagnostic(productMapNavigation["diagnostics"], "evidence_gap", "adr:PRA-ADR-0002"),
+               "product map navigation should report ADR evidence gaps without inferring support");
+        expect(has_diagnostic(productMapNavigation["diagnostics"], "stale_ref", "adr:PRA-ADR-0002"),
+               "product map navigation should report stale ADR lifecycle refs");
+        expect(has_diagnostic(productMapNavigation["diagnostics"], "missing_ref", "feature:PRA-FTR-9999"),
+               "product map navigation should report missing impacted feature refs");
+        expect(has_diagnostic(productMapNavigation["diagnostics"], "missing_ref", "evidence:PRA-TSK-9999"),
+               "product map navigation should report missing evidence refs");
+        expect(has_diagnostic(productMapNavigation["diagnostics"], "missing_ref", "adr:PRA-ADR-9999"),
+               "product map navigation should report missing ADR supersession refs");
+        const auto productMapSerialized = json_to_string(productMapNavigation);
+        expect(productMapSerialized.find(products.generic_string()) == std::string::npos,
+               "product map navigation should not expose absolute filesystem paths");
+        expect(productMapSerialized.find("items/") == std::string::npos &&
+                   productMapSerialized.find("decisions/") == std::string::npos,
+               "product map navigation refs should not expose raw repo paths");
 
         auto fallbackRoute = service.RecommendCapabilityRoute("product-alpha", "PRA-FTR-0003");
         expect(!fallbackRoute.isMember("error"), "fallback capability route should not fail");
@@ -1095,6 +1159,15 @@ int main() {
                "tree partial should render item ids");
         expect(treePartial.find("data-item-id") != std::string::npos,
                "tree partial should expose item link hooks");
+        auto productMapTreePartial = service.RenderTreePartial(allOptions);
+        expect(productMapTreePartial.find("Product Map refs") != std::string::npos,
+               "tree partial should expose DOM-readable Product Map navigation refs");
+        expect(productMapTreePartial.find("PRA-ADR-0001") != std::string::npos,
+               "tree partial should render feature to ADR refs");
+        expect(productMapTreePartial.find("PRA-TSK-0001") != std::string::npos,
+               "tree partial should render Product Map evidence refs");
+        expect(productMapTreePartial.find(products.generic_string()) == std::string::npos,
+               "tree partial should not expose absolute filesystem paths");
 
         auto kanbanPartial = service.RenderKanbanPartial(betaDoing);
         expect(kanbanPartial.find("Beta live bug") != std::string::npos,
@@ -1139,6 +1212,8 @@ int main() {
         expect(itemPartial.find(">Updated<") != std::string::npos &&
                itemPartial.find("2026-06-14") != std::string::npos,
                "item partial should render the updated timestamp");
+        expect(itemPartial.find(">Path<") == std::string::npos,
+               "item partial should not expose raw file paths as primary navigation");
         expect(itemPartial.find("Gate status") != std::string::npos,
                "item partial should render gate status details");
         expect(itemPartial.find("required_ready_sections") != std::string::npos,
@@ -1168,6 +1243,38 @@ int main() {
                          ">Risks / Dependencies<", ">Worklog<",
                          "Raw markdown / full file"},
                         "review-first sections should appear before the raw markdown toggle");
+
+        auto featurePartial = service.RenderItemPartial("product-alpha", "PRA-FTR-0002");
+        expect(featurePartial.find("Product Map navigation") != std::string::npos,
+               "feature detail should expose Product Map navigation");
+        expect(featurePartial.find("PRA-ADR-0001") != std::string::npos,
+               "feature detail should link to ADR refs");
+        expect(featurePartial.find("PRA-TSK-0001") != std::string::npos,
+               "feature detail should link to evidence refs");
+
+        auto adrPartial = service.RenderItemPartial("product-alpha", "PRA-ADR-0001");
+        expect(adrPartial.find("ADR decision navigation") != std::string::npos,
+               "ADR detail should expose DOM-readable decision navigation");
+        expect(adrPartial.find("Decision status") != std::string::npos &&
+               adrPartial.find("accepted") != std::string::npos,
+               "ADR detail should render decision status");
+        expect(adrPartial.find("Impacted features / follow-up work") != std::string::npos &&
+               adrPartial.find("PRA-FTR-0002") != std::string::npos,
+               "ADR detail should link impacted feature refs");
+        expect(adrPartial.find("Accepted option") != std::string::npos &&
+               adrPartial.find("Read-only Product Map projection over durable refs") != std::string::npos,
+               "ADR detail should render accepted option");
+        expect(adrPartial.find("Rejected options") != std::string::npos &&
+               adrPartial.find("Canvas-first mutation surface") != std::string::npos,
+               "ADR detail should render rejected options without enabling canvas mode");
+        expect(adrPartial.find("Linked evidence") != std::string::npos &&
+               adrPartial.find("PRA-TSK-0001") != std::string::npos,
+               "ADR detail should render linked evidence refs");
+        expect(adrPartial.find("Product Map needs write behavior") != std::string::npos,
+               "ADR detail should render revisit conditions");
+        expect(adrPartial.find(products.generic_string()) == std::string::npos &&
+                   adrPartial.find("decisions/") == std::string::npos,
+               "ADR detail navigation should not expose raw filesystem paths");
 
         const auto webviewAppRoot = locate_repo_file(
             std::filesystem::path("src") / "cpp" / "code" /
@@ -1202,6 +1309,9 @@ int main() {
                "embedded webview assets should keep the typing-context shortcut guard");
         expect(assetSource.find("function selectItemByDelta") != std::string::npos,
                "embedded webview assets should keep keyboard selection helpers");
+        expect(assetSource.find("function renderTreeNavigation") != std::string::npos &&
+               assetSource.find("Product Map refs") != std::string::npos,
+               "embedded webview assets should render DOM-readable Product Map navigation refs");
         expect(assetSource.find("selectedItemVisibleIndex") != std::string::npos,
                "embedded webview assets should keep a single roving-tabindex card selection index");
         expect(assetSource.find("card === selectedCard") != std::string::npos,

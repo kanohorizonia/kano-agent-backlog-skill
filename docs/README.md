@@ -53,6 +53,8 @@ If you are reading the repository directly, start here instead of `docs/index.md
 - [ADR lifecycle schema fixture](../references/adr-lifecycle-metadata.schema.json)
 - [Backboard enterprise envelope seam schema fixture](../references/backboard-enterprise-envelope-seams.schema.json)
 - [Backboard enterprise envelope seam example](../references/backboard-enterprise-envelope-seams.fixture.json)
+- [Backboard policy context extension seam schema fixture](../references/backboard-policy-context-extension-seam.schema.json)
+- [Backboard policy context extension seam example](../references/backboard-policy-context-extension-seam.fixture.json)
 - [Feature evolution schema fixture](../references/feature-evolution-event.schema.json)
 - [Design-history graph schema fixture](../references/design-history-graph.schema.json)
 - [Version Goal Ledger schema fixture](../references/version-goal-ledger.schema.json)

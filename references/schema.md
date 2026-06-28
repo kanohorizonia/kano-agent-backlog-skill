@@ -298,6 +298,28 @@ All refs are bounded canonical refs. Raw filesystem paths, personal names,
 emails, credentials, auth subjects, tenant memberships, RBAC grants, approval
 quorum, and runtime permission enforcement are outside this repo-visible schema.
 
+## Backboard policy context extension seam
+
+Backboard policy context and capability requirement metadata use the schema
+contract in
+[`backboard-policy-context-extension-seam.schema.json`](backboard-policy-context-extension-seam.schema.json)
+and the example in
+[`backboard-policy-context-extension-seam.fixture.json`](backboard-policy-context-extension-seam.fixture.json).
+
+The policy context extension model covers:
+
+- policy context refs with bounded canonical ids such as `policy_context_id`;
+- capability requirements with `required_capabilities`, `affected_action`,
+  `affected_surface`, optional `actor_alias`, optional `policy_context_ref`,
+  `evidence_refs`, and `rationale`;
+- local-first omitted-field cases where missing policy context or capability
+  requirement metadata does not block Backboard operation.
+
+Policy context and capability requirement records are advisory metadata only.
+They do not implement authentication, RBAC enforcement, approval workflows,
+permission matrix behavior, multi-tenant membership, enterprise UI, or Ark
+Console coupling.
+
 ## Parent reference format (collision-safe)
 
 - Same-product parent: use the display ID in `parent` (e.g., `KABSD-FTR-0002`).

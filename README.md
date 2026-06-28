@@ -210,6 +210,7 @@ not a current UI screenshot.
 - [Backboard partial UI boundary](docs/design/backboard-partial-ui-boundary.md)
 - [Actor alias and assignment policy](docs/design/actor-alias-and-assignment-policy.md)
 - [Backboard enterprise envelope seams](docs/design/backboard-enterprise-envelope-seams.md)
+- [Backboard policy context extension seam](docs/design/backboard-policy-context-extension-seam.md)
 - [Canonical backlog taxonomy](docs/design/canonical-backlog-taxonomy.md)
 - [Project model decision](docs/design/project-model-decision.md)
 - [Hierarchy validation matrix](docs/design/hierarchy-validation-matrix.md)

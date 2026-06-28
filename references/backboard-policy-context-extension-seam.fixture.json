@@ -1,0 +1,83 @@
+{
+  "schema": "kob.backboard.policy_context_extension_seam.v1",
+  "product": "kano-agent-backlog-skill",
+  "policy_contexts": [
+    {
+      "policy_context_id": "policy-backboard-local-review",
+      "scope": {
+        "scope_kind": "review_queue",
+        "scope_ref": {
+          "product": "kano-agent-backlog-skill"
+        },
+        "label": "Backboard local review queue"
+      },
+      "summary": "Local-first review actions may carry policy context metadata, but local operation remains valid without an enterprise policy provider.",
+      "evidence_refs": [
+        {
+          "product": "kano-agent-backlog-skill",
+          "item_id": "KOB-TSK-0106"
+        }
+      ]
+    }
+  ],
+  "capability_requirements": [
+    {
+      "requirement_id": "capability-review-decision-submit",
+      "required_capabilities": [
+        "backboard.review_decision.submit"
+      ],
+      "affected_action": "review_decision.submit",
+      "affected_surface": "backboard.review_inbox",
+      "actor_alias": "maintainer",
+      "policy_context_ref": {
+        "product": "kano-agent-backlog-skill",
+        "policy_context_id": "policy-backboard-local-review"
+      },
+      "subject_ref": {
+        "product": "kano-agent-backlog-skill",
+        "item_id": "KOB-TSK-0107"
+      },
+      "evidence_refs": [
+        {
+          "product": "kano-agent-backlog-skill",
+          "item_id": "KOB-TSK-0068"
+        },
+        {
+          "product": "kano-agent-backlog-skill",
+          "item_id": "KOB-TSK-0106"
+        }
+      ],
+      "rationale": "Future enterprise routing may need a named capability for review decision submission, but this fixture is metadata only."
+    }
+  ],
+  "local_first_defaults": {
+    "policy_context_required": false,
+    "capability_requirement_required": false,
+    "missing_policy_provider_blocks_local_operation": false,
+    "omitted_fields_remain_valid": true
+  },
+  "local_first_omitted_field_cases": [
+    {
+      "case_id": "local-first-no-policy-fields",
+      "affected_action": "item.detail.read",
+      "affected_surface": "backboard.item_detail",
+      "local_operation_allowed": true,
+      "rationale": "Existing local Backboard reads remain valid when policy context and capability requirement fields are absent.",
+      "evidence_refs": [
+        {
+          "product": "kano-agent-backlog-skill",
+          "item_id": "KOB-TSK-0107"
+        }
+      ]
+    }
+  ],
+  "non_goals": [
+    "authentication provider",
+    "RBAC enforcement",
+    "approval workflows",
+    "permission matrix behavior",
+    "multi-tenant membership",
+    "enterprise UI",
+    "Ark Console coupling"
+  ]
+}

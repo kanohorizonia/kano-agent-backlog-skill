@@ -1,0 +1,154 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentskill-backlog.kanohorizonia.com/references/backboard-policy-context-extension-seam.schema.json",
+  "title": "KOB Backboard Policy Context Extension Seam",
+  "type": "object",
+  "required": ["schema", "product", "local_first_defaults"],
+  "properties": {
+    "schema": { "const": "kob.backboard.policy_context_extension_seam.v1" },
+    "product": { "type": "string", "minLength": 1 },
+    "policy_contexts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/policy_context" }
+    },
+    "capability_requirements": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/capability_requirement" }
+    },
+    "local_first_defaults": { "$ref": "#/$defs/local_first_defaults" },
+    "local_first_omitted_field_cases": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/local_first_omitted_field_case" }
+    },
+    "non_goals": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    }
+  },
+  "$defs": {
+    "actor_alias": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9._-]*$"
+    },
+    "ref": {
+      "type": "object",
+      "required": ["product"],
+      "properties": {
+        "product": { "type": "string", "minLength": 1 },
+        "item_id": { "type": "string" },
+        "uid": { "type": "string" },
+        "topic_id": { "type": "string" },
+        "adr_id": { "type": "string" },
+        "evidence_id": { "type": "string" },
+        "goal_id": { "type": "string" },
+        "release_id": { "type": "string" },
+        "claim_id": { "type": "string" },
+        "lease_id": { "type": "string" },
+        "review_decision_id": { "type": "string" },
+        "audit_event_id": { "type": "string" },
+        "policy_context_id": { "type": "string" },
+        "capability_requirement_id": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "scope": {
+      "type": "object",
+      "required": ["scope_kind"],
+      "properties": {
+        "scope_kind": {
+          "enum": ["product", "item", "review_queue", "policy_context", "release", "backlog"]
+        },
+        "scope_ref": { "$ref": "#/$defs/ref" },
+        "label": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "policy_context": {
+      "type": "object",
+      "required": ["policy_context_id", "scope", "summary", "evidence_refs"],
+      "properties": {
+        "policy_context_id": { "type": "string", "minLength": 1 },
+        "scope": { "$ref": "#/$defs/scope" },
+        "summary": { "type": "string", "minLength": 1 },
+        "evidence_refs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ref" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "capability_name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_.-]*(\\.[a-z][a-z0-9_.-]*)+$"
+    },
+    "capability_requirement": {
+      "type": "object",
+      "required": [
+        "requirement_id",
+        "required_capabilities",
+        "affected_action",
+        "affected_surface",
+        "evidence_refs",
+        "rationale"
+      ],
+      "properties": {
+        "requirement_id": { "type": "string", "minLength": 1 },
+        "required_capabilities": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/capability_name" }
+        },
+        "affected_action": { "type": "string", "minLength": 1 },
+        "affected_surface": { "type": "string", "minLength": 1 },
+        "actor_alias": { "$ref": "#/$defs/actor_alias" },
+        "policy_context_ref": { "$ref": "#/$defs/ref" },
+        "subject_ref": { "$ref": "#/$defs/ref" },
+        "evidence_refs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ref" }
+        },
+        "rationale": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "local_first_defaults": {
+      "type": "object",
+      "required": [
+        "policy_context_required",
+        "capability_requirement_required",
+        "missing_policy_provider_blocks_local_operation",
+        "omitted_fields_remain_valid"
+      ],
+      "properties": {
+        "policy_context_required": { "type": "boolean" },
+        "capability_requirement_required": { "type": "boolean" },
+        "missing_policy_provider_blocks_local_operation": { "type": "boolean" },
+        "omitted_fields_remain_valid": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "local_first_omitted_field_case": {
+      "type": "object",
+      "required": [
+        "case_id",
+        "affected_action",
+        "affected_surface",
+        "local_operation_allowed",
+        "rationale"
+      ],
+      "properties": {
+        "case_id": { "type": "string", "minLength": 1 },
+        "affected_action": { "type": "string", "minLength": 1 },
+        "affected_surface": { "type": "string", "minLength": 1 },
+        "local_operation_allowed": { "type": "boolean" },
+        "rationale": { "type": "string", "minLength": 1 },
+        "evidence_refs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ref" }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

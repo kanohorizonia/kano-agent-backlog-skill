@@ -1895,6 +1895,86 @@ int main() {
                    enterpriseFixtureSerialized.find("@") == std::string::npos,
                "enterprise seam fixture should not expose raw paths, personal emails, or repo file paths");
 
+        const auto policySeamDoc = read_text(
+            locate_repo_file(std::filesystem::path("docs") / "design" /
+                             "backboard-policy-context-extension-seam.md"));
+        expect(policySeamDoc.find("Policy Context Refs") != std::string::npos &&
+                   policySeamDoc.find("Capability Requirement Metadata") != std::string::npos &&
+                   policySeamDoc.find("Local-First Omitted Fields") != std::string::npos,
+               "policy context seam doc should cover refs, capability requirements, and omitted local-first fields");
+        expect(policySeamDoc.find("No authentication provider") != std::string::npos &&
+                   policySeamDoc.find("No RBAC enforcement") != std::string::npos &&
+                   policySeamDoc.find("No approval workflows") != std::string::npos &&
+                   policySeamDoc.find("No permission matrix behavior") != std::string::npos,
+               "policy context seam doc should keep auth, RBAC, approval, and permission behavior out of scope");
+
+        const auto policySchemaText = read_text(
+            locate_repo_file(std::filesystem::path("references") /
+                             "backboard-policy-context-extension-seam.schema.json"));
+        const auto policySchema =
+            parse_json_text(policySchemaText, "policy context seam schema");
+        expect(policySchema["properties"]["schema"]["const"].asString() ==
+                   "kob.backboard.policy_context_extension_seam.v1",
+               "policy context seam schema should expose a stable schema marker");
+        expect(policySchemaText.find("\"policy_context_id\"") != std::string::npos &&
+                   policySchemaText.find("\"required_capabilities\"") != std::string::npos &&
+                   policySchemaText.find("\"affected_action\"") != std::string::npos &&
+                   policySchemaText.find("\"affected_surface\"") != std::string::npos &&
+                   policySchemaText.find("\"actor_alias\"") != std::string::npos &&
+                   policySchemaText.find("\"evidence_refs\"") != std::string::npos &&
+                   policySchemaText.find("\"rationale\"") != std::string::npos,
+               "policy context seam schema should include policy and capability requirement fields");
+        expect(policySchemaText.find("\"path\"") == std::string::npos &&
+                   policySchemaText.find("auth_subject") == std::string::npos &&
+                   policySchemaText.find("tenant_id") == std::string::npos &&
+                   policySchemaText.find("permission_matrix") == std::string::npos &&
+                   policySchemaText.find("quorum") == std::string::npos,
+               "policy context seam schema should not expose path, auth subject, tenant, permission matrix, or quorum fields");
+
+        const auto policyFixture = parse_json_text(
+            read_text(locate_repo_file(std::filesystem::path("references") /
+                                       "backboard-policy-context-extension-seam.fixture.json")),
+            "policy context seam fixture");
+        expect(policyFixture["schema"].asString() ==
+                   "kob.backboard.policy_context_extension_seam.v1",
+               "policy context seam fixture should match schema marker");
+        expect(policyFixture["policy_contexts"].size() == 1 &&
+                   policyFixture["policy_contexts"][0]["policy_context_id"].asString() == "policy-backboard-local-review" &&
+                   policyFixture["policy_contexts"][0]["scope"]["scope_kind"].asString() == "review_queue",
+               "policy context seam fixture should include one bounded policy context");
+        expect(policyFixture["capability_requirements"].size() == 1 &&
+                   policyFixture["capability_requirements"][0]["required_capabilities"][0].asString() ==
+                       "backboard.review_decision.submit" &&
+                   policyFixture["capability_requirements"][0]["affected_action"].asString() ==
+                       "review_decision.submit" &&
+                   policyFixture["capability_requirements"][0]["affected_surface"].asString() ==
+                       "backboard.review_inbox" &&
+                   policyFixture["capability_requirements"][0]["actor_alias"].asString() == "maintainer" &&
+                   policyFixture["capability_requirements"][0]["policy_context_ref"]["policy_context_id"].asString() ==
+                       "policy-backboard-local-review",
+               "policy context seam fixture should include one capability requirement with optional actor and policy context refs");
+        expect(policyFixture["local_first_defaults"]["policy_context_required"].asBool() == false &&
+                   policyFixture["local_first_defaults"]["capability_requirement_required"].asBool() == false &&
+                   policyFixture["local_first_defaults"]["missing_policy_provider_blocks_local_operation"].asBool() == false &&
+                   policyFixture["local_first_defaults"]["omitted_fields_remain_valid"].asBool(),
+               "policy context seam fixture should preserve single-user local-first defaults");
+        expect(policyFixture["local_first_omitted_field_cases"].size() == 1 &&
+                   policyFixture["local_first_omitted_field_cases"][0]["local_operation_allowed"].asBool() &&
+                   !policyFixture["local_first_omitted_field_cases"][0].isMember("policy_context_ref") &&
+                   !policyFixture["local_first_omitted_field_cases"][0].isMember("capability_requirement_ref"),
+               "policy context seam fixture should cover omitted policy and capability fields");
+        expect(has_string_value(policyFixture["non_goals"], "RBAC enforcement") &&
+                   has_string_value(policyFixture["non_goals"], "approval workflows") &&
+                   has_string_value(policyFixture["non_goals"], "permission matrix behavior") &&
+                   has_string_value(policyFixture["non_goals"], "enterprise UI"),
+               "policy context seam fixture should make enterprise policy enforcement non-goals explicit");
+        const auto policyFixtureSerialized = json_to_string(policyFixture);
+        expect(policyFixtureSerialized.find("\"path\"") == std::string::npos &&
+                   policyFixtureSerialized.find("items/") == std::string::npos &&
+                   policyFixtureSerialized.find("decisions/") == std::string::npos &&
+                   policyFixtureSerialized.find("@") == std::string::npos,
+               "policy context seam fixture should not expose raw paths, personal emails, or repo file paths");
+
         const auto readme = read_text(locate_repo_file("README.md"));
         expect(readme.find("pixi run webview-smoke-artifacts") != std::string::npos,
                "README should document the smoke artifact command");
@@ -1902,6 +1982,8 @@ int main() {
                "README should document the deterministic smoke artifact path");
         expect(readme.find("Backboard enterprise envelope seams") != std::string::npos,
                "README should link the Backboard enterprise envelope seam contract");
+        expect(readme.find("Backboard policy context extension seam") != std::string::npos,
+               "README should link the Backboard policy context extension seam contract");
 
         const auto docsIndex = read_text(
             locate_repo_file(std::filesystem::path("docs") / "index.md"));
@@ -1915,6 +1997,9 @@ int main() {
         expect(docsReadme.find("backboard-enterprise-envelope-seams.schema.json") != std::string::npos &&
                    docsReadme.find("backboard-enterprise-envelope-seams.fixture.json") != std::string::npos,
                "docs README should link the enterprise seam schema and fixture");
+        expect(docsReadme.find("backboard-policy-context-extension-seam.schema.json") != std::string::npos &&
+                   docsReadme.find("backboard-policy-context-extension-seam.fixture.json") != std::string::npos,
+               "docs README should link the policy context seam schema and fixture");
 
         const auto schemaReference = read_text(
             locate_repo_file(std::filesystem::path("references") / "schema.md"));
@@ -1922,6 +2007,10 @@ int main() {
                    schemaReference.find("owner_actor_alias") != std::string::npos &&
                    schemaReference.find("permission enforcement") != std::string::npos,
                "schema reference should document enterprise seam fields and non-enforcement boundary");
+        expect(schemaReference.find("Backboard policy context extension seam") != std::string::npos &&
+                   schemaReference.find("required_capabilities") != std::string::npos &&
+                   schemaReference.find("missing policy context or capability") != std::string::npos,
+               "schema reference should document policy context and capability requirement fields");
 
         Json::Value draft(Json::objectValue);
         draft["product"] = "product-alpha";

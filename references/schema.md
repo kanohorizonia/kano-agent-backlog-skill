@@ -277,6 +277,27 @@ Baseline config lives at `_kano/backlog/_config/config.json` and defaults to:
   - `KANO_AUDIT_LOG_MAX_BYTES`
   - `KANO_AUDIT_LOG_MAX_FILES`
 
+## Backboard enterprise envelope seams
+
+Backboard can persist future enterprise metadata with the schema contract in
+[`backboard-enterprise-envelope-seams.schema.json`](backboard-enterprise-envelope-seams.schema.json)
+and the example in
+[`backboard-enterprise-envelope-seams.fixture.json`](backboard-enterprise-envelope-seams.fixture.json).
+
+The envelope model covers:
+
+- claim records with `owner_actor_alias`, `claimed_subject_ref`, `scope`,
+  timestamps, optional lease/expiry, `status`, and `evidence_refs`;
+- lease lifecycle states `active`, `released`, `expired`, and `superseded`;
+- review decisions with `actor_alias`, `decision_status`, `rationale`,
+  `evidence_refs`, and `related_refs`;
+- audit events with `actor_alias`, `action_kind`, `target_ref`, `timestamp`,
+  `evidence_refs`, and optional `policy_context_ref`.
+
+All refs are bounded canonical refs. Raw filesystem paths, personal names,
+emails, credentials, auth subjects, tenant memberships, RBAC grants, approval
+quorum, and runtime permission enforcement are outside this repo-visible schema.
+
 ## Parent reference format (collision-safe)
 
 - Same-product parent: use the display ID in `parent` (e.g., `KABSD-FTR-0002`).

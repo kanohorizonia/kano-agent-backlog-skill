@@ -52,6 +52,18 @@ std::string read_text(const std::filesystem::path& path) {
     return buffer.str();
 }
 
+Json::Value parse_json_text(const std::string& text,
+                            const std::string& label) {
+    Json::CharReaderBuilder builder;
+    Json::Value value;
+    std::string errors;
+    std::istringstream input(text);
+    if (!Json::parseFromStream(builder, input, &value, &errors)) {
+        throw std::runtime_error("failed to parse " + label + ": " + errors);
+    }
+    return value;
+}
+
 std::filesystem::path locate_repo_file(const std::filesystem::path& relative) {
     const std::vector<std::filesystem::path> seeds = {
         std::filesystem::path(__FILE__).parent_path(),
@@ -1812,11 +1824,84 @@ int main() {
         expect(webviewReadme.find("/partials/decision-radar") != std::string::npos,
                "webview README should list the decision radar partial route");
 
+        const auto enterpriseSeamDoc = read_text(
+            locate_repo_file(std::filesystem::path("docs") / "design" /
+                             "backboard-enterprise-envelope-seams.md"));
+        expect(enterpriseSeamDoc.find("Claim Records") != std::string::npos &&
+                   enterpriseSeamDoc.find("Lease Lifecycle") != std::string::npos &&
+                   enterpriseSeamDoc.find("Review Decision Envelope") != std::string::npos &&
+                   enterpriseSeamDoc.find("Audit Event Envelope") != std::string::npos,
+               "enterprise seam doc should cover claim, lease, review decision, and audit event contracts");
+        expect(enterpriseSeamDoc.find("No authentication provider") != std::string::npos &&
+                   enterpriseSeamDoc.find("No RBAC or permission checks") != std::string::npos &&
+                   enterpriseSeamDoc.find("No approval quorum") != std::string::npos &&
+                   enterpriseSeamDoc.find("No runtime lock enforcement") != std::string::npos,
+               "enterprise seam doc should keep auth, RBAC, quorum, and lock enforcement out of scope");
+
+        const auto enterpriseSchemaText = read_text(
+            locate_repo_file(std::filesystem::path("references") /
+                             "backboard-enterprise-envelope-seams.schema.json"));
+        const auto enterpriseSchema =
+            parse_json_text(enterpriseSchemaText, "enterprise seam schema");
+        expect(enterpriseSchema["properties"]["schema"]["const"].asString() ==
+                   "kob.backboard.enterprise_envelope_seams.v1",
+               "enterprise seam schema should expose a stable schema marker");
+        expect(enterpriseSchemaText.find("\"owner_actor_alias\"") != std::string::npos &&
+                   enterpriseSchemaText.find("\"claimed_subject_ref\"") != std::string::npos &&
+                   enterpriseSchemaText.find("\"decision_status\"") != std::string::npos &&
+                   enterpriseSchemaText.find("\"policy_context_ref\"") != std::string::npos,
+               "enterprise seam schema should include claim, review decision, and audit envelope fields");
+        expect(enterpriseSchemaText.find("\"active\"") != std::string::npos &&
+                   enterpriseSchemaText.find("\"released\"") != std::string::npos &&
+                   enterpriseSchemaText.find("\"expired\"") != std::string::npos &&
+                   enterpriseSchemaText.find("\"superseded\"") != std::string::npos,
+               "enterprise seam schema should cover lease lifecycle statuses");
+        expect(enterpriseSchemaText.find("\"path\"") == std::string::npos &&
+                   enterpriseSchemaText.find("auth_subject") == std::string::npos &&
+                   enterpriseSchemaText.find("tenant_id") == std::string::npos &&
+                   enterpriseSchemaText.find("quorum") == std::string::npos,
+               "enterprise seam schema should not expose path, auth subject, tenant, or quorum fields");
+
+        const auto enterpriseFixture = parse_json_text(
+            read_text(locate_repo_file(std::filesystem::path("references") /
+                                       "backboard-enterprise-envelope-seams.fixture.json")),
+            "enterprise seam fixture");
+        expect(enterpriseFixture["schema"].asString() ==
+                   "kob.backboard.enterprise_envelope_seams.v1",
+               "enterprise seam fixture should match schema marker");
+        expect(enterpriseFixture["claims"].size() == 1 &&
+                   enterpriseFixture["claims"][0]["owner_actor_alias"].asString() == "koa" &&
+                   enterpriseFixture["claims"][0]["claimed_subject_ref"]["item_id"].asString() == "KOB-TSK-0106",
+               "enterprise seam fixture should represent a claim owner and claimed subject");
+        expect(enterpriseFixture["claims"][0]["lease"]["status"].asString() == "active" &&
+                   enterpriseFixture["claims"][0]["lease"]["expires_at"].asString().find("2026-07-05") != std::string::npos,
+               "enterprise seam fixture should represent an advisory active lease with expiry");
+        expect(enterpriseFixture["review_decisions"][0]["actor_alias"].asString() == "maintainer" &&
+                   enterpriseFixture["review_decisions"][0]["decision_status"].asString() == "approved" &&
+                   enterpriseFixture["review_decisions"][0]["related_refs"][0]["item_id"].asString() == "KOB-TSK-0106",
+               "enterprise seam fixture should represent review decision metadata");
+        expect(enterpriseFixture["audit_events"][0]["actor_alias"].asString() == "koa" &&
+                   enterpriseFixture["audit_events"][0]["action_kind"].asString() == "claim.created" &&
+                   enterpriseFixture["audit_events"][0]["policy_context_ref"]["policy_context_id"].asString() == "policy-local-first-alias-only",
+               "enterprise seam fixture should represent audit event policy context refs");
+        expect(has_string_value(enterpriseFixture["non_goals"], "RBAC or permission enforcement") &&
+                   has_string_value(enterpriseFixture["non_goals"], "multi-tenant membership") &&
+                   has_string_value(enterpriseFixture["non_goals"], "approval quorum"),
+               "enterprise seam fixture should make enterprise enforcement non-goals explicit");
+        const auto enterpriseFixtureSerialized = json_to_string(enterpriseFixture);
+        expect(enterpriseFixtureSerialized.find("\"path\"") == std::string::npos &&
+                   enterpriseFixtureSerialized.find("items/") == std::string::npos &&
+                   enterpriseFixtureSerialized.find("decisions/") == std::string::npos &&
+                   enterpriseFixtureSerialized.find("@") == std::string::npos,
+               "enterprise seam fixture should not expose raw paths, personal emails, or repo file paths");
+
         const auto readme = read_text(locate_repo_file("README.md"));
         expect(readme.find("pixi run webview-smoke-artifacts") != std::string::npos,
                "README should document the smoke artifact command");
         expect(readme.find("_ws/test-output/webview-smoke") != std::string::npos,
                "README should document the deterministic smoke artifact path");
+        expect(readme.find("Backboard enterprise envelope seams") != std::string::npos,
+               "README should link the Backboard enterprise envelope seam contract");
 
         const auto docsIndex = read_text(
             locate_repo_file(std::filesystem::path("docs") / "index.md"));
@@ -1824,6 +1909,19 @@ int main() {
                "docs index should document the smoke artifact command");
         expect(docsIndex.find("_ws/test-output/webview-smoke") != std::string::npos,
                "docs index should document the deterministic smoke artifact path");
+
+        const auto docsReadme = read_text(
+            locate_repo_file(std::filesystem::path("docs") / "README.md"));
+        expect(docsReadme.find("backboard-enterprise-envelope-seams.schema.json") != std::string::npos &&
+                   docsReadme.find("backboard-enterprise-envelope-seams.fixture.json") != std::string::npos,
+               "docs README should link the enterprise seam schema and fixture");
+
+        const auto schemaReference = read_text(
+            locate_repo_file(std::filesystem::path("references") / "schema.md"));
+        expect(schemaReference.find("Backboard enterprise envelope seams") != std::string::npos &&
+                   schemaReference.find("owner_actor_alias") != std::string::npos &&
+                   schemaReference.find("permission enforcement") != std::string::npos,
+               "schema reference should document enterprise seam fields and non-enforcement boundary");
 
         Json::Value draft(Json::objectValue);
         draft["product"] = "product-alpha";

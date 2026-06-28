@@ -168,6 +168,16 @@ std::optional<Json::Value> find_decision_row(const Json::Value& rows,
     return std::nullopt;
 }
 
+std::optional<Json::Value> find_feature_event(const Json::Value& events,
+                                              const std::string& event_id) {
+    for (const auto& event : events) {
+        if (event["event_id"].asString() == event_id) {
+            return event;
+        }
+    }
+    return std::nullopt;
+}
+
 bool has_string_value(const Json::Value& array,
                       const std::string& value) {
     for (const auto& entry : array) {
@@ -656,6 +666,134 @@ int main() {
             "---\n\n"
             "# ADR evidence challenged row\n\n"
             "This ADR points at incomplete evidence for Decision Radar coverage.\n");
+        write_text(
+            products / "product-alpha" / "product-memory" / "feature-evolution" /
+                "feature-timeline.json",
+            R"json({
+  "schema": "kob.product_memory.feature_evolution_events.v1",
+  "product": "product-alpha",
+  "events": [
+    {
+      "event_id": "fev-idea-0001",
+      "event_type": "idea",
+      "feature_ref": { "product": "product-alpha", "item_id": "PRA-FTR-0002" },
+      "summary": "The feature started as an explicit Product Map navigation review surface.",
+      "occurred_at": "2026-06-14T09:00:00Z",
+      "source_refs": [
+        { "product": "product-alpha", "item_id": "PRA-FTR-0002" }
+      ],
+      "evidence_refs": [
+        { "product": "product-alpha", "item_id": "PRA-TSK-0001" }
+      ]
+    },
+    {
+      "event_id": "fev-rejected-canvas",
+      "event_type": "rejected_option",
+      "feature_ref": { "product": "product-alpha", "item_id": "PRA-FTR-0002" },
+      "summary": "Canvas-first mutation was rejected for the DOM/readable first slice.",
+      "occurred_at": "2026-06-14T10:00:00Z",
+      "source_refs": [
+        { "product": "product-alpha", "adr_id": "PRA-ADR-0001" }
+      ],
+      "evidence_refs": [
+        { "product": "product-alpha", "item_id": "PRA-TSK-0001" }
+      ]
+    },
+    {
+      "event_id": "fev-current-state",
+      "event_type": "current_state",
+      "feature_ref": { "product": "product-alpha", "item_id": "PRA-FTR-0002" },
+      "summary": "Current state is a bounded DOM navigation model over canonical refs.",
+      "occurred_at": "2026-06-14T11:00:00Z",
+      "source_refs": [
+        { "product": "product-alpha", "adr_id": "PRA-ADR-0001" }
+      ],
+      "evidence_refs": [
+        { "product": "product-alpha", "item_id": "PRA-TSK-0001" }
+      ]
+    },
+    {
+      "event_id": "fev-validation-0001",
+      "event_type": "validation",
+      "feature_ref": { "product": "product-alpha", "item_id": "PRA-FTR-0002" },
+      "summary": "Smoke tests validate the feature detail navigation surface.",
+      "occurred_at": "2026-06-14T12:00:00Z",
+      "source_refs": [
+        { "product": "product-alpha", "item_id": "PRA-TSK-0001" }
+      ],
+      "evidence_refs": [
+        { "product": "product-alpha", "item_id": "PRA-TSK-0001" }
+      ]
+    }
+  ]
+})json");
+        write_text(
+            products / "product-alpha" / "product-memory" / "design-history" /
+                "feature-design-history.json",
+            R"json({
+  "schema": "kob.product_memory.design_history_graph.v1",
+  "product": "product-alpha",
+  "nodes": [
+    { "id": "event:fev-idea-0001", "node_type": "feature_event", "title": "Initial idea" },
+    { "id": "event:fev-rejected-canvas", "node_type": "feature_event", "title": "Rejected canvas option" },
+    { "id": "event:fev-current-state", "node_type": "feature_event", "title": "Current state" },
+    { "id": "event:fev-validation-0001", "node_type": "feature_event", "title": "Validation event" }
+  ],
+  "edges": [
+    {
+      "from": "event:fev-idea-0001",
+      "to": "event:fev-rejected-canvas",
+      "edge_type": "led_to",
+      "source_ref": { "product": "product-alpha", "item_id": "PRA-FTR-0002" },
+      "render_hint": "idea-to-option"
+    },
+    {
+      "from": "event:fev-rejected-canvas",
+      "to": "adr:PRA-ADR-0001",
+      "edge_type": "rejected_by",
+      "source_ref": { "product": "product-alpha", "adr_id": "PRA-ADR-0001" },
+      "render_hint": "option-to-decision"
+    },
+    {
+      "from": "event:fev-rejected-canvas",
+      "to": "event:fev-current-state",
+      "edge_type": "superseded_by",
+      "source_ref": { "product": "product-alpha", "adr_id": "PRA-ADR-0001" },
+      "render_hint": "option-to-current"
+    },
+    {
+      "from": "event:fev-current-state",
+      "to": "event:fev-validation-0001",
+      "edge_type": "validated_by",
+      "source_ref": { "product": "product-alpha", "item_id": "PRA-TSK-0001" },
+      "render_hint": "current-to-validation"
+    },
+    {
+      "from": "event:fev-current-state",
+      "to": "work_order:PRA-TSK-0006",
+      "edge_type": "invalidated_by",
+      "source_ref": { "product": "product-alpha", "item_id": "PRA-TSK-0006" },
+      "render_hint": "current-to-counter-signal"
+    },
+    {
+      "from": "event:fev-current-state",
+      "to": "work_order:PRA-TSK-0001",
+      "edge_type": "implemented_by",
+      "source_ref": { "product": "product-alpha", "item_id": "PRA-TSK-0001" },
+      "render_hint": "current-to-work"
+    },
+    {
+      "from": "adr:PRA-ADR-0001",
+      "to": "event:fev-current-state",
+      "edge_type": "motivated_by",
+      "source_ref": { "product": "product-alpha", "adr_id": "PRA-ADR-0001" },
+      "render_hint": "decision-to-state"
+    }
+  ],
+  "diagnostics": [
+    "Design-history relationships are not dependency graph edges."
+  ]
+})json");
         write_text(
             products / "product-alpha" / "roadmap" / "version-goal-ledger-0.1.0.json",
             R"json({
@@ -1248,6 +1386,54 @@ int main() {
                    productMapSerialized.find("decisions/") == std::string::npos,
                "product map navigation refs should not expose raw repo paths");
 
+        auto featureEvolution = service.BuildFeatureEvolutionTimeline(
+            allOptions, "product-alpha", "PRA-FTR-0002");
+        expect(!featureEvolution.isMember("error"), "feature evolution timeline should not fail");
+        expect(featureEvolution["schema"].asString() == "kob.backboard.feature_evolution_timeline.v1",
+               "feature evolution timeline should expose a stable schema marker");
+        expect(featureEvolution["read_only"].asBool(), "feature evolution timeline must be read-only");
+        expect(!featureEvolution["mutation_allowed"].asBool(), "feature evolution timeline must not allow mutations");
+        expect(!featureEvolution["starts_agent"].asBool(), "feature evolution timeline must not start agents");
+        expect(!featureEvolution["dispatches_work"].asBool(), "feature evolution timeline must not dispatch work");
+        expect(!featureEvolution["canvas_mode"].asBool(), "feature evolution timeline must stay DOM/readable first");
+        expect(featureEvolution["event_count"].asUInt64() == 4,
+               "feature evolution timeline should load fixture feature events");
+        auto rejectedEvent = find_feature_event(featureEvolution["events"], "fev-rejected-canvas");
+        expect(rejectedEvent.has_value(), "feature evolution should include rejected option rows");
+        expect((*rejectedEvent)["event_type"].asString() == "rejected_option",
+               "rejected option event should keep its first-class event type");
+        expect(has_logical_ref((*rejectedEvent)["source_refs"], "adr_id", "PRA-ADR-0001") &&
+                   has_logical_ref((*rejectedEvent)["evidence_refs"], "item_id", "PRA-TSK-0001"),
+               "feature evolution rejected option should expose bounded source and evidence refs");
+        expect(has_edge(featureEvolution["relationships"], "event:fev-idea-0001", "event:fev-rejected-canvas", "led_to") &&
+                   has_edge(featureEvolution["relationships"], "event:fev-rejected-canvas", "adr:PRA-ADR-0001", "rejected_by") &&
+                   has_edge(featureEvolution["relationships"], "event:fev-rejected-canvas", "event:fev-current-state", "superseded_by") &&
+                   has_edge(featureEvolution["relationships"], "event:fev-current-state", "event:fev-validation-0001", "validated_by") &&
+                   has_edge(featureEvolution["relationships"], "event:fev-current-state", "work_order:PRA-TSK-0006", "invalidated_by") &&
+                   has_edge(featureEvolution["relationships"], "event:fev-current-state", "work_order:PRA-TSK-0001", "implemented_by") &&
+                   has_edge(featureEvolution["relationships"], "adr:PRA-ADR-0001", "event:fev-current-state", "motivated_by"),
+               "feature evolution should project supported design-history relationships");
+        auto currentStateEvent = find_feature_event(featureEvolution["events"], "fev-current-state");
+        expect(currentStateEvent.has_value() &&
+                   has_edge((*currentStateEvent)["relationships"], "event:fev-rejected-canvas", "event:fev-current-state", "superseded_by"),
+               "feature evolution event rows should carry local relationship chips");
+        expect(has_diagnostic(featureEvolution["diagnostics"], "design_history_note", "product-alpha:feature-design-history"),
+               "feature evolution should surface design-history notes as diagnostics");
+        const auto featureEvolutionSerialized = json_to_string(featureEvolution);
+        expect(featureEvolutionSerialized.find(products.generic_string()) == std::string::npos,
+               "feature evolution projection should not expose absolute filesystem paths");
+        expect(featureEvolutionSerialized.find("product-memory/") == std::string::npos &&
+                   featureEvolutionSerialized.find("items/") == std::string::npos &&
+                   featureEvolutionSerialized.find("decisions/") == std::string::npos,
+               "feature evolution refs should not expose raw repo paths");
+
+        auto missingEvolution = service.BuildFeatureEvolutionTimeline(
+            allOptions, "product-alpha", "PRA-FTR-0003");
+        expect(missingEvolution["event_count"].asUInt64() == 0,
+               "feature evolution missing-history fixture should have no events");
+        expect(has_diagnostic(missingEvolution["diagnostics"], "missing_history", "product-alpha:PRA-FTR-0003"),
+               "feature evolution should show missing history as an explicit gap");
+
         auto roadmap = service.BuildVersionGoalLedger(allOptions);
         expect(!roadmap.isMember("error"), "version goal ledger projection should not fail");
         expect(roadmap["schema"].asString() == "kob.backboard.version_goal_ledger_projection.v1",
@@ -1684,6 +1870,20 @@ int main() {
         expect(featurePartial.find("Decision debt") != std::string::npos &&
                    featurePartial.find("PRA-ADR-0005") != std::string::npos,
                "feature detail should link bounded Decision Radar refs");
+        expect(featurePartial.find("data-navigation-model=\"feature-evolution-timeline\"") != std::string::npos,
+               "feature detail should expose DOM-readable Feature Evolution markup");
+        expect(featurePartial.find("fev-rejected-canvas") != std::string::npos &&
+                   featurePartial.find("rejected_option") != std::string::npos,
+               "feature detail should render rejected option timeline rows");
+        expect(featurePartial.find("data-feature-evolution-relation=\"superseded_by\"") != std::string::npos &&
+                   featurePartial.find("data-feature-evolution-relation=\"rejected_by\"") != std::string::npos,
+               "feature detail should render rejected and superseded relationship chips");
+        expect(featurePartial.find("Evidence refs") != std::string::npos &&
+                   featurePartial.find("PRA-TSK-0001") != std::string::npos,
+               "feature detail should render bounded evidence refs");
+        expect(featurePartial.find(products.generic_string()) == std::string::npos &&
+                   featurePartial.find("product-memory/") == std::string::npos,
+               "feature detail Feature Evolution markup should not expose raw filesystem paths");
 
         auto adrPartial = service.RenderItemPartial("product-alpha", "PRA-ADR-0001");
         expect(adrPartial.find("ADR decision navigation") != std::string::npos,
@@ -1815,6 +2015,8 @@ int main() {
                "webview README should list the evidence quality API route");
         expect(webviewReadme.find("/api/review/context-recovery") != std::string::npos,
                "webview README should list the context recovery API route");
+        expect(webviewReadme.find("/api/review/feature-evolution") != std::string::npos,
+               "webview README should list the feature evolution API route");
         expect(webviewReadme.find("/api/review/roadmap") != std::string::npos,
                "webview README should list the roadmap API route");
         expect(webviewReadme.find("/partials/roadmap") != std::string::npos,

@@ -28,6 +28,7 @@ Design contracts:
   - `GET /api/review/done-detector?product=all|<name>[&products=a,b][&q=...][&state=...][&type=...]`
   - `GET /api/review/evidence-quality?product=all|<name>[&products=a,b][&q=...][&state=...][&type=...]`
   - `GET /api/review/context-recovery?area=...&product=all|<name>[&products=a,b][&q=...][&state=...][&type=...]`
+  - `GET /api/review/feature-evolution?product=<name>&feature_id=<id>`
   - `GET /api/review/roadmap?product=all|<name>[&products=a,b]`
   - `GET /api/review/decision-radar?product=all|<name>[&products=a,b]`
   - `POST /api/review/decision/draft`

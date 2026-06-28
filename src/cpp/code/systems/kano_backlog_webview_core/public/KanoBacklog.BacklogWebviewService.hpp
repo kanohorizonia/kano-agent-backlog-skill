@@ -86,6 +86,9 @@ class BacklogWebviewService {
   Json::Value BuildContextRecoverySummary(const std::string& area,
                                           const ItemQueryOptions& options);
   Json::Value BuildProductMapNavigation(const ItemQueryOptions& options);
+  Json::Value BuildFeatureEvolutionTimeline(const ItemQueryOptions& options,
+                                            const std::string& product = "",
+                                            const std::string& featureId = "");
   Json::Value BuildVersionGoalLedger(const ItemQueryOptions& options);
   Json::Value BuildDecisionDebtRadar(const ItemQueryOptions& options);
   Json::Value BuildReviewInbox(const ItemQueryOptions& options);

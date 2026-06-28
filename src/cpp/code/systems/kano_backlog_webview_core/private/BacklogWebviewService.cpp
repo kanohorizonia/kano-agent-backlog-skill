@@ -1339,6 +1339,171 @@ Json::Value ProductMapEdge(const std::string& from,
   return edge;
 }
 
+const std::set<std::string>& FeatureEvolutionEventTypes() {
+  static const std::set<std::string> eventTypes = {
+      "idea", "decision", "rejected_option", "spike",
+      "implementation_version", "validation", "incident", "migration",
+      "current_state", "debt", "revisit_condition"};
+  return eventTypes;
+}
+
+const std::set<std::string>& FeatureEvolutionRelationshipTypes() {
+  static const std::set<std::string> relationshipTypes = {
+      "led_to", "rejected_by", "superseded_by", "validated_by",
+      "invalidated_by", "implemented_by", "motivated_by"};
+  return relationshipTypes;
+}
+
+std::string FeatureEvolutionTarget(const std::string& product,
+                                   const std::string& id) {
+  if (product.empty()) {
+    return id;
+  }
+  if (id.empty()) {
+    return product;
+  }
+  return product + ":" + id;
+}
+
+std::string FeatureEvolutionSourceId(const std::filesystem::path& path) {
+  const auto stem = path.stem().string();
+  return stem.empty() ? SafeFileToken(path.filename().string()) : SafeFileToken(stem);
+}
+
+std::vector<std::filesystem::path> JsonFilesUnderRoots(
+    const std::vector<std::filesystem::path>& roots) {
+  std::vector<std::filesystem::path> files;
+  for (const auto& root : roots) {
+    if (!std::filesystem::exists(root) || !std::filesystem::is_directory(root)) {
+      continue;
+    }
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(root)) {
+      if (entry.is_regular_file() && entry.path().extension() == ".json") {
+        files.push_back(entry.path());
+      }
+    }
+  }
+  std::sort(files.begin(), files.end());
+  return files;
+}
+
+std::vector<std::filesystem::path> FeatureEvolutionEventCandidateFiles(
+    const std::filesystem::path& productRoot) {
+  return JsonFilesUnderRoots({
+      productRoot / "product-memory" / "feature-evolution",
+      productRoot / "_meta" / "product-memory" / "feature-evolution"});
+}
+
+std::vector<std::filesystem::path> DesignHistoryGraphCandidateFiles(
+    const std::filesystem::path& productRoot) {
+  return JsonFilesUnderRoots({
+      productRoot / "product-memory" / "design-history",
+      productRoot / "_meta" / "product-memory" / "design-history"});
+}
+
+Json::Value FeatureEvolutionDiagnostic(
+    const std::string& code,
+    const std::string& target,
+    const std::string& message,
+    const Json::Value& ref = Json::Value(Json::nullValue)) {
+  Json::Value diagnostic(Json::objectValue);
+  diagnostic["code"] = code;
+  diagnostic["target"] = target;
+  diagnostic["message"] = message;
+  if (ref.isObject()) {
+    diagnostic["ref"] = ref;
+  }
+  return diagnostic;
+}
+
+std::string FeatureEvolutionRefId(const Json::Value& ref) {
+  for (const auto& key : {"item_id", "adr_id", "evidence_id", "topic_id", "uid",
+                         "event_id"}) {
+    if (ref.isObject() && ref.isMember(key) && !ref[key].asString().empty()) {
+      return ref[key].asString();
+    }
+  }
+  return "";
+}
+
+Json::Value FeatureEvolutionLogicalRef(Json::Value ref,
+                                       const std::string& fallbackProduct) {
+  if (!ref.isObject()) {
+    return Json::Value(Json::objectValue);
+  }
+  Json::Value clean(Json::objectValue);
+  clean["product"] = ref.get("product", fallbackProduct).asString().empty()
+      ? fallbackProduct
+      : ref.get("product", fallbackProduct).asString();
+  for (const auto& key : {"item_id", "adr_id", "evidence_id", "topic_id", "uid"}) {
+    if (ref.isMember(key) && !ref[key].asString().empty()) {
+      clean[key] = ref[key].asString();
+    }
+  }
+  return clean;
+}
+
+Json::Value FeatureEvolutionEventRef(const std::string& product,
+                                     const std::string& eventId) {
+  Json::Value ref(Json::objectValue);
+  ref["product"] = product;
+  ref["event_id"] = eventId;
+  return ref;
+}
+
+bool FeatureEvolutionRefMatchesFeature(const Json::Value& ref,
+                                       const std::string& fallbackProduct,
+                                       const std::string& product,
+                                       const std::string& featureId) {
+  if (featureId.empty()) {
+    return true;
+  }
+  if (!ref.isObject()) {
+    return false;
+  }
+  const auto refProduct = ref.get("product", fallbackProduct).asString();
+  if (!product.empty() && !refProduct.empty() && refProduct != product) {
+    return false;
+  }
+  return FeatureEvolutionRefId(ref) == featureId;
+}
+
+std::set<std::string> FeatureEvolutionNodeAliases(const std::string& product,
+                                                  const std::string& featureId,
+                                                  const std::set<std::string>& eventIds) {
+  std::set<std::string> aliases;
+  if (!featureId.empty()) {
+    aliases.insert(featureId);
+    aliases.insert("feature:" + featureId);
+    aliases.insert("item:" + featureId);
+    aliases.insert(FeatureEvolutionTarget(product, featureId));
+  }
+  for (const auto& eventId : eventIds) {
+    aliases.insert(eventId);
+    aliases.insert("event:" + eventId);
+    aliases.insert("feature_event:" + eventId);
+    aliases.insert("feature-evolution:" + eventId);
+    aliases.insert(FeatureEvolutionTarget(product, eventId));
+  }
+  return aliases;
+}
+
+bool FeatureEvolutionRelationTouchesAliases(const Json::Value& edge,
+                                            const std::set<std::string>& aliases) {
+  const auto from = edge.get("from", "").asString();
+  const auto to = edge.get("to", "").asString();
+  return aliases.count(from) > 0 || aliases.count(to) > 0;
+}
+
+bool FeatureEvolutionRelationTouchesEvent(const Json::Value& edge,
+                                          const std::string& eventId) {
+  const std::set<std::string> aliases = {
+      eventId, "event:" + eventId, "feature_event:" + eventId,
+      "feature-evolution:" + eventId};
+  return aliases.count(edge.get("from", "").asString()) > 0 ||
+         aliases.count(edge.get("to", "").asString()) > 0;
+}
+
 struct VersionGoalLedgerSource {
   std::string product;
   std::string targetVersion;
@@ -2090,6 +2255,82 @@ std::string RenderProductMapItemNavigationPartial(
             RenderDiagnosticList(diagnostics) + "</div>";
   }
   html += "</div></section>";
+  return html;
+}
+
+std::string RenderFeatureEvolutionTimelinePartial(const Json::Value& timeline) {
+  if (!timeline.isObject()) {
+    return "";
+  }
+  std::string html =
+      "<section class=\"panel detail-section feature-evolution-timeline\" data-navigation-model=\"feature-evolution-timeline\"><h4>Feature Evolution</h4>";
+  if (timeline["events"].empty()) {
+    html += "<div class=\"muted\">" +
+            HtmlEscape(timeline.get("empty_state", "No Feature Evolution events.").asString()) +
+            "</div>";
+  } else {
+    for (const auto& event : timeline["events"]) {
+      html += "<div class=\"card feature-evolution-event\" data-feature-evolution-event=\"" +
+              HtmlEscape(event.get("event_id", "").asString()) +
+              "\" data-event-type=\"" +
+              HtmlEscape(event.get("event_type", "").asString()) + "\">";
+      html += "<div><strong>" +
+              HtmlEscape(std::to_string(event.get("ordering", 0U).asUInt())) +
+              ". <code>" + HtmlEscape(event.get("event_id", "").asString()) +
+              "</code></strong> " +
+              RenderPill(event.get("event_type", "unknown").asString()) + "</div>";
+      if (!event.get("occurred_at", "").asString().empty()) {
+        html += "<div class=\"muted\">" +
+                HtmlEscape(event.get("occurred_at", "").asString()) + "</div>";
+      }
+      html += "<div>" + HtmlEscape(event.get("summary", "").asString()) +
+              "</div>";
+      html += "<div class=\"detail-stack\">";
+      Json::Value affectedRefs(Json::arrayValue);
+      if (event["affected_feature_ref"].isObject() &&
+          !FeatureEvolutionRefId(event["affected_feature_ref"]).empty()) {
+        AppendUniqueJson(affectedRefs, event["affected_feature_ref"]);
+      }
+      html += "<div><div class=\"detail-label\">Affected feature</div>" +
+              RenderLogicalRefList(affectedRefs, "No affected feature ref") +
+              "</div>";
+      html += "<div><div class=\"detail-label\">Event ref</div><div class=\"detail-links\"><span class=\"pill\"><code>" +
+              HtmlEscape(event.get("event_id", "").asString()) +
+              "</code></span></div></div>";
+      if (!event["source_refs"].empty()) {
+        html += "<div><div class=\"detail-label\">Source refs</div>" +
+                RenderLogicalRefList(event["source_refs"]) + "</div>";
+      }
+      if (!event["evidence_refs"].empty()) {
+        html += "<div><div class=\"detail-label\">Evidence refs</div>" +
+                RenderLogicalRefList(event["evidence_refs"]) + "</div>";
+      }
+      if (!event["relationships"].empty()) {
+        html += "<div><div class=\"detail-label\">Design-history relationships</div><div class=\"detail-links\">";
+        for (const auto& relationship : event["relationships"]) {
+          const auto edgeType = relationship.get("edge_type", "").asString();
+          html += "<span class=\"pill\" data-feature-evolution-relation=\"" +
+                  HtmlEscape(edgeType) + "\">" + HtmlEscape(edgeType) +
+                  ": <code>" +
+                  HtmlEscape(relationship.get("from", "").asString()) +
+                  "</code> -&gt; <code>" +
+                  HtmlEscape(relationship.get("to", "").asString()) +
+                  "</code></span>";
+        }
+        html += "</div></div>";
+      }
+      if (!event["diagnostics"].empty()) {
+        html += "<div><div class=\"detail-label\">Event gaps</div>" +
+                RenderDiagnosticList(event["diagnostics"]) + "</div>";
+      }
+      html += "</div></div>";
+    }
+  }
+  if (!timeline["diagnostics"].empty()) {
+    html += "<div><div class=\"detail-label\">Feature Evolution gaps</div>" +
+            RenderDiagnosticList(timeline["diagnostics"]) + "</div>";
+  }
+  html += "</section>";
   return html;
 }
 
@@ -5460,6 +5701,269 @@ Json::Value BacklogWebviewService::BuildProductMapNavigation(
   return response;
 }
 
+Json::Value BacklogWebviewService::BuildFeatureEvolutionTimeline(
+    const ItemQueryOptions& options,
+    const std::string& product,
+    const std::string& featureId) {
+  Json::Value response(Json::objectValue);
+  response["schema"] = "kob.backboard.feature_evolution_timeline.v1";
+  response["view"] = "Feature Evolution";
+  response["read_only"] = true;
+  response["mutation_allowed"] = false;
+  response["starts_agent"] = false;
+  response["dispatches_work"] = false;
+  response["canvas_mode"] = false;
+  response["advisory_only"] = true;
+  response["empty_state"] =
+      "No Feature Evolution events were found for the selected scope.";
+  response["events"] = Json::arrayValue;
+  response["relationships"] = Json::arrayValue;
+  response["diagnostics"] = Json::arrayValue;
+  response["warnings"] = Json::arrayValue;
+
+  std::vector<std::string> selectedProducts;
+  if (!product.empty() && product != "all") {
+    selectedProducts.push_back(product);
+  } else {
+    selectedProducts = ResolveSelectedProducts(options.products);
+  }
+  response["products"] = Json::arrayValue;
+  for (const auto& selectedProduct : selectedProducts) {
+    response["products"].append(selectedProduct);
+  }
+  if (!product.empty() && product != "all" && !featureId.empty()) {
+    response["feature_ref"] = MakeLogicalRef(product, featureId);
+  }
+  if (selectedProducts.empty()) {
+    response["empty"] = true;
+    return response;
+  }
+
+  std::vector<Json::Value> eventRows;
+  std::set<std::string> eventIds;
+
+  auto appendDiagnostic = [&](const Json::Value& diagnostic) {
+    AppendUniqueJson(response["diagnostics"], diagnostic);
+  };
+
+  auto appendEventDiagnostic = [&](Json::Value& event,
+                                   const Json::Value& diagnostic) {
+    AppendUniqueJson(event["diagnostics"], diagnostic);
+    appendDiagnostic(diagnostic);
+  };
+
+  auto appendRefs = [](Json::Value& target,
+                       const Json::Value& rawRefs,
+                       const std::string& fallbackProduct) {
+    if (!rawRefs.isArray()) {
+      return;
+    }
+    for (const auto& rawRef : rawRefs) {
+      auto ref = FeatureEvolutionLogicalRef(rawRef, fallbackProduct);
+      if (!FeatureEvolutionRefId(ref).empty()) {
+        AppendUniqueJson(target, ref);
+      }
+    }
+  };
+
+  auto appendEvent = [&](const Json::Value& rawEvent,
+                         const std::string& sourceProduct,
+                         const std::string& sourceId) {
+    if (!rawEvent.isObject()) {
+      return;
+    }
+    const auto eventId = rawEvent.get("event_id", "").asString();
+    if (eventId.empty()) {
+      appendDiagnostic(FeatureEvolutionDiagnostic(
+          "event_schema_gap", FeatureEvolutionTarget(sourceProduct, sourceId),
+          "Feature Evolution event is missing event_id."));
+      return;
+    }
+    const auto featureRef =
+        FeatureEvolutionLogicalRef(rawEvent["feature_ref"], sourceProduct);
+    if (!featureId.empty() &&
+        !FeatureEvolutionRefMatchesFeature(featureRef, sourceProduct, product,
+                                           featureId)) {
+      return;
+    }
+    const auto eventProduct = featureRef.get("product", sourceProduct).asString();
+    Json::Value row(Json::objectValue);
+    row["event_id"] = eventId;
+    row["event_ref"] = FeatureEvolutionEventRef(eventProduct, eventId);
+    row["event_type"] = rawEvent.get("event_type", "unknown").asString();
+    row["occurred_at"] = rawEvent.get("occurred_at", "").asString();
+    row["summary"] = rawEvent.get("summary", "").asString();
+    row["source_id"] = sourceId;
+    row["affected_feature_ref"] = featureRef;
+    row["source_refs"] = Json::arrayValue;
+    row["evidence_refs"] = Json::arrayValue;
+    row["relationships"] = Json::arrayValue;
+    row["diagnostics"] = Json::arrayValue;
+    appendRefs(row["source_refs"], rawEvent["source_refs"], eventProduct);
+    appendRefs(row["evidence_refs"], rawEvent["evidence_refs"], eventProduct);
+
+    if (!FeatureEvolutionEventTypes().count(row["event_type"].asString())) {
+      appendEventDiagnostic(row, FeatureEvolutionDiagnostic(
+          "unsupported_event_type", FeatureEvolutionTarget(eventProduct, eventId),
+          "Feature Evolution event type is not in the supported timeline taxonomy.",
+          row["event_ref"]));
+    }
+    if (FeatureEvolutionRefId(featureRef).empty()) {
+      appendEventDiagnostic(row, FeatureEvolutionDiagnostic(
+          "missing_ref", FeatureEvolutionTarget(eventProduct, eventId),
+          "Feature Evolution event is missing an affected feature ref.",
+          row["event_ref"]));
+    }
+    if (row["source_refs"].empty() && row["evidence_refs"].empty()) {
+      appendEventDiagnostic(row, FeatureEvolutionDiagnostic(
+          "evidence_gap", FeatureEvolutionTarget(eventProduct, eventId),
+          "Feature Evolution event has no source or evidence refs.",
+          row["event_ref"]));
+    }
+    if (rawEvent["diagnostics"].isArray()) {
+      for (const auto& diagnostic : rawEvent["diagnostics"]) {
+        appendEventDiagnostic(row, FeatureEvolutionDiagnostic(
+            "event_note", FeatureEvolutionTarget(eventProduct, eventId),
+            diagnostic.asString(), row["event_ref"]));
+      }
+    }
+
+    eventIds.insert(eventId);
+    eventRows.push_back(row);
+  };
+
+  for (const auto& selectedProduct : selectedProducts) {
+    const auto productRoot = ProductRoot(selectedProduct);
+    for (const auto& path : FeatureEvolutionEventCandidateFiles(productRoot)) {
+      Json::Value source(Json::objectValue);
+      const auto sourceId = FeatureEvolutionSourceId(path);
+      if (!ReadJsonFile(path, source) || !source.isObject()) {
+        appendDiagnostic(FeatureEvolutionDiagnostic(
+            "event_source_parse_failed",
+            FeatureEvolutionTarget(selectedProduct, sourceId),
+            "Feature Evolution JSON source could not be parsed."));
+        continue;
+      }
+      const auto sourceProduct =
+          source.get("product", selectedProduct).asString().empty()
+              ? selectedProduct
+              : source.get("product", selectedProduct).asString();
+      if (source["events"].isArray()) {
+        for (const auto& event : source["events"]) {
+          appendEvent(event, sourceProduct, sourceId);
+        }
+      } else if (source.isMember("event_id")) {
+        appendEvent(source, sourceProduct, sourceId);
+      } else {
+        appendDiagnostic(FeatureEvolutionDiagnostic(
+            "event_source_schema_gap",
+            FeatureEvolutionTarget(sourceProduct, sourceId),
+            "Feature Evolution source is missing an event object or events array."));
+      }
+    }
+  }
+
+  std::sort(eventRows.begin(), eventRows.end(),
+            [](const Json::Value& lhs, const Json::Value& rhs) {
+              return std::tuple<std::string, std::string>(
+                         lhs.get("occurred_at", "").asString(),
+                         lhs.get("event_id", "").asString()) <
+                     std::tuple<std::string, std::string>(
+                         rhs.get("occurred_at", "").asString(),
+                         rhs.get("event_id", "").asString());
+            });
+
+  const auto aliases = FeatureEvolutionNodeAliases(product, featureId, eventIds);
+  for (const auto& selectedProduct : selectedProducts) {
+    const auto productRoot = ProductRoot(selectedProduct);
+    for (const auto& path : DesignHistoryGraphCandidateFiles(productRoot)) {
+      Json::Value graph(Json::objectValue);
+      const auto sourceId = FeatureEvolutionSourceId(path);
+      if (!ReadJsonFile(path, graph) || !graph.isObject()) {
+        appendDiagnostic(FeatureEvolutionDiagnostic(
+            "design_history_parse_failed",
+            FeatureEvolutionTarget(selectedProduct, sourceId),
+            "Design-history graph JSON source could not be parsed."));
+        continue;
+      }
+      const auto sourceProduct =
+          graph.get("product", selectedProduct).asString().empty()
+              ? selectedProduct
+              : graph.get("product", selectedProduct).asString();
+      if (!graph["edges"].isArray()) {
+        appendDiagnostic(FeatureEvolutionDiagnostic(
+            "design_history_schema_gap",
+            FeatureEvolutionTarget(sourceProduct, sourceId),
+            "Design-history graph source is missing an edges array."));
+        continue;
+      }
+      if (graph["diagnostics"].isArray()) {
+        for (const auto& diagnostic : graph["diagnostics"]) {
+          appendDiagnostic(FeatureEvolutionDiagnostic(
+              "design_history_note", FeatureEvolutionTarget(sourceProduct, sourceId),
+              diagnostic.asString()));
+        }
+      }
+      for (const auto& rawEdge : graph["edges"]) {
+        if (!rawEdge.isObject()) {
+          continue;
+        }
+        const auto edgeType = rawEdge.get("edge_type", "").asString();
+        if (!FeatureEvolutionRelationshipTypes().count(edgeType)) {
+          appendDiagnostic(FeatureEvolutionDiagnostic(
+              "unsupported_relationship",
+              FeatureEvolutionTarget(sourceProduct, sourceId),
+              "Design-history edge type is not supported by Feature Evolution timeline."));
+          continue;
+        }
+        if (!FeatureEvolutionRelationTouchesAliases(rawEdge, aliases)) {
+          continue;
+        }
+        Json::Value relationship(Json::objectValue);
+        relationship["edge_type"] = edgeType;
+        relationship["from"] = rawEdge.get("from", "").asString();
+        relationship["to"] = rawEdge.get("to", "").asString();
+        relationship["source_id"] = sourceId;
+        relationship["render_hint"] = rawEdge.get("render_hint", "").asString();
+        relationship["source_ref"] =
+            FeatureEvolutionLogicalRef(rawEdge["source_ref"], sourceProduct);
+        AppendUniqueJson(response["relationships"], relationship);
+      }
+    }
+  }
+
+  for (Json::ArrayIndex relationshipIndex = 0;
+       relationshipIndex < response["relationships"].size();
+       ++relationshipIndex) {
+    const auto& relationship = response["relationships"][relationshipIndex];
+    for (auto& event : eventRows) {
+      if (FeatureEvolutionRelationTouchesEvent(relationship,
+                                               event["event_id"].asString())) {
+        AppendUniqueJson(event["relationships"], relationship);
+      }
+    }
+  }
+
+  for (Json::ArrayIndex index = 0; index < eventRows.size(); ++index) {
+    eventRows[index]["ordering"] = index + 1U;
+    response["events"].append(eventRows[index]);
+  }
+  if (!featureId.empty() && response["events"].empty()) {
+    appendDiagnostic(FeatureEvolutionDiagnostic(
+        "missing_history", FeatureEvolutionTarget(product, featureId),
+        "No Feature Evolution events were found for this feature; Backboard leaves the history as an explicit gap.",
+        MakeLogicalRef(product, featureId)));
+  }
+
+  response["event_count"] = static_cast<Json::UInt64>(response["events"].size());
+  response["relationship_count"] =
+      static_cast<Json::UInt64>(response["relationships"].size());
+  response["diagnostic_count"] =
+      static_cast<Json::UInt64>(response["diagnostics"].size());
+  response["empty"] = response["events"].empty();
+  return response;
+}
+
 Json::Value BacklogWebviewService::BuildVersionGoalLedger(
     const ItemQueryOptions& options) {
   Json::Value response(Json::objectValue);
@@ -7200,6 +7704,13 @@ std::string BacklogWebviewService::RenderItemPartial(const std::string& product,
           item, productMapNavigation,
           decisionRadar.isMember("error") ? Json::Value(Json::nullValue)
                                           : decisionRadar);
+      if (item.get("type", "").asString() == "Feature") {
+        const auto featureEvolution = BuildFeatureEvolutionTimeline(
+            navigationOptions, itemProduct, item.get("id", "").asString());
+        if (!featureEvolution.isMember("error")) {
+          html += RenderFeatureEvolutionTimelinePartial(featureEvolution);
+        }
+      }
     }
   }
 
@@ -7829,6 +8340,29 @@ void RegisterBacklogWebviewRoutes(
       [metaAppender, &service, queryOptionsFromRequest](const HttpRequestPtr& request,
           std::function<void(const HttpResponsePtr&)>&& callback) {
         auto data = service.BuildProductMapNavigation(queryOptionsFromRequest(request));
+        Json::Value body(Json::objectValue);
+        body["ok"] = !data.isMember("error");
+        body["data"] = data;
+        metaAppender(request, body);
+        auto response = HttpResponse::newHttpJsonResponse(body);
+        if (!body["ok"].asBool()) {
+          response->setStatusCode(k400BadRequest);
+        }
+        callback(response);
+      },
+      {Get});
+
+  app().registerHandler(
+      "/api/review/feature-evolution",
+      [metaAppender, &service, queryOptionsFromRequest](const HttpRequestPtr& request,
+          std::function<void(const HttpResponsePtr&)>&& callback) {
+        auto product = request->getParameter("product");
+        auto featureId = request->getParameter("feature_id");
+        if (featureId.empty()) {
+          featureId = request->getParameter("item_id");
+        }
+        auto data = service.BuildFeatureEvolutionTimeline(
+            queryOptionsFromRequest(request), product, featureId);
         Json::Value body(Json::objectValue);
         body["ok"] = !data.isMember("error");
         body["data"] = data;

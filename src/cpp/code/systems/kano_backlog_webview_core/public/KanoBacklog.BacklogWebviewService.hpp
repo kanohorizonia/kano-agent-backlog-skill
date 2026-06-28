@@ -86,6 +86,7 @@ class BacklogWebviewService {
   Json::Value BuildContextRecoverySummary(const std::string& area,
                                           const ItemQueryOptions& options);
   Json::Value BuildProductMapNavigation(const ItemQueryOptions& options);
+  Json::Value BuildVersionGoalLedger(const ItemQueryOptions& options);
   Json::Value BuildReviewInbox(const ItemQueryOptions& options);
   Json::Value SaveReviewDecisionDraft(const Json::Value& request);
   Json::Value DiscardReviewDecisionDraft(const Json::Value& request);
@@ -108,6 +109,7 @@ class BacklogWebviewService {
   std::string RenderTreePartial(const ItemQueryOptions& options);
   std::string RenderKanbanPartial(const ItemQueryOptions& options);
   std::string RenderReviewPartial(const ItemQueryOptions& options);
+  std::string RenderRoadmapPartial(const ItemQueryOptions& options);
   std::string RenderContextPartial(const ItemQueryOptions& options);
   std::string RenderFiltersPartial(const ItemQueryOptions& options);
   std::string RenderItemPartial(const std::string& product,

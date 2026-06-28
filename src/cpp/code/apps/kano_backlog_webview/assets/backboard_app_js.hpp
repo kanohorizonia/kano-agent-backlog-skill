@@ -43,10 +43,11 @@ inline constexpr std::string_view kBackboardAppJsPart1 = R"JS(
     const reviewQueueOrder = ['Needs Review', 'Done Candidate', 'False Done Suspect', 'Evidence Gap', 'Blocked/Dirty', 'Stale/Drift', 'Ready Frontier'];
     const itemStates = ['Proposed', 'Ready', 'InProgress', 'Blocked', 'Review', 'Done', 'Dropped'];
     const itemTypes = ['Theme', 'Initiative', 'Epic', 'Feature', 'UserStory', 'Task', 'Bug', 'Issue', 'ADR', 'Topic', 'Workset'];
-    const refreshableTabs = ['review', 'tree', 'kanban', 'context', 'graph', 'runs'];
+    const refreshableTabs = ['review', 'tree', 'roadmap', 'kanban', 'context', 'graph', 'runs'];
     const tabLabels = {
       review: 'Review Inbox',
       tree: 'Product Map',
+      roadmap: 'Roadmap',
       kanban: 'Flow',
       context: 'Context',
       graph: 'Dependencies',
@@ -77,7 +78,7 @@ inline constexpr std::string_view kBackboardAppJsPart1 = R"JS(
           state.limit = Math.max(1, Math.min(parsed, 1000));
         }
       }
-      if (query.tab && ['review', 'tree', 'kanban', 'context', 'graph', 'runs', 'command'].includes(query.tab)) {
+      if (query.tab && ['review', 'tree', 'roadmap', 'kanban', 'context', 'graph', 'runs', 'command'].includes(query.tab)) {
         state.activeTab = query.tab;
       }
     })();
@@ -1654,6 +1655,70 @@ inline constexpr std::string_view kBackboardAppJsPart5 = R"JS(
       });
     }
 
+    function renderRoadmapDiagnostic(diagnostic) {
+      return `<div class="card gap-card"><strong>${esc(diagnostic.code || 'gap')}</strong><div>${esc(diagnostic.message || '')}</div><div class="muted">${esc(diagnostic.target || '')}</div></div>`;
+    }
+
+    function renderRoadmapGoal(goal) {
+      const refs = (goal.linked_refs || []).map(renderTreeRefChip).join('');
+      const diagnostics = (goal.diagnostics || []).map(renderRoadmapDiagnostic).join('');
+      const gap = goal.gap_state
+        ? `<div><div class="detail-label">Gap state</div><div class="detail-value">${esc(goal.gap_state)}</div></div>`
+        : '';
+      const rationale = goal.rationale
+        ? `<div><div class="detail-label">Decision rationale</div><div class="detail-value">${esc(goal.rationale)}</div></div>`
+        : '';
+      return `<div class="card roadmap-goal" data-roadmap-goal="${escAttr(goal.goal_id || '')}">` +
+        `<div class="detail-title-row"><strong>${esc(goal.summary || goal.goal_id || 'Goal')}</strong>${pill(goal.status || 'Unknown')}</div>` +
+        `<div class="muted"><code>${esc(goal.goal_id || '')}</code> / ${esc(goal.product || '')} / target ${esc(goal.target_version || 'unknown')}</div>` +
+        `<div class="detail-facts">` +
+          `<div class="detail-fact"><span class="detail-label">Declared</span><div class="detail-value">${esc(goal.declared_status || 'Unknown')}</div></div>` +
+          `<div class="detail-fact"><span class="detail-label">Evidence quality</span><div class="detail-value">${esc(goal.evidence_quality || 'unclear')}</div></div>` +
+          `<div class="detail-fact"><span class="detail-label">Closed tickets</span><div class="detail-value">${goal.closed_ticket_count || 0}</div></div>` +
+          `<div class="detail-fact"><span class="detail-label">Evidence-backed</span><div class="detail-value">${goal.evidence_backed_count || 0}</div></div>` +
+          `<div class="detail-fact"><span class="detail-label">Implemented/unverified</span><div class="detail-value">${goal.implemented_unverified_count || 0}</div></div>` +
+        `</div>` +
+        gap + rationale +
+        `<div><div class="detail-label">Linked refs</div><div class="detail-links">${refs || '<div class="muted">No linked refs; roadmap status is unsupported</div>'}</div></div>` +
+        (diagnostics ? `<div><div class="detail-label">Gaps</div>${diagnostics}</div>` : '') +
+        `<div class="muted">${esc(goal.status_reason || '')}</div>` +
+      `</div>`;
+    }
+
+    function renderRoadmapSlice(label, goals) {
+      const pretty = label.charAt(0).toUpperCase() + label.slice(1);
+      const body = goals.length
+        ? goals.map(renderRoadmapGoal).join('')
+        : `<div class="muted">No ${esc(label)} roadmap goals for this scope.</div>`;
+      return `<section class="roadmap-slice" data-roadmap-slice="${escAttr(label)}"><h4>${esc(pretty)}</h4>${body}</section>`;
+    }
+
+    async function loadRoadmap(signal, refresh) {
+      const result = await getJson(`/api/review/roadmap?${queryString()}`, {
+        signal,
+        refresh,
+        stage: 'roadmap.version_goals',
+      });
+      const data = result?.data || {};
+      const goals = data.goals || [];
+      const diagnostics = data.diagnostics || [];
+      const counts = data.status_counts || {};
+      const countText = Object.keys(counts).map((key) => `${key}: ${counts[key] || 0}`).join(' | ');
+      document.getElementById('roadmap-summary').textContent =
+        `${goals.length} goal(s), ${diagnostics.length} gap(s)${countText ? ` | ${countText}` : ''}`;
+      const slices = data.slices || {};
+      document.getElementById('roadmap-list').innerHTML = [
+        renderRoadmapSlice('current', slices.current || []),
+        renderRoadmapSlice('next', slices.next || []),
+        renderRoadmapSlice('future', slices.future || []),
+        diagnostics.length
+          ? `<section class="roadmap-diagnostics"><h4>Roadmap gaps</h4>${diagnostics.slice(0, 40).map(renderRoadmapDiagnostic).join('')}</section>`
+          : '',
+        goals.length ? '' : `<div class="muted">${esc(data.empty_state || 'No roadmap goals.')}</div>`,
+      ].join('');
+      bindItemLinks('#roadmap-list');
+    }
+
     function graphEdgeClass(kind) {
       return String(kind || '').replace(/[^A-Za-z0-9_-]/g, '-');
     }
@@ -1785,6 +1850,10 @@ inline constexpr std::string_view kBackboardAppJsPart5 = R"JS(
       ].join('');
     }
 
+)JS";
+
+inline constexpr std::string_view kBackboardAppJsPart5b = R"JS(
+
     async function loadRuns(signal, refresh) {
       const result = await getJson(`/api/review/runs?${queryString()}`, {
         signal,
@@ -1820,6 +1889,7 @@ inline constexpr std::string_view kBackboardAppJsPart5 = R"JS(
     function setActiveTab(tab) {
       state.activeTab = tab;
       const isTree = tab === 'tree';
+      const isRoadmap = tab === 'roadmap';
       const isKanban = tab === 'kanban';
       const isContext = tab === 'context';
       const isReview = tab === 'review';
@@ -1827,6 +1897,7 @@ inline constexpr std::string_view kBackboardAppJsPart5 = R"JS(
       const isRuns = tab === 'runs';
       const isCommand = tab === 'command';
       document.getElementById('tab-tree').classList.toggle('active', isTree);
+      document.getElementById('tab-roadmap').classList.toggle('active', isRoadmap);
       document.getElementById('tab-kanban').classList.toggle('active', isKanban);
       document.getElementById('tab-context').classList.toggle('active', isContext);
       document.getElementById('tab-review').classList.toggle('active', isReview);
@@ -1834,6 +1905,7 @@ inline constexpr std::string_view kBackboardAppJsPart5 = R"JS(
       document.getElementById('tab-runs').classList.toggle('active', isRuns);
       document.getElementById('tab-command').classList.toggle('active', isCommand);
       document.getElementById('page-tree').classList.toggle('active', isTree);
+      document.getElementById('page-roadmap').classList.toggle('active', isRoadmap);
       document.getElementById('page-kanban').classList.toggle('active', isKanban);
       document.getElementById('page-context').classList.toggle('active', isContext);
       document.getElementById('page-review').classList.toggle('active', isReview);
@@ -1852,6 +1924,7 @@ inline constexpr std::string_view kBackboardAppJsPart6 = R"JS(
       return {
         review: loadReview,
         tree: loadTree,
+        roadmap: loadRoadmap,
         kanban: loadKanban,
         context: loadContext,
         graph: loadGraph,
@@ -2360,7 +2433,8 @@ inline const std::string& BackboardAppJs() {
         kBackboardAppJsPart1.size() + kBackboardAppJsPart1b.size() +
         kBackboardAppJsPart2.size() +
         kBackboardAppJsPart3.size() + kBackboardAppJsPart4.size() +
-        kBackboardAppJsPart5.size() + kBackboardAppJsPart6.size() +
+        kBackboardAppJsPart5.size() + kBackboardAppJsPart5b.size() +
+        kBackboardAppJsPart6.size() +
         kBackboardAppJsPart7.size());
     text.append(kBackboardAppJsPart1);
     text.append(kBackboardAppJsPart1b);
@@ -2368,6 +2442,7 @@ inline const std::string& BackboardAppJs() {
     text.append(kBackboardAppJsPart3);
     text.append(kBackboardAppJsPart4);
     text.append(kBackboardAppJsPart5);
+    text.append(kBackboardAppJsPart5b);
     text.append(kBackboardAppJsPart6);
     text.append(kBackboardAppJsPart7);
     return text;

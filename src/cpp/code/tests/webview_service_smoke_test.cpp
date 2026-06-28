@@ -136,6 +136,16 @@ std::optional<Json::Value> find_quality_row(const Json::Value& rows,
     return std::nullopt;
 }
 
+std::optional<Json::Value> find_goal(const Json::Value& goals,
+                                     const std::string& goal_id) {
+    for (const auto& goal : goals) {
+        if (goal["goal_id"].asString() == goal_id) {
+            return goal;
+        }
+    }
+    return std::nullopt;
+}
+
 bool has_edge(const Json::Value& edges,
               const std::string& from,
               const std::string& to,
@@ -332,6 +342,41 @@ int main() {
                      "  blocks: []\n"
                      "  blocked_by: []\n"));
         write_text(
+            products / "product-alpha" / "items" / "task" / "0005" / "PRA-TSK-0005.md",
+            item_doc("PRA-TSK-0005",
+                     "019ec100-0000-7000-8000-000000000018",
+                     "Task",
+                     "Alpha roadmap evidence-backed task",
+                     "Done",
+                     "PRA-EPIC-0001",
+                     "Evidence-backed roadmap task.\n\n"
+                     "## Worklog\n\n"
+                     "2026-06-14 15:00 [agent=codex] Work order dispatched for roadmap evidence coverage.\n"
+                     "2026-06-14 15:10 [agent=codex] Artifact attached: [report](../artifacts/PRA-TSK-0005/report.md).\n"
+                     "2026-06-14 15:20 [agent=codex] Commit evidence: implementation_commit=aaa1111 revision aaa1111.\n"
+                     "2026-06-14 15:30 [agent=codex] Branch convergence: target=main implementation_commit=aaa1111 reachable_from_target=true remote_publication=origin/main.\n"
+                     "2026-06-14 15:40 [agent=codex] Validation: pixi run quick-test PASS.\n"));
+        write_text(
+            products / "product-alpha" / "items" / "task" / "0006" / "PRA-TSK-0006.md",
+            item_doc("PRA-TSK-0006",
+                     "019ec100-0000-7000-8000-000000000019",
+                     "Task",
+                     "Alpha roadmap closed without evidence",
+                     "Done",
+                     "PRA-EPIC-0001",
+                     "Closed roadmap task without durable evidence."));
+        write_text(
+            products / "product-alpha" / "items" / "task" / "0007" / "PRA-TSK-0007.md",
+            item_doc("PRA-TSK-0007",
+                     "019ec100-0000-7000-8000-000000000020",
+                     "Task",
+                     "Alpha roadmap partial task",
+                     "InProgress",
+                     "PRA-EPIC-0001",
+                     "Active roadmap task.\n\n"
+                     "## Worklog\n\n"
+                     "2026-06-14 16:00 [agent=codex] Validation: pixi run quick-test PASS.\n"));
+        write_text(
             products / "product-alpha" / "items" / "task" / "0002" / "PRA-TSK-0002.md",
             item_doc("PRA-TSK-0002",
                      "019ec100-0000-7000-8000-000000000004",
@@ -520,6 +565,116 @@ int main() {
             "# ADR with missing stale refs\n\n"
             "This ADR intentionally points at missing refs for Product Map diagnostics.\n");
         write_text(
+            products / "product-alpha" / "roadmap" / "version-goal-ledger-0.1.0.json",
+            R"json({
+  "schema": "kob.roadmap.version_goal_ledger.v1",
+  "product": "product-alpha",
+  "target_version": "0.1.0",
+  "goals": [
+    {
+      "goal_id": "goal-done-evidence-backed",
+      "summary": "Done goal has closed work and durable evidence.",
+      "status": "Done",
+      "evidence_quality": "strong",
+      "linked_refs": [
+        { "product": "product-alpha", "item_id": "PRA-TSK-0005" }
+      ],
+      "dogfood_coverage": "webview smoke",
+      "gap_state": "none",
+      "rationale": "Done requires item-level validation, artifact, commit, and branch convergence evidence."
+    },
+    {
+      "goal_id": "goal-closed-unverified",
+      "summary": "Closed work remains implemented but unverified.",
+      "status": "Done",
+      "evidence_quality": "missing",
+      "linked_refs": [
+        { "product": "product-alpha", "item_id": "PRA-TSK-0006" }
+      ],
+      "dogfood_coverage": "webview smoke",
+      "gap_state": "closed ticket lacks evidence",
+      "rationale": "Closed tickets alone must not become completed roadmap goals."
+    },
+    {
+      "goal_id": "goal-cut-scope",
+      "summary": "Cut scope remains visible as a decision.",
+      "status": "Cut",
+      "evidence_quality": "unclear",
+      "linked_refs": [
+        { "product": "product-alpha", "item_id": "PRA-FTR-0002" }
+      ],
+      "dogfood_coverage": "not applicable",
+      "gap_state": "scope cut before release",
+      "rationale": "Keep cut scope visible instead of hiding it under hierarchy state."
+    }
+  ]
+})json");
+        write_text(
+            products / "product-alpha" / "roadmap" / "version-goal-ledger-0.2.0.json",
+            R"json({
+  "schema": "kob.roadmap.version_goal_ledger.v1",
+  "product": "product-alpha",
+  "target_version": "0.2.0",
+  "goals": [
+    {
+      "goal_id": "goal-partial-active",
+      "summary": "Partial goal has active linked work.",
+      "status": "Partial",
+      "evidence_quality": "weak",
+      "linked_refs": [
+        { "product": "product-alpha", "item_id": "PRA-TSK-0007" }
+      ],
+      "dogfood_coverage": "webview smoke",
+      "gap_state": "remaining work active",
+      "rationale": "Partial is distinct from closed or evidence-backed Done."
+    },
+    {
+      "goal_id": "goal-deferred-scope",
+      "summary": "Deferred scope remains visible for the next slice.",
+      "status": "Deferred",
+      "evidence_quality": "unclear",
+      "linked_refs": [
+        { "product": "product-alpha", "adr_id": "PRA-ADR-0001" }
+      ],
+      "dogfood_coverage": "not applicable",
+      "gap_state": "deferred after ADR review",
+      "rationale": "Deferred roadmap scope should not disappear from review."
+    }
+  ]
+})json");
+        write_text(
+            products / "product-alpha" / "roadmap" / "version-goal-ledger-future.json",
+            R"json({
+  "schema": "kob.roadmap.version_goal_ledger.v1",
+  "product": "product-alpha",
+  "target_version": "future",
+  "goals": [
+    {
+      "goal_id": "goal-stale-missing-refs",
+      "summary": "Missing and stale links are shown as gaps.",
+      "status": "Unknown",
+      "evidence_quality": "stale",
+      "linked_refs": [
+        { "product": "product-alpha", "item_id": "PRA-TSK-9999" },
+        { "product": "product-alpha", "adr_id": "PRA-ADR-9999" }
+      ],
+      "dogfood_coverage": "webview smoke",
+      "gap_state": "links require reconciliation",
+      "rationale": "Do not invent refs when the roadmap ledger is stale."
+    },
+    {
+      "goal_id": "goal-unknown-no-refs",
+      "summary": "Unsupported future goal remains unknown.",
+      "status": "Unknown",
+      "evidence_quality": "unclear",
+      "linked_refs": [],
+      "dogfood_coverage": "none",
+      "gap_state": "no evidence chain",
+      "rationale": "Unknown is safer than inventing roadmap history."
+    }
+  ]
+})json");
+        write_text(
             products / "product-alpha" / "items" / "feature" / "0003" / "PRA-FTR-0003.md",
             item_doc("PRA-FTR-0003",
                      "019ec100-0000-7000-8000-000000000012",
@@ -564,7 +719,7 @@ int main() {
         auto all = service.QueryItems(allOptions);
         expect(!all.isMember("error"), "all-products query should not fail");
         expect(all["products"].size() == 2, "all-products query should include both products");
-        expect(all["total"].asUInt64() == 21, "all-products query should include items, ADRs, plus unique topic pseudo-items");
+        expect(all["total"].asUInt64() == 24, "all-products query should include items, ADRs, plus unique topic pseudo-items");
         for (const auto& item : all["items"]) {
             expect(item.isMember("gate_status"), "all-products items should include gate_status");
             expect(item["gate_status"].isMember("ready"), "gate_status should include ready gate");
@@ -871,7 +1026,7 @@ int main() {
         for (const auto& rootNode : tree["roots"]) {
             if (rootNode["id"].asString() == "PRA-EPIC-0001") {
                 foundEpicRoot = true;
-                expect(rootNode["children"].size() == 3, "tree should attach task children under the epic root");
+                expect(rootNode["children"].size() == 6, "tree should attach task children under the epic root");
             }
             if (rootNode["id"].asString() == "PRA-TSK-0004") {
                 foundStandaloneTaskRoot = true;
@@ -1000,6 +1155,89 @@ int main() {
         expect(productMapSerialized.find("items/") == std::string::npos &&
                    productMapSerialized.find("decisions/") == std::string::npos,
                "product map navigation refs should not expose raw repo paths");
+
+        auto roadmap = service.BuildVersionGoalLedger(allOptions);
+        expect(!roadmap.isMember("error"), "version goal ledger projection should not fail");
+        expect(roadmap["schema"].asString() == "kob.backboard.version_goal_ledger_projection.v1",
+               "roadmap projection should expose a stable schema marker");
+        expect(roadmap["read_only"].asBool(), "roadmap projection must be read-only");
+        expect(!roadmap["mutation_allowed"].asBool(), "roadmap projection must not allow mutations");
+        expect(!roadmap["starts_agent"].asBool(), "roadmap projection must not start agents");
+        expect(!roadmap["dispatches_work"].asBool(), "roadmap projection must not dispatch work");
+        expect(roadmap["filters_ignored_for_ref_resolution"].asBool(),
+               "roadmap projection should not mark refs missing because of active UI filters");
+        expect(roadmap["goal_count"].asUInt64() == 7,
+               "roadmap projection should load all fixture goals");
+        expect(roadmap["slices"]["current"].size() == 3,
+               "roadmap projection should expose current goals");
+        expect(roadmap["slices"]["next"].size() == 2,
+               "roadmap projection should expose next goals");
+        expect(roadmap["slices"]["future"].size() == 2,
+               "roadmap projection should expose future goals");
+
+        auto doneGoal = find_goal(roadmap["goals"], "goal-done-evidence-backed");
+        expect(doneGoal.has_value(), "roadmap should include evidence-backed done goal");
+        expect((*doneGoal)["status"].asString() == "Done",
+               "evidence-backed done goal should project as Done");
+        expect((*doneGoal)["evidence_chain_complete"].asBool(),
+               "Done roadmap goals should require a complete evidence chain");
+        expect((*doneGoal)["evidence_backed_count"].asUInt64() == 1,
+               "Done roadmap goal should count evidence-backed refs");
+
+        auto closedUnverified = find_goal(roadmap["goals"], "goal-closed-unverified");
+        expect(closedUnverified.has_value(), "roadmap should include closed-unverified goal");
+        expect((*closedUnverified)["declared_status"].asString() == "Done",
+               "fixture should declare the unverified goal as Done");
+        expect((*closedUnverified)["status"].asString() == "Implemented/Unverified",
+               "closed ticket without evidence should project as implemented/unverified");
+        expect((*closedUnverified)["closed_ticket_count"].asUInt64() == 1,
+               "implemented/unverified goal should distinguish closed ticket count");
+        expect((*closedUnverified)["evidence_backed_count"].asUInt64() == 0,
+               "implemented/unverified goal should not count as evidence-backed");
+        expect(has_diagnostic((*closedUnverified)["diagnostics"], "done_requires_evidence", "goal-closed-unverified"),
+               "Done without evidence should produce a done_requires_evidence diagnostic");
+
+        auto cutGoal = find_goal(roadmap["goals"], "goal-cut-scope");
+        expect(cutGoal.has_value() && (*cutGoal)["status"].asString() == "Cut",
+               "cut goal should remain Cut");
+        expect((*cutGoal)["cut_defer_decision"].asBool(),
+               "cut goal should expose explicit cut/defer decision metadata");
+        auto deferredGoal = find_goal(roadmap["goals"], "goal-deferred-scope");
+        expect(deferredGoal.has_value() && (*deferredGoal)["status"].asString() == "Deferred",
+               "deferred goal should remain Deferred");
+        expect((*deferredGoal)["cut_defer_decision"].asBool(),
+               "deferred goal should expose explicit cut/defer decision metadata");
+
+        auto partialGoal = find_goal(roadmap["goals"], "goal-partial-active");
+        expect(partialGoal.has_value() && (*partialGoal)["status"].asString() == "Partial",
+               "active partial roadmap goal should project as Partial");
+        auto staleMissingGoal = find_goal(roadmap["goals"], "goal-stale-missing-refs");
+        expect(staleMissingGoal.has_value() && (*staleMissingGoal)["status"].asString() == "At Risk",
+               "stale/missing roadmap links should project as At Risk");
+        expect(has_diagnostic(roadmap["diagnostics"], "missing_ref", "product-alpha:PRA-TSK-9999"),
+               "roadmap projection should report missing item refs");
+        expect(has_diagnostic(roadmap["diagnostics"], "missing_ref", "product-alpha:PRA-ADR-9999"),
+               "roadmap projection should report missing ADR refs");
+        expect(has_diagnostic(roadmap["diagnostics"], "stale_ref", "goal-stale-missing-refs"),
+               "roadmap projection should report stale goal evidence quality");
+        auto unknownGoal = find_goal(roadmap["goals"], "goal-unknown-no-refs");
+        expect(unknownGoal.has_value() && (*unknownGoal)["status"].asString() == "Unknown",
+               "unsupported future goal should remain Unknown");
+        expect(roadmap["status_counts"].isMember("Done") &&
+                   roadmap["status_counts"].isMember("Implemented/Unverified") &&
+                   roadmap["status_counts"].isMember("Partial") &&
+                   roadmap["status_counts"].isMember("Deferred") &&
+                   roadmap["status_counts"].isMember("Cut") &&
+                   roadmap["status_counts"].isMember("Blocked") &&
+                   roadmap["status_counts"].isMember("At Risk") &&
+                   roadmap["status_counts"].isMember("Unknown"),
+               "roadmap projection should expose the complete status taxonomy");
+        const auto roadmapSerialized = json_to_string(roadmap);
+        expect(roadmapSerialized.find(products.generic_string()) == std::string::npos,
+               "roadmap projection should not expose absolute filesystem paths");
+        expect(roadmapSerialized.find("roadmap/") == std::string::npos &&
+                   roadmapSerialized.find("version-goals/") == std::string::npos,
+               "roadmap projection should not expose raw ledger file paths");
 
         auto fallbackRoute = service.RecommendCapabilityRoute("product-alpha", "PRA-FTR-0003");
         expect(!fallbackRoute.isMember("error"), "fallback capability route should not fail");
@@ -1193,6 +1431,26 @@ int main() {
         expect(reviewPartial.find("aria-label=\"Ready gate") != std::string::npos,
                "review partial should expose accessible gate badge labels");
 
+        auto roadmapPartial = service.RenderRoadmapPartial(allOptions);
+        expect(roadmapPartial.find("data-navigation-model=\"version-goal-ledger\"") != std::string::npos,
+               "roadmap partial should expose DOM-readable Version Goal Ledger markup");
+        expect(roadmapPartial.find("data-roadmap-slice=\"current\"") != std::string::npos &&
+                   roadmapPartial.find("data-roadmap-slice=\"next\"") != std::string::npos &&
+                   roadmapPartial.find("data-roadmap-slice=\"future\"") != std::string::npos,
+               "roadmap partial should expose current, next, and future slices");
+        expect(roadmapPartial.find("goal-done-evidence-backed") != std::string::npos &&
+                   roadmapPartial.find("Implemented/Unverified") != std::string::npos,
+               "roadmap partial should distinguish evidence-backed and unverified goals");
+        expect(roadmapPartial.find("goal-cut-scope") != std::string::npos &&
+                   roadmapPartial.find("goal-deferred-scope") != std::string::npos,
+               "roadmap partial should keep cut and deferred scope visible");
+        expect(roadmapPartial.find("missing_ref") != std::string::npos &&
+                   roadmapPartial.find("stale_ref") != std::string::npos,
+               "roadmap partial should render missing and stale ref diagnostics");
+        expect(roadmapPartial.find(products.generic_string()) == std::string::npos &&
+                   roadmapPartial.find("roadmap/") == std::string::npos,
+               "roadmap partial should not expose raw filesystem paths");
+
         auto contextPartial = service.RenderContextPartial(allOptions);
         expect(contextPartial.find("Native Migration") != std::string::npos,
                "context partial should render topic context");
@@ -1312,6 +1570,13 @@ int main() {
         expect(assetSource.find("function renderTreeNavigation") != std::string::npos &&
                assetSource.find("Product Map refs") != std::string::npos,
                "embedded webview assets should render DOM-readable Product Map navigation refs");
+        expect(indexHtmlSource.find("tab-roadmap") != std::string::npos &&
+                   indexHtmlSource.find("page-roadmap") != std::string::npos,
+               "embedded webview assets should expose the Roadmap tab shell");
+        expect(assetSource.find("function loadRoadmap") != std::string::npos &&
+                   assetSource.find("/api/review/roadmap") != std::string::npos &&
+                   assetSource.find("roadmap.version_goals") != std::string::npos,
+               "embedded webview assets should lazy-load the Version Goal Ledger roadmap tab");
         expect(assetSource.find("selectedItemVisibleIndex") != std::string::npos,
                "embedded webview assets should keep a single roving-tabindex card selection index");
         expect(assetSource.find("card === selectedCard") != std::string::npos,
@@ -1368,6 +1633,10 @@ int main() {
                "webview README should list the evidence quality API route");
         expect(webviewReadme.find("/api/review/context-recovery") != std::string::npos,
                "webview README should list the context recovery API route");
+        expect(webviewReadme.find("/api/review/roadmap") != std::string::npos,
+               "webview README should list the roadmap API route");
+        expect(webviewReadme.find("/partials/roadmap") != std::string::npos,
+               "webview README should list the roadmap partial route");
 
         const auto readme = read_text(locate_repo_file("README.md"));
         expect(readme.find("pixi run webview-smoke-artifacts") != std::string::npos,

@@ -14,6 +14,7 @@
 #include <regex>
 #include <set>
 #include <sstream>
+#include <tuple>
 #include <unordered_set>
 
 import KanoBacklogWebview.Strings;
@@ -1338,6 +1339,175 @@ Json::Value ProductMapEdge(const std::string& from,
   return edge;
 }
 
+struct VersionGoalLedgerSource {
+  std::string product;
+  std::string targetVersion;
+  std::string sourceId;
+  Json::Value ledger;
+};
+
+const std::vector<std::string>& VersionGoalStatuses() {
+  static const std::vector<std::string> statuses = {
+      "Done", "Implemented/Unverified", "Partial", "Deferred", "Cut",
+      "Blocked", "At Risk", "Unknown"};
+  return statuses;
+}
+
+std::string NormalizeVersionGoalStatus(const std::string& status) {
+  const auto lowered = text::ToLower(Trim(status));
+  if (lowered == "done") return "Done";
+  if (lowered == "implemented/unverified" ||
+      lowered == "implemented-unverified" ||
+      lowered == "implemented unverified") {
+    return "Implemented/Unverified";
+  }
+  if (lowered == "partial") return "Partial";
+  if (lowered == "deferred") return "Deferred";
+  if (lowered == "cut") return "Cut";
+  if (lowered == "blocked") return "Blocked";
+  if (lowered == "at risk" || lowered == "at-risk" || lowered == "risk") {
+    return "At Risk";
+  }
+  return "Unknown";
+}
+
+bool IsClosedTicketState(const std::string& state) {
+  const auto lowered = text::ToLower(Trim(state));
+  return lowered == "done" || lowered == "closed";
+}
+
+bool IsBlockedTicketState(const std::string& state) {
+  const auto lowered = text::ToLower(Trim(state));
+  return lowered == "blocked";
+}
+
+bool IsStaleEvidenceQuality(const std::string& quality) {
+  const auto lowered = text::ToLower(Trim(quality));
+  return lowered == "stale" || lowered == "contradicting";
+}
+
+std::string VersionGoalRefKind(const Json::Value& ref) {
+  if (ref.isMember("item_id") && !ref["item_id"].asString().empty()) {
+    return "item";
+  }
+  if (ref.isMember("adr_id") && !ref["adr_id"].asString().empty()) {
+    return "adr";
+  }
+  if (ref.isMember("evidence_id") && !ref["evidence_id"].asString().empty()) {
+    return "evidence";
+  }
+  if (ref.isMember("topic_id") && !ref["topic_id"].asString().empty()) {
+    return "topic";
+  }
+  if (ref.isMember("uid") && !ref["uid"].asString().empty()) {
+    return "uid";
+  }
+  return "unknown";
+}
+
+std::string VersionGoalRefId(const Json::Value& ref) {
+  for (const auto& key : {"item_id", "adr_id", "evidence_id", "topic_id", "uid"}) {
+    if (ref.isMember(key) && !ref[key].asString().empty()) {
+      return ref[key].asString();
+    }
+  }
+  return "";
+}
+
+std::string VersionGoalRefTarget(const Json::Value& ref,
+                                 const std::string& fallbackProduct) {
+  const auto product = ref.get("product", fallbackProduct).asString();
+  const auto id = VersionGoalRefId(ref);
+  if (product.empty()) {
+    return id;
+  }
+  if (id.empty()) {
+    return product;
+  }
+  return product + ":" + id;
+}
+
+Json::Value VersionGoalDiagnostic(const std::string& code,
+                                  const std::string& goalId,
+                                  const std::string& target,
+                                  const std::string& message,
+                                  const Json::Value& ref = Json::Value(Json::nullValue)) {
+  Json::Value diagnostic(Json::objectValue);
+  diagnostic["code"] = code;
+  diagnostic["goal_id"] = goalId;
+  diagnostic["target"] = target;
+  diagnostic["message"] = message;
+  if (ref.isObject()) {
+    diagnostic["ref"] = ref;
+  }
+  return diagnostic;
+}
+
+std::string VersionGoalSliceForTarget(const std::string& targetVersion,
+                                      size_t targetIndex) {
+  const auto lowered = text::ToLower(Trim(targetVersion));
+  if (lowered == "current" || lowered.find("current") != std::string::npos) {
+    return "current";
+  }
+  if (lowered == "next" || lowered.find("next") != std::string::npos) {
+    return "next";
+  }
+  if (lowered == "future" || lowered.find("future") != std::string::npos ||
+      lowered.find("later") != std::string::npos) {
+    return "future";
+  }
+  if (targetIndex == 0) {
+    return "current";
+  }
+  if (targetIndex == 1) {
+    return "next";
+  }
+  return "future";
+}
+
+std::vector<std::filesystem::path> VersionGoalLedgerCandidateFiles(
+    const std::filesystem::path& productRoot) {
+  std::vector<std::filesystem::path> files;
+  const std::vector<std::filesystem::path> roots = {
+      productRoot / "roadmap",
+      productRoot / "version-goals",
+      productRoot / "_meta" / "version-goals"};
+  for (const auto& root : roots) {
+    if (!std::filesystem::exists(root) || !std::filesystem::is_directory(root)) {
+      continue;
+    }
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(root)) {
+      if (entry.is_regular_file() && entry.path().extension() == ".json") {
+        files.push_back(entry.path());
+      }
+    }
+  }
+  std::sort(files.begin(), files.end());
+  return files;
+}
+
+std::string VersionGoalSourceId(const std::filesystem::path& path) {
+  const auto stem = path.stem().string();
+  return stem.empty() ? SafeFileToken(path.filename().string()) : SafeFileToken(stem);
+}
+
+Json::Value VersionGoalLogicalRef(Json::Value ref,
+                                  const std::string& fallbackProduct) {
+  if (!ref.isObject()) {
+    return Json::Value(Json::objectValue);
+  }
+  Json::Value clean(Json::objectValue);
+  clean["product"] = ref.get("product", fallbackProduct).asString().empty()
+      ? fallbackProduct
+      : ref.get("product", fallbackProduct).asString();
+  for (const auto& key : {"item_id", "adr_id", "evidence_id", "topic_id", "uid"}) {
+    if (ref.isMember(key) && !ref[key].asString().empty()) {
+      clean[key] = ref[key].asString();
+    }
+  }
+  return clean;
+}
+
 Json::Value MakeEvidenceItem(const ItemRecord& item) {
   Json::Value value(Json::objectValue);
   value["id"] = item.id;
@@ -1845,6 +2015,48 @@ std::string RenderAdrLifecyclePartial(const Json::Value& item,
             RenderDiagnosticList(diagnostics) + "</div>";
   }
   html += "</div></section>";
+  return html;
+}
+
+std::string RenderVersionGoalCard(const Json::Value& goal) {
+  std::string html =
+      "<div class=\"card roadmap-goal\" data-roadmap-goal=\"" +
+      HtmlEscape(goal.get("goal_id", "").asString()) + "\">";
+  html += "<div class=\"detail-title-row\"><strong>" +
+          HtmlEscape(goal.get("summary", goal.get("goal_id", "Goal")).asString()) +
+          "</strong>" + RenderPill(goal.get("status", "Unknown").asString()) +
+          "</div>";
+  html += "<div class=\"muted\"><code>" +
+          HtmlEscape(goal.get("goal_id", "").asString()) + "</code> / " +
+          HtmlEscape(goal.get("product", "").asString()) + " / target " +
+          HtmlEscape(goal.get("target_version", "unknown").asString()) +
+          "</div>";
+  html += "<div class=\"detail-facts\">" +
+          RenderDetailFact("Declared", goal.get("declared_status", "Unknown").asString()) +
+          RenderDetailFact("Evidence quality", goal.get("evidence_quality", "unclear").asString()) +
+          RenderDetailFact("Closed tickets", std::to_string(goal.get("closed_ticket_count", 0U).asUInt64())) +
+          RenderDetailFact("Evidence-backed", std::to_string(goal.get("evidence_backed_count", 0U).asUInt64())) +
+          RenderDetailFact("Implemented/unverified", std::to_string(goal.get("implemented_unverified_count", 0U).asUInt64())) +
+          "</div>";
+  if (!goal.get("gap_state", "").asString().empty()) {
+    html += "<div><div class=\"detail-label\">Gap state</div><div class=\"detail-value\">" +
+            HtmlEscape(goal.get("gap_state", "").asString()) + "</div></div>";
+  }
+  if (!goal.get("rationale", "").asString().empty()) {
+    html += "<div><div class=\"detail-label\">Decision rationale</div><div class=\"detail-value\">" +
+            HtmlEscape(goal.get("rationale", "").asString()) + "</div></div>";
+  }
+  html += "<div><div class=\"detail-label\">Linked refs</div>" +
+          RenderLogicalRefList(goal["linked_refs"],
+                               "No linked refs; roadmap status is unsupported") +
+          "</div>";
+  if (!goal["diagnostics"].empty()) {
+    html += "<div><div class=\"detail-label\">Gaps</div>" +
+            RenderDiagnosticList(goal["diagnostics"]) + "</div>";
+  }
+  html += "<div class=\"muted\">" +
+          HtmlEscape(goal.get("status_reason", "").asString()) + "</div>";
+  html += "</div>";
   return html;
 }
 
@@ -5037,6 +5249,382 @@ Json::Value BacklogWebviewService::BuildProductMapNavigation(
   return response;
 }
 
+Json::Value BacklogWebviewService::BuildVersionGoalLedger(
+    const ItemQueryOptions& options) {
+  Json::Value response(Json::objectValue);
+  response["schema"] = "kob.backboard.version_goal_ledger_projection.v1";
+  response["view"] = "Version Goal Ledger";
+  response["read_only"] = true;
+  response["mutation_allowed"] = false;
+  response["starts_agent"] = false;
+  response["dispatches_work"] = false;
+  response["advisory_only"] = true;
+  response["filters_ignored_for_ref_resolution"] = true;
+  response["empty_state"] =
+      "No Version Goal Ledger records were found for the selected product scope.";
+  response["goals"] = Json::arrayValue;
+  response["diagnostics"] = Json::arrayValue;
+  response["warnings"] = Json::arrayValue;
+  response["status_counts"] = Json::objectValue;
+  response["slice_order"] = Json::arrayValue;
+  response["slices"] = Json::objectValue;
+  for (const auto& status : VersionGoalStatuses()) {
+    response["status_counts"][status] = 0U;
+  }
+  for (const auto& slice : {"current", "next", "future"}) {
+    response["slice_order"].append(slice);
+    response["slices"][slice] = Json::arrayValue;
+  }
+
+  const auto selectedProducts = ResolveSelectedProducts(options.products);
+  response["products"] = Json::arrayValue;
+  for (const auto& product : selectedProducts) {
+    response["products"].append(product);
+  }
+  if (selectedProducts.empty()) {
+    response["empty"] = true;
+    return response;
+  }
+
+  ItemQueryOptions scanOptions;
+  scanOptions.products = selectedProducts;
+  scanOptions.limit = 1000;
+  scanOptions.offset = 0;
+  scanOptions.forceRefresh = options.forceRefresh;
+  auto items = QueryItems(scanOptions);
+  if (items.isMember("error")) {
+    response["error"] = items["error"];
+    response["error_code"] = items.get("error_code", "roadmap.items_failed");
+    return response;
+  }
+  while (items["offset"].asUInt64() + items["items"].size() <
+         items["total"].asUInt64()) {
+    scanOptions.offset = items["offset"].asUInt64() + items["items"].size();
+    auto page = QueryItems(scanOptions);
+    if (page.isMember("error")) {
+      response["error"] = page["error"];
+      response["error_code"] = page.get("error_code", "roadmap.items_failed");
+      return response;
+    }
+    for (const auto& item : page["items"]) {
+      items["items"].append(item);
+    }
+    items["warnings"] = MergeWarnings(items["warnings"], page["warnings"]);
+    items["limit"] = page["limit"];
+    items["offset"] = 0U;
+  }
+  response["warnings"] = items["warnings"];
+  response["query_total"] = items.get("total", 0U);
+  response["scanned_items"] = static_cast<Json::UInt64>(items["items"].size());
+
+  std::map<std::string, Json::Value> itemByKey;
+  std::map<std::string, std::string> keyByUid;
+  for (const auto& item : items["items"]) {
+    const auto product = item.get("product", "").asString();
+    const auto id = item.get("id", "").asString();
+    if (product.empty() || id.empty()) {
+      continue;
+    }
+    const auto key = ProductItemKey(product, id);
+    itemByKey[key] = item;
+    const auto uid = item.get("uid", "").asString();
+    if (!uid.empty()) {
+      keyByUid[ProductItemKey(product, uid)] = key;
+    }
+  }
+
+  std::vector<VersionGoalLedgerSource> sources;
+  for (const auto& product : selectedProducts) {
+    const auto productRoot = ProductRoot(product);
+    for (const auto& path : VersionGoalLedgerCandidateFiles(productRoot)) {
+      Json::Value ledger(Json::objectValue);
+      const auto sourceId = VersionGoalSourceId(path);
+      if (!ReadJsonFile(path, ledger) || !ledger.isObject()) {
+        response["diagnostics"].append(VersionGoalDiagnostic(
+            "ledger_parse_failed", "", product + ":" + sourceId,
+            "Version Goal Ledger JSON could not be parsed."));
+        continue;
+      }
+      if (ledger.get("schema", "").asString() !=
+              "kob.roadmap.version_goal_ledger.v1" ||
+          !ledger["goals"].isArray()) {
+        response["diagnostics"].append(VersionGoalDiagnostic(
+            "ledger_schema_gap", "", product + ":" + sourceId,
+            "Version Goal Ledger source is missing the expected schema marker or goals array."));
+        continue;
+      }
+      VersionGoalLedgerSource source;
+      source.product = ledger.get("product", product).asString().empty()
+          ? product
+          : ledger.get("product", product).asString();
+      source.targetVersion = ledger.get("target_version", "unknown").asString();
+      source.sourceId = sourceId;
+      source.ledger = ledger;
+      sources.push_back(source);
+    }
+  }
+
+  std::sort(sources.begin(), sources.end(),
+            [](const VersionGoalLedgerSource& lhs,
+               const VersionGoalLedgerSource& rhs) {
+              return std::tie(lhs.product, lhs.targetVersion, lhs.sourceId) <
+                     std::tie(rhs.product, rhs.targetVersion, rhs.sourceId);
+            });
+
+  std::map<std::string, size_t> targetIndex;
+  for (const auto& source : sources) {
+    if (targetIndex.find(source.targetVersion) == targetIndex.end()) {
+      targetIndex[source.targetVersion] = targetIndex.size();
+    }
+  }
+
+  auto appendGoalDiagnostic = [&](Json::Value& goal,
+                                  const Json::Value& diagnostic) {
+    goal["diagnostics"].append(diagnostic);
+    response["diagnostics"].append(diagnostic);
+  };
+
+  std::map<std::string, Json::Value> detailByKey;
+  auto evidenceDetailFor = [&](const Json::Value& item) -> Json::Value {
+    const auto product = item.get("product", "").asString();
+    const auto id = item.get("id", "").asString();
+    const auto key = ProductItemKey(product, id);
+    const auto cached = detailByKey.find(key);
+    if (cached != detailByKey.end()) {
+      return cached->second;
+    }
+    auto detail = GetEvidenceDetail(product, id, options.forceRefresh);
+    detailByKey[key] = detail;
+    return detail;
+  };
+
+  for (const auto& source : sources) {
+    const auto slice = VersionGoalSliceForTarget(
+        source.targetVersion, targetIndex[source.targetVersion]);
+    for (const auto& rawGoal : source.ledger["goals"]) {
+      if (!rawGoal.isObject()) {
+        continue;
+      }
+      Json::Value goal(Json::objectValue);
+      const auto goalId = rawGoal.get("goal_id", "").asString();
+      goal["goal_id"] = goalId;
+      goal["summary"] = rawGoal.get("summary", goalId).asString();
+      goal["product"] = source.product;
+      goal["target_version"] = source.targetVersion;
+      goal["slice"] = slice;
+      goal["source"]["product"] = source.product;
+      goal["source"]["source_id"] = source.sourceId;
+      goal["source"]["target_version"] = source.targetVersion;
+      const auto declaredStatus =
+          NormalizeVersionGoalStatus(rawGoal.get("status", "Unknown").asString());
+      goal["declared_status"] = declaredStatus;
+      goal["evidence_quality"] =
+          rawGoal.get("evidence_quality", "unclear").asString();
+      goal["gap_state"] = rawGoal.get("gap_state", "").asString();
+      goal["rationale"] = rawGoal.get("rationale", "").asString();
+      goal["linked_refs"] = Json::arrayValue;
+      goal["resolved_refs"] = Json::arrayValue;
+      goal["missing_refs"] = Json::arrayValue;
+      goal["stale_refs"] = Json::arrayValue;
+      goal["closed_ticket_refs"] = Json::arrayValue;
+      goal["implemented_unverified_refs"] = Json::arrayValue;
+      goal["evidence_backed_refs"] = Json::arrayValue;
+      goal["diagnostics"] = Json::arrayValue;
+
+      size_t linkedWorkRefs = 0;
+      size_t closedTickets = 0;
+      size_t evidenceBacked = 0;
+      size_t implementedUnverified = 0;
+      size_t blockedRefs = 0;
+      size_t missingRefs = 0;
+      size_t staleRefs = 0;
+      size_t directEvidenceRefs = 0;
+
+      const auto& refs = rawGoal["linked_refs"];
+      if (refs.isArray()) {
+        for (const auto& rawRef : refs) {
+          auto ref = VersionGoalLogicalRef(rawRef, source.product);
+          if (!ref.isObject() || VersionGoalRefId(ref).empty()) {
+            continue;
+          }
+          goal["linked_refs"].append(ref);
+          const auto refProduct = ref.get("product", source.product).asString();
+          const auto refKind = VersionGoalRefKind(ref);
+          const auto refId = VersionGoalRefId(ref);
+          const auto target = VersionGoalRefTarget(ref, source.product);
+
+          std::string itemKey;
+          if (refKind == "uid") {
+            const auto uidIt = keyByUid.find(ProductItemKey(refProduct, refId));
+            if (uidIt != keyByUid.end()) {
+              itemKey = uidIt->second;
+            }
+          } else {
+            itemKey = ProductItemKey(refProduct, refId);
+          }
+          const auto itemIt = itemByKey.find(itemKey);
+          if (itemIt == itemByKey.end()) {
+            ++missingRefs;
+            goal["missing_refs"].append(ref);
+            appendGoalDiagnostic(goal, VersionGoalDiagnostic(
+                "missing_ref", goalId, target,
+                "Version goal linked ref is not present in the selected product scope.",
+                ref));
+            continue;
+          }
+
+          const auto item = itemIt->second;
+          goal["resolved_refs"].append(ref);
+          const auto itemType = item.get("type", "").asString();
+          const bool isAdr = itemType == "ADR";
+          const bool isTopic = itemType == "Topic";
+          const bool isWorkRef = !isAdr && !isTopic && itemType != "Workset";
+          const auto state = item.get("state", "").asString();
+
+          if (isAdr) {
+            const auto decisionStatus =
+                text::ToLower(item.get("decision_status", "").asString());
+            if (decisionStatus == "stale" ||
+                decisionStatus == "revisit_needed") {
+              ++staleRefs;
+              goal["stale_refs"].append(ref);
+              appendGoalDiagnostic(goal, VersionGoalDiagnostic(
+                  "stale_ref", goalId, target,
+                  "ADR ref is stale or marked for revisit before this roadmap goal can be trusted.",
+                  ref));
+            }
+            continue;
+          }
+          if (!isWorkRef) {
+            continue;
+          }
+
+          ++linkedWorkRefs;
+          if (IsBlockedTicketState(state)) {
+            ++blockedRefs;
+          }
+          const bool closed = IsClosedTicketState(state);
+          if (closed) {
+            ++closedTickets;
+            goal["closed_ticket_refs"].append(ref);
+          }
+
+          auto detail = evidenceDetailFor(item);
+          if (detail.isMember("error")) {
+            ++missingRefs;
+            appendGoalDiagnostic(goal, VersionGoalDiagnostic(
+                "evidence_lookup_failed", goalId, target,
+                "Linked work item evidence lookup failed for the roadmap projection.",
+                ref));
+            continue;
+          }
+          const bool evidenceComplete =
+              detail["evidence"].get("complete", false).asBool();
+          const bool doneGatePassed =
+              detail["item"]["gate_status"]["done"]["state"].asString() ==
+              "passed";
+          if (refKind == "evidence") {
+            ++directEvidenceRefs;
+          }
+          if (closed && evidenceComplete && doneGatePassed) {
+            ++evidenceBacked;
+            goal["evidence_backed_refs"].append(ref);
+          } else if (closed) {
+            ++implementedUnverified;
+            goal["implemented_unverified_refs"].append(ref);
+          }
+          if (ContentContainsAny(detail["item"].get("content", "").asString(),
+                                 {"stale", "drift", "outdated", "timed out"})) {
+            ++staleRefs;
+            goal["stale_refs"].append(ref);
+            appendGoalDiagnostic(goal, VersionGoalDiagnostic(
+                "stale_ref", goalId, target,
+                "Linked work item contains stale/drift/outdated evidence terms.",
+                ref));
+          }
+        }
+      }
+
+      if (goal["linked_refs"].empty()) {
+        appendGoalDiagnostic(goal, VersionGoalDiagnostic(
+            "missing_ref", goalId, goalId,
+            "Version goal has no linked refs; status remains unsupported."));
+      }
+      if (IsStaleEvidenceQuality(goal["evidence_quality"].asString())) {
+        ++staleRefs;
+        appendGoalDiagnostic(goal, VersionGoalDiagnostic(
+            "stale_ref", goalId, goalId,
+            "Version goal evidence quality is stale or contradicting."));
+      }
+      if (text::ToLower(goal["evidence_quality"].asString()) == "missing") {
+        appendGoalDiagnostic(goal, VersionGoalDiagnostic(
+            "missing_evidence", goalId, goalId,
+            "Version goal declares missing evidence."));
+      }
+
+      const bool evidenceChainComplete =
+          linkedWorkRefs > 0 && missingRefs == 0 && staleRefs == 0 &&
+          evidenceBacked == linkedWorkRefs;
+      goal["evidence_chain_complete"] = evidenceChainComplete;
+      goal["linked_work_ref_count"] = static_cast<Json::UInt64>(linkedWorkRefs);
+      goal["closed_ticket_count"] = static_cast<Json::UInt64>(closedTickets);
+      goal["implemented_unverified_count"] =
+          static_cast<Json::UInt64>(implementedUnverified);
+      goal["evidence_backed_count"] = static_cast<Json::UInt64>(evidenceBacked);
+      goal["blocked_ref_count"] = static_cast<Json::UInt64>(blockedRefs);
+      goal["missing_ref_count"] = static_cast<Json::UInt64>(missingRefs);
+      goal["stale_ref_count"] = static_cast<Json::UInt64>(staleRefs);
+      goal["direct_evidence_ref_count"] =
+          static_cast<Json::UInt64>(directEvidenceRefs);
+      goal["cut_defer_decision"] =
+          declaredStatus == "Cut" || declaredStatus == "Deferred";
+
+      if (declaredStatus == "Done" && !evidenceChainComplete) {
+        appendGoalDiagnostic(goal, VersionGoalDiagnostic(
+            "done_requires_evidence", goalId, goalId,
+            "Done roadmap goals require closed linked work and evidence-backed Done gates."));
+      }
+
+      std::string projectedStatus = "Unknown";
+      if (declaredStatus == "Cut" || declaredStatus == "Deferred") {
+        projectedStatus = declaredStatus;
+      } else if (blockedRefs > 0 || declaredStatus == "Blocked") {
+        projectedStatus = "Blocked";
+      } else if (staleRefs > 0 ||
+                 (missingRefs > 0 && !goal["resolved_refs"].empty()) ||
+                 declaredStatus == "At Risk") {
+        projectedStatus = "At Risk";
+      } else if (evidenceChainComplete) {
+        projectedStatus = "Done";
+      } else if (closedTickets > 0) {
+        projectedStatus = "Implemented/Unverified";
+      } else if (evidenceBacked > 0 || declaredStatus == "Partial") {
+        projectedStatus = "Partial";
+      }
+      goal["status"] = projectedStatus;
+      goal["status_reason"] =
+          projectedStatus == "Done"
+              ? "All linked work refs are closed and evidence-backed."
+              : (projectedStatus == "Implemented/Unverified"
+                     ? "Linked work is closed but lacks a complete evidence chain."
+                     : (projectedStatus == "Cut" || projectedStatus == "Deferred"
+                            ? "Goal status comes from an explicit cut/defer decision."
+                            : "Projection preserves gaps instead of inferring completion."));
+
+      response["status_counts"][projectedStatus] = static_cast<Json::UInt64>(
+          response["status_counts"].get(projectedStatus, 0U).asUInt64() + 1U);
+      response["goals"].append(goal);
+      response["slices"][slice].append(goal);
+    }
+  }
+
+  response["goal_count"] = static_cast<Json::UInt64>(response["goals"].size());
+  response["diagnostic_count"] =
+      static_cast<Json::UInt64>(response["diagnostics"].size());
+  response["empty"] = response["goals"].empty();
+  return response;
+}
+
 Json::Value BacklogWebviewService::SaveReviewDecisionDraft(
     const Json::Value& request) {
   try {
@@ -5907,6 +6495,52 @@ std::string BacklogWebviewService::RenderReviewPartial(
                       : html;
 }
 
+std::string BacklogWebviewService::RenderRoadmapPartial(
+    const ItemQueryOptions& options) {
+  const auto roadmap = BuildVersionGoalLedger(options);
+  if (roadmap.isMember("error")) {
+    return RenderErrorPartial(roadmap["error"].asString());
+  }
+
+  std::string html =
+      "<section class=\"roadmap-view\" data-navigation-model=\"version-goal-ledger\">";
+  html += "<div class=\"detail-facts\">";
+  for (const auto& status : VersionGoalStatuses()) {
+    html += RenderDetailFact(
+        status, std::to_string(
+                    roadmap["status_counts"].get(status, 0U).asUInt64()));
+  }
+  html += "</div>";
+  for (const auto& sliceName : {"current", "next", "future"}) {
+    const auto& goals = roadmap["slices"][sliceName];
+    html += "<section class=\"roadmap-slice\" data-roadmap-slice=\"" +
+            std::string(sliceName) + "\"><h4>" +
+            HtmlEscape(std::string(1, static_cast<char>(std::toupper(sliceName[0]))) +
+                       std::string(sliceName).substr(1)) +
+            "</h4>";
+    if (goals.empty()) {
+      html += "<div class=\"muted\">No " + std::string(sliceName) +
+              " roadmap goals for this scope.</div>";
+    } else {
+      for (const auto& goal : goals) {
+        html += RenderVersionGoalCard(goal);
+      }
+    }
+    html += "</section>";
+  }
+  if (!roadmap["diagnostics"].empty()) {
+    html += "<section class=\"roadmap-diagnostics\"><h4>Roadmap gaps</h4>" +
+            RenderDiagnosticList(roadmap["diagnostics"]) + "</section>";
+  }
+  if (roadmap["goals"].empty()) {
+    html += "<div class=\"muted\">" +
+            HtmlEscape(roadmap.get("empty_state", "No roadmap goals.").asString()) +
+            "</div>";
+  }
+  html += "</section>";
+  return html;
+}
+
 std::string BacklogWebviewService::RenderContextPartial(
     const ItemQueryOptions& options) {
   const auto items = QueryItems(options);
@@ -6277,6 +6911,16 @@ void RegisterBacklogWebviewRoutes(
       {Get});
 
   app().registerHandler(
+      "/partials/roadmap",
+      [&service, queryOptionsFromRequest, htmlResponse](
+          const HttpRequestPtr& request,
+          std::function<void(const HttpResponsePtr&)>&& callback) {
+        callback(htmlResponse(
+            service.RenderRoadmapPartial(queryOptionsFromRequest(request))));
+      },
+      {Get});
+
+  app().registerHandler(
       "/partials/context",
       [&service, queryOptionsFromRequest, htmlResponse](
           const HttpRequestPtr& request,
@@ -6624,6 +7268,23 @@ void RegisterBacklogWebviewRoutes(
       [metaAppender, &service, queryOptionsFromRequest](const HttpRequestPtr& request,
           std::function<void(const HttpResponsePtr&)>&& callback) {
         auto data = service.BuildProductMapNavigation(queryOptionsFromRequest(request));
+        Json::Value body(Json::objectValue);
+        body["ok"] = !data.isMember("error");
+        body["data"] = data;
+        metaAppender(request, body);
+        auto response = HttpResponse::newHttpJsonResponse(body);
+        if (!body["ok"].asBool()) {
+          response->setStatusCode(k400BadRequest);
+        }
+        callback(response);
+      },
+      {Get});
+
+  app().registerHandler(
+      "/api/review/roadmap",
+      [metaAppender, &service, queryOptionsFromRequest](const HttpRequestPtr& request,
+          std::function<void(const HttpResponsePtr&)>&& callback) {
+        auto data = service.BuildVersionGoalLedger(queryOptionsFromRequest(request));
         Json::Value body(Json::objectValue);
         body["ok"] = !data.isMember("error");
         body["data"] = data;

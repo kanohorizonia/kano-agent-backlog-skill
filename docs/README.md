@@ -49,6 +49,8 @@ If you are reading the repository directly, start here instead of `docs/index.md
 - [Repository reference](../REFERENCE.md)
 - [Workflow reference](../references/workflow.md)
 - [Schema reference](../references/schema.md)
+- [Actor alias policy schema fixture](../references/actor-alias-and-assignment-policy.schema.json)
+- [Actor alias policy example](../references/actor-alias-and-assignment-policy.fixture.json)
 - [Product Map schema fixture](../references/product-map-projection.schema.json)
 - [ADR lifecycle schema fixture](../references/adr-lifecycle-metadata.schema.json)
 - [Backboard enterprise envelope seam schema fixture](../references/backboard-enterprise-envelope-seams.schema.json)

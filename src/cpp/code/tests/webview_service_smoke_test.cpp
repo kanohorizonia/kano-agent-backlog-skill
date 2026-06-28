@@ -1824,6 +1824,84 @@ int main() {
         expect(webviewReadme.find("/partials/decision-radar") != std::string::npos,
                "webview README should list the decision radar partial route");
 
+        const auto actorAliasDoc = read_text(
+            locate_repo_file(std::filesystem::path("docs") / "design" /
+                             "actor-alias-and-assignment-policy.md"));
+        expect(actorAliasDoc.find("Actor Type Semantics") != std::string::npos &&
+                   actorAliasDoc.find("`runner`") != std::string::npos &&
+                   actorAliasDoc.find("runner-local") != std::string::npos,
+               "actor alias doc should explicitly list runner actor semantics");
+        expect(actorAliasDoc.find("not an execution permission grant") != std::string::npos &&
+                   actorAliasDoc.find("not an authentication or authorization model") != std::string::npos,
+               "actor alias doc should keep runner aliases non-enforcing");
+
+        const auto actorAliasSchemaText = read_text(
+            locate_repo_file(std::filesystem::path("references") /
+                             "actor-alias-and-assignment-policy.schema.json"));
+        const auto actorAliasSchema =
+            parse_json_text(actorAliasSchemaText, "actor alias policy schema");
+        expect(actorAliasSchema["properties"]["schema"]["const"].asString() ==
+                   "kob.actor_alias_policy_examples.v1",
+               "actor alias policy schema should expose a stable schema marker");
+        expect(has_string_value(actorAliasSchema["$defs"]["actor_type"]["enum"], "human") &&
+                   has_string_value(actorAliasSchema["$defs"]["actor_type"]["enum"], "agent") &&
+                   has_string_value(actorAliasSchema["$defs"]["actor_type"]["enum"], "service") &&
+                   has_string_value(actorAliasSchema["$defs"]["actor_type"]["enum"], "runner") &&
+                   has_string_value(actorAliasSchema["$defs"]["actor_type"]["enum"], "role"),
+               "actor alias policy schema should enumerate human, agent, service, runner, and role actor types");
+        expect(actorAliasSchemaText.find("\"path\"") == std::string::npos &&
+                   actorAliasSchemaText.find("auth_subject") == std::string::npos &&
+                   actorAliasSchemaText.find("tenant_id") == std::string::npos &&
+                   actorAliasSchemaText.find("permission_matrix") == std::string::npos,
+               "actor alias policy schema should not expose raw path, auth subject, tenant, or permission matrix fields");
+
+        const auto actorAliasFixture = parse_json_text(
+            read_text(locate_repo_file(std::filesystem::path("references") /
+                                       "actor-alias-and-assignment-policy.fixture.json")),
+            "actor alias policy fixture");
+        expect(actorAliasFixture["schema"].asString() ==
+                   "kob.actor_alias_policy_examples.v1",
+               "actor alias policy fixture should match schema marker");
+        bool foundRunnerAlias = false;
+        bool foundHumanAlias = false;
+        bool foundAgentAlias = false;
+        bool foundServiceAlias = false;
+        bool foundRoleAlias = false;
+        for (const auto& alias : actorAliasFixture["aliases"]) {
+            const auto actorType = alias["actor_type"].asString();
+            foundHumanAlias = foundHumanAlias || actorType == "human";
+            foundAgentAlias = foundAgentAlias || actorType == "agent";
+            foundServiceAlias = foundServiceAlias || actorType == "service";
+            foundRoleAlias = foundRoleAlias || actorType == "role";
+            if (alias["alias"].asString() == "runner-local") {
+                foundRunnerAlias = actorType == "runner" &&
+                    alias["repo_visible"].asBool() &&
+                    !alias["private_identity_data"].asBool() &&
+                    !alias["permission_grant"].asBool() &&
+                    has_string_value(alias["distinct_from"], "human") &&
+                    has_string_value(alias["distinct_from"], "agent") &&
+                    has_string_value(alias["distinct_from"], "service") &&
+                    has_string_value(alias["distinct_from"], "role");
+            }
+        }
+        expect(foundHumanAlias && foundAgentAlias && foundServiceAlias &&
+                   foundRunnerAlias && foundRoleAlias,
+               "actor alias policy fixture should include distinct human, agent, service, runner, and role aliases");
+        expect(actorAliasFixture["local_first_defaults"]["auth_provider_required"].asBool() == false &&
+                   actorAliasFixture["local_first_defaults"]["private_identity_mapping_required"].asBool() == false &&
+                   actorAliasFixture["local_first_defaults"]["omitted_actor_type_blocks_local_operation"].asBool() == false,
+               "actor alias policy fixture should keep local-first operation valid without enterprise identity providers");
+        expect(has_string_value(actorAliasFixture["non_goals"], "RBAC or permission enforcement") &&
+                   has_string_value(actorAliasFixture["non_goals"], "enterprise identity mapping") &&
+                   has_string_value(actorAliasFixture["non_goals"], "runner execution permission grant"),
+               "actor alias policy fixture should keep enterprise auth and runner execution grants out of scope");
+        const auto actorAliasFixtureSerialized = json_to_string(actorAliasFixture);
+        expect(actorAliasFixtureSerialized.find("\"path\"") == std::string::npos &&
+                   actorAliasFixtureSerialized.find("items/") == std::string::npos &&
+                   actorAliasFixtureSerialized.find("decisions/") == std::string::npos &&
+                   actorAliasFixtureSerialized.find("@") == std::string::npos,
+               "actor alias policy fixture should not expose raw paths, personal emails, or repo file paths");
+
         const auto enterpriseSeamDoc = read_text(
             locate_repo_file(std::filesystem::path("docs") / "design" /
                              "backboard-enterprise-envelope-seams.md"));
@@ -1994,6 +2072,9 @@ int main() {
 
         const auto docsReadme = read_text(
             locate_repo_file(std::filesystem::path("docs") / "README.md"));
+        expect(docsReadme.find("actor-alias-and-assignment-policy.schema.json") != std::string::npos &&
+                   docsReadme.find("actor-alias-and-assignment-policy.fixture.json") != std::string::npos,
+               "docs README should link the actor alias policy schema and fixture");
         expect(docsReadme.find("backboard-enterprise-envelope-seams.schema.json") != std::string::npos &&
                    docsReadme.find("backboard-enterprise-envelope-seams.fixture.json") != std::string::npos,
                "docs README should link the enterprise seam schema and fixture");
@@ -2003,6 +2084,10 @@ int main() {
 
         const auto schemaReference = read_text(
             locate_repo_file(std::filesystem::path("references") / "schema.md"));
+        expect(schemaReference.find("Actor alias policy examples") != std::string::npos &&
+                   schemaReference.find("`runner` aliases") != std::string::npos &&
+                   schemaReference.find("grant execution permission") != std::string::npos,
+               "schema reference should document runner actor alias semantics and non-enforcement boundary");
         expect(schemaReference.find("Backboard enterprise envelope seams") != std::string::npos &&
                    schemaReference.find("owner_actor_alias") != std::string::npos &&
                    schemaReference.find("permission enforcement") != std::string::npos,

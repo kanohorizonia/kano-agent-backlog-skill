@@ -1,0 +1,65 @@
+{
+  "schema": "kob.actor_alias_policy_examples.v1",
+  "aliases": [
+    {
+      "alias": "maintainer",
+      "actor_type": "human",
+      "summary": "Human-facing maintainer role alias, not a personal identity.",
+      "repo_visible": true,
+      "private_identity_data": false,
+      "permission_grant": false,
+      "distinct_from": ["agent", "service", "runner", "role"]
+    },
+    {
+      "alias": "codex",
+      "actor_type": "agent",
+      "summary": "Coding agent alias used for authored worklog and review evidence.",
+      "repo_visible": true,
+      "private_identity_data": false,
+      "permission_grant": false,
+      "distinct_from": ["human", "service", "runner", "role"]
+    },
+    {
+      "alias": "koa",
+      "actor_type": "service",
+      "summary": "Local service or gateway alias used by Backboard and KOB records.",
+      "repo_visible": true,
+      "private_identity_data": false,
+      "permission_grant": false,
+      "distinct_from": ["human", "agent", "runner", "role"]
+    },
+    {
+      "alias": "runner-local",
+      "actor_type": "runner",
+      "summary": "Local automation runner or execution host alias for audit and evidence routing.",
+      "repo_visible": true,
+      "private_identity_data": false,
+      "permission_grant": false,
+      "distinct_from": ["human", "agent", "service", "role"]
+    },
+    {
+      "alias": "reviewer-koa",
+      "actor_type": "role",
+      "summary": "Review responsibility alias that may be fulfilled outside repo-visible identity data.",
+      "repo_visible": true,
+      "private_identity_data": false,
+      "permission_grant": false,
+      "distinct_from": ["human", "agent", "service", "runner"]
+    }
+  ],
+  "local_first_defaults": {
+    "auth_provider_required": false,
+    "private_identity_mapping_required": false,
+    "omitted_actor_type_blocks_local_operation": false
+  },
+  "future_private_identity_mapping": "Any mapping from repo-visible aliases to real users, service principals, credentials, runner identities, or organization accounts remains outside source control.",
+  "non_goals": [
+    "authentication provider",
+    "RBAC or permission enforcement",
+    "multi-tenant membership",
+    "approval quorum",
+    "enterprise identity mapping",
+    "runner execution permission grant",
+    "personal names or emails in repo files"
+  ]
+}

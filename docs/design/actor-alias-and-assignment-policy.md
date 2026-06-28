@@ -33,8 +33,27 @@ Alias examples:
 | --- | --- |
 | `koa` | Local service or agent gateway actor. |
 | `codex` | Codex coding agent actor. |
+| `runner-local` | Local automation runner actor for execution evidence. |
 | `maintainer` | Human maintainer role, not a personal identity. |
 | `reviewer-koa` | Review role or service alias. |
+
+## Actor Type Semantics
+
+Actor aliases can represent several distinct repo-visible actor types:
+
+| Actor type | Meaning |
+| --- | --- |
+| `human` | A person-facing review or ownership alias, such as `maintainer`; it is not a private personal identity. |
+| `agent` | An AI or automation agent that plans, edits, reviews, or records work, such as `codex`. |
+| `service` | A long-running service, daemon, gateway, or integration actor, such as `koa`. |
+| `runner` | An automation runner or execution host that produced or relayed evidence, such as `runner-local`. |
+| `role` | A queue, responsibility, or review role alias, such as `reviewer-koa`; it may be fulfilled by a human, service, or agent outside the repo. |
+
+Runner aliases identify execution context for audit and evidence routing. They
+are distinct from agent aliases, which identify the actor deciding or authoring
+work, and from service aliases, which identify service boundaries. A runner
+alias is not an execution permission grant and does not prove that the runner was
+authorized to act.
 
 ## Private Identity Mapping Boundary
 
@@ -101,3 +120,10 @@ Use `external.owner_source: explicit` and
 - Preserve explicit assignments when product defaults change later.
 - Do not use this policy as proof of authorization; it is assignment metadata
   only.
+
+## Reference Fixture
+
+The schema and fixture examples for this policy live in
+[`../../references/actor-alias-and-assignment-policy.schema.json`](../../references/actor-alias-and-assignment-policy.schema.json)
+and
+[`../../references/actor-alias-and-assignment-policy.fixture.json`](../../references/actor-alias-and-assignment-policy.fixture.json).

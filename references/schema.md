@@ -141,6 +141,32 @@ no-go/defer policy records why no implementation follows. If implementation is
 needed, create or link a separate Task/Bug/Feature follow-up instead of treating
 the investigation item as the implementation itself.
 
+## Actor alias policy examples
+
+Repo-visible actor aliases use the schema contract in
+[`actor-alias-and-assignment-policy.schema.json`](actor-alias-and-assignment-policy.schema.json)
+and the example in
+[`actor-alias-and-assignment-policy.fixture.json`](actor-alias-and-assignment-policy.fixture.json).
+
+The actor alias model covers:
+
+- `human` aliases for human-facing review or ownership labels;
+- `agent` aliases for AI or automation actors that plan, edit, review, or record
+  work;
+- `service` aliases for long-running service, daemon, gateway, or integration
+  actors;
+- `runner` aliases for automation runners or execution hosts that produced or
+  relayed evidence;
+- `role` aliases for queues or responsibilities that may be fulfilled outside
+  repo-visible identity data.
+
+Runner aliases are repo-visible metadata only. They are distinct from human,
+agent, service, and role aliases, and they do not expose private identity data or
+grant execution permission. Private mapping to real users, service principals,
+runner identities, organization accounts, or credentials stays outside source
+control. Local-first Backboard operation remains valid without an auth provider,
+enterprise identity mapping, multi-tenant membership, or permission enforcement.
+
 ## Parent state sync (forward-only)
 
 When a child item state changes, parents can auto-advance forward-only:

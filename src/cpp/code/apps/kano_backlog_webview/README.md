@@ -29,6 +29,7 @@ Design contracts:
   - `GET /api/review/evidence-quality?product=all|<name>[&products=a,b][&q=...][&state=...][&type=...]`
   - `GET /api/review/context-recovery?area=...&product=all|<name>[&products=a,b][&q=...][&state=...][&type=...]`
   - `GET /api/review/roadmap?product=all|<name>[&products=a,b]`
+  - `GET /api/review/decision-radar?product=all|<name>[&products=a,b]`
   - `POST /api/review/decision/draft`
   - `POST /api/review/decision/draft/discard`
   - `POST /api/review/decision/submit`
@@ -37,6 +38,7 @@ Design contracts:
   - `GET /partials/kanban?...`
   - `GET /partials/review?...`
   - `GET /partials/roadmap?...`
+  - `GET /partials/decision-radar?...`
   - `GET /partials/context?...`
   - `GET /partials/filters?...`
   - `GET /partials/item/<id>?product=all|<name>`

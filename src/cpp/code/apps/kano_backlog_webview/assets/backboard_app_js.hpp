@@ -43,11 +43,12 @@ inline constexpr std::string_view kBackboardAppJsPart1 = R"JS(
     const reviewQueueOrder = ['Needs Review', 'Done Candidate', 'False Done Suspect', 'Evidence Gap', 'Blocked/Dirty', 'Stale/Drift', 'Ready Frontier'];
     const itemStates = ['Proposed', 'Ready', 'InProgress', 'Blocked', 'Review', 'Done', 'Dropped'];
     const itemTypes = ['Theme', 'Initiative', 'Epic', 'Feature', 'UserStory', 'Task', 'Bug', 'Issue', 'ADR', 'Topic', 'Workset'];
-    const refreshableTabs = ['review', 'tree', 'roadmap', 'kanban', 'context', 'graph', 'runs'];
+    const refreshableTabs = ['review', 'tree', 'roadmap', 'decision-radar', 'kanban', 'context', 'graph', 'runs'];
     const tabLabels = {
       review: 'Review Inbox',
       tree: 'Product Map',
       roadmap: 'Roadmap',
+      'decision-radar': 'Decision Radar',
       kanban: 'Flow',
       context: 'Context',
       graph: 'Dependencies',
@@ -78,7 +79,7 @@ inline constexpr std::string_view kBackboardAppJsPart1 = R"JS(
           state.limit = Math.max(1, Math.min(parsed, 1000));
         }
       }
-      if (query.tab && ['review', 'tree', 'roadmap', 'kanban', 'context', 'graph', 'runs', 'command'].includes(query.tab)) {
+      if (query.tab && ['review', 'tree', 'roadmap', 'decision-radar', 'kanban', 'context', 'graph', 'runs', 'command'].includes(query.tab)) {
         state.activeTab = query.tab;
       }
     })();
@@ -1854,6 +1855,56 @@ inline constexpr std::string_view kBackboardAppJsPart5 = R"JS(
 
 inline constexpr std::string_view kBackboardAppJsPart5b = R"JS(
 
+    function renderDecisionRadarDiagnostic(diagnostic) {
+      return `<div class="card gap-card"><strong>${esc(diagnostic.code || 'gap')}</strong><div>${esc(diagnostic.message || '')}</div><div class="muted">${esc(diagnostic.target || '')}</div></div>`;
+    }
+
+    function renderDecisionRadarRow(row) {
+      const categories = (row.categories || []).map(pill).join('');
+      const affected = (row.affected_refs || []).map(renderTreeRefChip).join('');
+      const evidence = (row.evidence_refs || []).map(renderTreeRefChip).join('');
+      const superseded = (row.superseded_by || []).map(renderTreeRefChip).join('');
+      const diagnostics = (row.diagnostics || []).map(renderDecisionRadarDiagnostic).join('');
+      return `<div class="card decision-radar-row" data-decision-radar-row="${escAttr(row.adr_id || '')}">` +
+        `<div class="detail-title-row"><strong>${esc(row.title || row.adr_id || 'ADR')}</strong>${categories}</div>` +
+        `<div class="muted"><code>${esc(row.adr_id || '')}</code> / ${esc(row.product || '')}</div>` +
+        `<div class="detail-facts">` +
+          `<div class="detail-fact"><span class="detail-label">Decision status</span><div class="detail-value">${esc(row.decision_status || 'metadata_gap')}</div></div>` +
+          `<div class="detail-fact"><span class="detail-label">Radar status</span><div class="detail-value">${esc(row.radar_status || 'unknown')}</div></div>` +
+          `<div class="detail-fact"><span class="detail-label">Advisory</span><div class="detail-value">${row.advisory_only === false ? 'false' : 'true'}</div></div>` +
+        `</div>` +
+        `<div><div class="detail-label">Affected feature or Product Map node</div><div class="detail-links">${affected || '<div class="muted">No impacted feature refs recorded</div>'}</div></div>` +
+        `<div><div class="detail-label">Revisit condition</div><div class="detail-value">${esc(row.revisit_condition || 'none recorded')}</div></div>` +
+        `<div><div class="detail-label">Current signal / evidence</div><div class="detail-value">${esc(row.current_signal || '')}</div><div class="detail-links">${evidence || '<div class="muted">No evidence refs recorded</div>'}</div></div>` +
+        `<div><div class="detail-label">Recommended human review action</div><div class="detail-value">${esc(row.recommended_human_review_action || '')}</div></div>` +
+        (superseded ? `<div><div class="detail-label">Superseded by</div><div class="detail-links">${superseded}</div></div>` : '') +
+        (diagnostics ? `<div><div class="detail-label">Gaps</div>${diagnostics}</div>` : '') +
+      `</div>`;
+    }
+
+    async function loadDecisionRadar(signal, refresh) {
+      const result = await getJson(`/api/review/decision-radar?${queryString()}`, {
+        signal,
+        refresh,
+        stage: 'decision_radar.adrs',
+      });
+      const data = result?.data || {};
+      const rows = data.rows || [];
+      const diagnostics = data.diagnostics || [];
+      const counts = data.category_counts || {};
+      const countText = Object.keys(counts).map((key) => `${key}: ${counts[key] || 0}`).join(' | ');
+      document.getElementById('decision-radar-summary').textContent =
+        `${rows.length} ADR row(s), ${diagnostics.length} gap(s)${countText ? ` | ${countText}` : ''}`;
+      document.getElementById('decision-radar-list').innerHTML = [
+        ...rows.map(renderDecisionRadarRow),
+        diagnostics.length
+          ? `<section class="decision-radar-diagnostics"><h4>Decision radar gaps</h4>${diagnostics.slice(0, 40).map(renderDecisionRadarDiagnostic).join('')}</section>`
+          : '',
+        rows.length ? '' : `<div class="muted">${esc(data.empty_state || 'No ADR radar rows.')}</div>`,
+      ].join('');
+      bindItemLinks('#decision-radar-list');
+    }
+
     async function loadRuns(signal, refresh) {
       const result = await getJson(`/api/review/runs?${queryString()}`, {
         signal,
@@ -1890,6 +1941,7 @@ inline constexpr std::string_view kBackboardAppJsPart5b = R"JS(
       state.activeTab = tab;
       const isTree = tab === 'tree';
       const isRoadmap = tab === 'roadmap';
+      const isDecisionRadar = tab === 'decision-radar';
       const isKanban = tab === 'kanban';
       const isContext = tab === 'context';
       const isReview = tab === 'review';
@@ -1898,6 +1950,7 @@ inline constexpr std::string_view kBackboardAppJsPart5b = R"JS(
       const isCommand = tab === 'command';
       document.getElementById('tab-tree').classList.toggle('active', isTree);
       document.getElementById('tab-roadmap').classList.toggle('active', isRoadmap);
+      document.getElementById('tab-decision-radar').classList.toggle('active', isDecisionRadar);
       document.getElementById('tab-kanban').classList.toggle('active', isKanban);
       document.getElementById('tab-context').classList.toggle('active', isContext);
       document.getElementById('tab-review').classList.toggle('active', isReview);
@@ -1906,6 +1959,7 @@ inline constexpr std::string_view kBackboardAppJsPart5b = R"JS(
       document.getElementById('tab-command').classList.toggle('active', isCommand);
       document.getElementById('page-tree').classList.toggle('active', isTree);
       document.getElementById('page-roadmap').classList.toggle('active', isRoadmap);
+      document.getElementById('page-decision-radar').classList.toggle('active', isDecisionRadar);
       document.getElementById('page-kanban').classList.toggle('active', isKanban);
       document.getElementById('page-context').classList.toggle('active', isContext);
       document.getElementById('page-review').classList.toggle('active', isReview);
@@ -1925,6 +1979,7 @@ inline constexpr std::string_view kBackboardAppJsPart6 = R"JS(
         review: loadReview,
         tree: loadTree,
         roadmap: loadRoadmap,
+        'decision-radar': loadDecisionRadar,
         kanban: loadKanban,
         context: loadContext,
         graph: loadGraph,

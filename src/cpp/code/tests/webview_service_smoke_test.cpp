@@ -146,6 +146,37 @@ std::optional<Json::Value> find_goal(const Json::Value& goals,
     return std::nullopt;
 }
 
+std::optional<Json::Value> find_decision_row(const Json::Value& rows,
+                                             const std::string& adr_id) {
+    for (const auto& row : rows) {
+        if (row["adr_id"].asString() == adr_id) {
+            return row;
+        }
+    }
+    return std::nullopt;
+}
+
+bool has_string_value(const Json::Value& array,
+                      const std::string& value) {
+    for (const auto& entry : array) {
+        if (entry.asString() == value) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool has_logical_ref(const Json::Value& refs,
+                     const std::string& key,
+                     const std::string& value) {
+    for (const auto& ref : refs) {
+        if (ref.isMember(key) && ref[key].asString() == value) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool has_edge(const Json::Value& edges,
               const std::string& from,
               const std::string& to,
@@ -565,6 +596,55 @@ int main() {
             "# ADR with missing stale refs\n\n"
             "This ADR intentionally points at missing refs for Product Map diagnostics.\n");
         write_text(
+            products / "product-alpha" / "decisions" / "PRA-ADR-0004_superseded-decision.md",
+            "---\n"
+            "id: PRA-ADR-0004\n"
+            "title: Superseded ADR radar row\n"
+            "decision_status: superseded\n"
+            "feature_refs:\n"
+            "  - PRA-FTR-0002\n"
+            "evidence_refs:\n"
+            "  - PRA-TSK-0001\n"
+            "superseded_by:\n"
+            "  - PRA-ADR-0001\n"
+            "revisit_condition: Supersession must remain linked\n"
+            "date: 2026-06-14\n"
+            "---\n\n"
+            "# Superseded ADR radar row\n\n"
+            "This ADR is intentionally superseded for Decision Radar coverage.\n");
+        write_text(
+            products / "product-alpha" / "decisions" / "PRA-ADR-0005_revisit-needed.md",
+            "---\n"
+            "id: PRA-ADR-0005\n"
+            "title: ADR revisit needed row\n"
+            "decision_status: revisit_needed\n"
+            "feature_refs:\n"
+            "  - PRA-FTR-0002\n"
+            "evidence_refs:\n"
+            "  - PRA-TSK-0001\n"
+            "superseded_by: []\n"
+            "revisit_condition: Product Map navigation begins linking decision debt\n"
+            "date: 2026-06-14\n"
+            "---\n\n"
+            "# ADR revisit needed row\n\n"
+            "This ADR intentionally requires human revisit without mutating item state.\n");
+        write_text(
+            products / "product-alpha" / "decisions" / "PRA-ADR-0006_evidence-challenged.md",
+            "---\n"
+            "id: PRA-ADR-0006\n"
+            "title: ADR evidence challenged row\n"
+            "decision_status: accepted\n"
+            "feature_refs:\n"
+            "  - PRA-FTR-0002\n"
+            "evidence_refs:\n"
+            "  - PRA-TSK-0006\n"
+            "superseded_by: []\n"
+            "revisit_condition: Evidence chain becomes incomplete\n"
+            "date: 2026-06-14\n"
+            "---\n\n"
+            "# ADR evidence challenged row\n\n"
+            "This ADR points at incomplete evidence for Decision Radar coverage.\n");
+        write_text(
             products / "product-alpha" / "roadmap" / "version-goal-ledger-0.1.0.json",
             R"json({
   "schema": "kob.roadmap.version_goal_ledger.v1",
@@ -719,7 +799,7 @@ int main() {
         auto all = service.QueryItems(allOptions);
         expect(!all.isMember("error"), "all-products query should not fail");
         expect(all["products"].size() == 2, "all-products query should include both products");
-        expect(all["total"].asUInt64() == 24, "all-products query should include items, ADRs, plus unique topic pseudo-items");
+        expect(all["total"].asUInt64() == 27, "all-products query should include items, ADRs, plus unique topic pseudo-items");
         for (const auto& item : all["items"]) {
             expect(item.isMember("gate_status"), "all-products items should include gate_status");
             expect(item["gate_status"].isMember("ready"), "gate_status should include ready gate");
@@ -1239,6 +1319,68 @@ int main() {
                    roadmapSerialized.find("version-goals/") == std::string::npos,
                "roadmap projection should not expose raw ledger file paths");
 
+        auto decisionRadar = service.BuildDecisionDebtRadar(allOptions);
+        expect(!decisionRadar.isMember("error"), "decision debt radar projection should not fail");
+        expect(decisionRadar["schema"].asString() == "kob.backboard.decision_debt_radar.v1",
+               "decision debt radar should expose a stable schema marker");
+        expect(decisionRadar["read_only"].asBool(), "decision debt radar must be read-only");
+        expect(!decisionRadar["mutation_allowed"].asBool(), "decision debt radar must not allow mutations");
+        expect(!decisionRadar["starts_agent"].asBool(), "decision debt radar must not start agents");
+        expect(!decisionRadar["dispatches_work"].asBool(), "decision debt radar must not dispatch work");
+        expect(decisionRadar["advisory_only"].asBool(), "decision debt radar findings should be advisory");
+        expect(decisionRadar["filters_ignored_for_ref_resolution"].asBool(),
+               "decision debt radar should not mark refs missing because of active UI filters");
+        expect(decisionRadar["row_count"].asUInt64() >= 6,
+               "decision debt radar should list ADR lifecycle rows");
+
+        auto activeDecision = find_decision_row(decisionRadar["rows"], "PRA-ADR-0001");
+        expect(activeDecision.has_value(), "decision radar should include active ADR row");
+        expect(has_string_value((*activeDecision)["categories"], "active"),
+               "accepted ADR with evidence should be categorized as active");
+        expect((*activeDecision)["radar_status"].asString() == "active",
+               "active ADR should keep active radar status");
+        expect(has_logical_ref((*activeDecision)["affected_refs"], "item_id", "PRA-FTR-0002"),
+               "decision radar active row should link affected feature refs");
+        expect(has_logical_ref((*activeDecision)["evidence_refs"], "evidence_id", "PRA-TSK-0001"),
+               "decision radar active row should link evidence refs");
+
+        auto supersededDecision = find_decision_row(decisionRadar["rows"], "PRA-ADR-0004");
+        expect(supersededDecision.has_value(), "decision radar should include superseded ADR row");
+        expect(has_string_value((*supersededDecision)["categories"], "superseded") &&
+                   has_logical_ref((*supersededDecision)["superseded_by"], "adr_id", "PRA-ADR-0001"),
+               "decision radar should show superseded ADRs with supersession refs");
+
+        auto staleDecision = find_decision_row(decisionRadar["rows"], "PRA-ADR-0002");
+        expect(staleDecision.has_value() &&
+                   has_string_value((*staleDecision)["categories"], "stale"),
+               "decision radar should include stale ADR row");
+
+        auto revisitDecision = find_decision_row(decisionRadar["rows"], "PRA-ADR-0005");
+        expect(revisitDecision.has_value(), "decision radar should include revisit-needed ADR row");
+        expect(has_string_value((*revisitDecision)["categories"], "revisit_needed"),
+               "decision radar should categorize revisit-needed ADRs");
+        expect((*revisitDecision)["revisit_condition"].asString().find("Product Map navigation") != std::string::npos,
+               "decision radar should show revisit condition text");
+        expect(!(*revisitDecision)["mutation_allowed"].asBool() &&
+                   !(*revisitDecision)["starts_agent"].asBool(),
+               "revisit-needed radar rows must not mutate state or start work");
+
+        auto challengedDecision = find_decision_row(decisionRadar["rows"], "PRA-ADR-0006");
+        expect(challengedDecision.has_value(), "decision radar should include evidence-challenged ADR row");
+        expect(has_string_value((*challengedDecision)["categories"], "evidence_challenged"),
+               "decision radar should categorize evidence-challenged ADRs");
+        expect(has_diagnostic((*challengedDecision)["diagnostics"], "evidence_incomplete", "product-alpha:PRA-TSK-0006"),
+               "decision radar should diagnose incomplete linked evidence");
+        expect(has_diagnostic(decisionRadar["diagnostics"], "missing_ref", "product-alpha:PRA-FTR-9999") &&
+                   has_diagnostic(decisionRadar["diagnostics"], "missing_ref", "product-alpha:PRA-TSK-9999"),
+               "decision radar should report stale or missing refs as gaps");
+        const auto decisionRadarSerialized = json_to_string(decisionRadar);
+        expect(decisionRadarSerialized.find(products.generic_string()) == std::string::npos,
+               "decision radar projection should not expose absolute filesystem paths");
+        expect(decisionRadarSerialized.find("decisions/") == std::string::npos &&
+                   decisionRadarSerialized.find("items/") == std::string::npos,
+               "decision radar projection should not expose raw repo paths");
+
         auto fallbackRoute = service.RecommendCapabilityRoute("product-alpha", "PRA-FTR-0003");
         expect(!fallbackRoute.isMember("error"), "fallback capability route should not fail");
         expect(fallbackRoute["status"].asString() == "fallback",
@@ -1451,6 +1593,24 @@ int main() {
                    roadmapPartial.find("roadmap/") == std::string::npos,
                "roadmap partial should not expose raw filesystem paths");
 
+        auto decisionRadarPartial = service.RenderDecisionDebtPartial(allOptions);
+        expect(decisionRadarPartial.find("data-navigation-model=\"decision-debt-radar\"") != std::string::npos,
+               "decision radar partial should expose DOM-readable Decision Debt markup");
+        expect(decisionRadarPartial.find("PRA-ADR-0001") != std::string::npos &&
+                   decisionRadarPartial.find("PRA-ADR-0004") != std::string::npos &&
+                   decisionRadarPartial.find("PRA-ADR-0005") != std::string::npos &&
+                   decisionRadarPartial.find("PRA-ADR-0006") != std::string::npos,
+               "decision radar partial should render active, superseded, revisit-needed, and evidence-challenged ADR rows");
+        expect(decisionRadarPartial.find("Affected feature or Product Map node") != std::string::npos &&
+                   decisionRadarPartial.find("PRA-FTR-0002") != std::string::npos,
+               "decision radar partial should render affected feature links");
+        expect(decisionRadarPartial.find("Recommended human review action") != std::string::npos &&
+                   decisionRadarPartial.find("missing_ref") != std::string::npos,
+               "decision radar partial should render advisory action and gap diagnostics");
+        expect(decisionRadarPartial.find(products.generic_string()) == std::string::npos &&
+                   decisionRadarPartial.find("decisions/") == std::string::npos,
+               "decision radar partial should not expose raw filesystem paths");
+
         auto contextPartial = service.RenderContextPartial(allOptions);
         expect(contextPartial.find("Native Migration") != std::string::npos,
                "context partial should render topic context");
@@ -1509,6 +1669,9 @@ int main() {
                "feature detail should link to ADR refs");
         expect(featurePartial.find("PRA-TSK-0001") != std::string::npos,
                "feature detail should link to evidence refs");
+        expect(featurePartial.find("Decision debt") != std::string::npos &&
+                   featurePartial.find("PRA-ADR-0005") != std::string::npos,
+               "feature detail should link bounded Decision Radar refs");
 
         auto adrPartial = service.RenderItemPartial("product-alpha", "PRA-ADR-0001");
         expect(adrPartial.find("ADR decision navigation") != std::string::npos,
@@ -1577,6 +1740,13 @@ int main() {
                    assetSource.find("/api/review/roadmap") != std::string::npos &&
                    assetSource.find("roadmap.version_goals") != std::string::npos,
                "embedded webview assets should lazy-load the Version Goal Ledger roadmap tab");
+        expect(indexHtmlSource.find("tab-decision-radar") != std::string::npos &&
+                   indexHtmlSource.find("page-decision-radar") != std::string::npos,
+               "embedded webview assets should expose the Decision Radar tab shell");
+        expect(assetSource.find("function loadDecisionRadar") != std::string::npos &&
+                   assetSource.find("/api/review/decision-radar") != std::string::npos &&
+                   assetSource.find("decision_radar.adrs") != std::string::npos,
+               "embedded webview assets should lazy-load the Decision Debt radar tab");
         expect(assetSource.find("selectedItemVisibleIndex") != std::string::npos,
                "embedded webview assets should keep a single roving-tabindex card selection index");
         expect(assetSource.find("card === selectedCard") != std::string::npos,
@@ -1637,6 +1807,10 @@ int main() {
                "webview README should list the roadmap API route");
         expect(webviewReadme.find("/partials/roadmap") != std::string::npos,
                "webview README should list the roadmap partial route");
+        expect(webviewReadme.find("/api/review/decision-radar") != std::string::npos,
+               "webview README should list the decision radar API route");
+        expect(webviewReadme.find("/partials/decision-radar") != std::string::npos,
+               "webview README should list the decision radar partial route");
 
         const auto readme = read_text(locate_repo_file("README.md"));
         expect(readme.find("pixi run webview-smoke-artifacts") != std::string::npos,

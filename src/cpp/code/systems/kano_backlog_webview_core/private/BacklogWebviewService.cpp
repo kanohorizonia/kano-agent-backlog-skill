@@ -1508,6 +1508,157 @@ Json::Value VersionGoalLogicalRef(Json::Value ref,
   return clean;
 }
 
+const std::vector<std::string>& DecisionRadarCategories() {
+  static const std::vector<std::string> categories = {
+      "active", "superseded", "stale", "revisit_needed",
+      "evidence_challenged"};
+  return categories;
+}
+
+std::string NormalizeDecisionStatus(const std::string& status) {
+  const auto lowered = text::ToLower(Trim(status));
+  if (lowered == "accepted" || lowered == "active") return "accepted";
+  if (lowered == "rejected") return "rejected";
+  if (lowered == "superseded") return "superseded";
+  if (lowered == "revisit_needed" || lowered == "revisit-needed" ||
+      lowered == "revisit needed") {
+    return "revisit_needed";
+  }
+  if (lowered == "stale") return "stale";
+  return status.empty() ? "metadata_gap" : lowered;
+}
+
+Json::Value DecisionRadarDiagnostic(
+    const std::string& code,
+    const std::string& adrId,
+    const std::string& target,
+    const std::string& message,
+    const Json::Value& ref = Json::Value(Json::nullValue)) {
+  Json::Value diagnostic(Json::objectValue);
+  diagnostic["code"] = code;
+  diagnostic["adr_id"] = adrId;
+  diagnostic["target"] = target;
+  diagnostic["message"] = message;
+  if (ref.isObject()) {
+    diagnostic["ref"] = ref;
+  }
+  return diagnostic;
+}
+
+std::string DecisionRadarTarget(const std::string& product,
+                                const std::string& id) {
+  if (product.empty()) {
+    return id;
+  }
+  if (id.empty()) {
+    return product;
+  }
+  return product + ":" + id;
+}
+
+bool JsonStringArrayContains(const Json::Value& array,
+                             const std::string& value) {
+  if (!array.isArray()) {
+    return false;
+  }
+  for (const auto& entry : array) {
+    if (entry.asString() == value) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void AppendDecisionCategory(Json::Value& row, const std::string& category) {
+  if (!row["categories"].isArray()) {
+    row["categories"] = Json::arrayValue;
+  }
+  if (!JsonStringArrayContains(row["categories"], category)) {
+    row["categories"].append(category);
+  }
+}
+
+std::string DecisionRadarPrimaryStatus(const Json::Value& row) {
+  for (const auto& category :
+       {"revisit_needed", "stale", "superseded", "evidence_challenged",
+        "active"}) {
+    if (JsonStringArrayContains(row["categories"], category)) {
+      return category;
+    }
+  }
+  return "unknown";
+}
+
+std::string DecisionRadarSignalText(const Json::Value& row) {
+  const auto primary = row.get("radar_status", "unknown").asString();
+  if (primary == "revisit_needed") {
+    return "ADR lifecycle status says the revisit condition needs human review.";
+  }
+  if (primary == "stale") {
+    return "ADR lifecycle status or content marks the decision as stale.";
+  }
+  if (primary == "superseded") {
+    return "Decision has a supersession status or superseded-by ref.";
+  }
+  if (primary == "evidence_challenged") {
+    return "Linked evidence is missing, unresolved, or incomplete.";
+  }
+  if (primary == "active") {
+    return "Decision is active with resolved evidence in the selected scope.";
+  }
+  return "Decision status is not enough to classify without human review.";
+}
+
+std::string DecisionRadarActionText(const Json::Value& row) {
+  const auto primary = row.get("radar_status", "unknown").asString();
+  if (primary == "revisit_needed") {
+    return "Review the revisit condition and decide whether to keep, revise, supersede, or open separately tracked follow-up work.";
+  }
+  if (primary == "stale") {
+    return "Review stale assumptions before relying on this decision for Product Map or roadmap planning.";
+  }
+  if (primary == "superseded") {
+    return "Verify the supersession target and prefer the active decision when reviewing impacted features.";
+  }
+  if (primary == "evidence_challenged") {
+    return "Verify or attach supporting evidence before treating this ADR as evidence-backed.";
+  }
+  if (primary == "active") {
+    return "No immediate action; keep this decision under normal review cadence.";
+  }
+  return "Inspect ADR lifecycle metadata and fill missing decision fields if the decision remains relevant.";
+}
+
+Json::Value DecisionRadarRowsForItem(const Json::Value& radar,
+                                     const Json::Value& item) {
+  Json::Value rows(Json::arrayValue);
+  const auto product = item.get("product", "").asString();
+  const auto id = item.get("id", "").asString();
+  if (product.empty() || id.empty()) {
+    return rows;
+  }
+  for (const auto& row : radar["rows"]) {
+    for (const auto& ref : row["affected_refs"]) {
+      if (ref.get("product", "").asString() == product &&
+          ref.get("item_id", "").asString() == id) {
+        AppendUniqueJson(rows, row);
+        break;
+      }
+    }
+  }
+  return rows;
+}
+
+Json::Value DecisionRadarAdrRefsForRows(const Json::Value& rows) {
+  Json::Value refs(Json::arrayValue);
+  for (const auto& row : rows) {
+    if (row["adr_ref"].isObject()) {
+      AppendUniqueJson(refs, row["adr_ref"]);
+    }
+  }
+  return refs;
+}
+
 Json::Value MakeEvidenceItem(const ItemRecord& item) {
   Json::Value value(Json::objectValue);
   value["id"] = item.id;
@@ -1891,7 +2042,8 @@ Json::Value ProductMapDiagnosticsForTarget(
 
 std::string RenderProductMapItemNavigationPartial(
     const Json::Value& item,
-    const Json::Value& navigation) {
+    const Json::Value& navigation,
+    const Json::Value& decisionRadar = Json::Value(Json::nullValue)) {
   const auto nodeId = ProductMapNodeIdForItem(item);
   if (nodeId.empty() || item.get("type", "").asString() == "ADR") {
     return "";
@@ -1904,8 +2056,12 @@ std::string RenderProductMapItemNavigationPartial(
   const auto relatedRefs =
       ProductMapRefsFromEdges(navigation, nodeId, {"contains", "contextualizes"});
   const auto diagnostics = ProductMapDiagnosticsForTarget(navigation, nodeId);
+  const auto decisionDebtRows = decisionRadar.isObject()
+      ? DecisionRadarRowsForItem(decisionRadar, item)
+      : Json::Value(Json::arrayValue);
+  const auto decisionDebtRefs = DecisionRadarAdrRefsForRows(decisionDebtRows);
   if (adrRefs.empty() && evidenceRefs.empty() && relatedRefs.empty() &&
-      diagnostics.empty()) {
+      diagnostics.empty() && decisionDebtRefs.empty()) {
     return "";
   }
 
@@ -1923,6 +2079,11 @@ std::string RenderProductMapItemNavigationPartial(
   if (!relatedRefs.empty()) {
     html += "<div><div class=\"detail-label\">Related backlog items</div>" +
             RenderLogicalRefList(relatedRefs) + "</div>";
+  }
+  if (!decisionDebtRefs.empty()) {
+    html += "<div><div class=\"detail-label\">Decision debt</div>" +
+            RenderLogicalRefList(decisionDebtRefs) +
+            "<div class=\"muted\">Advisory radar links for affected ADRs.</div></div>";
   }
   if (!diagnostics.empty()) {
     html += "<div><div class=\"detail-label\">Gaps</div>" +
@@ -2015,6 +2176,56 @@ std::string RenderAdrLifecyclePartial(const Json::Value& item,
             RenderDiagnosticList(diagnostics) + "</div>";
   }
   html += "</div></section>";
+  return html;
+}
+
+std::string RenderDecisionRadarRow(const Json::Value& row) {
+  std::string categoryPills;
+  for (const auto& category : row["categories"]) {
+    categoryPills += RenderPill(category.asString());
+  }
+  std::string html =
+      "<div class=\"card decision-radar-row\" data-decision-radar-row=\"" +
+      HtmlEscape(row.get("adr_id", "").asString()) + "\">";
+  html += "<div class=\"detail-title-row\"><strong>" +
+          HtmlEscape(row.get("title", row.get("adr_id", "ADR")).asString()) +
+          "</strong>" + categoryPills + "</div>";
+  html += "<div class=\"muted\"><code>" +
+          HtmlEscape(row.get("adr_id", "").asString()) + "</code> / " +
+          HtmlEscape(row.get("product", "").asString()) + "</div>";
+  html += "<div class=\"detail-facts\">" +
+          RenderDetailFact("Decision status",
+                           row.get("decision_status", "metadata_gap").asString()) +
+          RenderDetailFact("Radar status",
+                           row.get("radar_status", "unknown").asString()) +
+          RenderDetailFact("Advisory",
+                           row.get("advisory_only", true).asBool() ? "true" : "false") +
+          "</div>";
+  html += "<div class=\"detail-stack\">";
+  html += "<div><div class=\"detail-label\">Affected feature or Product Map node</div>" +
+          RenderLogicalRefList(row["affected_refs"],
+                               "No impacted feature refs recorded") +
+          "</div>";
+  html += "<div><div class=\"detail-label\">Revisit condition</div><div class=\"detail-value\">" +
+          HtmlEscape(row.get("revisit_condition", "none recorded").asString()) +
+          "</div></div>";
+  html += "<div><div class=\"detail-label\">Current signal / evidence</div><div class=\"detail-value\">" +
+          HtmlEscape(row.get("current_signal", "").asString()) +
+          "</div>" + RenderLogicalRefList(row["evidence_refs"],
+                                           "No evidence refs recorded") +
+          "</div>";
+  html += "<div><div class=\"detail-label\">Recommended human review action</div><div class=\"detail-value\">" +
+          HtmlEscape(row.get("recommended_human_review_action", "").asString()) +
+          "</div></div>";
+  if (!row["superseded_by"].empty()) {
+    html += "<div><div class=\"detail-label\">Superseded by</div>" +
+            RenderLogicalRefList(row["superseded_by"]) + "</div>";
+  }
+  if (!row["diagnostics"].empty()) {
+    html += "<div><div class=\"detail-label\">Gaps</div>" +
+            RenderDiagnosticList(row["diagnostics"]) + "</div>";
+  }
+  html += "</div></div>";
   return html;
 }
 
@@ -5625,6 +5836,305 @@ Json::Value BacklogWebviewService::BuildVersionGoalLedger(
   return response;
 }
 
+Json::Value BacklogWebviewService::BuildDecisionDebtRadar(
+    const ItemQueryOptions& options) {
+  Json::Value response(Json::objectValue);
+  response["schema"] = "kob.backboard.decision_debt_radar.v1";
+  response["view"] = "Decision Debt / ADR Revisit Radar";
+  response["read_only"] = true;
+  response["mutation_allowed"] = false;
+  response["starts_agent"] = false;
+  response["dispatches_work"] = false;
+  response["advisory_only"] = true;
+  response["filters_ignored_for_ref_resolution"] = true;
+  response["empty_state"] =
+      "No ADR lifecycle records were found for the selected product scope.";
+  response["rows"] = Json::arrayValue;
+  response["diagnostics"] = Json::arrayValue;
+  response["warnings"] = Json::arrayValue;
+  response["category_counts"] = Json::objectValue;
+  response["decision_status_counts"] = Json::objectValue;
+  for (const auto& category : DecisionRadarCategories()) {
+    response["category_counts"][category] = 0U;
+  }
+
+  const auto selectedProducts = ResolveSelectedProducts(options.products);
+  response["products"] = Json::arrayValue;
+  for (const auto& product : selectedProducts) {
+    response["products"].append(product);
+  }
+  if (selectedProducts.empty()) {
+    response["empty"] = true;
+    return response;
+  }
+
+  ItemQueryOptions scanOptions;
+  scanOptions.products = selectedProducts;
+  scanOptions.limit = 1000;
+  scanOptions.offset = 0;
+  scanOptions.forceRefresh = options.forceRefresh;
+  auto items = QueryItems(scanOptions);
+  if (items.isMember("error")) {
+    response["error"] = items["error"];
+    response["error_code"] =
+        items.get("error_code", "decision_radar.items_failed");
+    return response;
+  }
+  while (items["offset"].asUInt64() + items["items"].size() <
+         items["total"].asUInt64()) {
+    scanOptions.offset = items["offset"].asUInt64() + items["items"].size();
+    auto page = QueryItems(scanOptions);
+    if (page.isMember("error")) {
+      response["error"] = page["error"];
+      response["error_code"] =
+          page.get("error_code", "decision_radar.items_failed");
+      return response;
+    }
+    for (const auto& item : page["items"]) {
+      items["items"].append(item);
+    }
+    items["warnings"] = MergeWarnings(items["warnings"], page["warnings"]);
+    items["limit"] = page["limit"];
+    items["offset"] = 0U;
+  }
+  response["warnings"] = items["warnings"];
+  response["query_total"] = items.get("total", 0U);
+  response["scanned_items"] = static_cast<Json::UInt64>(items["items"].size());
+
+  std::map<std::string, Json::Value> itemByKey;
+  std::map<std::string, Json::Value> adrByKey;
+  std::vector<Json::Value> adrItems;
+  for (const auto& item : items["items"]) {
+    const auto product = item.get("product", "").asString();
+    const auto id = item.get("id", "").asString();
+    if (product.empty() || id.empty()) {
+      continue;
+    }
+    const auto key = ProductItemKey(product, id);
+    itemByKey[key] = item;
+    if (item.get("type", "").asString() == "ADR") {
+      adrByKey[key] = item;
+      adrItems.push_back(item);
+    }
+  }
+  std::sort(adrItems.begin(), adrItems.end(),
+            [](const Json::Value& lhs, const Json::Value& rhs) {
+              return std::make_tuple(lhs.get("product", "").asString(),
+                                     lhs.get("id", "").asString()) <
+                     std::make_tuple(rhs.get("product", "").asString(),
+                                     rhs.get("id", "").asString());
+            });
+
+  std::map<std::string, Json::Value> detailByKey;
+  auto evidenceDetailFor = [&](const Json::Value& item) -> Json::Value {
+    const auto product = item.get("product", "").asString();
+    const auto id = item.get("id", "").asString();
+    const auto key = ProductItemKey(product, id);
+    const auto cached = detailByKey.find(key);
+    if (cached != detailByKey.end()) {
+      return cached->second;
+    }
+    auto detail = GetEvidenceDetail(product, id, options.forceRefresh);
+    detailByKey[key] = detail;
+    return detail;
+  };
+
+  auto appendRowDiagnostic = [&](Json::Value& row,
+                                 const Json::Value& diagnostic) {
+    row["diagnostics"].append(diagnostic);
+    response["diagnostics"].append(diagnostic);
+  };
+
+  for (const auto& adr : adrItems) {
+    const auto product = adr.get("product", "").asString();
+    const auto adrId = adr.get("id", "").asString();
+    if (product.empty() || adrId.empty()) {
+      continue;
+    }
+
+    Json::Value row(Json::objectValue);
+    row["product"] = product;
+    row["adr_id"] = adrId;
+    row["title"] = adr.get("title", adrId).asString();
+    row["adr_ref"] = MakeLogicalRef(product, "", adrId);
+    row["decision_status"] =
+        NormalizeDecisionStatus(adr.get("decision_status", "").asString());
+    row["declared_decision_status"] =
+        adr.get("decision_status", "").asString();
+    row["revisit_condition"] =
+        adr.get("revisit_condition", "").asString().empty()
+            ? "none recorded"
+            : adr.get("revisit_condition", "").asString();
+    row["affected_refs"] = Json::arrayValue;
+    row["evidence_refs"] = Json::arrayValue;
+    row["superseded_by"] = Json::arrayValue;
+    row["missing_refs"] = Json::arrayValue;
+    row["diagnostics"] = Json::arrayValue;
+    row["categories"] = Json::arrayValue;
+    row["advisory_only"] = true;
+    row["mutation_allowed"] = false;
+    row["starts_agent"] = false;
+    row["dispatches_work"] = false;
+
+    const auto normalizedStatus = row["decision_status"].asString();
+    response["decision_status_counts"][normalizedStatus] =
+        static_cast<Json::UInt64>(
+            response["decision_status_counts"]
+                .get(normalizedStatus, 0U)
+                .asUInt64() +
+            1U);
+
+    if (normalizedStatus == "metadata_gap") {
+      appendRowDiagnostic(
+          row,
+          DecisionRadarDiagnostic(
+              "metadata_gap", adrId, DecisionRadarTarget(product, adrId),
+              "ADR is missing decision_status lifecycle metadata.",
+              row["adr_ref"]));
+    } else if (normalizedStatus == "superseded") {
+      AppendDecisionCategory(row, "superseded");
+    } else if (normalizedStatus == "stale") {
+      AppendDecisionCategory(row, "stale");
+    } else if (normalizedStatus == "revisit_needed") {
+      AppendDecisionCategory(row, "revisit_needed");
+    }
+
+    if (adr["feature_refs"].empty()) {
+      appendRowDiagnostic(
+          row,
+          DecisionRadarDiagnostic(
+              "missing_ref", adrId, DecisionRadarTarget(product, adrId),
+              "ADR lifecycle metadata has no impacted feature or Product Map node refs.",
+              row["adr_ref"]));
+    }
+    for (const auto& rawRef : adr["feature_refs"]) {
+      const auto [featureProduct, featureId] =
+          SplitReferenceProduct(rawRef.asString(), product);
+      if (featureId.empty()) {
+        continue;
+      }
+      auto ref = MakeLogicalRef(featureProduct, featureId);
+      AppendUniqueJson(row["affected_refs"], ref);
+      if (itemByKey.find(ProductItemKey(featureProduct, featureId)) ==
+          itemByKey.end()) {
+        AppendUniqueJson(row["missing_refs"], ref);
+        appendRowDiagnostic(
+            row,
+            DecisionRadarDiagnostic(
+                "missing_ref", adrId,
+                DecisionRadarTarget(featureProduct, featureId),
+                "ADR affected feature or Product Map node ref is not present in the selected product scope.",
+                ref));
+      }
+    }
+
+    if (adr["evidence_refs"].empty()) {
+      AppendDecisionCategory(row, "evidence_challenged");
+      appendRowDiagnostic(
+          row,
+          DecisionRadarDiagnostic(
+              "missing_evidence", adrId, DecisionRadarTarget(product, adrId),
+              "ADR has no evidence refs; missing support is shown as a gap, not inferred.",
+              row["adr_ref"]));
+    }
+    for (const auto& rawRef : adr["evidence_refs"]) {
+      const auto [evidenceProduct, evidenceId] =
+          SplitReferenceProduct(rawRef.asString(), product);
+      if (evidenceId.empty()) {
+        continue;
+      }
+      auto ref = MakeLogicalRef(evidenceProduct, evidenceId, "", evidenceId);
+      AppendUniqueJson(row["evidence_refs"], ref);
+      const auto evidenceIt =
+          itemByKey.find(ProductItemKey(evidenceProduct, evidenceId));
+      if (evidenceIt == itemByKey.end()) {
+        AppendDecisionCategory(row, "evidence_challenged");
+        AppendUniqueJson(row["missing_refs"], ref);
+        appendRowDiagnostic(
+            row,
+            DecisionRadarDiagnostic(
+                "missing_ref", adrId,
+                DecisionRadarTarget(evidenceProduct, evidenceId),
+                "ADR evidence ref is not present in the selected product scope.",
+                ref));
+        continue;
+      }
+
+      const auto detail = evidenceDetailFor(evidenceIt->second);
+      if (detail.isMember("error")) {
+        AppendDecisionCategory(row, "evidence_challenged");
+        appendRowDiagnostic(
+            row,
+            DecisionRadarDiagnostic(
+                "evidence_lookup_failed", adrId,
+                DecisionRadarTarget(evidenceProduct, evidenceId),
+                "ADR linked evidence could not be inspected for the radar projection.",
+                ref));
+        continue;
+      }
+      if (!detail["evidence"].get("complete", false).asBool()) {
+        AppendDecisionCategory(row, "evidence_challenged");
+        appendRowDiagnostic(
+            row,
+            DecisionRadarDiagnostic(
+                "evidence_incomplete", adrId,
+                DecisionRadarTarget(evidenceProduct, evidenceId),
+                "ADR linked evidence exists but is incomplete.",
+                ref));
+      }
+    }
+
+    for (const auto& rawRef : adr["superseded_by"]) {
+      const auto [targetProduct, targetAdrId] =
+          SplitReferenceProduct(rawRef.asString(), product);
+      if (targetAdrId.empty()) {
+        continue;
+      }
+      auto ref = MakeLogicalRef(targetProduct, "", targetAdrId);
+      AppendUniqueJson(row["superseded_by"], ref);
+      AppendDecisionCategory(row, "superseded");
+      if (adrByKey.find(ProductItemKey(targetProduct, targetAdrId)) ==
+          adrByKey.end()) {
+        AppendUniqueJson(row["missing_refs"], ref);
+        appendRowDiagnostic(
+            row,
+            DecisionRadarDiagnostic(
+                "missing_ref", adrId,
+                DecisionRadarTarget(targetProduct, targetAdrId),
+                "ADR supersession ref is not present in the selected product scope.",
+                ref));
+      }
+    }
+
+    if (ContentContainsAny(adr.get("content", "").asString(),
+                           {"stale", "drift", "outdated"})) {
+      AppendDecisionCategory(row, "stale");
+    }
+    if (row["categories"].empty()) {
+      AppendDecisionCategory(row, "active");
+    }
+    row["radar_status"] = DecisionRadarPrimaryStatus(row);
+    row["current_signal"] = DecisionRadarSignalText(row);
+    row["recommended_human_review_action"] = DecisionRadarActionText(row);
+
+    for (const auto& category : row["categories"]) {
+      response["category_counts"][category.asString()] =
+          static_cast<Json::UInt64>(
+              response["category_counts"]
+                  .get(category.asString(), 0U)
+                  .asUInt64() +
+              1U);
+    }
+    response["rows"].append(row);
+  }
+
+  response["row_count"] = static_cast<Json::UInt64>(response["rows"].size());
+  response["diagnostic_count"] =
+      static_cast<Json::UInt64>(response["diagnostics"].size());
+  response["empty"] = response["rows"].empty();
+  return response;
+}
+
 Json::Value BacklogWebviewService::SaveReviewDecisionDraft(
     const Json::Value& request) {
   try {
@@ -6541,6 +7051,40 @@ std::string BacklogWebviewService::RenderRoadmapPartial(
   return html;
 }
 
+std::string BacklogWebviewService::RenderDecisionDebtPartial(
+    const ItemQueryOptions& options) {
+  const auto radar = BuildDecisionDebtRadar(options);
+  if (radar.isMember("error")) {
+    return RenderErrorPartial(radar["error"].asString());
+  }
+
+  std::string html =
+      "<section class=\"decision-radar-view\" data-navigation-model=\"decision-debt-radar\">";
+  html += "<div class=\"detail-facts\">";
+  for (const auto& category : DecisionRadarCategories()) {
+    html += RenderDetailFact(
+        category,
+        std::to_string(
+            radar["category_counts"].get(category, 0U).asUInt64()));
+  }
+  html += "</div>";
+  if (radar["rows"].empty()) {
+    html += "<div class=\"muted\">" +
+            HtmlEscape(radar.get("empty_state", "No ADR radar rows.").asString()) +
+            "</div>";
+  } else {
+    for (const auto& row : radar["rows"]) {
+      html += RenderDecisionRadarRow(row);
+    }
+  }
+  if (!radar["diagnostics"].empty()) {
+    html += "<section class=\"decision-radar-diagnostics\"><h4>Decision radar gaps</h4>" +
+            RenderDiagnosticList(radar["diagnostics"]) + "</section>";
+  }
+  html += "</section>";
+  return html;
+}
+
 std::string BacklogWebviewService::RenderContextPartial(
     const ItemQueryOptions& options) {
   const auto items = QueryItems(options);
@@ -6622,6 +7166,10 @@ std::string BacklogWebviewService::RenderItemPartial(const std::string& product,
   }
   navigationOptions.limit = 2000;
   const auto productMapNavigation = BuildProductMapNavigation(navigationOptions);
+  Json::Value decisionRadar(Json::objectValue);
+  if (item.get("type", "").asString() != "ADR") {
+    decisionRadar = BuildDecisionDebtRadar(navigationOptions);
+  }
 
   std::string html = "<section class=\"detail-shell\" data-item-title=\"" +
                      HtmlEscape(item.get("title", item.get("id", "")).asString()) + "\">";
@@ -6648,7 +7196,10 @@ std::string BacklogWebviewService::RenderItemPartial(const std::string& product,
     if (item.get("type", "").asString() == "ADR") {
       html += RenderAdrLifecyclePartial(item, productMapNavigation);
     } else {
-      html += RenderProductMapItemNavigationPartial(item, productMapNavigation);
+      html += RenderProductMapItemNavigationPartial(
+          item, productMapNavigation,
+          decisionRadar.isMember("error") ? Json::Value(Json::nullValue)
+                                          : decisionRadar);
     }
   }
 
@@ -6917,6 +7468,16 @@ void RegisterBacklogWebviewRoutes(
           std::function<void(const HttpResponsePtr&)>&& callback) {
         callback(htmlResponse(
             service.RenderRoadmapPartial(queryOptionsFromRequest(request))));
+      },
+      {Get});
+
+  app().registerHandler(
+      "/partials/decision-radar",
+      [&service, queryOptionsFromRequest, htmlResponse](
+          const HttpRequestPtr& request,
+          std::function<void(const HttpResponsePtr&)>&& callback) {
+        callback(htmlResponse(
+            service.RenderDecisionDebtPartial(queryOptionsFromRequest(request))));
       },
       {Get});
 
@@ -7285,6 +7846,23 @@ void RegisterBacklogWebviewRoutes(
       [metaAppender, &service, queryOptionsFromRequest](const HttpRequestPtr& request,
           std::function<void(const HttpResponsePtr&)>&& callback) {
         auto data = service.BuildVersionGoalLedger(queryOptionsFromRequest(request));
+        Json::Value body(Json::objectValue);
+        body["ok"] = !data.isMember("error");
+        body["data"] = data;
+        metaAppender(request, body);
+        auto response = HttpResponse::newHttpJsonResponse(body);
+        if (!body["ok"].asBool()) {
+          response->setStatusCode(k400BadRequest);
+        }
+        callback(response);
+      },
+      {Get});
+
+  app().registerHandler(
+      "/api/review/decision-radar",
+      [metaAppender, &service, queryOptionsFromRequest](const HttpRequestPtr& request,
+          std::function<void(const HttpResponsePtr&)>&& callback) {
+        auto data = service.BuildDecisionDebtRadar(queryOptionsFromRequest(request));
         Json::Value body(Json::objectValue);
         body["ok"] = !data.isMember("error");
         body["data"] = data;

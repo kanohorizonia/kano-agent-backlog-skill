@@ -87,6 +87,7 @@ inline constexpr std::string_view kIndexHtmlBetweenAssets = R"HTML(
       <button id="tab-review" class="tab-btn active" data-tab="review">Review Inbox</button>
       <button id="tab-tree" class="tab-btn" data-tab="tree">Product Map</button>
       <button id="tab-roadmap" class="tab-btn" data-tab="roadmap">Roadmap</button>
+      <button id="tab-decision-radar" class="tab-btn" data-tab="decision-radar">Decision Radar</button>
       <button id="tab-kanban" class="tab-btn" data-tab="kanban">Flow</button>
       <button id="tab-context" class="tab-btn" data-tab="context">Context</button>
       <button id="tab-graph" class="tab-btn" data-tab="graph">Dependencies</button>
@@ -108,6 +109,12 @@ inline constexpr std::string_view kIndexHtmlBetweenAssets = R"HTML(
     <h3>Version Goal Ledger</h3>
     <div id="roadmap-summary" class="muted" style="margin-bottom:8px;"></div>
     <div id="roadmap-list"></div>
+  </div>
+
+  <div id="page-decision-radar" class="panel page">
+    <h3>Decision Debt / ADR Revisit Radar</h3>
+    <div id="decision-radar-summary" class="muted" style="margin-bottom:8px;"></div>
+    <div id="decision-radar-list"></div>
   </div>
 
   <div id="page-kanban" class="panel page">

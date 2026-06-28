@@ -21,8 +21,11 @@ inline constexpr std::string_view kBackboardCss = R"CSS(
     .tabs { display: flex; gap: 8px; }
     .tab-btn { border: 1px solid #cfd9ea; background: #fff; border-radius: 8px; padding: 6px 12px; cursor: pointer; }
     .tab-btn.active { background: #1f4fa3; color: #fff; border-color: #1f4fa3; }
-    .page { display: none; }
+    .page { display: none; position: relative; }
     .page.active { display: block; }
+    .page.is-refreshing::before,
+    .page.is-stale::before { content: attr(data-refresh-note); display: inline-block; margin: 0 0 8px 0; border: 1px solid #b9c9e8; border-radius: 6px; padding: 4px 8px; font-size: 12px; font-weight: 600; color: #1d3158; background: #f5f8ff; }
+    .page.is-stale::before { border-color: #d5b15d; color: #6a4c0f; background: #fff9e8; }
     .kanban { display: grid; grid-template-columns: repeat(5, minmax(180px, 1fr)); gap: 10px; }
     .lane { background: #fff; border: 1px solid #dde3f0; border-radius: 10px; padding: 8px; min-height: 140px; }
     .card { position: relative; border: 1px solid #cfd9ea; border-radius: 8px; padding: 8px; margin-bottom: 8px; background: #fcfdff; }

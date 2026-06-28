@@ -20,23 +20,39 @@ inline constexpr std::string_view kBackboardAppJsPart1 = R"JS(
       treeTouched: false,
       activeTab: 'review',
       allItems: [],
+      loadedTabs: new Set(),
+      staleTabs: new Set(),
+      tabCacheStatus: {},
       refreshSeq: 0,
       refreshAbort: null,
       refreshTimer: null,
       refreshTickTimer: null,
-        refreshCancelRequested: false,
-        lastRefreshDiagnostic: null,
-        selectedItemKey: '',
-        selectedItemId: '',
-        selectedItemProduct: '',
-        selectedItemVisibleIndex: -1,
-        shortcutHelpOpen: false,
-        reviewActorAlias: 'human-reviewer'
+      refreshCancelRequested: false,
+      activeRefresh: null,
+      lastRefreshDiagnostic: null,
+      detailSeq: 0,
+      lastDetailDiagnostic: null,
+      selectedItemKey: '',
+      selectedItemId: '',
+      selectedItemProduct: '',
+      selectedItemVisibleIndex: -1,
+      shortcutHelpOpen: false,
+      reviewActorAlias: 'human-reviewer'
     };
     const lanes = ['Backlog', 'Doing', 'Blocked', 'Review', 'Done'];
     const reviewQueueOrder = ['Needs Review', 'Done Candidate', 'False Done Suspect', 'Evidence Gap', 'Blocked/Dirty', 'Stale/Drift', 'Ready Frontier'];
     const itemStates = ['Proposed', 'Ready', 'InProgress', 'Blocked', 'Review', 'Done', 'Dropped'];
     const itemTypes = ['Theme', 'Initiative', 'Epic', 'Feature', 'UserStory', 'Task', 'Bug', 'Issue', 'ADR', 'Topic', 'Workset'];
+    const refreshableTabs = ['review', 'tree', 'kanban', 'context', 'graph', 'runs'];
+    const tabLabels = {
+      review: 'Review Inbox',
+      tree: 'Product Map',
+      kanban: 'Flow',
+      context: 'Context',
+      graph: 'Dependencies',
+      runs: 'Agent Runs',
+      command: 'Command',
+    };
     const workspaceStorageKey = 'kano_webview_workspaces_v2';
 
     function tokenSetFromQuery(value, fallback) {
@@ -66,43 +82,136 @@ inline constexpr std::string_view kBackboardAppJsPart1 = R"JS(
       }
     })();
 
-    async function getJson(url, options = {}) {
-      const resp = await fetch(url, { signal: options.signal });
-      let body = null;
+    function nowIso() {
+      return new Date().toISOString();
+    }
+
+    function endpointPath(url) {
       try {
-        body = await resp.json();
-      } catch (_e) {
-        body = {};
+        return new URL(url, window.location.href).pathname;
+      } catch (_error) {
+        return String(url || '').split('?')[0];
       }
-      if (!resp.ok || body?.ok === false) {
-        const detail = body?.data?.error || body?.error || `HTTP ${resp.status}`;
-        throw new Error(detail);
+    }
+
+    function beginStageTiming(refresh, stage, method, url) {
+      if (!refresh) {
+        return null;
       }
-      return body;
+      const startedAt = Date.now();
+      const timing = {
+        stage: stage || endpointPath(url),
+        method: method || 'GET',
+        endpoint: endpointPath(url),
+        operation: `${method || 'GET'} ${url}`,
+        started_at: new Date(startedAt).toISOString(),
+        started_at_ms: startedAt,
+        status: 'running',
+      };
+      refresh.current_stage = timing.stage;
+      refresh.active_endpoint = timing.endpoint;
+      refresh.active_operation = timing.operation;
+      refresh.stage_timings.push(timing);
+      updateBusyFromRefresh(refresh);
+      return timing;
+    }
+
+    function finishStageTiming(timing, refresh, result = {}) {
+      if (!timing) {
+        return;
+      }
+      timing.finished_at = nowIso();
+      timing.elapsed_ms = Date.now() - timing.started_at_ms;
+      timing.http_status = result.http_status || 0;
+      timing.status = result.ok === false ? 'failed' : 'loaded';
+      if (result.cache_status) {
+        timing.cache_status = result.cache_status;
+        if (refresh) {
+          refresh.cache_status = result.cache_status;
+        }
+      }
+      if (result.aborted) {
+        timing.status = 'aborted';
+        timing.aborted = true;
+      }
+      if (result.error) {
+        timing.error_name = result.error.name || '';
+        timing.error = result.error.message || String(result.error);
+      }
+      if (refresh) {
+        updateBusyFromRefresh(refresh);
+      }
+    }
+
+    async function getJson(url, options = {}) {
+      const timing = beginStageTiming(options.refresh, options.stage, 'GET', url);
+      try {
+        const resp = await fetch(url, { signal: options.signal });
+        let body = null;
+        try {
+          body = await resp.json();
+        } catch (_e) {
+          body = {};
+        }
+        if (!resp.ok || body?.ok === false) {
+          const detail = body?.data?.error || body?.error || `HTTP ${resp.status}`;
+          const error = new Error(detail);
+          error.httpStatus = resp.status;
+          throw error;
+        }
+        finishStageTiming(timing, options.refresh, {
+          ok: true,
+          http_status: resp.status,
+          cache_status: body?.data?.cache_status || body?.cache_status || '',
+        });
+        return body;
+      } catch (error) {
+        finishStageTiming(timing, options.refresh, {
+          ok: false,
+          http_status: error.httpStatus || 0,
+          aborted: error?.name === 'AbortError',
+          error,
+        });
+        throw error;
+      }
     }
 
     async function postJson(url, payload, options = {}) {
-      const resp = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload || {}),
-        signal: options.signal
-      });
-      let body = null;
+      const timing = beginStageTiming(options.refresh, options.stage, 'POST', url);
       try {
-        body = await resp.json();
-      } catch (_e) {
-        body = {};
+        const resp = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload || {}),
+          signal: options.signal
+        });
+        let body = null;
+        try {
+          body = await resp.json();
+        } catch (_e) {
+          body = {};
+        }
+        if (!resp.ok || body?.ok === false) {
+          const detail = body?.data?.error || body?.error || `HTTP ${resp.status}`;
+          const error = new Error(detail);
+          error.httpStatus = resp.status;
+          throw error;
+        }
+        finishStageTiming(timing, options.refresh, {
+          ok: true,
+          http_status: resp.status,
+          cache_status: body?.data?.cache_status || body?.cache_status || '',
+        });
+        return body;
+      } catch (error) {
+        finishStageTiming(timing, options.refresh, {
+          ok: false,
+          http_status: error.httpStatus || 0,
+          aborted: error?.name === 'AbortError',
+          error,
+        });
+        throw error;
       }
-      if (!resp.ok || body?.ok === false) {
-        const detail = body?.data?.error || body?.error || `HTTP ${resp.status}`;
-        throw new Error(detail);
-      }
-      return body;
-    }
-
-    function nowIso() {
-      return new Date().toISOString();
     }
 
     function normalizeWorkspaceEntry(entry) {
@@ -295,8 +404,9 @@ inline constexpr std::string_view kBackboardAppJsPart1 = R"JS(
 
       state.treeOpen.clear();
       state.treeTouched = false;
+      clearLoadedViewState('workspace switched');
       await loadProducts();
-      await refreshAll();
+      await refreshActiveTab({ force: true, reason: 'workspace switched' });
     }
 
     function esc(v) {
@@ -339,6 +449,108 @@ inline constexpr std::string_view kBackboardAppJsPart1 = R"JS(
       status.textContent = text || '';
       status.classList.toggle('status-error', kind === 'error');
     }
+)JS";
+
+inline constexpr std::string_view kBackboardAppJsPart1b = R"JS(
+
+    function isRefreshableTab(tab = state.activeTab) {
+      return refreshableTabs.includes(tab);
+    }
+
+    function activePageElement(tab = state.activeTab) {
+      return document.getElementById(`page-${tab}`);
+    }
+
+    function cacheStatusFor(tab = state.activeTab) {
+      if (state.staleTabs.has(tab)) {
+        return 'stale';
+      }
+      if (state.loadedTabs.has(tab)) {
+        return 'cached';
+      }
+      return 'cold';
+    }
+
+    function setPageRefreshState(tab, refreshing = false, note = '') {
+      const page = activePageElement(tab);
+      if (!page) {
+        return;
+      }
+      const stale = state.staleTabs.has(tab);
+      page.classList.toggle('is-refreshing', !!refreshing);
+      page.classList.toggle('is-stale', stale && !refreshing);
+      if (refreshing || stale) {
+        const label = tabLabels[tab] || tab;
+        const defaultNote = refreshing
+          ? `Refreshing ${label}; visible data stays usable`
+          : `Showing stale ${label}; refresh pending`;
+        page.setAttribute('data-refresh-note', note || defaultNote);
+      } else {
+        page.removeAttribute('data-refresh-note');
+      }
+    }
+
+    function updateAllPageRefreshStates() {
+      refreshableTabs.forEach((tab) => setPageRefreshState(tab, false));
+    }
+
+    function markLoadedViewsStale(reason) {
+      for (const tab of state.loadedTabs) {
+        if (!isRefreshableTab(tab)) {
+          continue;
+        }
+        state.staleTabs.add(tab);
+        state.tabCacheStatus[tab] = {
+          status: 'stale',
+          reason: reason || 'filters changed',
+          updated_at: nowIso(),
+        };
+      }
+      updateAllPageRefreshStates();
+    }
+
+    function clearLoadedViewState(reason = '') {
+      state.loadedTabs.clear();
+      state.staleTabs.clear();
+      state.tabCacheStatus = {};
+      if (reason) {
+        state.lastRefreshDiagnostic = makeRefreshDiagnostic('reset', reason, Date.now(), []);
+      }
+      updateAllPageRefreshStates();
+    }
+
+    function createRefreshContext(requestId, tab, reason, overrides = {}) {
+      const startedAt = Date.now();
+      return {
+        request_id: `backboard-refresh-${requestId}`,
+        status: 'running',
+        view: tab,
+        view_label: tabLabels[tab] || tab,
+        reason: reason || 'active tab refresh',
+        generated_at: nowIso(),
+        started_at: new Date(startedAt).toISOString(),
+        started_at_ms: startedAt,
+        product_scope: selectedProductValues(),
+        product_scope_label: productScopeLabel(),
+        query: state.q,
+        states: [...state.selectedStates],
+        types: [...state.selectedTypes],
+        limit: state.limit,
+        current_stage: '',
+        active_endpoint: '',
+        active_operation: '',
+        stage_timings: [],
+        completed: 0,
+        total: 1,
+        cache_status: cacheStatusFor(tab),
+        stale_reason: state.staleTabs.has(tab)
+          ? state.tabCacheStatus[tab]?.reason || 'visible data retained while refreshing'
+          : '',
+        cancel_reason: '',
+        abort_reason: '',
+        ...overrides,
+      };
+    }
 
     function setBusy(active, recoverable = false) {
       document.getElementById('status-wrap').classList.toggle('busy', active);
@@ -357,29 +569,84 @@ inline constexpr std::string_view kBackboardAppJsPart1 = R"JS(
       document.getElementById('busy-detail').textContent = detail;
     }
 
+    function updateBusyFromRefresh(refresh) {
+      if (!refresh) {
+        return;
+      }
+      const elapsed = formatElapsed(refresh.started_at_ms || Date.now());
+      const stage = refresh.current_stage || refresh.reason || 'starting';
+      const endpoint = refresh.active_endpoint || 'pending';
+      const operation = refresh.active_operation || 'waiting for endpoint';
+      const stale = refresh.stale_reason ? `; stale=${refresh.stale_reason}` : '';
+      const cancel = refresh.cancel_reason ? `; cancel=${refresh.cancel_reason}` : '';
+      const abort = refresh.abort_reason ? `; abort=${refresh.abort_reason}` : '';
+      updateBusy(
+        `Loading ${refresh.view_label}`,
+        `view=${refresh.view_label}; scope=${refresh.product_scope_label}; stage=${stage}; endpoint=${endpoint}; operation=${operation}; elapsed=${elapsed}; cache=${refresh.cache_status || cacheStatusFor(refresh.view)}${stale}${cancel}${abort}`,
+      );
+    }
+
     function describeRefreshError(error) {
       if (error?.name === 'AbortError') {
-        return 'Refresh replaced by a newer request';
+        return state.refreshCancelRequested
+          ? 'Refresh canceled by user'
+          : 'Refresh request aborted before completion';
       }
       return error?.message || String(error || 'Unknown refresh error');
     }
 
-    function makeRefreshDiagnostic(status, detail, startedAt, failures = []) {
+    function makeRefreshDiagnostic(status, detail, startedAt, failures = [], refresh = state.activeRefresh) {
+      const active = refresh || {};
+      const startedAtMs = active.started_at_ms || startedAt || Date.now();
+      const stageTimings = (active.stage_timings || []).map((timing) => ({
+        stage: timing.stage || '',
+        method: timing.method || '',
+        endpoint: timing.endpoint || '',
+        operation: timing.operation || '',
+        status: timing.status || '',
+        http_status: timing.http_status || 0,
+        elapsed_ms: timing.elapsed_ms || 0,
+        started_at: timing.started_at || '',
+        finished_at: timing.finished_at || '',
+        cache_status: timing.cache_status || '',
+        aborted: !!timing.aborted,
+        error_name: timing.error_name || '',
+        error: timing.error || '',
+      }));
       return {
+        request_id: active.request_id || `backboard-refresh-${state.refreshSeq}`,
         status,
         detail,
         generated_at: nowIso(),
-        elapsed: formatElapsed(startedAt || Date.now()),
+        started_at: active.started_at || new Date(startedAtMs).toISOString(),
+        elapsed: formatElapsed(startedAtMs),
+        elapsed_ms: Date.now() - startedAtMs,
         workspace: state.workspace || '',
-        product_scope: selectedProductValues(),
+        product_scope: active.product_scope || selectedProductValues(),
+        product_scope_label: active.product_scope_label || productScopeLabel(),
         query: state.q,
         states: [...state.selectedStates],
         types: [...state.selectedTypes],
         limit: state.limit,
-        active_tab: state.activeTab,
+        active_tab: active.view || state.activeTab,
+        view: active.view || state.activeTab,
+        view_label: active.view_label || tabLabels[state.activeTab] || state.activeTab,
+        active_endpoint: active.active_endpoint || '',
+        active_operation: active.active_operation || '',
+        current_stage: active.current_stage || '',
+        cache_status: active.cache_status || cacheStatusFor(active.view || state.activeTab),
+        stale_reason: active.stale_reason || '',
+        cancel_reason: active.cancel_reason || '',
+        abort_reason: active.abort_reason || '',
+        aborted: !!active.abort_reason || failures.some((failure) => (failure.reason || failure)?.name === 'AbortError'),
+        stage_timings: stageTimings,
+        last_detail_request: state.lastDetailDiagnostic,
         failures: failures.map((failure) => ({
           status: failure.status || 'rejected',
+          stage: failure.stage || '',
+          endpoint: failure.endpoint || '',
           reason: describeRefreshError(failure.reason || failure),
+          error_name: (failure.reason || failure)?.name || '',
         })),
       };
     }
@@ -884,21 +1151,82 @@ inline constexpr std::string_view kBackboardAppJsPart3 = R"JS(
       backdrop.setAttribute('aria-hidden', 'true');
     }
 
+    function describeItemDetailError(error, diagnostic) {
+      const itemId = diagnostic?.item_id || 'unknown item';
+      const product = diagnostic?.product_scope || 'all';
+      const elapsed = diagnostic?.elapsed_ms ? `${Math.ceil(diagnostic.elapsed_ms / 1000)}s` : 'unknown duration';
+      if (diagnostic?.timed_out || error?.name === 'AbortError') {
+        return `Item detail lookup timed out after ${elapsed} for ${product}/${itemId}`;
+      }
+      return `Item detail lookup failed for ${product}/${itemId}: ${error?.message || String(error || 'unknown error')}`;
+    }
+
+    async function fetchItemDetailPartial(itemId, productScope, requestId) {
+      const timeoutMs = 60000;
+      const endpoint = `/partials/item/${encodeURIComponent(itemId)}?product=${encodeURIComponent(productScope)}`;
+      const controller = new AbortController();
+      const startedAt = Date.now();
+      const diagnostic = {
+        request_id: `item-detail-${requestId}`,
+        item_id: itemId,
+        product_scope: productScope,
+        endpoint: endpointPath(endpoint),
+        operation: `GET ${endpoint}`,
+        started_at: new Date(startedAt).toISOString(),
+        timeout_ms: timeoutMs,
+        status: 'running',
+      };
+      state.lastDetailDiagnostic = diagnostic;
+      const timeout = setTimeout(() => {
+        diagnostic.timed_out = true;
+        controller.abort();
+      }, timeoutMs);
+      try {
+        const resp = await fetch(endpoint, {
+          signal: controller.signal,
+          headers: { 'Accept': 'text/html' },
+        });
+        const html = await resp.text();
+        diagnostic.http_status = resp.status;
+        if (!resp.ok) {
+          throw new Error(`HTTP ${resp.status}`);
+        }
+        diagnostic.status = 'loaded';
+        return html;
+      } catch (error) {
+        diagnostic.status = diagnostic.timed_out || error?.name === 'AbortError'
+          ? 'timeout'
+          : 'failed';
+        diagnostic.error_name = error?.name || '';
+        diagnostic.error = describeItemDetailError(error, diagnostic);
+        throw error;
+      } finally {
+        clearTimeout(timeout);
+        diagnostic.finished_at = nowIso();
+        diagnostic.elapsed_ms = Date.now() - startedAt;
+      }
+    }
+
     async function openItemModal(itemId, product = '') {
       const productScope = product || (selectedProductValues().length === 1 ? selectedProductValues()[0] : 'all');
+      const detailRequest = ++state.detailSeq;
       openModal(itemId, '<div class="muted">Loading item detail...</div>');
       try {
-        await window.KobUi.fetchPartial(
-          `/partials/item/${encodeURIComponent(itemId)}?product=${encodeURIComponent(productScope)}`,
-          { target: '#item-modal-body' },
-        );
+        const html = await fetchItemDetailPartial(itemId, productScope, detailRequest);
+        if (detailRequest !== state.detailSeq) {
+          return;
+        }
+        document.getElementById('item-modal-body').innerHTML = html;
         hydrateMarkdown('#item-modal-body');
         bindItemLinksWithin('#item-modal-body', productScope);
         const titleSource = document.querySelector('#item-modal-body [data-item-title]');
         document.getElementById('item-modal-title').textContent =
           titleSource?.getAttribute('data-item-title') || itemId;
       } catch (error) {
-        openModal(itemId, `<div class="muted">Unable to load item detail: ${esc(describeRefreshError(error))}</div>`);
+        if (detailRequest !== state.detailSeq) {
+          return;
+        }
+        openModal(itemId, `<div class="muted">Unable to load item detail: ${esc(describeItemDetailError(error, state.lastDetailDiagnostic))}</div>`);
       }
     }
 
@@ -1185,8 +1513,12 @@ inline constexpr std::string_view kBackboardAppJsPart5 = R"JS(
       renderFilters();
     }
 
-    async function loadTree(signal) {
-      const result = await getJson(`/api/tree?${queryString()}`, { signal });
+    async function loadTree(signal, refresh) {
+      const result = await getJson(`/api/tree?${queryString()}`, {
+        signal,
+        refresh,
+        stage: 'tree.items',
+      });
       const roots = result?.data?.roots || [];
       if (!state.treeTouched && state.treeOpen.size === 0) {
         for (const root of roots) {
@@ -1199,8 +1531,12 @@ inline constexpr std::string_view kBackboardAppJsPart5 = R"JS(
       bindTreeToggles();
     }
 
-    async function loadKanban(signal) {
-      const result = await getJson(`/api/kanban?${queryString()}`, { signal });
+    async function loadKanban(signal, refresh) {
+      const result = await getJson(`/api/kanban?${queryString()}`, {
+        signal,
+        refresh,
+        stage: 'kanban.lanes',
+      });
       const lanesData = result?.data?.lanes || {};
       const html = lanes.map((lane) => {
         const cards = (lanesData[lane] || [])
@@ -1212,8 +1548,12 @@ inline constexpr std::string_view kBackboardAppJsPart5 = R"JS(
       bindSelectableCards('#kanban');
     }
 
-    async function loadContext(signal) {
-      const result = await getJson(`/api/items?${queryString()}`, { signal });
+    async function loadContext(signal, refresh) {
+      const result = await getJson(`/api/items?${queryString()}`, {
+        signal,
+        refresh,
+        stage: 'context.items',
+      });
       const items = (result?.data?.items || []);
       state.allItems = items;
       const contextItems = items.filter((item) => {
@@ -1238,14 +1578,22 @@ inline constexpr std::string_view kBackboardAppJsPart5 = R"JS(
       bindSelectableCards('#context-list');
     }
 
-    async function loadReview(signal) {
-      const viewsResult = await getJson('/api/review/saved-views', { signal });
+    async function loadReview(signal, refresh) {
+      const viewsResult = await getJson('/api/review/saved-views', {
+        signal,
+        refresh,
+        stage: 'review.saved_views',
+      });
       const views = viewsResult?.data?.views || [];
       document.getElementById('saved-views').innerHTML = views.map((view) =>
         `<button class="btn" data-saved-view="${escAttr(view.id)}">${esc(view.title)}</button>`
       ).join('');
 
-      const inboxResult = await getJson(`/api/review/inbox?${queryString()}`, { signal });
+      const inboxResult = await getJson(`/api/review/inbox?${queryString()}`, {
+        signal,
+        refresh,
+        stage: 'review.inbox',
+      });
       const lanesData = inboxResult?.data?.lanes || {};
       const laneNames = reviewQueueOrder.filter((lane) => Object.prototype.hasOwnProperty.call(lanesData, lane));
       document.getElementById('review-inbox').innerHTML = laneNames.map((lane) => {
@@ -1361,8 +1709,12 @@ inline constexpr std::string_view kBackboardAppJsPart5 = R"JS(
       `</svg></div>`;
     }
 
-    async function loadGraph(signal) {
-      const result = await getJson(`/api/review/graph?${queryString()}`, { signal });
+    async function loadGraph(signal, refresh) {
+      const result = await getJson(`/api/review/graph?${queryString()}`, {
+        signal,
+        refresh,
+        stage: 'graph.dependencies',
+      });
       const data = result?.data || {};
       const nodes = data.nodes || [];
       const edges = data.edges || [];
@@ -1397,8 +1749,12 @@ inline constexpr std::string_view kBackboardAppJsPart5 = R"JS(
       ].join('');
     }
 
-    async function loadRuns(signal) {
-      const result = await getJson(`/api/review/runs?${queryString()}`, { signal });
+    async function loadRuns(signal, refresh) {
+      const result = await getJson(`/api/review/runs?${queryString()}`, {
+        signal,
+        refresh,
+        stage: 'runs.records',
+      });
       const runs = result?.data?.runs || [];
       document.getElementById('runs-summary').textContent = `${runs.length} run(s)`;
       document.getElementById('runs-list').innerHTML = runs.map((run) =>
@@ -1448,12 +1804,24 @@ inline constexpr std::string_view kBackboardAppJsPart5 = R"JS(
       document.getElementById('page-graph').classList.toggle('active', isGraph);
       document.getElementById('page-runs').classList.toggle('active', isRuns);
       document.getElementById('page-command').classList.toggle('active', isCommand);
+      updateAllPageRefreshStates();
       updateUrlState();
       syncSelectableItems();
     }
 )JS";
 
 inline constexpr std::string_view kBackboardAppJsPart6 = R"JS(
+
+    function loaderForTab(tab) {
+      return {
+        review: loadReview,
+        tree: loadTree,
+        kanban: loadKanban,
+        context: loadContext,
+        graph: loadGraph,
+        runs: loadRuns,
+      }[tab] || null;
+    }
 
     function scheduleRefresh(delayMs = 120) {
       updateUrlState();
@@ -1462,14 +1830,45 @@ inline constexpr std::string_view kBackboardAppJsPart6 = R"JS(
       }
       const runRefresh = () => {
         state.refreshTimer = null;
-        refreshAll();
+        ensureActiveTabLoaded({ force: true, reason: 'scheduled active tab refresh' });
       };
       state.refreshTimer = window.KobUi?.debounce
-          ? window.KobUi.debounce('refresh-all', runRefresh, delayMs)
+          ? window.KobUi.debounce('refresh-active-tab', runRefresh, delayMs)
           : setTimeout(runRefresh, delayMs);
     }
 
-    async function refreshAll() {
+    async function ensureActiveTabLoaded(options = {}) {
+      const tab = state.activeTab;
+      if (!isRefreshableTab(tab)) {
+        setBusy(false);
+        return;
+      }
+      if (!options.force && state.loadedTabs.has(tab) && !state.staleTabs.has(tab)) {
+        setPageRefreshState(tab, false);
+        return;
+      }
+      await refreshActiveTab({
+        tab,
+        force: !!options.force,
+        reason: options.reason || (state.loadedTabs.has(tab) ? 'reload stale active tab' : 'lazy tab load'),
+      });
+    }
+
+    async function refreshAll(options = {}) {
+      await refreshActiveTab({
+        ...options,
+        tab: options.tab || state.activeTab,
+        reason: options.reason || 'active tab refresh',
+      });
+    }
+
+    async function refreshActiveTab(options = {}) {
+      const tab = options.tab || state.activeTab;
+      const loader = loaderForTab(tab);
+      if (!loader) {
+        setBusy(false);
+        return;
+      }
       if (selectedProductValues().length === 0) {
         setStatus('No product found', 'error');
         setBusy(false);
@@ -1481,6 +1880,11 @@ inline constexpr std::string_view kBackboardAppJsPart6 = R"JS(
         state.refreshTimer = null;
       }
       if (state.refreshAbort) {
+        if (state.activeRefresh) {
+          state.activeRefresh.abort_reason =
+              `superseded by ${tabLabels[tab] || tab} refresh`;
+          state.activeRefresh.status = 'aborted';
+        }
         state.refreshAbort.abort();
       }
 
@@ -1489,79 +1893,101 @@ inline constexpr std::string_view kBackboardAppJsPart6 = R"JS(
       state.refreshAbort = controller;
       state.refreshCancelRequested = false;
       const signal = controller.signal;
-      const startedAt = Date.now();
-      const scopeLabel = productScopeLabel();
-      const steps = [
-        ['tree', () => loadTree(signal)],
-        ['kanban', () => loadKanban(signal)],
-        ['context', () => loadContext(signal)],
-        ['review', () => loadReview(signal)],
-        ['graph', () => loadGraph(signal)],
-        ['runs', () => loadRuns(signal)],
-      ];
-      let completed = 0;
-      const total = steps.length;
+      const refresh = createRefreshContext(refreshId, tab, options.reason || 'active tab refresh', {
+        cache_status: options.cache_status || cacheStatusFor(tab),
+        stale_reason: options.stale_reason || (state.staleTabs.has(tab)
+          ? state.tabCacheStatus[tab]?.reason || 'visible data retained while refreshing'
+          : ''),
+      });
+      state.activeRefresh = refresh;
 
-      setStatus(`Loading ${scopeLabel}...`);
+      setStatus(`Loading ${refresh.view_label} for ${refresh.product_scope_label}...`);
       setBusy(true);
-      updateBusy(`Loading ${scopeLabel}`, `Starting refresh, 0/${total} complete`);
+      setPageRefreshState(tab, true);
+      updateBusyFromRefresh(refresh);
       if (state.refreshTickTimer) {
         clearInterval(state.refreshTickTimer);
       }
       state.refreshTickTimer = setInterval(() => {
         if (refreshId === state.refreshSeq) {
-          updateBusy(
-              `Loading ${scopeLabel}`,
-              `${completed}/${total} complete, elapsed ${formatElapsed(startedAt)}`);
+          updateBusyFromRefresh(refresh);
         }
       }, 1000);
 
-      const results = await Promise.allSettled(steps.map(async ([label, run]) => {
-        if (refreshId === state.refreshSeq) {
-          updateBusy(
-              `Loading ${scopeLabel}`,
-              `Loading ${label}, ${completed}/${total} complete, elapsed ${formatElapsed(startedAt)}`);
+      try {
+        await loader(signal, refresh);
+        if (refreshId !== state.refreshSeq) {
+          return;
         }
-        await run();
-        completed += 1;
-        if (refreshId === state.refreshSeq) {
-          updateBusy(
-              `Loading ${scopeLabel}`,
-              `Loaded ${label}, ${completed}/${total} complete, elapsed ${formatElapsed(startedAt)}`);
+        refresh.completed = 1;
+        refresh.status = 'loaded';
+        refresh.finished_at = nowIso();
+        refresh.elapsed_ms = Date.now() - refresh.started_at_ms;
+        refresh.cache_status = 'fresh';
+        state.loadedTabs.add(tab);
+        state.staleTabs.delete(tab);
+        state.tabCacheStatus[tab] = {
+          status: 'fresh',
+          reason: refresh.reason,
+          updated_at: nowIso(),
+          request_id: refresh.request_id,
+        };
+        setPageRefreshState(tab, false);
+        state.lastRefreshDiagnostic =
+            makeRefreshDiagnostic('loaded', `Loaded ${refresh.view_label}`, refresh.started_at_ms, [], refresh);
+        setBusy(false);
+        setStatus(`Loaded ${refresh.view_label} for ${refresh.product_scope_label} in ${formatElapsed(refresh.started_at_ms)}`);
+      } catch (error) {
+        if (refreshId !== state.refreshSeq) {
+          return;
         }
-      }));
+        refresh.finished_at = nowIso();
+        refresh.elapsed_ms = Date.now() - refresh.started_at_ms;
+        if (signal.aborted) {
+          const reason = state.refreshCancelRequested
+            ? 'canceled by user'
+            : refresh.abort_reason || 'active tab refresh aborted';
+          refresh.status = state.refreshCancelRequested ? 'canceled' : 'aborted';
+          refresh.abort_reason = reason;
+          refresh.cancel_reason = state.refreshCancelRequested ? reason : '';
+          state.lastRefreshDiagnostic =
+              makeRefreshDiagnostic(refresh.status, reason, refresh.started_at_ms, [{ status: 'rejected', reason: error }], refresh);
+          updateBusy('Refresh canceled', `${reason}; elapsed ${formatElapsed(refresh.started_at_ms)}; view=${refresh.view_label}; scope=${refresh.product_scope_label}`);
+          setBusy(false, true);
+          setStatus(`${refresh.view_label} refresh ${refresh.status} after ${formatElapsed(refresh.started_at_ms)}`);
+          state.refreshCancelRequested = false;
+          return;
+        }
 
-      if (refreshId !== state.refreshSeq) {
-        return;
-      }
-      state.refreshAbort = null;
-      setBusy(false);
-
-      if (signal.aborted && state.refreshCancelRequested) {
+        const detail = describeRefreshError(error);
+        refresh.status = 'failed';
+        refresh.error = detail;
+        if (state.loadedTabs.has(tab)) {
+          state.staleTabs.add(tab);
+          state.tabCacheStatus[tab] = {
+            status: 'stale',
+            reason: `refresh failed: ${detail}`,
+            updated_at: nowIso(),
+            request_id: refresh.request_id,
+          };
+        }
+        setPageRefreshState(tab, false);
         state.lastRefreshDiagnostic =
-            makeRefreshDiagnostic('canceled', 'Refresh canceled by user', startedAt, []);
-        updateBusy('Refresh canceled', `Canceled after ${formatElapsed(startedAt)}`);
+            makeRefreshDiagnostic('failed', detail, refresh.started_at_ms, [{ status: 'rejected', reason: error }], refresh);
+        updateBusy('Refresh failed', `${detail}; elapsed ${formatElapsed(refresh.started_at_ms)}; view=${refresh.view_label}; scope=${refresh.product_scope_label}; endpoint=${refresh.active_endpoint || 'unknown'}`);
         setBusy(false, true);
-        setStatus(`Refresh canceled after ${formatElapsed(startedAt)}`);
-        state.refreshCancelRequested = false;
-        return;
+        setStatus(`Refresh failed: ${detail}`, 'error');
+      } finally {
+        if (refreshId === state.refreshSeq) {
+          if (state.refreshTickTimer) {
+            clearInterval(state.refreshTickTimer);
+            state.refreshTickTimer = null;
+          }
+          state.refreshAbort = null;
+          state.activeRefresh = null;
+          updateAllPageRefreshStates();
+        }
       }
-
-      const failures = results.filter((result) =>
-          result.status === 'rejected' && result.reason?.name !== 'AbortError');
-      if (failures.length) {
-        const first = describeRefreshError(failures[0].reason);
-        state.lastRefreshDiagnostic =
-            makeRefreshDiagnostic('failed', first, startedAt, failures);
-        updateBusy('Refresh failed', `${first}; elapsed ${formatElapsed(startedAt)}`);
-        setBusy(false, true);
-        setStatus(`Refresh failed: ${first}`, 'error');
-        return;
-      }
-
-      state.lastRefreshDiagnostic =
-          makeRefreshDiagnostic('loaded', `Loaded ${scopeLabel}`, startedAt, []);
-      setStatus(`Loaded ${scopeLabel} in ${formatElapsed(startedAt)}`);
     }
 
     document.getElementById('product').addEventListener('change', async (e) => {
@@ -1573,6 +1999,7 @@ inline constexpr std::string_view kBackboardAppJsPart6 = R"JS(
       renderProductFilters();
       state.treeOpen.clear();
       state.treeTouched = false;
+      markLoadedViewsStale('product selection changed');
       scheduleRefresh(0);
     });
 
@@ -1580,6 +2007,7 @@ inline constexpr std::string_view kBackboardAppJsPart6 = R"JS(
       state.q = e.target.value.trim();
       state.treeTouched = false;
       state.treeOpen.clear();
+      markLoadedViewsStale('search changed');
       scheduleRefresh(250);
     });
 
@@ -1678,8 +2106,9 @@ inline constexpr std::string_view kBackboardAppJsPart6 = R"JS(
     });
 
     document.querySelectorAll('.tab-btn[data-tab]').forEach((btn) => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', async () => {
         setActiveTab(btn.getAttribute('data-tab') || 'tree');
+        await ensureActiveTabLoaded({ reason: 'tab selected' });
       });
     });
 
@@ -1703,6 +2132,7 @@ inline constexpr std::string_view kBackboardAppJsPart6 = R"JS(
       renderProductFilters();
       state.treeOpen.clear();
       state.treeTouched = false;
+      markLoadedViewsStale('product filter changed');
       scheduleRefresh(120);
     });
 
@@ -1719,6 +2149,7 @@ inline constexpr std::string_view kBackboardAppJsPart6 = R"JS(
       }
       state.treeOpen.clear();
       state.treeTouched = false;
+      markLoadedViewsStale('state filter changed');
       scheduleRefresh(120);
     });
 
@@ -1735,6 +2166,7 @@ inline constexpr std::string_view kBackboardAppJsPart6 = R"JS(
       }
       state.treeOpen.clear();
       state.treeTouched = false;
+      markLoadedViewsStale('type filter changed');
       scheduleRefresh(120);
     });
 
@@ -1742,28 +2174,74 @@ inline constexpr std::string_view kBackboardAppJsPart6 = R"JS(
       const parsed = Number.parseInt(event.target.value, 10);
       state.limit = Number.isFinite(parsed) ? Math.max(1, Math.min(parsed, 1000)) : 200;
       event.target.value = String(state.limit);
+      markLoadedViewsStale('limit changed');
       scheduleRefresh(0);
     });
+)JS";
+
+inline constexpr std::string_view kBackboardAppJsPart7 = R"JS(
 
     document.getElementById('refresh').addEventListener('click', async () => {
       const products = selectedProductValues();
       const refreshScope = products.length === 1 ? products[0] : 'all';
-      const startedAt = Date.now();
-      setStatus(`Refreshing ${productScopeLabel()}...`);
+      if (state.refreshAbort) {
+        if (state.activeRefresh) {
+          state.activeRefresh.abort_reason = 'superseded by manual cache refresh';
+          state.activeRefresh.status = 'aborted';
+        }
+        state.refreshAbort.abort();
+      }
+      const refreshId = ++state.refreshSeq;
+      const controller = new AbortController();
+      state.refreshAbort = controller;
+      state.refreshCancelRequested = false;
+      markLoadedViewsStale('manual cache refresh requested');
+      const refresh = createRefreshContext(refreshId, state.activeTab, 'manual cache invalidation', {
+        cache_status: 'invalidating',
+        stale_reason: 'manual cache refresh requested',
+      });
+      state.activeRefresh = refresh;
+      setStatus(`Refreshing ${refresh.product_scope_label}...`);
       setBusy(true);
-      updateBusy(`Refreshing ${productScopeLabel()}`, 'Invalidating cached backlog data');
+      setPageRefreshState(state.activeTab, true);
+      updateBusyFromRefresh(refresh);
       try {
-        await getJson(`/api/refresh?product=${encodeURIComponent(refreshScope)}`);
-        setStatus(`Refresh requested in ${formatElapsed(startedAt)}`);
-        await refreshAll();
+        await getJson(`/api/refresh?product=${encodeURIComponent(refreshScope)}`, {
+          signal: controller.signal,
+          refresh,
+          stage: 'cache.invalidate',
+        });
+        if (refreshId !== state.refreshSeq) {
+          return;
+        }
+        refresh.status = 'cache-invalidated';
+        refresh.cache_status = 'invalidated';
+        state.lastRefreshDiagnostic =
+            makeRefreshDiagnostic('cache-invalidated', 'Backlog cache invalidated', refresh.started_at_ms, [], refresh);
+        state.refreshAbort = null;
+        state.activeRefresh = null;
+        setStatus(`Refresh requested in ${formatElapsed(refresh.started_at_ms)}`);
+        await refreshActiveTab({
+          force: true,
+          reason: 'manual refresh after cache invalidation',
+          stale_reason: 'manual cache refresh requested',
+        });
       } catch (error) {
         const detail = describeRefreshError(error);
+        refresh.status = controller.signal.aborted ? 'canceled' : 'failed';
+        refresh.abort_reason = controller.signal.aborted ? detail : '';
+        refresh.error = detail;
         state.lastRefreshDiagnostic =
-            makeRefreshDiagnostic('failed', detail, startedAt, [{ status: 'rejected', reason: error }]);
-        updateBusy('Refresh failed', `${detail}; elapsed ${formatElapsed(startedAt)}`);
-        setBusy(false);
+            makeRefreshDiagnostic(refresh.status, detail, refresh.started_at_ms, [{ status: 'rejected', reason: error }], refresh);
+        updateBusy('Refresh failed', `${detail}; elapsed ${formatElapsed(refresh.started_at_ms)}; endpoint=${refresh.active_endpoint || '/api/refresh'}`);
         setBusy(false, true);
         setStatus(`Refresh failed: ${detail}`, 'error');
+      } finally {
+        if (refreshId === state.refreshSeq) {
+          state.refreshAbort = null;
+          state.activeRefresh = null;
+          updateAllPageRefreshStates();
+        }
       }
     });
 
@@ -1772,6 +2250,10 @@ inline constexpr std::string_view kBackboardAppJsPart6 = R"JS(
         return;
       }
       state.refreshCancelRequested = true;
+      if (state.activeRefresh) {
+        state.activeRefresh.cancel_reason = 'canceled by user';
+        state.activeRefresh.abort_reason = 'canceled by user';
+      }
       state.refreshAbort.abort();
       updateBusy('Canceling refresh', 'Waiting for in-flight requests to stop');
       setStatus('Canceling refresh...');
@@ -1831,7 +2313,7 @@ inline constexpr std::string_view kBackboardAppJsPart6 = R"JS(
       document.getElementById('search').value = state.q;
       document.getElementById('limit').value = String(state.limit);
       await loadProducts();
-      await refreshAll();
+      await ensureActiveTabLoaded({ reason: 'initial active tab load' });
     })();
 )JS";
 
@@ -1839,15 +2321,19 @@ inline const std::string& BackboardAppJs() {
   static const std::string js = [] {
     std::string text;
     text.reserve(
-        kBackboardAppJsPart1.size() + kBackboardAppJsPart2.size() +
+        kBackboardAppJsPart1.size() + kBackboardAppJsPart1b.size() +
+        kBackboardAppJsPart2.size() +
         kBackboardAppJsPart3.size() + kBackboardAppJsPart4.size() +
-        kBackboardAppJsPart5.size() + kBackboardAppJsPart6.size());
+        kBackboardAppJsPart5.size() + kBackboardAppJsPart6.size() +
+        kBackboardAppJsPart7.size());
     text.append(kBackboardAppJsPart1);
+    text.append(kBackboardAppJsPart1b);
     text.append(kBackboardAppJsPart2);
     text.append(kBackboardAppJsPart3);
     text.append(kBackboardAppJsPart4);
     text.append(kBackboardAppJsPart5);
     text.append(kBackboardAppJsPart6);
+    text.append(kBackboardAppJsPart7);
     return text;
   }();
   return js;

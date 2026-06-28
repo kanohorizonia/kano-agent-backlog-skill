@@ -856,6 +856,17 @@ int main() {
                "detail lookup should include content");
         expect(detail["item"]["gate_status"]["ready"]["state"].asString() == "passed",
                "item detail should include gate_status");
+        auto globalRefresh = service.Refresh("all");
+        expect(globalRefresh["refreshed"].asString() == "all",
+               "global refresh should invalidate all product caches");
+        auto exactDetailAfterGlobalRefresh = service.GetItem("product-alpha", "PRA-TSK-0001");
+        expect(!exactDetailAfterGlobalRefresh.isMember("error"),
+               "exact product detail lookup should remain available after global refresh invalidation");
+        expect(exactDetailAfterGlobalRefresh["item"]["content"].asString().find("Native migration evidence") != std::string::npos,
+               "exact product detail lookup after global refresh should include content");
+        auto exactDetailPartialAfterGlobalRefresh = service.RenderItemPartial("product-alpha", "PRA-TSK-0001");
+        expect(exactDetailPartialAfterGlobalRefresh.find("Native migration evidence") != std::string::npos,
+               "item detail partial should render after simulated slow/global refresh invalidation");
 
         auto savedViews = service.ListSavedViews();
         expect(savedViews["views"].size() >= 4, "saved views should expose review lanes");
@@ -1199,6 +1210,32 @@ int main() {
                "embedded webview assets should keep keyboard open helper");
         expect(assetSource.find("Focus the backlog search field") != std::string::npos,
                "embedded webview assets should document slash-search help text");
+        expect(assetSource.find("function refreshActiveTab") != std::string::npos,
+               "embedded webview assets should refresh only the active tab by default");
+        expect(assetSource.find("function ensureActiveTabLoaded") != std::string::npos,
+               "embedded webview assets should lazy-load inactive tabs when selected");
+        expect(assetSource.find("loadedTabs") != std::string::npos &&
+                   assetSource.find("staleTabs") != std::string::npos,
+               "embedded webview assets should track loaded and stale tab state");
+        expect(assetSource.find("Promise.allSettled(steps.map") == std::string::npos,
+               "embedded webview assets should not run initial refresh as a blocking all-tabs fanout");
+        expect(assetSource.find("Refresh replaced by a newer request") == std::string::npos,
+               "embedded webview assets should not report item detail failures as refresh replacement");
+        expect(assetSource.find("function fetchItemDetailPartial") != std::string::npos,
+               "embedded webview assets should use an item-detail request path independent from refresh");
+        expect(assetSource.find("const timeoutMs = 60000") != std::string::npos,
+               "item detail lookup should use a bounded long timeout independent from tab refresh");
+        expect(assetSource.find("detailSeq") != std::string::npos,
+               "embedded webview assets should sequence item detail requests separately");
+        expect(assetSource.find("stage_timings") != std::string::npos &&
+                   assetSource.find("request_id") != std::string::npos &&
+                   assetSource.find("abort_reason") != std::string::npos &&
+                   assetSource.find("cache_status") != std::string::npos &&
+                   assetSource.find("active_endpoint") != std::string::npos,
+               "refresh diagnostics should include request, timing, abort, cache, and endpoint metadata");
+        expect(indexCssSource.find(".page.is-stale::before") != std::string::npos &&
+                   indexCssSource.find(".page.is-refreshing::before") != std::string::npos,
+               "embedded webview css should mark stale or refreshing visible data without clearing it");
 
         const auto smokeScript = read_text(
             locate_repo_file(std::filesystem::path("src") / "shell" / "webview" /

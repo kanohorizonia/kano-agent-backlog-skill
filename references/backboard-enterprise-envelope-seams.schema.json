@@ -1,0 +1,200 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentskill-backlog.kanohorizonia.com/references/backboard-enterprise-envelope-seams.schema.json",
+  "title": "KOB Backboard Enterprise Envelope Seams",
+  "type": "object",
+  "required": ["schema", "product", "claims", "review_decisions", "audit_events"],
+  "properties": {
+    "schema": { "const": "kob.backboard.enterprise_envelope_seams.v1" },
+    "product": { "type": "string", "minLength": 1 },
+    "claims": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/claim_record" }
+    },
+    "review_decisions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/review_decision" }
+    },
+    "audit_events": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/audit_event" }
+    },
+    "policy_contexts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/policy_context" }
+    },
+    "non_goals": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    }
+  },
+  "$defs": {
+    "actor_alias": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9._-]*$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "ref": {
+      "type": "object",
+      "required": ["product"],
+      "properties": {
+        "product": { "type": "string", "minLength": 1 },
+        "item_id": { "type": "string" },
+        "uid": { "type": "string" },
+        "topic_id": { "type": "string" },
+        "adr_id": { "type": "string" },
+        "evidence_id": { "type": "string" },
+        "goal_id": { "type": "string" },
+        "release_id": { "type": "string" },
+        "claim_id": { "type": "string" },
+        "lease_id": { "type": "string" },
+        "review_decision_id": { "type": "string" },
+        "audit_event_id": { "type": "string" },
+        "policy_context_id": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "scope": {
+      "type": "object",
+      "required": ["scope_kind"],
+      "properties": {
+        "scope_kind": {
+          "enum": ["product", "item", "review_queue", "policy_context", "release", "backlog"]
+        },
+        "scope_ref": { "$ref": "#/$defs/ref" },
+        "label": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "lease": {
+      "type": "object",
+      "required": ["lease_id", "status", "created_at", "updated_at"],
+      "properties": {
+        "lease_id": { "type": "string", "minLength": 1 },
+        "owner_actor_alias": { "$ref": "#/$defs/actor_alias" },
+        "status": {
+          "enum": ["active", "released", "expired", "superseded"]
+        },
+        "created_at": { "$ref": "#/$defs/timestamp" },
+        "updated_at": { "$ref": "#/$defs/timestamp" },
+        "expires_at": { "$ref": "#/$defs/timestamp" },
+        "released_at": { "$ref": "#/$defs/timestamp" },
+        "superseded_by": { "$ref": "#/$defs/ref" },
+        "evidence_refs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ref" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "claim_record": {
+      "type": "object",
+      "required": [
+        "claim_id",
+        "owner_actor_alias",
+        "claimed_subject_ref",
+        "scope",
+        "created_at",
+        "updated_at",
+        "status",
+        "evidence_refs"
+      ],
+      "properties": {
+        "claim_id": { "type": "string", "minLength": 1 },
+        "owner_actor_alias": { "$ref": "#/$defs/actor_alias" },
+        "claimed_subject_ref": { "$ref": "#/$defs/ref" },
+        "scope": { "$ref": "#/$defs/scope" },
+        "created_at": { "$ref": "#/$defs/timestamp" },
+        "updated_at": { "$ref": "#/$defs/timestamp" },
+        "expires_at": { "$ref": "#/$defs/timestamp" },
+        "status": {
+          "enum": ["active", "released", "expired", "superseded"]
+        },
+        "lease": { "$ref": "#/$defs/lease" },
+        "evidence_refs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ref" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "review_decision": {
+      "type": "object",
+      "required": [
+        "decision_id",
+        "actor_alias",
+        "decision_status",
+        "rationale",
+        "evidence_refs",
+        "related_refs"
+      ],
+      "properties": {
+        "decision_id": { "type": "string", "minLength": 1 },
+        "actor_alias": { "$ref": "#/$defs/actor_alias" },
+        "decision_status": {
+          "enum": [
+            "approved",
+            "rejected",
+            "request_changes",
+            "deferred",
+            "accepted_risk",
+            "dismissed",
+            "commented"
+          ]
+        },
+        "rationale": { "type": "string", "minLength": 1 },
+        "evidence_refs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ref" }
+        },
+        "related_refs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ref" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "audit_event": {
+      "type": "object",
+      "required": [
+        "event_id",
+        "actor_alias",
+        "action_kind",
+        "target_ref",
+        "timestamp",
+        "evidence_refs"
+      ],
+      "properties": {
+        "event_id": { "type": "string", "minLength": 1 },
+        "actor_alias": { "$ref": "#/$defs/actor_alias" },
+        "action_kind": { "type": "string", "minLength": 1 },
+        "target_ref": { "$ref": "#/$defs/ref" },
+        "timestamp": { "$ref": "#/$defs/timestamp" },
+        "evidence_refs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ref" }
+        },
+        "policy_context_ref": { "$ref": "#/$defs/ref" }
+      },
+      "additionalProperties": false
+    },
+    "policy_context": {
+      "type": "object",
+      "required": ["policy_context_id", "scope", "summary"],
+      "properties": {
+        "policy_context_id": { "type": "string", "minLength": 1 },
+        "scope": { "$ref": "#/$defs/scope" },
+        "summary": { "type": "string", "minLength": 1 },
+        "evidence_refs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ref" }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,115 @@
+{
+  "schema": "kob.backboard.enterprise_envelope_seams.v1",
+  "product": "kano-agent-backlog-skill",
+  "claims": [
+    {
+      "claim_id": "claim-kob-tsk-0106-seam-model",
+      "owner_actor_alias": "koa",
+      "claimed_subject_ref": {
+        "product": "kano-agent-backlog-skill",
+        "item_id": "KOB-TSK-0106"
+      },
+      "scope": {
+        "scope_kind": "item",
+        "scope_ref": {
+          "product": "kano-agent-backlog-skill",
+          "item_id": "KOB-TSK-0106"
+        },
+        "label": "Backboard enterprise seam contract"
+      },
+      "created_at": "2026-06-28T07:23:12Z",
+      "updated_at": "2026-06-28T07:24:20Z",
+      "expires_at": "2026-07-05T00:00:00Z",
+      "status": "active",
+      "lease": {
+        "lease_id": "lease-kob-tsk-0106-local-review",
+        "owner_actor_alias": "koa",
+        "status": "active",
+        "created_at": "2026-06-28T07:23:12Z",
+        "updated_at": "2026-06-28T07:24:20Z",
+        "expires_at": "2026-07-05T00:00:00Z",
+        "evidence_refs": [
+          {
+            "product": "kano-agent-backlog-skill",
+            "item_id": "KOB-TSK-0068"
+          }
+        ]
+      },
+      "evidence_refs": [
+        {
+          "product": "kano-agent-backlog-skill",
+          "item_id": "KOB-TSK-0068"
+        }
+      ]
+    }
+  ],
+  "review_decisions": [
+    {
+      "decision_id": "review-decision-kob-tsk-0106-ready",
+      "actor_alias": "maintainer",
+      "decision_status": "approved",
+      "rationale": "Ready gate accepted for a metadata-only enterprise seam contract.",
+      "evidence_refs": [
+        {
+          "product": "kano-agent-backlog-skill",
+          "item_id": "KOB-TSK-0068"
+        }
+      ],
+      "related_refs": [
+        {
+          "product": "kano-agent-backlog-skill",
+          "item_id": "KOB-TSK-0106"
+        }
+      ]
+    }
+  ],
+  "audit_events": [
+    {
+      "event_id": "audit-kob-tsk-0106-claim-created",
+      "actor_alias": "koa",
+      "action_kind": "claim.created",
+      "target_ref": {
+        "product": "kano-agent-backlog-skill",
+        "claim_id": "claim-kob-tsk-0106-seam-model"
+      },
+      "timestamp": "2026-06-28T07:23:12Z",
+      "evidence_refs": [
+        {
+          "product": "kano-agent-backlog-skill",
+          "item_id": "KOB-TSK-0106"
+        }
+      ],
+      "policy_context_ref": {
+        "product": "kano-agent-backlog-skill",
+        "policy_context_id": "policy-local-first-alias-only"
+      }
+    }
+  ],
+  "policy_contexts": [
+    {
+      "policy_context_id": "policy-local-first-alias-only",
+      "scope": {
+        "scope_kind": "product",
+        "scope_ref": {
+          "product": "kano-agent-backlog-skill"
+        },
+        "label": "Local-first Backboard metadata"
+      },
+      "summary": "Actor aliases are repo-visible metadata only; auth, RBAC, tenancy, quorum, and permission enforcement are out of scope.",
+      "evidence_refs": [
+        {
+          "product": "kano-agent-backlog-skill",
+          "item_id": "KOB-TSK-0068"
+        }
+      ]
+    }
+  ],
+  "non_goals": [
+    "authentication provider",
+    "RBAC or permission enforcement",
+    "multi-tenant membership",
+    "approval quorum",
+    "runtime lock enforcement",
+    "personal names or emails in repo files"
+  ]
+}

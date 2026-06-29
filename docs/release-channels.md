@@ -113,6 +113,26 @@ Package-manager publish flags remain dry-run by default. A non-dry-run publish
 requires explicit operator flags plus configured owned/internal repository
 targets and credentials.
 
+## Post-release install verification
+
+After `Release_Publish`, run Jenkins `PostRelease_Install_Verify` for the final
+tag. The job prefers GitHub Actions clean runners, records a warning when that
+backend is unavailable, and may fall back to local Jenkins agents when explicitly
+allowed.
+
+The verification order is package-manager channel first, native installer
+second, and portable tarball last:
+
+- macOS: owned Homebrew tap validation when enabled; otherwise portable tarball.
+- Windows: winget when configured, then MSI, then portable tarball.
+- Linux: apt when configured, then portable tarball until `.deb` packaging is
+  available.
+
+Each platform writes an install verification manifest under
+`Release/install-verification/` with the chosen channel, artifact URL, install
+command, CLI smoke result, and fallback reason. This job must not publish to
+winget, Homebrew, apt, `homebrew-core`, or external package-manager PR targets.
+
 ## 0.0.4 status
 
 For `0.0.4`, this repo is prepared for native release metadata and channel

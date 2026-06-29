@@ -75,6 +75,17 @@ Python package publishing is retired for the `0.0.4` native release line. Do not
 
 ## Post-Release
 
+- [ ] Run Jenkins `PostRelease_Install_Verify` for the released tag, preferring
+  GitHub Actions clean runners and falling back to local Jenkins agents only
+  with an explicit warning.
+- [ ] Confirm at least one platform installs and passes CLI smoke from the
+  selected channel, with package-manager channels preferred over native
+  installers and portable tarballs used only as fallback.
+- [ ] Archive `Release/install-verification/**` and review the per-platform
+  manifest fields: chosen channel, artifact URL, install command, CLI smoke
+  result, and fallback reason.
+- [ ] Run `bash src/shell/release/07-recheck-release-assets-msi.sh` against the
+  public GitHub Release before closing release asset/MSI cleanup bugs.
 - [ ] Verify repo-local native binary works from a clean clone
 - [ ] Update documentation if needed
 - [ ] Announce release (if applicable)

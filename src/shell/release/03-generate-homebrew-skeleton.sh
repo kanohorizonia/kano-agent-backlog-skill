@@ -158,9 +158,16 @@ write_install_block() {
 
   def install
     libexec.install Dir["*"]
-    payload = libexec/"kano-agent-backlog-skill"
+    payload = Dir[libexec/"*/scripts/kob"].map { |kob| Pathname.new(kob).dirname.parent }.first
+    odie "installed payload does not contain scripts/kob" unless payload
     bin.install_symlink payload/"scripts/kob" => "kob"
     bin.install_symlink payload/"scripts/kano-backlog" => "kano-backlog"
+  end
+
+  def caveats
+    <<~EOS
+      Run `kob --help` after install. The skill payload is installed under Homebrew libexec.
+    EOS
   end
 
   test do

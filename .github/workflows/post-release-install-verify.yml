@@ -1,0 +1,114 @@
+name: KanoAgentSkills / Post-Release Install Verify
+
+run-name: ${{ format('InstallVerify_{0}_{1}', inputs.platform || 'linux-x64', inputs.release_tag || 'v0.0.4') }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: GitHub Release tag to verify.
+        required: true
+        default: v0.0.4
+        type: string
+      release_version:
+        description: Release version expected by package-manager formulas.
+        required: true
+        default: 0.0.4
+        type: string
+      platform:
+        description: Platform to verify.
+        required: true
+        default: linux-x64
+        type: choice
+        options:
+          - linux-x64
+          - linux-arm64
+          - macos-x64
+          - macos-arm64
+          - windows-x64
+          - windows-arm64
+      execute_install:
+        description: Download/install and run CLI smoke where supported.
+        required: true
+        default: "true"
+        type: choice
+        options: ["true", "false"]
+      enable_homebrew:
+        description: Enable Homebrew channel on macOS.
+        required: true
+        default: "true"
+        type: choice
+        options: ["true", "false"]
+      enable_winget:
+        description: Enable winget channel on Windows when configured.
+        required: true
+        default: "false"
+        type: choice
+        options: ["true", "false"]
+      enable_apt:
+        description: Enable apt channel on Linux when configured.
+        required: true
+        default: "false"
+        type: choice
+        options: ["true", "false"]
+      enable_msi:
+        description: Enable MSI channel on Windows when an MSI asset exists.
+        required: true
+        default: "true"
+        type: choice
+        options: ["true", "false"]
+      allow_tar_fallback:
+        description: Allow portable tarball fallback.
+        required: true
+        default: "true"
+        type: choice
+        options: ["true", "false"]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ${{ fromJSON('{"linux-x64":"ubuntu-24.04","linux-arm64":"ubuntu-24.04-arm","macos-x64":"macos-15-intel","macos-arm64":"macos-15","windows-x64":"windows-2025","windows-arm64":"windows-11-arm"}')[inputs.platform || 'linux-x64'] }}
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run post-release install verification
+        run: |
+          set -euo pipefail
+          args=(
+            --repo "${{ github.repository }}"
+            --tag "${{ inputs.release_tag }}"
+            --version "${{ inputs.release_version }}"
+            --platform "${{ inputs.platform }}"
+            --output-dir "Release/install-verification/${{ inputs.platform }}"
+            --cloud-backend github-actions
+            --fail-if-no-pass
+          )
+          [ "${{ inputs.enable_homebrew }}" = "true" ] && args+=(--enable-homebrew) || args+=(--no-enable-homebrew)
+          [ "${{ inputs.enable_winget }}" = "true" ] && args+=(--enable-winget) || args+=(--no-enable-winget)
+          [ "${{ inputs.enable_apt }}" = "true" ] && args+=(--enable-apt) || args+=(--no-enable-apt)
+          [ "${{ inputs.enable_msi }}" = "true" ] && args+=(--enable-msi) || args+=(--no-enable-msi)
+          [ "${{ inputs.allow_tar_fallback }}" = "true" ] && args+=(--allow-tar-fallback) || args+=(--no-allow-tar-fallback)
+          [ "${{ inputs.execute_install }}" = "true" ] && args+=(--execute-install)
+          bash src/shell/release/08-post-release-install-verify.sh "${args[@]}"
+
+      - name: Upload install verification report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: post-release-install-verification-${{ inputs.platform }}
+          path: Release/install-verification/**
+          if-no-files-found: error

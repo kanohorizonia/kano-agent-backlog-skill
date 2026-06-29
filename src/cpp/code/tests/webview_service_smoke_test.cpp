@@ -148,6 +148,18 @@ std::optional<Json::Value> find_quality_row(const Json::Value& rows,
     return std::nullopt;
 }
 
+std::optional<Json::Value> find_handoff_row(const Json::Value& rows,
+                                            const std::string& product,
+                                            const std::string& item_id) {
+    for (const auto& row : rows) {
+        if (row["product"].asString() == product &&
+            row["item_id"].asString() == item_id) {
+            return row;
+        }
+    }
+    return std::nullopt;
+}
+
 std::optional<Json::Value> find_goal(const Json::Value& goals,
                                      const std::string& goal_id) {
     for (const auto& goal : goals) {
@@ -429,6 +441,55 @@ int main() {
                      "Active roadmap task.\n\n"
                      "## Worklog\n\n"
                      "2026-06-14 16:00 [agent=codex] Validation: pixi run quick-test PASS.\n"));
+        write_text(
+            products / "product-alpha" / "items" / "task" / "0008" / "PRA-TSK-0008.md",
+            item_doc("PRA-TSK-0008",
+                     "019ec100-0000-7000-8000-000000000021",
+                     "Task",
+                     "Alpha safe handoff fixture",
+                     "Ready",
+                     "PRA-EPIC-0001",
+                     "Target repo: kano-agent-backlog-skill\n\n"
+                     "## Context\n\n"
+                     "Backboard needs a deterministic preview before an implementation handoff.\n\n"
+                     "## Goal\n\n"
+                     "Expose a read-only handoff readiness row for a safe task candidate.\n\n"
+                     "## Non-Goals\n\n"
+                     "- Do not start execution.\n"
+                     "- Do not dispatch agents.\n"
+                     "- Do not add approval or auth behavior.\n\n"
+                     "## Acceptance Criteria\n\n"
+                     "- Safe candidate row includes repo, goal, non-goals, validation commands, artifact, and report format.\n"
+                     "- Missing data is not inferred.\n\n"
+                     "## Risks / Dependencies\n\n"
+                     "- KOA and Ark Console remain responsible for dispatch and admission.\n\n"
+                     "## Validation\n\n"
+                     "- pixi run build\n"
+                     "- pixi run quick-test\n"
+                     "- git diff --check\n\n"
+                     "## Expected Result Artifact\n\n"
+                     "Backboard handoff-readiness smoke fixture output.\n\n"
+                     "## Report\n\n"
+                     "Report safe candidate status, validation output, commit SHA, push status, and remaining risks.\n",
+                     "external:\n"
+                     "  target_repo: kano-agent-backlog-skill\n"));
+        write_text(
+            products / "product-alpha" / "items" / "task" / "0009" / "PRA-TSK-0009.md",
+            item_doc("PRA-TSK-0009",
+                     "019ec100-0000-7000-8000-000000000022",
+                     "Task",
+                     "Alpha blocked handoff fixture",
+                     "Ready",
+                     "PRA-EPIC-0001",
+                     "Risky handoff body with dirty worktree overlap risk.\n\n"
+                     "## Context\n\n"
+                     "This fixture is intentionally incomplete.\n\n"
+                     "## Goal\n\n"
+                     "Show missing handoff data as blockers.\n\n"
+                     "## Expected Result Artifact\n\n"
+                     "C:\\Users\\private\\secret\\handoff.md\n\n"
+                     "## Risks / Dependencies\n\n"
+                     "- Dirty worktree overlap risk must block handoff.\n"));
         write_text(
             products / "product-alpha" / "items" / "task" / "0002" / "PRA-TSK-0002.md",
             item_doc("PRA-TSK-0002",
@@ -949,7 +1010,7 @@ int main() {
         auto all = service.QueryItems(allOptions);
         expect(!all.isMember("error"), "all-products query should not fail");
         expect(all["products"].size() == 2, "all-products query should include both products");
-        expect(all["total"].asUInt64() == 27, "all-products query should include items, ADRs, plus unique topic pseudo-items");
+        expect(all["total"].asUInt64() == 29, "all-products query should include items, ADRs, plus unique topic pseudo-items");
         for (const auto& item : all["items"]) {
             expect(item.isMember("gate_status"), "all-products items should include gate_status");
             expect(item["gate_status"].isMember("ready"), "gate_status should include ready gate");
@@ -1172,6 +1233,96 @@ int main() {
         expect(!pagedQuality["truncated"].asBool(),
                "evidence quality view should report no truncation after internal pagination completes");
 
+        const auto handoffFileCountBefore = count_regular_files(products);
+        const auto handoffStateBefore = read_text(products / "product-alpha" / "items" / "task" / "0008" / "PRA-TSK-0008.md");
+        auto handoff = service.BuildHandoffReadinessInspector(allOptions);
+        expect(!handoff.isMember("error"), "handoff readiness inspector query should not fail");
+        expect(handoff["schema"].asString() == "kob.backboard.handoff_readiness_inspector.v1",
+               "handoff readiness inspector should expose a stable schema marker");
+        expect(handoff["read_only"].asBool(), "handoff readiness inspector must be read-only");
+        expect(!handoff["mutation_allowed"].asBool(), "handoff readiness inspector must not allow mutations");
+        expect(!handoff["starts_agent"].asBool(), "handoff readiness inspector must not start agents");
+        expect(!handoff["dispatches_work"].asBool(), "handoff readiness inspector must not dispatch work");
+        expect(!handoff["creates_work_order_prompt"].asBool(), "handoff readiness inspector must not create work-order prompts");
+        expect(handoff["advisory_only"].asBool(), "handoff readiness inspector must be advisory only");
+        expect(handoff["pagination_ignored_for_full_scan"].asBool(),
+               "handoff readiness inspector should scan the selected set instead of one query page");
+        expect(handoff["scanned"].asUInt64() == handoff["query_total"].asUInt64(),
+               "handoff readiness full scan should visit every selected query match");
+        expect(!handoff["truncated"].asBool(), "unbounded handoff readiness query should not be truncated");
+        expect(handoff["row_count"].asUInt64() == handoff["rows"].size(),
+               "handoff readiness inspector should expose bounded row_count metadata");
+        expect(count_regular_files(products) == handoffFileCountBefore,
+               "handoff readiness inspector must not create or delete files");
+        expect(read_text(products / "product-alpha" / "items" / "task" / "0008" / "PRA-TSK-0008.md") == handoffStateBefore,
+               "handoff readiness inspector must not mutate item markdown state");
+
+        auto safeHandoff = find_handoff_row(handoff["rows"], "product-alpha", "PRA-TSK-0008");
+        expect(safeHandoff.has_value(), "safe handoff fixture should be present");
+        expect((*safeHandoff)["status"].asString() == "safe_candidate",
+               "complete Ready task should be a safe handoff candidate");
+        expect((*safeHandoff)["safe_to_handoff"].asBool(),
+               "safe handoff fixture should be marked safe");
+        expect((*safeHandoff)["blockers"].empty(),
+               "safe handoff fixture should not expose blockers");
+        expect((*safeHandoff)["handoff_preview"]["repo"].asString() == "kano-agent-backlog-skill",
+               "handoff preview should include bounded repo metadata");
+        expect((*safeHandoff)["handoff_preview"]["goal"].asString().find("read-only handoff readiness row") != std::string::npos,
+               "handoff preview should include goal text");
+        expect((*safeHandoff)["handoff_preview"]["non_goals"].asString().find("Do not start execution") != std::string::npos,
+               "handoff preview should include non-goals");
+        expect(has_string_value((*safeHandoff)["handoff_preview"]["validation_commands"], "pixi run build") &&
+                   has_string_value((*safeHandoff)["handoff_preview"]["validation_commands"], "pixi run quick-test") &&
+                   has_string_value((*safeHandoff)["handoff_preview"]["validation_commands"], "git diff --check"),
+               "handoff preview should include validation commands");
+        expect((*safeHandoff)["handoff_preview"]["expected_result_artifact"].asString().find("smoke fixture output") != std::string::npos,
+               "handoff preview should include expected result artifact");
+        expect((*safeHandoff)["handoff_preview"]["reporting_format"].asString().find("commit SHA") != std::string::npos,
+               "handoff preview should include reporting format");
+
+        auto blockedHandoff = find_handoff_row(handoff["rows"], "product-alpha", "PRA-TSK-0009");
+        expect(blockedHandoff.has_value(), "blocked handoff fixture should be present");
+        expect(!(*blockedHandoff)["safe_to_handoff"].asBool(),
+               "incomplete handoff fixture should not be safe");
+        expect(has_diagnostic((*blockedHandoff)["blockers"], "missing_target_repo", "product-alpha:PRA-TSK-0009"),
+               "handoff readiness should report missing target repo");
+        expect(has_diagnostic((*blockedHandoff)["blockers"], "missing_acceptance_criteria", "product-alpha:PRA-TSK-0009"),
+               "handoff readiness should report missing acceptance criteria");
+        expect(has_diagnostic((*blockedHandoff)["blockers"], "missing_validation_plan", "product-alpha:PRA-TSK-0009"),
+               "handoff readiness should report missing validation plan");
+        expect(has_diagnostic((*blockedHandoff)["blockers"], "ambiguous_scope", "product-alpha:PRA-TSK-0009"),
+               "handoff readiness should report ambiguous scope");
+        expect(has_diagnostic((*blockedHandoff)["blockers"], "workspace_risk_dirty_overlap", "product-alpha:PRA-TSK-0009"),
+               "handoff readiness should report dirty-overlap risk");
+        expect(has_diagnostic((*blockedHandoff)["blockers"], "missing_reporting_format", "product-alpha:PRA-TSK-0009"),
+               "handoff readiness should report missing reporting format");
+        expect(has_diagnostic((*blockedHandoff)["gaps"], "missing_expected_result_artifact", "product-alpha:PRA-TSK-0009"),
+               "raw artifact paths should become missing artifact gaps instead of preview text");
+        expect(has_diagnostic((*blockedHandoff)["diagnostics"], "raw_filesystem_path_redacted", "product-alpha:PRA-TSK-0009"),
+               "handoff readiness should report redacted raw filesystem paths");
+
+        auto parentLevelHandoff = find_handoff_row(handoff["rows"], "product-alpha", "PRA-FTR-0003");
+        expect(parentLevelHandoff.has_value(), "ready feature fixture should be present");
+        expect(has_diagnostic((*parentLevelHandoff)["blockers"], "unsafe_parent_level_work", "product-alpha:PRA-FTR-0003"),
+               "handoff readiness should block unsafe parent-level work");
+
+        const auto handoffSerialized = json_to_string(handoff);
+        expect(handoffSerialized.find(products.generic_string()) == std::string::npos,
+               "handoff readiness JSON should not expose absolute filesystem paths");
+        expect(handoffSerialized.find("C:\\Users\\private") == std::string::npos &&
+                   handoffSerialized.find("items/") == std::string::npos &&
+                   handoffSerialized.find("decisions/") == std::string::npos,
+               "handoff readiness refs should not expose raw repo paths");
+        auto handoffPartial = service.RenderHandoffReadinessPartial(allOptions);
+        expect(handoffPartial.find("data-navigation-model=\"handoff-readiness\"") != std::string::npos,
+               "handoff readiness partial should be DOM/readable first");
+        expect(handoffPartial.find("Alpha safe handoff fixture") != std::string::npos &&
+                   handoffPartial.find("missing_target_repo") != std::string::npos,
+               "handoff readiness partial should render safe candidates and blockers");
+        expect(handoffPartial.find("C:\\Users\\private") == std::string::npos &&
+                   handoffPartial.find("items/") == std::string::npos,
+               "handoff readiness partial should not expose raw filesystem paths");
+
         const auto recoveryFileCountBefore = count_regular_files(products);
         const auto recoveryStateBefore = read_text(products / "product-alpha" / "items" / "task" / "0001" / "PRA-TSK-0001.md");
         auto recovery = service.BuildContextRecoverySummary("Native Migration", allOptions);
@@ -1256,7 +1407,7 @@ int main() {
         for (const auto& rootNode : tree["roots"]) {
             if (rootNode["id"].asString() == "PRA-EPIC-0001") {
                 foundEpicRoot = true;
-                expect(rootNode["children"].size() == 6, "tree should attach task children under the epic root");
+                expect(rootNode["children"].size() == 8, "tree should attach task children under the epic root");
             }
             if (rootNode["id"].asString() == "PRA-TSK-0004") {
                 foundStandaloneTaskRoot = true;
@@ -1969,6 +2120,13 @@ int main() {
                "embedded webview assets should document slash-search help text");
         expect(assetSource.find("function refreshActiveTab") != std::string::npos,
                "embedded webview assets should refresh only the active tab by default");
+        expect(indexHtmlSource.find("tab-handoff") != std::string::npos &&
+                   indexHtmlSource.find("page-handoff") != std::string::npos,
+               "embedded webview assets should expose the Handoff Readiness tab shell");
+        expect(assetSource.find("function loadHandoffReadiness") != std::string::npos &&
+                   assetSource.find("/api/review/handoff-readiness") != std::string::npos &&
+                   assetSource.find("handoff.readiness") != std::string::npos,
+               "embedded webview assets should lazy-load the handoff readiness tab");
         expect(assetSource.find("function ensureActiveTabLoaded") != std::string::npos,
                "embedded webview assets should lazy-load inactive tabs when selected");
         expect(assetSource.find("loadedTabs") != std::string::npos &&
@@ -2013,6 +2171,10 @@ int main() {
                "webview README should list the done detector API route");
         expect(webviewReadme.find("/api/review/evidence-quality") != std::string::npos,
                "webview README should list the evidence quality API route");
+        expect(webviewReadme.find("/api/review/handoff-readiness") != std::string::npos,
+               "webview README should list the handoff readiness API route");
+        expect(webviewReadme.find("/partials/handoff-readiness") != std::string::npos,
+               "webview README should list the handoff readiness partial route");
         expect(webviewReadme.find("/api/review/context-recovery") != std::string::npos,
                "webview README should list the context recovery API route");
         expect(webviewReadme.find("/api/review/feature-evolution") != std::string::npos,

@@ -27,6 +27,7 @@ Design contracts:
   - `GET /api/refresh[?product=all|<name>][&products=a,b]`
   - `GET /api/review/done-detector?product=all|<name>[&products=a,b][&q=...][&state=...][&type=...]`
   - `GET /api/review/evidence-quality?product=all|<name>[&products=a,b][&q=...][&state=...][&type=...]`
+  - `GET /api/review/handoff-readiness?product=all|<name>[&products=a,b][&q=...][&state=...][&type=...]`
   - `GET /api/review/context-recovery?area=...&product=all|<name>[&products=a,b][&q=...][&state=...][&type=...]`
   - `GET /api/review/feature-evolution?product=<name>&feature_id=<id>`
   - `GET /api/review/roadmap?product=all|<name>[&products=a,b]`
@@ -38,6 +39,7 @@ Design contracts:
   - `GET /partials/tree?...`
   - `GET /partials/kanban?...`
   - `GET /partials/review?...`
+  - `GET /partials/handoff-readiness?...`
   - `GET /partials/roadmap?...`
   - `GET /partials/decision-radar?...`
   - `GET /partials/context?...`
@@ -45,8 +47,8 @@ Design contracts:
   - `GET /partials/item/<id>?product=all|<name>`
 - First-party UI runtime:
   - `GET /assets/kob-ui.js`
-- UI: Backboard Review Inbox, product map, flow, context, dependencies, agent
-  runs, and command preview at `/`
+- UI: Backboard Review Inbox, Agent Handoff Readiness, product map, flow,
+  context, dependencies, agent runs, and command preview at `/`
 
 `kob-ui.js` is intentionally small and first-party. It owns partial fetch/swap,
 delegated partial links, filter debounce support, URL query-state helpers, and

@@ -83,6 +83,7 @@ class BacklogWebviewService {
                                         bool forceRefresh = false);
   Json::Value BuildDoneCandidateDetector(const ItemQueryOptions& options);
   Json::Value BuildEvidenceQualityView(const ItemQueryOptions& options);
+  Json::Value BuildHandoffReadinessInspector(const ItemQueryOptions& options);
   Json::Value BuildContextRecoverySummary(const std::string& area,
                                           const ItemQueryOptions& options);
   Json::Value BuildProductMapNavigation(const ItemQueryOptions& options);
@@ -113,6 +114,7 @@ class BacklogWebviewService {
   std::string RenderTreePartial(const ItemQueryOptions& options);
   std::string RenderKanbanPartial(const ItemQueryOptions& options);
   std::string RenderReviewPartial(const ItemQueryOptions& options);
+  std::string RenderHandoffReadinessPartial(const ItemQueryOptions& options);
   std::string RenderRoadmapPartial(const ItemQueryOptions& options);
   std::string RenderDecisionDebtPartial(const ItemQueryOptions& options);
   std::string RenderContextPartial(const ItemQueryOptions& options);

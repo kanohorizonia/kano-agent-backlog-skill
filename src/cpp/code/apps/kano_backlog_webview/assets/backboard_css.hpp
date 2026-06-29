@@ -35,7 +35,10 @@ inline constexpr std::string_view kBackboardCss = R"CSS(
     .card.is-selected { border-color: var(--kob-accent); border-left-width: 6px; padding-left: 10px; background: var(--kob-surface-strong); box-shadow: 0 0 0 1px var(--kob-accent), 0 8px 18px var(--kob-shadow); transform: translateX(2px); }
     .review-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
     .review-lane { border: 1px solid #d8e1f0; border-radius: 8px; padding: 8px; background: #fff; min-height: 120px; }
-    .lane-items, .review-lane-items, .context-items, .command-items { margin-top: 8px; }
+    .lane-items, .review-lane-items, .context-items, .command-items, .handoff-readiness-list { margin-top: 8px; }
+    .handoff-readiness-list { display: grid; gap: 10px; }
+    .handoff-preview-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin: 10px 0; }
+    .handoff-row { display: grid; gap: 8px; }
     .review-reason { margin-top: 6px; padding-top: 6px; border-top: 1px solid #edf1f7; }
     .evidence-row { display: grid; grid-template-columns: 130px 90px minmax(0, 1fr); gap: 8px; padding: 4px 0; border-bottom: 1px solid #edf1f7; }
     .pill { display: inline-block; border: 1px solid #cfd9ea; border-radius: 999px; padding: 2px 7px; font-size: 12px; background: #f8fbff; }

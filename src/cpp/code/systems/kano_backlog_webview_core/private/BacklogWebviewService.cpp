@@ -2086,6 +2086,102 @@ std::string RenderDiagnosticList(const Json::Value& diagnostics) {
   return html;
 }
 
+std::string RenderHandoffIssueList(const Json::Value& issues,
+                                   const std::string& emptyText) {
+  if (!issues.isArray() || issues.empty()) {
+    return "<div class=\"muted\">" + HtmlEscape(emptyText) + "</div>";
+  }
+  std::string html;
+  for (const auto& issue : issues) {
+    html += "<div class=\"card gap-card\"><strong>" +
+            HtmlEscape(issue.get("code", "gap").asString()) +
+            "</strong><div>" +
+            HtmlEscape(issue.get("message", "").asString()) +
+            "</div><div class=\"muted\">" +
+            HtmlEscape(issue.get("severity", "").asString()) +
+            "</div></div>";
+  }
+  return html;
+}
+
+std::string RenderHandoffPreviewField(const std::string& label,
+                                      const Json::Value& value) {
+  if (value.isArray()) {
+    std::string chips;
+    for (const auto& entry : value) {
+      const auto text = entry.asString();
+      if (!text.empty()) {
+        chips += "<span class=\"pill\">" + HtmlEscape(text) + "</span>";
+      }
+    }
+    if (chips.empty()) {
+      chips = "<div class=\"muted\">Missing</div>";
+    } else {
+      chips = "<div class=\"detail-links\">" + chips + "</div>";
+    }
+    return "<div><div class=\"detail-label\">" + HtmlEscape(label) +
+           "</div>" + chips + "</div>";
+  }
+  const auto text = value.asString();
+  return "<div><div class=\"detail-label\">" + HtmlEscape(label) +
+         "</div><div class=\"detail-value\">" +
+         (text.empty() ? "<span class=\"muted\">Missing</span>" : HtmlEscape(text)) +
+         "</div></div>";
+}
+
+std::string RenderHandoffReadinessRow(const Json::Value& row) {
+  const auto product = row.get("product", "").asString();
+  const auto itemId = row.get("item_id", "").asString();
+  const auto title = row.get("title", itemId).asString();
+  const auto& preview = row["handoff_preview"];
+  std::string html =
+      "<div class=\"card handoff-row\" data-handoff-readiness-row=\"" +
+      HtmlEscape(itemId) +
+      "\" data-selectable-item=\"true\" data-item-id=\"" +
+      HtmlEscape(itemId) + "\" data-item-product=\"" + HtmlEscape(product) +
+      "\" tabindex=\"-1\" aria-selected=\"false\" role=\"option\">";
+  html += "<div class=\"detail-title-row\"><strong><a href=\"#\" class=\"item-link\" data-item-id=\"" +
+          HtmlEscape(itemId) + "\" data-item-product=\"" + HtmlEscape(product) +
+          "\">" + HtmlEscape(title) + "</a></strong>" +
+          RenderPill(row.get("status", "unknown").asString()) + "</div>";
+  html += "<div class=\"muted\"><code>" + HtmlEscape(itemId) + "</code> / " +
+          HtmlEscape(product) + " / " +
+          HtmlEscape(row.get("type", "").asString()) + " / " +
+          HtmlEscape(row.get("state", "").asString()) + "</div>";
+  html += "<div class=\"detail-facts\">" +
+          RenderDetailFact("Safe to hand off",
+                           row.get("safe_to_handoff", false).asBool() ? "true" : "false") +
+          RenderDetailFact("Blockers",
+                           std::to_string(row.get("blocker_count", 0U).asUInt64())) +
+          RenderDetailFact("Gaps",
+                           std::to_string(row.get("gap_count", 0U).asUInt64())) +
+          RenderDetailFact("Dispatch boundary",
+                           "KOA / Ark Console") +
+          "</div>";
+  html += "<div class=\"handoff-preview-grid\">" +
+          RenderHandoffPreviewField("Repo", preview["repo"]) +
+          RenderHandoffPreviewField("Goal", preview["goal"]) +
+          RenderHandoffPreviewField("Non-goals", preview["non_goals"]) +
+          RenderHandoffPreviewField("Validation commands",
+                                    preview["validation_commands"]) +
+          RenderHandoffPreviewField("Expected result artifact",
+                                    preview["expected_result_artifact"]) +
+          RenderHandoffPreviewField("Reporting format",
+                                    preview["reporting_format"]) +
+          "</div>";
+  html += "<div><div class=\"detail-label\">Blockers</div>" +
+          RenderHandoffIssueList(row["blockers"], "No blockers") + "</div>";
+  if (!row["gaps"].empty() || !row["diagnostics"].empty()) {
+    html += "<div><div class=\"detail-label\">Gaps</div>" +
+            RenderHandoffIssueList(row["gaps"], "No gaps") +
+            RenderHandoffIssueList(row["diagnostics"], "No diagnostics") + "</div>";
+  }
+  html += "<div class=\"muted\">" +
+          HtmlEscape(row.get("recommended_human_action", "").asString()) +
+          "</div></div>";
+  return html;
+}
+
 std::string RenderTreeNavigationSummary(const Json::Value& node) {
   const auto& navigation = node["navigation"];
   if (!NavigationHasContent(navigation)) {
@@ -3482,6 +3578,330 @@ Json::Value EvidenceQualityRow(const Json::Value& item,
   row["mutation_allowed"] = false;
   row["starts_agent"] = false;
   row["dispatches_work"] = false;
+  return row;
+}
+
+std::string CollapseWhitespace(const std::string& value) {
+  std::ostringstream out;
+  bool pendingSpace = false;
+  bool wrote = false;
+  for (const unsigned char ch : value) {
+    if (std::isspace(ch)) {
+      pendingSpace = true;
+      continue;
+    }
+    if (pendingSpace && wrote) {
+      out << ' ';
+    }
+    out << static_cast<char>(ch);
+    wrote = true;
+    pendingSpace = false;
+  }
+  return Trim(out.str());
+}
+
+bool LooksLikeRawFilesystemPath(const std::string& value) {
+  static const std::regex drivePath(R"([A-Za-z]:[\\/])");
+  static const std::regex uncPath(R"(\\\\[^\\/\s]+[\\/])");
+  static const std::regex unixPath(R"((^|\s)/(users|home|tmp|var|etc|mnt|workspace|work|private|volumes)/)",
+                                  std::regex_constants::icase);
+  const auto trimmed = Trim(value);
+  const auto lowered = text::ToLower(trimmed);
+  return std::regex_search(trimmed, drivePath) ||
+         std::regex_search(trimmed, uncPath) ||
+         std::regex_search(trimmed, unixPath) ||
+         lowered.find("file://") != std::string::npos ||
+         lowered.find("../") != std::string::npos ||
+         lowered.find("..\\") != std::string::npos;
+}
+
+std::string BoundedHandoffText(const std::string& value, const size_t limit = 320) {
+  auto out = CollapseWhitespace(value);
+  if (out.size() > limit) {
+    out = out.substr(0, limit - 3) + "...";
+  }
+  return out;
+}
+
+std::string StripHandoffListPrefix(std::string value) {
+  value = Trim(value);
+  while (!value.empty() && (value.front() == '-' || value.front() == '*' ||
+                           value.front() == '+')) {
+    value.erase(value.begin());
+    value = Trim(value);
+  }
+  static const std::regex orderedPrefix(R"(^[0-9]+[.)]\s*)");
+  value = std::regex_replace(value, orderedPrefix, "");
+  while (value.size() >= 2 && value.front() == '`' && value.back() == '`') {
+    value = Trim(value.substr(1, value.size() - 2));
+  }
+  return value;
+}
+
+std::string ExtractNamedSectionBody(const std::string& content,
+                                    const std::vector<std::string>& names) {
+  std::set<std::string> wanted;
+  for (const auto& name : names) {
+    wanted.insert(NormalizeSectionName(name));
+  }
+
+  std::ostringstream body;
+  bool capturing = false;
+  for (const auto& line : SplitLines(ExtractMarkdownBody(content))) {
+    const auto trimmed = Trim(line);
+    if (StartsWith(trimmed, "#")) {
+      if (capturing) {
+        break;
+      }
+      const auto titleStart = trimmed.find_first_not_of('#');
+      if (titleStart == std::string::npos) {
+        continue;
+      }
+      const auto sectionName = NormalizeSectionName(trimmed.substr(titleStart));
+      capturing = wanted.count(sectionName) > 0;
+      continue;
+    }
+    if (!capturing) {
+      continue;
+    }
+    body << line << "\n";
+  }
+  return Trim(body.str());
+}
+
+Json::Value HandoffIssue(const std::string& code,
+                         const std::string& severity,
+                         const std::string& message,
+                         const std::string& target,
+                         const std::vector<std::string>& sourceFields) {
+  Json::Value issue(Json::objectValue);
+  issue["code"] = code;
+  issue["severity"] = severity;
+  issue["message"] = message;
+  issue["target"] = target;
+  issue["source_fields"] = MakeArray(sourceFields);
+  return issue;
+}
+
+std::string FirstExternalValue(const Json::Value& item,
+                               const std::vector<std::string>& keys) {
+  const auto& external = item["external"];
+  if (!external.isObject()) {
+    return "";
+  }
+  for (const auto& key : keys) {
+    if (external.isMember(key) && !IsEmptyLikeString(external[key].asString())) {
+      return Trim(external[key].asString());
+    }
+  }
+  return "";
+}
+
+std::string ExtractTargetRepoFromContent(const std::string& content) {
+  static const std::regex targetRepoPattern(
+      R"(^[-*]?\s*(?:target repo|target repository|repo|repository)\s*:\s*`?([^`\r\n]+?)`?\s*$)",
+      std::regex_constants::icase);
+  for (const auto& line : SplitLines(ExtractMarkdownBody(content))) {
+    std::smatch match;
+    const auto trimmed = Trim(line);
+    if (std::regex_match(trimmed, match, targetRepoPattern) && match.size() > 1) {
+      return StripHandoffListPrefix(match[1].str());
+    }
+  }
+  return "";
+}
+
+std::string HandoffTargetRepo(const Json::Value& item) {
+  auto repo = FirstExternalValue(
+      item, {"target_repo", "target_repository", "repo", "repository",
+             "repo_slug", "repository_slug"});
+  if (repo.empty()) {
+    repo = ExtractTargetRepoFromContent(item.get("content", "").asString());
+  }
+  return BoundedHandoffText(repo, 120);
+}
+
+Json::Value ExtractValidationCommands(const std::string& content) {
+  Json::Value commands(Json::arrayValue);
+  const auto validation = ExtractNamedSectionBody(
+      content, {"Validation", "Validation Plan", "Validation Commands"});
+  if (validation.empty()) {
+    return commands;
+  }
+  for (const auto& line : SplitLines(validation)) {
+    auto command = StripHandoffListPrefix(line);
+    if (command.empty() || LooksLikeRawFilesystemPath(command)) {
+      continue;
+    }
+    if (!ContentContainsAny(command, {"pixi run", "git diff --check", "quick-test",
+                                     "build", "test", "smoke"})) {
+      continue;
+    }
+    commands.append(BoundedHandoffText(command, 180));
+    if (commands.size() >= 8) {
+      break;
+    }
+  }
+  return commands;
+}
+
+bool IsParentLevelHandoffType(const std::string& type) {
+  return type == "Theme" || type == "Initiative" || type == "Epic" ||
+         type == "Feature";
+}
+
+bool HasAnyBlockers(const Json::Value& blockers) {
+  return blockers.isArray() && !blockers.empty();
+}
+
+Json::Value BuildHandoffReadinessRow(const Json::Value& item) {
+  const auto product = item.get("product", "").asString();
+  const auto itemId = item.get("id", "").asString();
+  const auto type = item.get("type", "").asString();
+  const auto state = item.get("state", "").asString();
+  const auto loweredState = text::ToLower(state);
+  const auto content = item.get("content", "").asString();
+  const auto target = product + ":" + itemId;
+
+  Json::Value row(Json::objectValue);
+  row["schema"] = "kob.backboard.handoff_readiness.row.v1";
+  row["product"] = product;
+  row["item_id"] = itemId;
+  row["title"] = item.get("title", "").asString();
+  row["type"] = type;
+  row["state"] = state;
+  row["item_ref"] = MakeLogicalRef(product, itemId);
+  row["blockers"] = Json::arrayValue;
+  row["gaps"] = Json::arrayValue;
+  row["diagnostics"] = Json::arrayValue;
+  row["read_only"] = true;
+  row["advisory"] = true;
+  row["mutation_allowed"] = false;
+  row["starts_agent"] = false;
+  row["dispatches_work"] = false;
+  row["creates_work_order_prompt"] = false;
+
+  auto appendBlocker = [&](const std::string& code,
+                           const std::string& message,
+                           const std::vector<std::string>& sourceFields) {
+    row["blockers"].append(HandoffIssue(code, "blocker", message, target, sourceFields));
+  };
+  auto appendGap = [&](const std::string& code,
+                       const std::string& message,
+                       const std::vector<std::string>& sourceFields) {
+    row["gaps"].append(HandoffIssue(code, "gap", message, target, sourceFields));
+  };
+  auto previewText = [&](const std::string& raw,
+                         const std::string& sourceField,
+                         const size_t limit = 320) {
+    if (LooksLikeRawFilesystemPath(raw)) {
+      row["diagnostics"].append(HandoffIssue(
+          "raw_filesystem_path_redacted", "gap",
+          "A raw filesystem path was omitted from the handoff preview.",
+          target, {sourceField}));
+      return std::string{};
+    }
+    return BoundedHandoffText(raw, limit);
+  };
+
+  const auto repo = previewText(HandoffTargetRepo(item), "external.target_repo", 120);
+  const auto goal = previewText(
+      ExtractNamedSectionBody(content, {"Goal"}), "content.sections.Goal");
+  const auto nonGoals = previewText(
+      ExtractNamedSectionBody(content, {"Non-Goals", "Non Goals", "Do Not",
+                                        "Non-Goals / Do Not"}),
+      "content.sections.Non-Goals");
+  const auto acceptanceCriteria = ExtractNamedSectionBody(
+      content, {"Acceptance Criteria", "AC"});
+  const auto validationCommands = ExtractValidationCommands(content);
+  const auto expectedArtifact = previewText(
+      ExtractNamedSectionBody(content, {"Expected Result Artifact",
+                                        "Result Artifact", "Evidence Artifact",
+                                        "Artifact"}),
+      "content.sections.Expected Result Artifact");
+  const auto reportingFormat = previewText(
+      ExtractNamedSectionBody(content, {"Report", "Reporting",
+                                        "Reporting Format"}),
+      "content.sections.Report");
+
+  row["handoff_preview"]["repo"] = repo;
+  row["handoff_preview"]["item_id"] = itemId;
+  row["handoff_preview"]["title"] = item.get("title", "").asString();
+  row["handoff_preview"]["goal"] = goal;
+  row["handoff_preview"]["non_goals"] = nonGoals;
+  row["handoff_preview"]["validation_commands"] = validationCommands;
+  row["handoff_preview"]["expected_result_artifact"] = expectedArtifact;
+  row["handoff_preview"]["reporting_format"] = reportingFormat;
+
+  if (loweredState != "ready") {
+    appendBlocker("item_not_ready",
+                  "Item is selected but is not in Ready state.",
+                  {"state"});
+  }
+  if (repo.empty()) {
+    appendBlocker("missing_target_repo",
+                  "No bounded target repo metadata was found.",
+                  {"external.target_repo", "content.target_repo"});
+  }
+  if (Trim(acceptanceCriteria).empty()) {
+    appendBlocker("missing_acceptance_criteria",
+                  "Acceptance Criteria section is missing or empty.",
+                  {"content.sections.Acceptance Criteria"});
+  }
+  if (validationCommands.empty()) {
+    appendBlocker("missing_validation_plan",
+                  "Validation section does not list runnable validation commands.",
+                  {"content.sections.Validation"});
+  }
+  if (goal.empty()) {
+    appendGap("missing_goal",
+              "Goal section is missing or empty.",
+              {"content.sections.Goal"});
+  }
+  if (nonGoals.empty() ||
+      ContentContainsAny(content, {"TBD", "to be decided", "unclear", "ambiguous"})) {
+    appendBlocker("ambiguous_scope",
+                  "Non-goals or do-not boundaries are missing or the item text signals ambiguity.",
+                  {"content.sections.Non-Goals", "content"});
+  }
+  if (IsParentLevelHandoffType(type)) {
+    appendBlocker("unsafe_parent_level_work",
+                  "Parent-level Product Map items need a child work item before agent handoff.",
+                  {"type"});
+  }
+  if (loweredState == "blocked" ||
+      (item["links"].isObject() && item["links"]["blocked_by"].isArray() &&
+       !item["links"]["blocked_by"].empty()) ||
+      ContentContainsAny(content, {"blocked by", "blocker:"})) {
+    appendBlocker("dependency_blocker_state",
+                  "Dependency or blocker state must be cleared before handoff.",
+                  {"state", "links.blocked_by", "content"});
+  }
+  if (ContentContainsAny(content, {"dirty", "untracked", "worktree", "git status",
+                                  "overlap"})) {
+    appendBlocker("workspace_risk_dirty_overlap",
+                  "Item text signals workspace dirt or overlap risk.",
+                  {"content"});
+  }
+  if (expectedArtifact.empty()) {
+    appendGap("missing_expected_result_artifact",
+              "Expected result artifact is not stated.",
+              {"content.sections.Expected Result Artifact"});
+  }
+  if (reportingFormat.empty()) {
+    appendBlocker("missing_reporting_format",
+                  "Reporting format is not stated.",
+                  {"content.sections.Report"});
+  }
+
+  const bool blocked = HasAnyBlockers(row["blockers"]);
+  row["safe_to_handoff"] = !blocked;
+  row["status"] = blocked ? "blocked" : "safe_candidate";
+  row["recommended_human_action"] = blocked
+      ? "fill_handoff_gaps_before_dispatch"
+      : "review_preview_then_use_koa_or_ark_console_for_dispatch";
+  row["blocker_count"] = static_cast<Json::UInt64>(row["blockers"].size());
+  row["gap_count"] = static_cast<Json::UInt64>(row["gaps"].size());
   return row;
 }
 
@@ -5325,6 +5745,105 @@ Json::Value BacklogWebviewService::BuildEvidenceQualityView(
 
   response["empty"] = response["rows"].empty();
   response["row_count"] = static_cast<Json::UInt64>(response["rows"].size());
+  return response;
+}
+
+Json::Value BacklogWebviewService::BuildHandoffReadinessInspector(
+    const ItemQueryOptions& options) {
+  Json::Value response(Json::objectValue);
+  response["schema"] = "kob.backboard.handoff_readiness_inspector.v1";
+  response["rows"] = Json::arrayValue;
+  response["diagnostics"] = Json::arrayValue;
+  response["status_counts"] = Json::objectValue;
+  response["blocker_counts"] = Json::objectValue;
+  response["read_only"] = true;
+  response["mutation_allowed"] = false;
+  response["starts_agent"] = false;
+  response["dispatches_work"] = false;
+  response["creates_work_order_prompt"] = false;
+  response["advisory_only"] = true;
+  response["dispatch_boundary"] =
+      "KOA and Ark Console remain responsible for dispatch and admission.";
+  response["empty_state"] =
+      "No Ready or explicitly selected handoff candidates match the current filters.";
+
+  auto scanOptions = options;
+  scanOptions.limit = 1000;
+  scanOptions.offset = 0;
+  auto items = QueryItems(scanOptions);
+  if (items.isMember("error")) {
+    return items;
+  }
+  while (items["offset"].asUInt64() + items["items"].size() < items["total"].asUInt64()) {
+    scanOptions.offset = items["offset"].asUInt64() + items["items"].size();
+    auto page = QueryItems(scanOptions);
+    if (page.isMember("error")) {
+      return page;
+    }
+    for (const auto& item : page["items"]) {
+      items["items"].append(item);
+    }
+    items["warnings"] = MergeWarnings(items["warnings"], page["warnings"]);
+    items["limit"] = page["limit"];
+    items["offset"] = 0U;
+  }
+
+  response["products"] = items["products"];
+  response["warnings"] = items["warnings"];
+  response["requested_limit"] = static_cast<Json::UInt64>(options.limit);
+  response["requested_offset"] = static_cast<Json::UInt64>(options.offset);
+  response["scan_limit"] = items.get("limit", 0U);
+  response["scan_offset"] = 0U;
+  response["pagination_ignored_for_full_scan"] = true;
+  response["query_total"] = items.get("total", 0U);
+  response["scanned"] = static_cast<Json::UInt64>(items["items"].size());
+  response["truncated"] = response["scanned"].asUInt64() <
+                          response["query_total"].asUInt64();
+
+  const bool explicitTextSelection = !Trim(options.text).empty();
+  for (const auto& itemSummary : items["items"]) {
+    if (itemSummary.get("source_kind", "").asString() != "Item") {
+      continue;
+    }
+    const auto state = text::ToLower(itemSummary.get("state", "").asString());
+    if (state != "ready" && !explicitTextSelection) {
+      continue;
+    }
+
+    const auto product = itemSummary.get("product", "").asString();
+    const auto itemId = itemSummary.get("id", "").asString();
+    auto detail = GetItem(product, itemId, options.forceRefresh);
+    if (detail.isMember("error")) {
+      response["warnings"].append(product + ": " + itemId + ": " +
+                                  detail.get("error", "unknown error").asString());
+      continue;
+    }
+
+    auto row = BuildHandoffReadinessRow(detail["item"]);
+    response["rows"].append(row);
+    const auto status = row.get("status", "unknown").asString();
+    response["status_counts"][status] = static_cast<Json::UInt64>(
+        response["status_counts"].get(status, 0U).asUInt64() + 1U);
+    for (const auto& blocker : row["blockers"]) {
+      const auto code = blocker.get("code", "unknown").asString();
+      response["blocker_counts"][code] = static_cast<Json::UInt64>(
+          response["blocker_counts"].get(code, 0U).asUInt64() + 1U);
+    }
+    for (const auto& diagnostic : row["diagnostics"]) {
+      response["diagnostics"].append(diagnostic);
+    }
+  }
+
+  response["empty"] = response["rows"].empty();
+  response["row_count"] = static_cast<Json::UInt64>(response["rows"].size());
+  response["safe_candidate_count"] =
+      response["status_counts"].get("safe_candidate", 0U);
+  response["blocked_count"] = response["status_counts"].get("blocked", 0U);
+  response["gap_count"] = static_cast<Json::UInt64>(response["diagnostics"].size());
+  for (const auto& row : response["rows"]) {
+    response["gap_count"] = static_cast<Json::UInt64>(
+        response["gap_count"].asUInt64() + row.get("gap_count", 0U).asUInt64());
+  }
   return response;
 }
 
@@ -7509,6 +8028,44 @@ std::string BacklogWebviewService::RenderReviewPartial(
                       : html;
 }
 
+std::string BacklogWebviewService::RenderHandoffReadinessPartial(
+    const ItemQueryOptions& options) {
+  const auto inspector = BuildHandoffReadinessInspector(options);
+  if (inspector.isMember("error")) {
+    return RenderErrorPartial(inspector["error"].asString());
+  }
+
+  std::string html =
+      "<section class=\"handoff-readiness-view\" data-navigation-model=\"handoff-readiness\">";
+  html += "<div class=\"detail-facts\">" +
+          RenderDetailFact("Safe candidates",
+                           std::to_string(inspector.get("safe_candidate_count", 0U).asUInt64())) +
+          RenderDetailFact("Blocked",
+                           std::to_string(inspector.get("blocked_count", 0U).asUInt64())) +
+          RenderDetailFact("Gaps",
+                           std::to_string(inspector.get("gap_count", 0U).asUInt64())) +
+          RenderDetailFact("Dispatch boundary", "KOA / Ark Console") +
+          "</div>";
+  if (inspector["rows"].empty()) {
+    html += "<div class=\"muted\">" +
+            HtmlEscape(inspector.get("empty_state", "No handoff rows.").asString()) +
+            "</div>";
+  } else {
+    html += "<div class=\"handoff-readiness-list\" role=\"listbox\" aria-label=\"Handoff readiness candidates\">";
+    for (const auto& row : inspector["rows"]) {
+      html += RenderHandoffReadinessRow(row);
+    }
+    html += "</div>";
+  }
+  if (!inspector["diagnostics"].empty()) {
+    html += "<section class=\"handoff-diagnostics\"><h4>Handoff gaps</h4>" +
+            RenderHandoffIssueList(inspector["diagnostics"], "No diagnostics") +
+            "</section>";
+  }
+  html += "</section>";
+  return html;
+}
+
 std::string BacklogWebviewService::RenderRoadmapPartial(
     const ItemQueryOptions& options) {
   const auto roadmap = BuildVersionGoalLedger(options);
@@ -7973,6 +8530,16 @@ void RegisterBacklogWebviewRoutes(
       {Get});
 
   app().registerHandler(
+      "/partials/handoff-readiness",
+      [&service, queryOptionsFromRequest, htmlResponse](
+          const HttpRequestPtr& request,
+          std::function<void(const HttpResponsePtr&)>&& callback) {
+        callback(htmlResponse(service.RenderHandoffReadinessPartial(
+            queryOptionsFromRequest(request))));
+      },
+      {Get});
+
+  app().registerHandler(
       "/partials/roadmap",
       [&service, queryOptionsFromRequest, htmlResponse](
           const HttpRequestPtr& request,
@@ -8305,6 +8872,24 @@ void RegisterBacklogWebviewRoutes(
       [metaAppender, &service, queryOptionsFromRequest](const HttpRequestPtr& request,
           std::function<void(const HttpResponsePtr&)>&& callback) {
         auto data = service.BuildEvidenceQualityView(queryOptionsFromRequest(request));
+        Json::Value body(Json::objectValue);
+        body["ok"] = !data.isMember("error");
+        body["data"] = data;
+        metaAppender(request, body);
+        auto response = HttpResponse::newHttpJsonResponse(body);
+        if (!body["ok"].asBool()) {
+          response->setStatusCode(k400BadRequest);
+        }
+        callback(response);
+      },
+      {Get});
+
+  app().registerHandler(
+      "/api/review/handoff-readiness",
+      [metaAppender, &service, queryOptionsFromRequest](const HttpRequestPtr& request,
+          std::function<void(const HttpResponsePtr&)>&& callback) {
+        auto data = service.BuildHandoffReadinessInspector(
+            queryOptionsFromRequest(request));
         Json::Value body(Json::objectValue);
         body["ok"] = !data.isMember("error");
         body["data"] = data;

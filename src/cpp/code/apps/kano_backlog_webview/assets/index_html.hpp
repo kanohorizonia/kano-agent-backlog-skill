@@ -85,6 +85,7 @@ inline constexpr std::string_view kIndexHtmlBetweenAssets = R"HTML(
   <div class="panel">
     <div class="tabs">
       <button id="tab-review" class="tab-btn active" data-tab="review">Review Inbox</button>
+      <button id="tab-handoff" class="tab-btn" data-tab="handoff">Handoff Readiness</button>
       <button id="tab-tree" class="tab-btn" data-tab="tree">Product Map</button>
       <button id="tab-roadmap" class="tab-btn" data-tab="roadmap">Roadmap</button>
       <button id="tab-decision-radar" class="tab-btn" data-tab="decision-radar">Decision Radar</button>
@@ -132,6 +133,12 @@ inline constexpr std::string_view kIndexHtmlBetweenAssets = R"HTML(
     <h3>Backboard Review Inbox</h3>
     <div id="saved-views" class="row" style="align-items:flex-start; flex-wrap:wrap;"></div>
     <div id="review-inbox" class="review-grid"></div>
+  </div>
+
+  <div id="page-handoff" class="panel page">
+    <h3>Agent Handoff Readiness</h3>
+    <div id="handoff-summary" class="muted" style="margin-bottom:8px;"></div>
+    <div id="handoff-list"></div>
   </div>
 
   <div id="page-graph" class="panel page">

@@ -43,9 +43,10 @@ inline constexpr std::string_view kBackboardAppJsPart1 = R"JS(
     const reviewQueueOrder = ['Needs Review', 'Done Candidate', 'False Done Suspect', 'Evidence Gap', 'Blocked/Dirty', 'Stale/Drift', 'Ready Frontier'];
     const itemStates = ['Proposed', 'Ready', 'InProgress', 'Blocked', 'Review', 'Done', 'Dropped'];
     const itemTypes = ['Theme', 'Initiative', 'Epic', 'Feature', 'UserStory', 'Task', 'Bug', 'Issue', 'ADR', 'Topic', 'Workset'];
-    const refreshableTabs = ['review', 'tree', 'roadmap', 'decision-radar', 'kanban', 'context', 'graph', 'runs'];
+    const refreshableTabs = ['review', 'handoff', 'tree', 'roadmap', 'decision-radar', 'kanban', 'context', 'graph', 'runs'];
     const tabLabels = {
       review: 'Review Inbox',
+      handoff: 'Handoff Readiness',
       tree: 'Product Map',
       roadmap: 'Roadmap',
       'decision-radar': 'Decision Radar',
@@ -79,7 +80,7 @@ inline constexpr std::string_view kBackboardAppJsPart1 = R"JS(
           state.limit = Math.max(1, Math.min(parsed, 1000));
         }
       }
-      if (query.tab && ['review', 'tree', 'roadmap', 'decision-radar', 'kanban', 'context', 'graph', 'runs', 'command'].includes(query.tab)) {
+      if (query.tab && ['review', 'handoff', 'tree', 'roadmap', 'decision-radar', 'kanban', 'context', 'graph', 'runs', 'command'].includes(query.tab)) {
         state.activeTab = query.tab;
       }
     })();
@@ -1655,6 +1656,65 @@ inline constexpr std::string_view kBackboardAppJsPart5 = R"JS(
         });
       });
     }
+)JS";
+
+inline constexpr std::string_view kBackboardAppJsPart5a = R"JS(
+
+    function renderHandoffIssue(issue) {
+      return `<div class="card gap-card"><strong>${esc(issue.code || 'gap')}</strong><div>${esc(issue.message || '')}</div><div class="muted">${esc(issue.severity || '')}</div></div>`;
+    }
+
+    function renderHandoffPreviewField(label, value) {
+      if (Array.isArray(value)) {
+        const chips = value.map((entry) => `<span class="pill">${esc(entry)}</span>`).join('');
+        return `<div><div class="detail-label">${esc(label)}</div><div class="detail-links">${chips || '<span class="muted">Missing</span>'}</div></div>`;
+      }
+      return `<div><div class="detail-label">${esc(label)}</div><div class="detail-value">${value ? esc(value) : '<span class="muted">Missing</span>'}</div></div>`;
+    }
+
+    function renderHandoffReadinessRow(row) {
+      const preview = row.handoff_preview || {};
+      const blockers = (row.blockers || []).map(renderHandoffIssue).join('');
+      const gaps = [...(row.gaps || []), ...(row.diagnostics || [])].map(renderHandoffIssue).join('');
+      return `<div class="card handoff-row" data-handoff-readiness-row="${escAttr(row.item_id || '')}" data-selectable-item="true" data-item-id="${escAttr(row.item_id || '')}" data-item-product="${escAttr(row.product || '')}" tabindex="-1" aria-selected="false" role="option">` +
+        `<div class="detail-title-row"><strong><a href="#" class="item-link" data-item-id="${escAttr(row.item_id || '')}" data-item-product="${escAttr(row.product || '')}">${esc(row.title || row.item_id || '')}</a></strong>${pill(row.status || 'unknown')}</div>` +
+        `<div class="muted"><code>${esc(row.item_id || '')}</code> / ${esc(row.product || '')} / ${esc(row.type || '')} / ${esc(row.state || '')}</div>` +
+        `<div class="detail-facts">` +
+          `<div class="detail-fact"><span class="detail-label">Safe to hand off</span><div class="detail-value">${row.safe_to_handoff ? 'true' : 'false'}</div></div>` +
+          `<div class="detail-fact"><span class="detail-label">Blockers</span><div class="detail-value">${row.blocker_count || 0}</div></div>` +
+          `<div class="detail-fact"><span class="detail-label">Gaps</span><div class="detail-value">${row.gap_count || 0}</div></div>` +
+          `<div class="detail-fact"><span class="detail-label">Dispatch boundary</span><div class="detail-value">KOA / Ark Console</div></div>` +
+        `</div>` +
+        `<div class="handoff-preview-grid">` +
+          renderHandoffPreviewField('Repo', preview.repo) +
+          renderHandoffPreviewField('Goal', preview.goal) +
+          renderHandoffPreviewField('Non-goals', preview.non_goals) +
+          renderHandoffPreviewField('Validation commands', preview.validation_commands || []) +
+          renderHandoffPreviewField('Expected result artifact', preview.expected_result_artifact) +
+          renderHandoffPreviewField('Reporting format', preview.reporting_format) +
+        `</div>` +
+        `<div><div class="detail-label">Blockers</div>${blockers || '<div class="muted">No blockers</div>'}</div>` +
+        (gaps ? `<div><div class="detail-label">Gaps</div>${gaps}</div>` : '') +
+        `<div class="muted">${esc(row.recommended_human_action || '')}</div>` +
+      `</div>`;
+    }
+
+    async function loadHandoffReadiness(signal, refresh) {
+      const result = await getJson(`/api/review/handoff-readiness?${queryString()}`, {
+        signal,
+        refresh,
+        stage: 'handoff.readiness',
+      });
+      const data = result?.data || {};
+      const rows = data.rows || [];
+      document.getElementById('handoff-summary').textContent =
+        `${rows.length} candidate(s), ${data.safe_candidate_count || 0} safe, ${data.blocked_count || 0} blocked, ${data.gap_count || 0} gap(s)`;
+      document.getElementById('handoff-list').innerHTML = rows.length
+        ? `<div class="handoff-readiness-list" role="listbox" aria-label="Handoff readiness candidates">${rows.map(renderHandoffReadinessRow).join('')}</div>`
+        : `<div class="muted">${esc(data.empty_state || 'No handoff rows.')}</div>`;
+      bindItemLinks('#handoff-list');
+      bindSelectableCards('#handoff-list');
+    }
 
     function renderRoadmapDiagnostic(diagnostic) {
       return `<div class="card gap-card"><strong>${esc(diagnostic.code || 'gap')}</strong><div>${esc(diagnostic.message || '')}</div><div class="muted">${esc(diagnostic.target || '')}</div></div>`;
@@ -1940,6 +2000,7 @@ inline constexpr std::string_view kBackboardAppJsPart5b = R"JS(
     function setActiveTab(tab) {
       state.activeTab = tab;
       const isTree = tab === 'tree';
+      const isHandoff = tab === 'handoff';
       const isRoadmap = tab === 'roadmap';
       const isDecisionRadar = tab === 'decision-radar';
       const isKanban = tab === 'kanban';
@@ -1949,6 +2010,7 @@ inline constexpr std::string_view kBackboardAppJsPart5b = R"JS(
       const isRuns = tab === 'runs';
       const isCommand = tab === 'command';
       document.getElementById('tab-tree').classList.toggle('active', isTree);
+      document.getElementById('tab-handoff').classList.toggle('active', isHandoff);
       document.getElementById('tab-roadmap').classList.toggle('active', isRoadmap);
       document.getElementById('tab-decision-radar').classList.toggle('active', isDecisionRadar);
       document.getElementById('tab-kanban').classList.toggle('active', isKanban);
@@ -1958,6 +2020,7 @@ inline constexpr std::string_view kBackboardAppJsPart5b = R"JS(
       document.getElementById('tab-runs').classList.toggle('active', isRuns);
       document.getElementById('tab-command').classList.toggle('active', isCommand);
       document.getElementById('page-tree').classList.toggle('active', isTree);
+      document.getElementById('page-handoff').classList.toggle('active', isHandoff);
       document.getElementById('page-roadmap').classList.toggle('active', isRoadmap);
       document.getElementById('page-decision-radar').classList.toggle('active', isDecisionRadar);
       document.getElementById('page-kanban').classList.toggle('active', isKanban);
@@ -1977,6 +2040,7 @@ inline constexpr std::string_view kBackboardAppJsPart6 = R"JS(
     function loaderForTab(tab) {
       return {
         review: loadReview,
+        handoff: loadHandoffReadiness,
         tree: loadTree,
         roadmap: loadRoadmap,
         'decision-radar': loadDecisionRadar,
@@ -2488,7 +2552,8 @@ inline const std::string& BackboardAppJs() {
         kBackboardAppJsPart1.size() + kBackboardAppJsPart1b.size() +
         kBackboardAppJsPart2.size() +
         kBackboardAppJsPart3.size() + kBackboardAppJsPart4.size() +
-        kBackboardAppJsPart5.size() + kBackboardAppJsPart5b.size() +
+        kBackboardAppJsPart5.size() + kBackboardAppJsPart5a.size() +
+        kBackboardAppJsPart5b.size() +
         kBackboardAppJsPart6.size() +
         kBackboardAppJsPart7.size());
     text.append(kBackboardAppJsPart1);
@@ -2497,6 +2562,7 @@ inline const std::string& BackboardAppJs() {
     text.append(kBackboardAppJsPart3);
     text.append(kBackboardAppJsPart4);
     text.append(kBackboardAppJsPart5);
+    text.append(kBackboardAppJsPart5a);
     text.append(kBackboardAppJsPart5b);
     text.append(kBackboardAppJsPart6);
     text.append(kBackboardAppJsPart7);

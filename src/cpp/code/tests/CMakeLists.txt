@@ -90,6 +90,7 @@ if(TARGET kano::kano_backlog_webview_core)
     target_link_libraries(webview_service_smoke_test PRIVATE
         kano::kano_backlog_webview_core
         kano::backlog_core
+        kano::backlog_ops
     )
     set(KB_TEST_WEBVIEW_SERVICE "[bdd][feature:cli-workflow][scenario:KOB-BDD-WEBVIEW-001] Backlog webview service exposes reviewable project data")
     add_test(NAME "${KB_TEST_WEBVIEW_SERVICE}" COMMAND webview_service_smoke_test)

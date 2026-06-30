@@ -1,3 +1,4 @@
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -10,6 +11,7 @@
 
 #include "KanoBacklog.BacklogWebviewService.hpp"
 #include "kano/backlog_core/process/noninteractive_errors.hpp"
+#include "kano/backlog_ops/index/backlog_index.hpp"
 
 namespace {
 
@@ -120,6 +122,16 @@ std::optional<Json::Value> find_item(const Json::Value& items,
         }
     }
     return std::nullopt;
+}
+
+bool has_index_event(const Json::Value& diagnostics,
+                     const std::string& code) {
+    for (const auto& event : diagnostics["events"]) {
+        if (event["code"].asString() == code) {
+            return true;
+        }
+    }
+    return false;
 }
 
 std::optional<Json::Value> find_finding(const Json::Value& findings,
@@ -1000,6 +1012,11 @@ int main() {
         write_text(root / "topics" / "native-migration" / "brief.md",
                    "# Native Migration\n\nTopic brief.");
 
+        const auto alphaIndexPath = products / "product-alpha" / ".cache" / "index" / "backlog.db";
+        auto alphaIndexBuild = kano::backlog_ops::build_index(products / "product-alpha", alphaIndexPath, true);
+        expect(alphaIndexBuild.items_indexed >= 1,
+               "alpha product index should include item rows for Backboard exact-detail smoke");
+
         webview::BacklogWebviewService service(products);
 
         auto productList = service.ListProducts();
@@ -1439,6 +1456,39 @@ int main() {
                "detail lookup should include content");
         expect(detail["item"]["gate_status"]["ready"]["state"].asString() == "passed",
                "item detail should include gate_status");
+        auto indexedDetail = service.GetItem("product-alpha", "PRA-TSK-0001");
+        expect(!indexedDetail.isMember("error"), "indexed exact product detail lookup should find task");
+        expect(indexedDetail["index_diagnostics"]["schema"].asString() == "kob.backboard.index_diagnostics.v1",
+               "exact detail should expose index diagnostics schema");
+        expect(indexedDetail["index_diagnostics"]["status"].asString() == "warm_index_hit",
+               "fresh index should support warm exact-detail lookup");
+        expect(indexedDetail["index_diagnostics"]["used_index"].asBool(),
+               "fresh exact-detail lookup should use indexed metadata");
+        expect(!indexedDetail["index_diagnostics"]["fallback_used"].asBool(),
+               "warm exact-detail lookup should not fall back to product refresh");
+        expect(has_index_event(indexedDetail["index_diagnostics"], "warm_index_hit"),
+               "exact-detail diagnostics should distinguish warm index hits");
+        const auto indexedDetailSerialized = json_to_string(indexedDetail);
+        expect(indexedDetailSerialized.find(products.generic_string()) == std::string::npos,
+               "index diagnostics must not expose absolute filesystem paths");
+        std::filesystem::last_write_time(
+            alphaIndexPath,
+            std::filesystem::file_time_type::clock::now() - std::chrono::hours(24));
+        auto staleIndexedDetail = service.GetItem("product-alpha", "PRA-TSK-0001");
+        expect(!staleIndexedDetail.isMember("error"),
+               "stale indexed exact detail should fall back and still find task");
+        expect(staleIndexedDetail["index_diagnostics"]["status"].asString() == "per_product_refresh",
+               "stale index should fall back to bounded product refresh");
+        expect(has_index_event(staleIndexedDetail["index_diagnostics"], "stale_index_fallback"),
+               "exact-detail diagnostics should distinguish stale index fallback");
+        expect(has_index_event(staleIndexedDetail["index_diagnostics"], "per_product_refresh"),
+               "exact-detail diagnostics should report per-product refresh fallback");
+        auto coldIndexDetail = service.GetItem("product-beta", "PRB-BUG-0001");
+        expect(!coldIndexDetail.isMember("error"), "cold exact detail should fall back and still find beta bug");
+        expect(has_index_event(coldIndexDetail["index_diagnostics"], "cold_index_build"),
+               "exact-detail diagnostics should distinguish missing cold index state");
+        expect(has_index_event(coldIndexDetail["index_diagnostics"], "per_product_refresh"),
+               "cold exact detail should report product refresh fallback");
         auto globalRefresh = service.Refresh("all");
         expect(globalRefresh["refreshed"].asString() == "all",
                "global refresh should invalidate all product caches");

@@ -2,6 +2,7 @@
 
 #include "kano/backlog_core/models/models.hpp"
 #include "kano/backlog_core/state/state_machine.hpp"
+#include "kano/backlog_ops/index/backlog_index.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -1162,6 +1163,58 @@ Json::Value MakeArray(const std::vector<std::string>& values) {
     out.append(value);
   }
   return out;
+}
+
+Json::Value MakeIndexEvent(const std::string& code,
+                           const std::string& message) {
+  Json::Value event(Json::objectValue);
+  event["code"] = code;
+  event["message"] = message;
+  return event;
+}
+
+Json::Value MakeExactDetailIndexDiagnostics(const std::string& product,
+                                            const std::string& itemId) {
+  Json::Value diagnostics(Json::objectValue);
+  diagnostics["schema"] = "kob.backboard.index_diagnostics.v1";
+  diagnostics["read_model"] = "exact_item_detail";
+  diagnostics["product"] = product;
+  diagnostics["item_id"] = itemId;
+  diagnostics["used_index"] = false;
+  diagnostics["fallback_used"] = false;
+  diagnostics["status"] = "not_attempted";
+  diagnostics["index_ref"] = "product-cache/index/backlog.db";
+  diagnostics["events"] = Json::arrayValue;
+  return diagnostics;
+}
+
+void AppendIndexEvent(Json::Value& diagnostics,
+                      const std::string& code,
+                      const std::string& message) {
+  diagnostics["events"].append(MakeIndexEvent(code, message));
+}
+
+bool PathIsInsideRoot(const std::filesystem::path& path,
+                      const std::filesystem::path& root) {
+  std::error_code ec;
+  const auto normalizedPath = std::filesystem::weakly_canonical(path, ec);
+  if (ec) {
+    return false;
+  }
+  const auto normalizedRoot = std::filesystem::weakly_canonical(root, ec);
+  if (ec) {
+    return false;
+  }
+  const auto relative = std::filesystem::relative(normalizedPath, normalizedRoot, ec);
+  if (ec || relative.empty() || relative.is_absolute()) {
+    return false;
+  }
+  for (const auto& component : relative) {
+    if (component == "..") {
+      return false;
+    }
+  }
+  return true;
 }
 
 Json::Value MakeLogicalRef(const std::string& product,
@@ -4836,10 +4889,77 @@ Json::Value BacklogWebviewService::GetItem(const std::string& product,
     return response;
   }
 
+  auto indexDiagnostics = MakeExactDetailIndexDiagnostics(product, id);
+  const auto productRoot = ProductRoot(product);
+  const auto indexPath = productRoot / ".cache" / "index" / "backlog.db";
+  if (forceRefresh) {
+    AppendIndexEvent(indexDiagnostics, "per_product_refresh",
+                     "Force refresh requested; using the product markdown cache path.");
+  } else if (!std::filesystem::exists(indexPath)) {
+    indexDiagnostics["status"] = "cold_index_build";
+    AppendIndexEvent(indexDiagnostics, "cold_index_build",
+                     "Product index is unavailable; a future index build can enable the exact-detail fast path.");
+  } else {
+    const auto latestSourceMtime = ScanLatestMtime(productRoot);
+    const auto indexMtime = std::filesystem::last_write_time(indexPath);
+    if (latestSourceMtime != std::filesystem::file_time_type::min() &&
+        indexMtime < latestSourceMtime) {
+      indexDiagnostics["status"] = "stale_index_fallback";
+      AppendIndexEvent(indexDiagnostics, "stale_index_fallback",
+                       "Product index is older than source markdown; falling back to product refresh.");
+    } else {
+      try {
+        kano::backlog_ops::BacklogIndex index(indexPath);
+        const auto indexedPath = index.get_path_by_id(id);
+        if (!indexedPath) {
+          indexDiagnostics["status"] = "warm_index_miss";
+          AppendIndexEvent(indexDiagnostics, "warm_index_miss",
+                           "Warm product index did not contain the requested item id.");
+        } else if (!PathIsInsideRoot(*indexedPath, productRoot)) {
+          indexDiagnostics["status"] = "stale_index_fallback";
+          AppendIndexEvent(indexDiagnostics, "stale_index_fallback",
+                           "Indexed item path is outside the active product root; falling back to product refresh.");
+        } else if (!std::filesystem::exists(*indexedPath)) {
+          indexDiagnostics["status"] = "stale_index_fallback";
+          AppendIndexEvent(indexDiagnostics, "stale_index_fallback",
+                           "Indexed item path no longer exists; falling back to product refresh.");
+        } else if (!IsMarkdownItemFile(*indexedPath) || ShouldSkipPath(*indexedPath)) {
+          indexDiagnostics["status"] = "stale_index_fallback";
+          AppendIndexEvent(indexDiagnostics, "stale_index_fallback",
+                           "Indexed item path is not an active item markdown file; falling back to product refresh.");
+        } else {
+          auto item = ParseItem(*indexedPath, productRoot);
+          item.product = product;
+          if (!item.valid || item.id != id) {
+            indexDiagnostics["status"] = "stale_index_fallback";
+            AppendIndexEvent(indexDiagnostics, "stale_index_fallback",
+                             "Indexed item file no longer matches the requested id; falling back to product refresh.");
+          } else {
+            Json::Value indexedResponse(Json::objectValue);
+            indexDiagnostics["status"] = "warm_index_hit";
+            indexDiagnostics["used_index"] = true;
+            AppendIndexEvent(indexDiagnostics, "warm_index_hit",
+                             "Exact item detail resolved through the product index without product cache refresh.");
+            indexedResponse["item"] = ItemToJson(item, true);
+            indexedResponse["duplicates"] = Json::arrayValue;
+            indexedResponse["duplicates"].append(ItemToJson(item));
+            indexedResponse["index_diagnostics"] = indexDiagnostics;
+            return indexedResponse;
+          }
+        }
+      } catch (const std::exception& error) {
+        indexDiagnostics["status"] = "stale_index_fallback";
+        AppendIndexEvent(indexDiagnostics, "stale_index_fallback",
+                         std::string("Product index could not be read; falling back to product refresh: ") + error.what());
+      }
+    }
+  }
+
   LoadProduct(product, forceRefresh);
   const auto cacheIt = cacheByProduct.find(product);
   if (cacheIt == cacheByProduct.end()) {
     response["error"] = "Product not found";
+    response["index_diagnostics"] = indexDiagnostics;
     return response;
   }
 
@@ -4847,6 +4967,7 @@ Json::Value BacklogWebviewService::GetItem(const std::string& product,
   const auto primaryIt = productCache.primaryById.find(id);
   if (primaryIt == productCache.primaryById.end()) {
     response["error"] = "Item not found";
+    response["index_diagnostics"] = indexDiagnostics;
     return response;
   }
 
@@ -4858,6 +4979,13 @@ Json::Value BacklogWebviewService::GetItem(const std::string& product,
       response["duplicates"].append(ItemToJson(productCache.allItems[index]));
     }
   }
+  if (!indexDiagnostics["used_index"].asBool()) {
+    indexDiagnostics["fallback_used"] = true;
+    indexDiagnostics["status"] = "per_product_refresh";
+    AppendIndexEvent(indexDiagnostics, "per_product_refresh",
+                     "Exact item detail used the bounded product markdown cache fallback.");
+  }
+  response["index_diagnostics"] = indexDiagnostics;
   return response;
 }
 

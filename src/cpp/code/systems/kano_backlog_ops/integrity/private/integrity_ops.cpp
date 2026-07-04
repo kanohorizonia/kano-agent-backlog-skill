@@ -108,6 +108,7 @@ std::string item_type_directory(ItemType type) {
         case ItemType::Feature: return "feature";
         case ItemType::UserStory: return "userstory";
         case ItemType::Task: return "task";
+        case ItemType::SubTask: return "subtask";
         case ItemType::Bug: return "bug";
         case ItemType::Issue: return "issue";
     }

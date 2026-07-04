@@ -63,8 +63,9 @@ int type_rank(ItemType type) {
         case ItemType::Feature: return 2;
         case ItemType::UserStory: return 3;
         case ItemType::Task: return 4;
-        case ItemType::Bug: return 5;
-        case ItemType::Issue: return 6;
+        case ItemType::SubTask: return 5;
+        case ItemType::Bug: return 6;
+        case ItemType::Issue: return 7;
     }
     return 99;
 }

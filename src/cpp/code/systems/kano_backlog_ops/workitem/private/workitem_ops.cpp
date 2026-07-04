@@ -546,6 +546,7 @@ std::string intent_stack_role_for_type(ItemType type) {
         case ItemType::Feature: return "feature";
         case ItemType::UserStory: return "story";
         case ItemType::Task: return "task";
+        case ItemType::SubTask: return "subtask";
         case ItemType::Bug: return "bug";
         case ItemType::Issue: return "issue";
     }
@@ -557,7 +558,7 @@ bool is_parent_work_order_type(ItemType type) {
 }
 
 bool is_implementation_work_order_type(ItemType type) {
-    return type == ItemType::Task || type == ItemType::Bug || type == ItemType::Issue || type == ItemType::UserStory;
+    return type == ItemType::Task || type == ItemType::SubTask || type == ItemType::Bug || type == ItemType::Issue || type == ItemType::UserStory;
 }
 
 bool is_allowed_parent_work_order_intent(const std::string& intent) {
@@ -814,6 +815,100 @@ BacklogItem resolve_parent_item(
     );
 }
 
+bool is_empty_parent_ref(const std::string& parent_ref) {
+    const auto normalized = lower_copy(trim_text(parent_ref));
+    return normalized.empty() || normalized == "none" || normalized == "null" || normalized == "~";
+}
+
+std::vector<ItemType> allowed_parent_types_for(ItemType child_type) {
+    switch (child_type) {
+        case ItemType::Initiative:
+            return {};
+        case ItemType::Epic:
+            return {ItemType::Initiative};
+        case ItemType::Feature:
+            return {ItemType::Initiative, ItemType::Epic};
+        case ItemType::UserStory:
+            return {ItemType::Feature, ItemType::Epic};
+        case ItemType::Task:
+            return {ItemType::UserStory, ItemType::Feature, ItemType::Epic};
+        case ItemType::SubTask:
+            return {ItemType::Task};
+        case ItemType::Bug:
+        case ItemType::Issue:
+            return {ItemType::Task, ItemType::Feature, ItemType::Epic, ItemType::Initiative};
+    }
+    return {};
+}
+
+std::string allowed_parent_types_text(ItemType child_type) {
+    const auto allowed = allowed_parent_types_for(child_type);
+    if (allowed.empty()) {
+        return "no structural parent";
+    }
+
+    std::vector<std::string> names;
+    names.reserve(allowed.size());
+    for (const auto type : allowed) {
+        names.push_back(to_string(type));
+    }
+    return join_values(names, ", ");
+}
+
+bool is_allowed_parent_type(ItemType child_type, ItemType parent_type) {
+    const auto allowed = allowed_parent_types_for(child_type);
+    return std::find(allowed.begin(), allowed.end(), parent_type) != allowed.end();
+}
+
+bool same_item_identity(const BacklogItem& left, const BacklogItem& right) {
+    if (!left.id.empty() && left.id == right.id) {
+        return true;
+    }
+    return !left.uid.empty() && left.uid == right.uid;
+}
+
+void validate_parent_relationship(
+    const RefResolver& resolver,
+    const BacklogItem& item,
+    const BacklogItem& parent_item
+) {
+    if (!is_allowed_parent_type(item.type, parent_item.type)) {
+        throw std::runtime_error(
+            "hierarchy.parent_type_invalid: " + to_string(item.type) +
+            " parent must be " + allowed_parent_types_text(item.type) +
+            "; got " + to_string(parent_item.type) + " (" + parent_item.id + ")");
+    }
+
+    std::set<std::string> seen;
+    BacklogItem current = parent_item;
+    while (true) {
+        if (same_item_identity(current, item)) {
+            throw std::runtime_error(
+                "hierarchy.parent_cycle: proposed parent " + parent_item.id +
+                " is the item itself or a descendant of " + item.id);
+        }
+
+        const std::string current_identity = !current.uid.empty() ? current.uid : current.id;
+        if (!seen.insert(current_identity).second) {
+            throw std::runtime_error(
+                "hierarchy.parent_cycle: proposed parent chain already contains a cycle at " + current.id);
+        }
+
+        if (!current.parent || is_empty_parent_ref(*current.parent)) {
+            return;
+        }
+
+        try {
+            current = resolver.resolve(*current.parent);
+        } catch (const std::exception& ex) {
+            throw std::runtime_error(
+                "hierarchy.parent_cycle_unverified: cannot verify proposed parent chain at " +
+                current.id + " parent " + parent_ref_for_diagnostic(*current.parent) +
+                " (" + ex.what() + ")");
+        }
+    }
+}
+
 } // namespace
 
 CreateItemResult WorkitemOps::create_item(
@@ -847,6 +942,7 @@ CreateItemResult WorkitemOps::create_item(
         case ItemType::Feature: type_code = "FTR"; break;
         case ItemType::UserStory: type_code = "USR"; break;
         case ItemType::Task: type_code = "TSK"; break;
+        case ItemType::SubTask: type_code = "SUBTSK"; break;
         case ItemType::Bug: type_code = "BUG"; break;
         case ItemType::Issue: type_code = "ISS"; break;
     }
@@ -1126,11 +1222,12 @@ void WorkitemOps::remap_parent(
     }
 
     // 2. Resolve parent
-    if (new_parent_ref == "none" || new_parent_ref.empty() || new_parent_ref == "null") {
+    if (is_empty_parent_ref(new_parent_ref)) {
         item.parent = std::nullopt;
     } else {
         diagnostics::ScopedMutationSpan span("workitem.remap_parent.resolve_parent", new_parent_ref);
         BacklogItem parent_item = resolver.resolve(new_parent_ref);
+        validate_parent_relationship(resolver, item, parent_item);
         item.parent = parent_item.id;
     }
 

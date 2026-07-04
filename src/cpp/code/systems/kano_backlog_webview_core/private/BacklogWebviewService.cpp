@@ -766,6 +766,10 @@ std::string NormalizeItemTypeName(const std::string& value) {
     return "UserStory";
   }
   if (lowered == "task") return "Task";
+  if (lowered == "subtask" || lowered == "sub-task" ||
+      lowered == "sub_task") {
+    return "SubTask";
+  }
   if (lowered == "bug") return "Bug";
   if (lowered == "issue") return "Issue";
   return trimmed;
@@ -946,7 +950,7 @@ const std::vector<SavedViewDefinition>& SavedViews() {
   static const std::vector<SavedViewDefinition> views = {
       {"ready-frontier", "Ready Frontier",
        "Ready items waiting for a human to approve, dispatch, or defer.",
-       "state:Ready type:Initiative type:Feature type:UserStory type:Task type:Bug"},
+       "state:Ready type:Initiative type:Feature type:UserStory type:Task type:SubTask type:Bug"},
       {"needs-review", "Needs Review",
        "Items waiting for a human to review delivered results.",
        "state:Review"},
@@ -1251,8 +1255,8 @@ std::optional<std::string> ProductMapNodeTypeForItemType(
   if (type == "Epic") return "epic";
   if (type == "Feature") return "feature";
   if (type == "Topic") return "topic";
-  if (type == "UserStory" || type == "Task" || type == "Bug" ||
-      type == "Issue") {
+  if (type == "UserStory" || type == "Task" || type == "SubTask" ||
+      type == "Bug" || type == "Issue") {
     return "work_order";
   }
   if (type == "ADR") return "adr";
@@ -3031,19 +3035,19 @@ const std::vector<CapabilityRouteRule>& CapabilityRouteRules() {
        "pixi run build && pixi run quick-test",
        "native_cpp_signal",
        "Native C++ or Drogon work should route to the Kano C++ skill path.",
-       {"Feature", "UserStory", "Task", "Bug", "Issue"},
+       {"Feature", "UserStory", "Task", "SubTask", "Bug", "Issue"},
        {"c++", "cpp", "native", "cmake", "drogon", "msvc", "webview", "pixi"}},
       {"docs", "kano-docs", "kano-agent-backlog-skill",
        "review docs and update markdown references",
        "documentation_signal",
        "Documentation-heavy work should route to the Kano backlog/docs authoring path.",
-       {"Feature", "UserStory", "Task", "Bug", "Issue"},
+       {"Feature", "UserStory", "Task", "SubTask", "Bug", "Issue"},
        {"doc", "docs", "documentation", "readme", "reference", "design note"}},
       {"git", "kano-git", "kano-git-master-skill",
        "GIT_MASTER=1 git status",
        "git_workflow_signal",
        "Git workflow work should route through the Git master path.",
-       {"Feature", "UserStory", "Task", "Bug", "Issue"},
+       {"Feature", "UserStory", "Task", "SubTask", "Bug", "Issue"},
        {"git", "commit", "push", "branch", "worktree", "merge"}},
   };
   return rules;
@@ -3125,7 +3129,7 @@ std::optional<CapabilityRouteRule> CapabilityRuleForToken(const std::string& tok
 
 bool IsCommonRoutableType(const std::string& type) {
   static const std::vector<std::string> types = {
-      "Initiative", "Epic", "Feature", "UserStory", "Task", "Bug", "Issue"};
+      "Initiative", "Epic", "Feature", "UserStory", "Task", "SubTask", "Bug", "Issue"};
   return std::find(types.begin(), types.end(), type) != types.end();
 }
 
@@ -4209,6 +4213,9 @@ std::string BacklogWebviewService::NormalizeTypeFromPath(
   if (parent == "task") {
     return "Task";
   }
+  if (parent == "subtask") {
+    return "SubTask";
+  }
   if (parent == "bug") {
     return "Bug";
   }
@@ -5205,7 +5212,7 @@ Json::Value BacklogWebviewService::BuildTree(const ItemQueryOptions& options) {
   for (const auto& item : itemsResponse["items"]) {
     const auto type = item["type"].asString();
     if (type != "Initiative" && type != "Epic" && type != "Feature" && type != "UserStory" &&
-        type != "Task" && type != "Bug" && type != "Issue" && type != "Theme" &&
+        type != "Task" && type != "SubTask" && type != "Bug" && type != "Issue" && type != "Theme" &&
         type != "Topic") {
       continue;
     }
@@ -5234,7 +5241,7 @@ Json::Value BacklogWebviewService::BuildTree(const ItemQueryOptions& options) {
   for (const auto& item : itemsResponse["items"]) {
     const auto type = item["type"].asString();
     if (type != "Initiative" && type != "Epic" && type != "Feature" && type != "UserStory" &&
-        type != "Task" && type != "Bug" && type != "Issue" && type != "Theme" &&
+        type != "Task" && type != "SubTask" && type != "Bug" && type != "Issue" && type != "Theme" &&
         type != "Topic") {
       continue;
     }
@@ -5278,7 +5285,7 @@ Json::Value BacklogWebviewService::BuildTree(const ItemQueryOptions& options) {
   for (const auto& item : itemsResponse["items"]) {
     const auto type = item["type"].asString();
     if (type != "Initiative" && type != "Epic" && type != "Feature" && type != "UserStory" &&
-        type != "Task" && type != "Bug" && type != "Issue" && type != "Theme" &&
+        type != "Task" && type != "SubTask" && type != "Bug" && type != "Issue" && type != "Theme" &&
         type != "Topic") {
       continue;
     }
@@ -5518,7 +5525,9 @@ Json::Value BacklogWebviewService::PreviewCommand(const std::string& phrase,
   if (ContentContainsAny(lowered, {"done", "closed", "complete"})) {
     kobql += "state:Done ";
   }
-  if (ContentContainsAny(lowered, {"task", "tasks"})) {
+  if (ContentContainsAny(lowered, {"subtask", "subtasks", "sub-task", "sub-tasks"})) {
+    kobql += "type:SubTask ";
+  } else if (ContentContainsAny(lowered, {"task", "tasks"})) {
     kobql += "type:Task ";
   }
   if (ContentContainsAny(lowered, {"bug", "bugs"})) {
@@ -8309,7 +8318,7 @@ std::string BacklogWebviewService::RenderFiltersPartial(
                                            "Blocked", "Review", "Done",
                                            "Dropped"};
   const std::vector<std::string> types = {"Theme", "Initiative", "Epic", "Feature",
-                                          "UserStory", "Task", "Bug",
+                                          "UserStory", "Task", "SubTask", "Bug",
                                           "Issue", "ADR", "Topic",
                                           "Workset"};
   const bool allProducts =

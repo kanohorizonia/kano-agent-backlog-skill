@@ -117,6 +117,7 @@ std::optional<std::pair<ItemType, int>> parse_display_id_type_and_number(const s
     else if (type_code == "FTR") type = ItemType::Feature;
     else if (type_code == "USR") type = ItemType::UserStory;
     else if (type_code == "TSK") type = ItemType::Task;
+    else if (type_code == "SUBTSK") type = ItemType::SubTask;
     else if (type_code == "BUG") type = ItemType::Bug;
     else if (type_code == "ISS") type = ItemType::Issue;
 
@@ -133,6 +134,7 @@ std::string item_type_directory(ItemType type) {
         case ItemType::Feature: return "feature";
         case ItemType::UserStory: return "userstory";
         case ItemType::Task: return "task";
+        case ItemType::SubTask: return "subtask";
         case ItemType::Bug: return "bug";
         case ItemType::Issue: return "issue";
     }
@@ -436,6 +438,7 @@ BacklogItem CanonicalStore::create(const std::string& prefix, ItemType type, con
         case ItemType::Feature: abbrev = "FTR"; type_dir = "feature"; break;
         case ItemType::UserStory: abbrev = "USR"; type_dir = "userstory"; break;
         case ItemType::Task: abbrev = "TSK"; type_dir = "task"; break;
+        case ItemType::SubTask: abbrev = "SUBTSK"; type_dir = "subtask"; break;
         case ItemType::Bug: abbrev = "BUG"; type_dir = "bug"; break;
         case ItemType::Issue: abbrev = "ISS"; type_dir = "issue"; break;
     }
@@ -495,6 +498,7 @@ std::vector<std::filesystem::path> CanonicalStore::list_items(std::optional<Item
             case ItemType::Feature: type_dir = "feature"; break;
             case ItemType::UserStory: type_dir = "userstory"; break;
             case ItemType::Task: type_dir = "task"; break;
+            case ItemType::SubTask: type_dir = "subtask"; break;
             case ItemType::Bug: type_dir = "bug"; break;
             case ItemType::Issue: type_dir = "issue"; break;
         }

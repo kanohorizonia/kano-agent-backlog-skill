@@ -15,6 +15,7 @@ enum class ItemType {
     Feature,
     UserStory,
     Task,
+    SubTask,
     Bug,
     Issue
 };

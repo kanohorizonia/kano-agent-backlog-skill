@@ -73,7 +73,7 @@ std::optional<DisplayIdRef> RefParser::parse_display_id(const std::string& ref) 
     const std::string type_abbrev = product_and_type.substr(type_dash + 1);
     const bool type_ok =
         type_abbrev == "INIT" || type_abbrev == "EPIC" || type_abbrev == "FTR" || type_abbrev == "USR" ||
-        type_abbrev == "TSK" || type_abbrev == "BUG" || type_abbrev == "ISS";
+        type_abbrev == "TSK" || type_abbrev == "SUBTSK" || type_abbrev == "BUG" || type_abbrev == "ISS";
     if (!type_ok) {
         return std::nullopt;
     }

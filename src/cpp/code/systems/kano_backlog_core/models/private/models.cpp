@@ -33,6 +33,7 @@ std::string to_string(ItemType type) {
         case ItemType::Feature: return "Feature";
         case ItemType::UserStory: return "UserStory";
         case ItemType::Task: return "Task";
+        case ItemType::SubTask: return "SubTask";
         case ItemType::Bug: return "Bug";
         case ItemType::Issue: return "Issue";
         default: return "Unknown";
@@ -46,6 +47,7 @@ std::optional<ItemType> parse_item_type(const std::string& str) {
     if (normalized == "feature") return ItemType::Feature;
     if (normalized == "userstory") return ItemType::UserStory;
     if (normalized == "task") return ItemType::Task;
+    if (normalized == "subtask") return ItemType::SubTask;
     if (normalized == "bug") return ItemType::Bug;
     if (normalized == "issue") return ItemType::Issue;
     return std::nullopt;

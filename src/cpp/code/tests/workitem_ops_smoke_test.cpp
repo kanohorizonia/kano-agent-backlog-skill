@@ -9,6 +9,7 @@
 #include "kano/backlog_core/frontmatter/canonical_store.hpp"
 #include "kano/backlog_core/models/models.hpp"
 #include "kano/backlog_core/process/noninteractive_errors.hpp"
+#include "kano/backlog_core/refs/ref_resolver.hpp"
 #include "kano/backlog_core/validation/validator.hpp"
 #include "kano/backlog_ops/index/backlog_index.hpp"
 #include "kano/backlog_ops/view/view_ops.hpp"
@@ -163,6 +164,7 @@ int main() {
     using kano::backlog_core::ItemState;
     using kano::backlog_core::ItemType;
     using kano::backlog_core::CanonicalStore;
+    using kano::backlog_core::RefResolver;
     using kano::backlog_ops::BacklogIndex;
     using kano::backlog_ops::WorkitemOps;
 
@@ -200,6 +202,75 @@ int main() {
 
             auto queried = index.query_items(ItemType::Task, std::nullopt);
             expect(!queried.empty(), "task item should appear in index query");
+
+            CanonicalStore store(root);
+
+            auto subtask_created = create_item_with_admission(index, root, "TST", ItemType::SubTask, "Native subtask smoke", "opencode", created.id);
+            expect(subtask_created.id.rfind("TST-SUBTSK-", 0) == 0, "created subtask should use SUBTSK prefix");
+            expect(
+                subtask_created.path.parent_path().parent_path().filename().string() == "subtask",
+                "created subtask should be stored under items/subtask");
+            auto subtask_exact_path = store.find_item_path_by_id(subtask_created.id);
+            expect(subtask_exact_path.has_value(), "subtask exact id lookup should resolve deterministic bucket path");
+            expect(subtask_exact_path->filename() == subtask_created.path.filename(), "subtask exact lookup should return created path");
+            auto subtask_read = store.read(subtask_created.path);
+            expect(subtask_read.type == ItemType::SubTask, "created subtask should round-trip with SubTask type");
+            expect(subtask_read.parent && *subtask_read.parent == created.id, "created subtask should preserve Task parent ref");
+            auto subtask_queried = index.query_items(ItemType::SubTask, std::nullopt);
+            expect(subtask_queried.size() == 1, "subtask item should appear in index query");
+            expect(subtask_queried.front().id == subtask_created.id, "subtask index query should return created subtask");
+            RefResolver subtask_resolver(store);
+            auto resolved_subtask = subtask_resolver.resolve(subtask_created.id);
+            expect(resolved_subtask.id == subtask_created.id, "SUBTSK ref should resolve through RefResolver");
+            auto resolved_many = subtask_resolver.resolve_many({created.id, subtask_created.id});
+            expect(resolved_many.size() == 2, "resolve_many should include SubTask refs");
+
+            auto task_parent_for_subtask = store.read(created.path);
+            set_ready_fields(task_parent_for_subtask);
+            task_parent_for_subtask.state = ItemState::Ready;
+            store.write(task_parent_for_subtask);
+            index.index_item(task_parent_for_subtask);
+            set_ready_fields(subtask_read);
+            subtask_read.state = ItemState::Ready;
+            store.write(subtask_read);
+            index.index_item(subtask_read);
+            auto subtask_admission = WorkitemOps::evaluate_work_order_admission(root, subtask_created.id, std::string("implementation"));
+            expect(subtask_admission.admitted, "subtask implementation admission should be allowed");
+            expect(subtask_admission.reason_code == "item_intent_allowed", "subtask admission should use executable item reason code");
+            auto subtask_update = WorkitemOps::update_state(index, root, subtask_created.id, ItemState::InProgress, "opencode");
+            expect(subtask_update.worklog_appended, "subtask state update should append worklog");
+            expect(subtask_update.parent_synced, "Task parent should sync when SubTask starts execution");
+            expect(!diagnostics_contain(subtask_update, "same-level"), "Task->SubTask should not emit same-level hierarchy warnings");
+            auto subtask_after_update = store.read(subtask_created.path);
+            expect(subtask_after_update.state == ItemState::InProgress, "subtask should transition to InProgress");
+            auto task_parent_after_subtask = store.read(created.path);
+            expect(task_parent_after_subtask.state == ItemState::InProgress, "Task parent should transition to InProgress for active SubTask child");
+            kano::backlog_ops::ViewOps::refresh_dashboards(root, "opencode");
+            expect(read_text(root / "views" / "Dashboard_PlainMarkdown_Active.md").find(subtask_created.id) != std::string::npos,
+                "plain Markdown dashboard should include active subtask");
+
+            auto invalid_parent_feature = create_item_with_admission(
+                index,
+                root,
+                "TST",
+                ItemType::Feature,
+                "Invalid subtask parent feature",
+                "opencode");
+            expect_throws_contains(
+                [&]() {
+                    WorkitemOps::remap_parent(index, root, subtask_created.id, invalid_parent_feature.id, "opencode");
+                },
+                "hierarchy.parent_type_invalid",
+                "subtask reparent should reject non-Task parents");
+            expect_throws_contains(
+                [&]() {
+                    WorkitemOps::remap_parent(index, root, subtask_created.id, subtask_created.id, "opencode");
+                },
+                "hierarchy.parent_type_invalid",
+                "subtask reparent should reject self parent before mutation");
+            auto subtask_after_rejected_parent = store.read(subtask_created.path);
+            expect(subtask_after_rejected_parent.parent && *subtask_after_rejected_parent.parent == created.id,
+                "rejected subtask reparent should preserve original Task parent");
 
             expect_throws_contains(
                 [&]() {
@@ -248,7 +319,6 @@ int main() {
             std::filesystem::remove_all(symlink_root);
             std::filesystem::remove_all(symlink_escape);
 
-            CanonicalStore store(root);
             auto exact_path = store.find_item_path_by_id(created.id);
             expect(exact_path.has_value(), "exact id lookup should resolve deterministic bucket path");
             expect(exact_path->filename() == created.path.filename(), "exact id lookup should return created item path");

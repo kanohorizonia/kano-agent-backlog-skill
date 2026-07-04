@@ -10,6 +10,7 @@
 #include "kano/backlog_core/frontmatter/frontmatter.hpp"
 #include "kano/backlog_core/models/models.hpp"
 #include "kano/backlog_core/process/noninteractive_errors.hpp"
+#include "kano/backlog_core/refs/ref_parser.hpp"
 #include "kano/backlog_core/state/state_machine.hpp"
 #include "kano/backlog_core/validation/validator.hpp"
 
@@ -43,6 +44,7 @@ int main() {
     using kano::backlog_core::ItemState;
     using kano::backlog_core::ItemType;
     using kano::backlog_core::ProjectConfig;
+    using kano::backlog_core::RefParser;
     using kano::backlog_core::StateAction;
     using kano::backlog_core::StateMachine;
     using kano::backlog_core::Validator;
@@ -175,6 +177,36 @@ int main() {
         expect(to_string(ItemType::Issue) == "Issue", "issue type should stringify");
         expect(parse_item_type("issue").value_or(ItemType::Task) == ItemType::Issue, "issue type should parse");
         expect(parse_item_type("Issue").value_or(ItemType::Task) == ItemType::Issue, "Issue type should parse case-insensitively");
+
+        BacklogItem subtask = item;
+        subtask.id = "GT-SUBTSK-0001";
+        subtask.uid = "019cdf6a-0000-7000-8000-000000000004";
+        subtask.type = ItemType::SubTask;
+        subtask.title = "Native SubTask smoke";
+        subtask.context = "Need first-class SubTask coverage.";
+        subtask.goal = "Validate SubTask parsing, schema, refs, and Ready gate behavior.";
+        subtask.approach = "Exercise the native C++ model and validator paths.";
+        subtask.acceptance_criteria = "SubTask uses SUBTSK and task-style Ready fields.";
+        subtask.risks = "Low.";
+        auto subtask_schema_errors = Validator::validate_schema(subtask);
+        expect(subtask_schema_errors.empty(), "subtask item should satisfy schema validation");
+        auto [subtask_ready_ok, subtask_ready_gaps] = Validator::is_ready(subtask);
+        expect(subtask_ready_ok, "subtask item should satisfy task-style ready gate");
+        expect(subtask_ready_gaps.empty(), "subtask item should not have ready gate gaps");
+        expect(to_string(ItemType::SubTask) == "SubTask", "subtask type should stringify");
+        expect(parse_item_type("subtask").value_or(ItemType::Task) == ItemType::SubTask, "subtask type should parse");
+        expect(parse_item_type("SubTask").value_or(ItemType::Task) == ItemType::SubTask, "SubTask type should parse case-insensitively");
+        expect(parse_item_type("sub-task").value_or(ItemType::Task) == ItemType::SubTask, "sub-task alias should parse");
+        expect(parse_item_type("sub_task").value_or(ItemType::Task) == ItemType::SubTask, "sub_task alias should parse");
+        auto subtask_ref = RefParser::parse_display_id("GT-SUBTSK-0001");
+        expect(subtask_ref.has_value(), "SUBTSK display id should parse");
+        expect(subtask_ref->type_abbrev == "SUBTSK", "SUBTSK display id should preserve type abbreviation");
+
+        BacklogItem incomplete_subtask = subtask;
+        incomplete_subtask.approach.reset();
+        auto [incomplete_subtask_ready, incomplete_subtask_gaps] = Validator::is_ready(incomplete_subtask);
+        expect(!incomplete_subtask_ready, "subtask missing Approach should fail ready gate");
+        expect(!incomplete_subtask_gaps.empty(), "subtask missing Approach should report a gap");
 
         BacklogItem initiative = item;
         initiative.id = "GT-INIT-0001";

@@ -308,6 +308,14 @@ int main(int argc, char** argv) {
             "parent feature set-ready failed");
         expect(run_command(binary, with_duplicate_admission({"-P", "quick-smoke-product", "workitem", "create", "-t", "task", "--title", "Quick smoke child task", "--parent", "QS-FTR-0001", "--agent", "tester"}, "Quick smoke child task")) == 0,
             "workitem create child task failed");
+        expect(run_command(binary, {"-P", "quick-smoke-product", "workitem", "set-ready", "QS-TSK-0002",
+            "--context", "Child task context.",
+            "--goal", "Child task goal.",
+            "--approach", "Child task approach.",
+            "--acceptance-criteria", "Child task acceptance.",
+            "--risks", "Child task risks.",
+            "--agent", "tester"}) == 0,
+            "child task set-ready failed");
 
         const auto parent_missing_admission_output = temp_root / "work-order-admission-parent-missing.json";
         expect_command_capture_success(
@@ -365,6 +373,49 @@ int main(int argc, char** argv) {
         expect(task_admission_json.find("\"would_dispatch\" : true") != std::string::npos, "task implementation admission should report would_dispatch");
         expect(task_admission_json.find("\"starts_agent\" : false") != std::string::npos, "task implementation admission should not start an agent during diagnostic");
         expect(task_admission_json.find("\"dispatches_work\" : false") != std::string::npos, "task implementation admission should not dispatch work during diagnostic");
+
+        expect(run_command(binary, with_duplicate_admission({"-P", "quick-smoke-product", "workitem", "create", "-t", "sub-task", "--title", "Quick smoke subtask", "--parent", "QS-TSK-0002", "--agent", "tester"}, "Quick smoke subtask")) == 0,
+            "workitem create subtask failed");
+        const auto subtask_path = temp_root / "_kano" / "backlog" / "products" / "quick-smoke-product" / "items" / "subtask" / "0000" / "QS-SUBTSK-0001_quick-smoke-subtask.md";
+        expect(std::filesystem::exists(subtask_path), "workitem create did not create expected subtask file");
+        expect(read_text(subtask_path).find("type: SubTask") != std::string::npos, "subtask file did not materialize SubTask type");
+        expect(read_text(subtask_path).find("parent: QS-TSK-0002") != std::string::npos, "subtask file did not preserve Task parent");
+        expect(run_command(binary, {
+            "-P", "quick-smoke-product", "workitem", "set-ready", "QS-SUBTSK-0001",
+            "--context", "Quick smoke subtask context.",
+            "--goal", "Quick smoke subtask goal.",
+            "--approach", "Quick smoke subtask approach.",
+            "--acceptance-criteria", "Quick smoke subtask acceptance.",
+            "--risks", "Quick smoke subtask risks.",
+            "--agent", "tester"
+        }) == 0, "subtask set-ready failed");
+        expect(run_command(binary, {"-P", "quick-smoke-product", "workitem", "check-ready", "QS-SUBTSK-0001"}) == 0,
+            "subtask check-ready failed");
+        const auto subtask_list_output = temp_root / "subtask-list.txt";
+        expect_command_capture_success(
+            run_command_capture(binary, {
+                "-P", "quick-smoke-product", "workitem", "list", "--type", "sub_task"
+            }, subtask_list_output),
+            subtask_list_output,
+            "subtask list failed"
+        );
+        expect(read_text(subtask_list_output).find("QS-SUBTSK-0001") != std::string::npos,
+            "subtask list did not include created subtask");
+        const auto subtask_admission_output = temp_root / "work-order-admission-subtask.json";
+        expect_command_capture_success(
+            run_command_capture(binary, {
+                "-P", "quick-smoke-product", "workitem", "work-order-admission", "QS-SUBTSK-0001", "--intent", "implementation", "--format", "json"
+            }, subtask_admission_output),
+            subtask_admission_output,
+            "subtask work-order-admission json failed"
+        );
+        const auto subtask_admission_json = read_text(subtask_admission_output);
+        expect(subtask_admission_json.find("\"admitted\" : true") != std::string::npos, "subtask implementation admission should be allowed");
+        expect(subtask_admission_json.find("\"item_type\" : \"SubTask\"") != std::string::npos, "subtask admission should report SubTask item type");
+        expect(run_command(binary, {"-P", "quick-smoke-product", "view", "refresh", "--agent", "tester"}) == 0,
+            "view refresh after subtask failed");
+        expect(read_text(temp_root / "_kano" / "backlog" / "products" / "quick-smoke-product" / "views" / "Dashboard_PlainMarkdown_New.md").find("QS-SUBTSK-0001") != std::string::npos,
+            "dashboard should include created subtask");
 
         const auto intent_stack_json_output = temp_root / "intent-stack.json";
         expect_command_capture_success(

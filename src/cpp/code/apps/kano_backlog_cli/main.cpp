@@ -480,7 +480,7 @@ std::vector<std::filesystem::path> list_item_markdown_paths(const std::filesyste
 }
 
 std::optional<std::string> item_id_from_path(const std::filesystem::path& path) {
-    static const std::regex id_pattern(R"(([A-Z][A-Z0-9]{1,15}-(?:INIT|EPIC|FTR|USR|TSK|BUG|ISS)-\d{4}))");
+    static const std::regex id_pattern(R"(([A-Z][A-Z0-9]{1,15}-(?:INIT|EPIC|FTR|USR|TSK|SUBTSK|BUG|ISS)-\d{4}))");
     std::smatch match;
     const std::string stem = path.stem().string();
     if (std::regex_search(stem, match, id_pattern)) {
@@ -4915,7 +4915,7 @@ SandboxInitNativeResult init_native_sandbox(
     for (const auto& dir : {"decisions", "views", "items", "_config", "_meta", ".cache", "artifacts", "topics"}) {
         ensure_dir(sandbox_root / dir);
     }
-    for (const auto& type : {"epic", "feature", "userstory", "task", "bug", "issue"}) {
+    for (const auto& type : {"epic", "feature", "userstory", "task", "subtask", "bug", "issue"}) {
         ensure_dir(sandbox_root / "items" / type);
         ensure_dir(sandbox_root / "items" / type / "0000");
     }
@@ -8316,7 +8316,7 @@ int main(int InArgc, char* InArgv[]) {
             auto* createCmd = workitemCmd->add_subcommand("create", "Create a new work item");
             std::string type_str, title, agent, parent, owner, reviewer;
             auto duplicate_admission = std::make_shared<DuplicateAdmissionEvidence>();
-            createCmd->add_option("-t,--type", type_str, "Item type (initiative, epic, feature, userstory, task, bug, issue)")->required();
+            createCmd->add_option("-t,--type", type_str, "Item type (initiative, epic, feature, userstory, task, subtask, bug, issue)")->required();
             createCmd->add_option("--title", title, "Item title")->required();
             createCmd->add_option("--agent", agent, "Agent ID")->required();
             createCmd->add_option("--parent", parent, "Parent item ID");
@@ -9242,7 +9242,7 @@ int main(int InArgc, char* InArgv[]) {
                 std::string filter_state_str;
             };
             auto state = std::make_shared<ListCommandState>();
-            listCmd->add_option("--type", state->filter_type_str, "Filter by type (initiative, epic, feature, userstory, task, bug, issue)");
+            listCmd->add_option("--type", state->filter_type_str, "Filter by type (initiative, epic, feature, userstory, task, subtask, bug, issue)");
             listCmd->add_option("--state", state->filter_state_str, "Filter by state");
             listCmd->callback([&, state]() {
                 auto ctx = resolve_ctx();
@@ -20824,6 +20824,7 @@ int main(int InArgc, char* InArgv[]) {
                             ItemType::Feature,
                             ItemType::UserStory,
                             ItemType::Task,
+                            ItemType::SubTask,
                             ItemType::Bug,
                             ItemType::Issue,
                         };

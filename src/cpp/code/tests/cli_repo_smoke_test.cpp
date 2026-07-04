@@ -479,7 +479,7 @@ int main(int argc, char** argv) {
         expect(std::filesystem::exists(product_root / "views"), "admin init did not create views directory");
         expect(std::filesystem::exists(product_root / "_meta"), "admin init did not create _meta directory");
         expect(std::filesystem::exists(product_root / "artifacts"), "admin init did not create artifacts directory");
-        for (const std::string type : {"epic", "feature", "userstory", "task", "bug", "issue"}) {
+        for (const std::string type : {"epic", "feature", "userstory", "task", "subtask", "bug", "issue"}) {
             expect(std::filesystem::exists(product_root / "items" / type / "0000"), "admin init did not create item bucket for " + type);
         }
         expect(!std::filesystem::exists(temp_root / "items"), "admin init created stray root-level items directory");

@@ -87,7 +87,7 @@ The model-level hierarchy, as amended by `KOB-TSK-0097` and `KOB-TSK-0098`, is:
 | Feature | Initiative or Epic |
 | UserStory | Feature or Epic |
 | Task | UserStory, Feature, or Epic |
-| SubTask role | Task |
+| SubTask | Task |
 | Bug | Task, Feature, Epic, Initiative, or Project-equivalent |
 | Issue | Task, Feature, Epic, Initiative, or Project-equivalent |
 

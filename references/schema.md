@@ -33,6 +33,7 @@ _kano/backlog/products/<product>/
 │   ├── feature/
 │   ├── userstory/
 │   ├── task/
+│   ├── subtask/
 │   ├── bug/
 │   └── issue/
 └── views/            # Generated dashboards and reports
@@ -54,6 +55,7 @@ specified in config (built-in or custom) instead of hardcoding the list.
 - Feature: capability container and/or release-facing highlight unit under an Initiative or Epic.
 - UserStory: user-facing outcome under a Feature or directly under an Epic when no release-facing Feature boundary is useful.
 - Task: focused implementation, docs, test, or maintenance work.
+- SubTask: independently delegable executable child work under a Task.
 - Bug: confirmed defect or regression against existing intent.
 - Issue: pre-triage container for an unclear problem, risk, blocker, or runtime gap before it is clear whether follow-up work is a Task, Bug, Feature, or no change.
 
@@ -65,9 +67,9 @@ plus worklogs, ADRs, topics, tags, artifacts, or follow-up Tasks/Bugs/Issues.
 `Project` is not a hard formal item type in the current schema. `Initiative` is
 the hard top planning item type for independently releasable component narrative
 ownership. Product Line / Portfolio grouping above Initiative is catalog
-membership, not a parent item. `SubTask` is not a hard item type in this schema;
-represent independently delegable subtask-role work as a child Task under a Task,
-or keep ordinary steps as a checklist or Worklog note.
+membership, not a parent item. `SubTask` is a hard executable item type for
+independently delegable child work under a Task; keep ordinary non-delegable
+steps as a checklist or Worklog note instead of creating a SubTask.
 See [Canonical backlog taxonomy](../docs/design/canonical-backlog-taxonomy.md)
 and [Project model decision](../docs/design/project-model-decision.md).
 
@@ -78,8 +80,12 @@ and [Project model decision](../docs/design/project-model-decision.md).
 - Epic -> Feature, UserStory, Task, Bug, or Issue
 - Feature -> UserStory, Task, Bug, or Issue
 - UserStory -> Task
-- Task -> child Task only when it represents independently delegable SubTask-role work
+- Task -> SubTask when the child is independently delegable executable work
 - Bug and Issue may attach to Task, Feature, Epic, Initiative, or Project-equivalent scope; split actionable Issue remediation into Task/Bug follow-ups once triage is clear
+
+Existing Task-under-Task workaround items are not auto-migrated by schema or CLI
+tools. Review and report candidates explicitly; migrate only after confirming the
+child is independently delegable SubTask work and preserving evidence/history.
 
 Release membership, topics, work orders, and execution dependencies are not
 parents. Use release scope, topic membership, work-order context, `blocks`,
@@ -221,6 +227,7 @@ Record branch convergence evidence in Worklog or Intent Amendments before closin
   - `KABSD-FTR-`
   - `KABSD-USR-`
   - `KABSD-TSK-`
+  - `KABSD-SUBTSK-`
   - `KABSD-BUG-`
   - `KABSD-ISS-`
 - Prefix derivation:

@@ -30,7 +30,7 @@ Rejected or deferred names remain explicit:
 | Epic | Durable release or campaign story under an Initiative or legacy product scope. | Strategic vision, execution dependency, or release membership. |
 | Feature | Reviewable capability or release-facing highlight. | Mandatory child layer under every Epic. |
 | UserStory | Stakeholder value slice. | Structural requirement for all execution work. |
-| Task / SubTask role | Focused executable work; SubTask remains a child-Task role when independently delegable. | Hard `SubTask` storage. |
+| Task / SubTask | Focused executable work; SubTask is the first-class child type when independently delegable under a Task. | Vision-layer storage or checklist fragments. |
 | Work Intent | Metadata describing why an item exists and what result contract closes it. | Taxonomy tier or parent relationship. |
 | Topic | Horizontal execution context and material bundle. | Vertical product hierarchy or parent edge. |
 | Work Order | Agent execution or handoff context. | Durable structural parent. |
@@ -112,8 +112,8 @@ rationale, and follow-up items using the semantic absorption protocol from
 
 ## Non-Goals
 
-- No hard `Project`, Product Line, Portfolio, or `SubTask` item type.
-- No new item folder, id prefix, KOA connector schema, or Backboard mutation
-  path.
+- No hard `Project`, Product Line, or Portfolio item type.
+- No new vision-layer item folder, id prefix, KOA connector schema, or Backboard
+  mutation path.
 - No automatic cross-backlog scan outside configured backlog roots.
 - No agent dispatch, release publication, item remap, or topic cleanup.

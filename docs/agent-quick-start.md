@@ -344,7 +344,7 @@ bash scripts/kob workitem update-state <ID> --state Done --product <product>
 
 ### "Ready gate validation failed"
 
-**Problem:** Task/Bug/Issue missing required fields
+**Problem:** Task/SubTask/Bug/Issue missing required fields
 
 **Solution:**
 ```bash

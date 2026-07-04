@@ -1,14 +1,15 @@
 # Hierarchy Validation Matrix
 
 Status: accepted design contract for `KOB-TSK-0087` under `KOB-FTR-0030`, with
-top-layer amendments from `KOB-TSK-0097` and `KOB-TSK-0098`.
+top-layer amendments from `KOB-TSK-0097`, `KOB-TSK-0098`, and `KOB-TSK-0111`.
 
 This matrix defines how reparenting should be validated once hierarchy checks are
 implemented or tightened. `KOB-TSK-0097` adds the hard Initiative item type.
 `KOB-TSK-0098` defines Product Line / Portfolio membership as catalog metadata,
 not a parent edge. This matrix remains a design contract for future parent
 validation and does not add KOA contracts, metadata storage, or runtime
-membership implementation.
+membership implementation. `KOB-TSK-0111` adds hard SubTask storage and IDs but
+does not auto-migrate historical Task-under-Task workaround items.
 
 ## Edge Semantics
 
@@ -45,7 +46,7 @@ membership implementation.
 | Feature | Initiative or Epic | Direct Initiative parent is valid when no release/campaign Epic boundary is useful. | Project-equivalent as direct parent, UserStory, Task, Bug, Issue, Topic, Work Order, Release. |
 | UserStory | Feature or Epic | Direct Epic parent should be used only when no release-facing Feature boundary is useful. | Task, Bug, Issue, Topic, Work Order, Release. |
 | Task | UserStory, Feature, or Epic | Direct Epic or Feature parent is valid for foundation work without story boundaries. | Bug, Issue, Topic, Work Order, Release. |
-| SubTask role | Task | Store as child `Task` under Task until hard SubTask support exists. | Non-Task parent; hard `type: SubTask` item is unsupported in this run. |
+| SubTask | Task | none | Non-Task parent; checklist fragments that are not independently delegable should stay in the parent Task body or Worklog. |
 | Bug | Task, Feature, Epic, Initiative, or Project-equivalent | Project-equivalent attachment may be root/product scoped until vision refs exist. | UserStory unless the process explicitly chooses story-level bug ownership; Topic, Work Order, Release. |
 | Issue | Task, Feature, Epic, Initiative, or Project-equivalent | Project-equivalent attachment may be root/product scoped until vision refs exist. | UserStory unless the scope is already localized by process policy; Topic, Work Order, Release. |
 
@@ -59,7 +60,6 @@ membership implementation.
 | `hierarchy.product_line_as_parent_invalid` | Invalid | Product Line / Portfolio membership is catalog grouping, not structural hierarchy. Use future membership metadata, docs, or report grouping instead of `parent`. |
 | `hierarchy.product_line_hard_type_unsupported` | Unsupported | Hard Product Line / Portfolio item storage is not implemented in this run. Do not create ProductLine or Portfolio enums, prefixes, or item folders. |
 | `hierarchy.subtask_parent_invalid` | Invalid | SubTask-role work must be under a Task and independently delegable; checklist fragments stay in the parent Task body or Worklog. |
-| `hierarchy.subtask_hard_type_unsupported` | Unsupported | Hard `SubTask` item storage is not implemented in this run. Use a child Task or checklist. |
 | `hierarchy.release_as_parent_invalid` | Invalid | Release membership is release scope, not structural hierarchy. Use release inclusion metadata or links. |
 | `hierarchy.topic_as_parent_invalid` | Invalid | Topic is horizontal execution context, not a parent. Use topic membership or relates links. |
 | `hierarchy.work_order_as_parent_invalid` | Invalid | Work order is execution and handoff context, not durable item hierarchy. |
@@ -88,9 +88,9 @@ Before mutating an item parent, future tooling should check:
 Existing root Epics remain acceptable while Initiative migration is incremental.
 New durable component roots should use Initiative when they need independent
 release or narrative ownership. Existing Task-to-Task relationships should be
-reviewed as SubTask-role work: keep them only when they are independently
-delegable and validated; move ordinary step lists back into the parent Task body
-or Worklog.
+reviewed as SubTask candidates, but tooling must not auto-migrate them. Keep or
+migrate them only after confirming they are independently delegable and validated;
+move ordinary step lists back into the parent Task body or Worklog.
 
 Product Line / Portfolio changes are catalog migration, not hierarchy migration.
 Future tools should update or report membership metadata when a Product Line

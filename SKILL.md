@@ -77,10 +77,10 @@ Use this skill to:
 - Backlog volume control:
   - Only create items for work that changes code or design decisions.
   - Avoid new items for exploratory discussion; record in existing Worklog instead.
-  - Keep Tasks/Bugs/Issues sized for a single focused session.
+  - Keep Tasks/SubTasks/Bugs/Issues sized for a single focused session.
   - Avoid ADRs unless a real architectural trade-off is made.
 - Ticketing threshold (agent-decided):
-  - Open a new Task/Bug/Issue when you will change code/docs/views/scripts or when an unclear runtime gap needs pre-triage evidence.
+  - Open a new Task/SubTask/Bug/Issue when you will change code/docs/views/scripts or when an unclear runtime gap needs pre-triage evidence.
   - Open an ADR (and link it) when a real trade-off or direction change is decided.
   - Otherwise, record the discussion in an existing Worklog; ask if unsure.
 - Ticket type selection (keep it lightweight):
@@ -89,9 +89,10 @@ Use this skill to:
   - Feature: a new capability that delivers multiple UserStories.
   - UserStory: a single user-facing outcome that requires multiple Tasks.
   - Task: a single focused implementation or doc change (typically one session).
+  - SubTask: independently delegable executable child work under a Task; use only when a distinct agent/thread can own it with separate validation.
   - Issue: a pre-triage unclear problem, risk, blocker, or runtime gap; split into Task/Bug follow-ups once actionable.
   - Product Line/Portfolio membership above Initiative is catalog metadata, not a backlog item type.
-  - Example: "Asset platform" = Initiative; "End-to-end embedding pipeline" = Epic; "Pluggable vector backend" = Feature; "MVP chunking pipeline" = UserStory; "Implement tokenizer adapter" = Task.
+  - Example: "Asset platform" = Initiative; "End-to-end embedding pipeline" = Epic; "Pluggable vector backend" = Feature; "MVP chunking pipeline" = UserStory; "Implement tokenizer adapter" = Task; "Add tokenizer fixture coverage" = SubTask when delegated separately under that Task.
 - Bug vs Task triage (when fixing behavior):
   - If you are correcting a behavior that was previously marked `Done` and the behavior violates the original intent/acceptance (defect or regression), open a **Bug** and link it to the original item.
   - If the change is a new requirement/scope change beyond the original acceptance, open a **Task/UserStory** (or Feature) instead, and link it for traceability.

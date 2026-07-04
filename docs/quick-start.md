@@ -69,10 +69,11 @@ and create the work item with duplicate-search admission evidence.
 
 Use `--type issue` instead of `task` when the report is still pre-triage: an
 unclear problem, runtime gap, risk, or blocker that needs evidence before it can
-be split into a Task or Bug. Research, Decisions, Spikes, Experiments,
-Validations, Audits, Migrations, Policy Contracts, Runbooks, Incidents, and
-Deprecations remain Work Intent metadata, worklog evidence, ADRs, topics, tags,
-or artifacts rather than separate formal item types.
+be split into a Task or Bug. Use `--type subtask` only for independently
+delegable executable child work under a Task. Research, Decisions, Spikes,
+Experiments, Validations, Audits, Migrations, Policy Contracts, Runbooks,
+Incidents, and Deprecations remain Work Intent metadata, worklog evidence, ADRs,
+topics, tags, or artifacts rather than separate formal item types.
 
 New item templates include optional Work Intent frontmatter:
 
@@ -105,7 +106,7 @@ conflict handling.
 
 ## 4. Satisfy the Ready Gate
 
-Tasks, bugs, and issues are expected to carry enough context before active execution. Fill:
+Tasks, subtasks, bugs, and issues are expected to carry enough context before active execution. Fill:
 
 - Context
 - Goal

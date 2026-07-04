@@ -73,7 +73,7 @@ Found 42 items across 5 types
 
 ## Item/Workitem Commands
 
-Create and manage work items (Epic, Feature, User Story, Task, Bug).
+Create and manage work items (Epic, Feature, User Story, Task, SubTask, Bug).
 
 ### Create an Epic
 

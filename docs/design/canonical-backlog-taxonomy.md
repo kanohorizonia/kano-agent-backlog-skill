@@ -2,26 +2,27 @@
 
 Status: accepted design contract for `KOB-FTR-0030`, `KOB-FTR-0021`, `KOB-TSK-0086`, the
 semantic-absorption amendment from `KOB-TSK-0096`, the hard Initiative amendment
-from `KOB-TSK-0097`, and the Product Line / Portfolio membership definition from
-`KOB-TSK-0098`.
+from `KOB-TSK-0097`, the Product Line / Portfolio membership definition from
+`KOB-TSK-0098`, and the hard SubTask amendment from `KOB-TSK-0111`.
 
 ## Scope
 
 This contract defines KOB taxonomy semantics and the intended structural parent
-model. `KOB-TSK-0097` adds the hard `Initiative` item type only.
+model. `KOB-TSK-0097` adds the hard `Initiative` item type.
 `KOB-TSK-0098` defines Product Line / Portfolio as catalog membership above
-Initiative. These decisions do not implement hard `Project`, `SubTask`, Product
-Line, or Portfolio item types; Product Line storage/schema/CLI/reporting;
+Initiative. `KOB-TSK-0111` adds the hard `SubTask` item type for independently
+delegable executable child work under a Task. These decisions do not implement
+hard `Project`, Product Line, or Portfolio item types; Product Line storage/schema/CLI/reporting;
 release records; KOA contract changes; HorizonPlugin migration; or Backboard
 mutation behavior.
 
 Current hard formal item types are `Initiative`, `Epic`, `Feature`, `UserStory`,
-`Task`, `Bug`, and `Issue`. `Project` remains rejected as a hard item type by
+`Task`, `SubTask`, `Bug`, and `Issue`. `Project` remains rejected as a hard item type by
 [Project Model Decision](project-model-decision.md); `Initiative` is the
 KOB-TSK-0097 amendment for an independently releasable component/module/product
-narrative layer. `SubTask` is a role for independently delegable child work under
-a Task, represented with the current Task storage until a future hard type is
-explicitly accepted.
+narrative layer. `SubTask` is the KOB-TSK-0111 amendment for independently
+delegable child work under a Task and uses `SUBTSK` display IDs under
+`items/subtask/`.
 
 Work Intent is metadata on those item types, not another taxonomy tier. The
 accepted metadata fields are `work_intent`, `execution_mode`, `result_contract`,
@@ -58,7 +59,7 @@ Allowed `work_intent` values are `implementation`, `investigation`, `spike`,
 | Feature | Capability or release-facing highlight unit under an Initiative or Epic. | Use when the result is a coherent capability or likely release-note highlight. It is not mandatory under every Epic. |
 | UserStory | Stakeholder or user value slice. | Use when value framing and outcome acceptance matter. It may sit under Feature or directly under Epic. |
 | Task | Focused executable work. | Use for one bounded implementation, docs, validation, analysis, or migration unit. A Task may support UserStory, Feature, or Epic directly. |
-| SubTask role | Independently delegable child work under a Task. | Use only when a distinct agent or thread can own it with its own output and validation. Otherwise keep the steps as a checklist or Worklog note. |
+| SubTask | Independently delegable executable child work under a Task. | Use only when a distinct agent or thread can own it with its own output and validation. Otherwise keep the steps as a checklist or Worklog note. |
 | Bug | Known incorrect behavior or regression. | Attach to the smallest useful ownership boundary: Task, Feature, Epic, Initiative, or Project-equivalent. |
 | Issue | Pre-triage unclear problem, risk, blocker, or runtime gap. | Attach to the smallest useful boundary when known; split into Task or Bug once actionable. Initiative is valid for component-level unclear scope. |
 
@@ -94,7 +95,7 @@ intent conflict resolution.
 | Feature | Initiative or Epic | `parent` points to the closest useful Initiative or Epic boundary. |
 | UserStory | Feature or Epic | `parent` points to a Feature or Epic. |
 | Task | UserStory, Feature, or Epic | `parent` points to the closest useful structural owner. |
-| SubTask role | Task | Store as a child `Task` under a Task only when independently delegable. |
+| SubTask | Task | Store as `items/subtask/<bucket>/<PREFIX>-SUBTSK-<NNNN>_...md` with `parent` pointing to a Task. |
 | Bug | Task, Feature, Epic, Initiative, or Project-equivalent | Use structural parent when local; use Initiative or root/product scope when cross-epic. |
 | Issue | Task, Feature, Epic, Initiative, or Project-equivalent | Use structural parent when local; use Initiative or root/product scope when not yet localized. |
 
@@ -235,12 +236,19 @@ than duplicated.
 ## Non-goals
 
 - No hard `Project` item type.
-- No hard `SubTask` item type.
 - No hard Research, Decision, Spike, Experiment, Validation, Audit, Migration,
   Policy, Runbook, Incident, or Deprecation item types; use Work Intent metadata.
-- No `items/project/` or `items/subtask/` directories.
+- No `items/project/` directory.
 - No Product Line / Portfolio hard item type, storage, CLI/API, or runtime
   membership implementation.
 - No Release Record, `releases/` directory, or KCC publication gate work.
 - No KOA contract/view update or HorizonPlugin migration.
 - No Backboard mutation behavior.
+
+## SubTask migration guidance
+
+Existing Task-under-Task workaround items are historical evidence and must not be
+auto-migrated. Review candidates explicitly, report which Task children are truly
+independently delegable SubTask work, and migrate only with a deliberate item move
+or rewrite that preserves IDs/history according to the chosen maintenance plan.
+Ordinary checklist fragments should remain in the parent Task body or Worklog.

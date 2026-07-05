@@ -296,6 +296,41 @@ int main() {
                 },
                 "duplicate_admission.rationale_required",
                 "create override should require rationale");
+            auto allocation_collision = store.create("TST", ItemType::Task, "Existing allocation collision", 2);
+            store.write(allocation_collision);
+            expect(store.find_item_paths_by_id(allocation_collision.id).size() == 1, "collision fixture should be discoverable by frontmatter id");
+            expect_throws_contains(
+                [&]() {
+                    (void)WorkitemOps::create_item(index, root, "TST", ItemType::Task, "Allocator collision should fail", "opencode", std::nullopt, "P2", {}, "general", "backlog", std::nullopt, std::nullopt, "", "", duplicate_admission("Allocator collision should fail"));
+                },
+                "duplicate_item_id.allocation_collision",
+                "create should fail closed before writing when allocator returns an existing item id");
+            expect(!std::filesystem::exists(root / "_meta" / "duplicate-admission" / (allocation_collision.id + ".json")),
+                "allocation collision should not write duplicate admission receipt");
+            auto duplicate_identity = store.create("TST", ItemType::Task, "Duplicate identity fixture", 2);
+            duplicate_identity.id = allocation_collision.id;
+            duplicate_identity.file_path = allocation_collision.file_path->parent_path() / (allocation_collision.id + "_duplicate-identity-fixture.md");
+            store.write(duplicate_identity);
+            expect(store.find_item_paths_by_id(allocation_collision.id).size() == 2, "duplicate identity fixture should report both active paths");
+            expect(!store.find_item_path_by_id(allocation_collision.id).has_value(), "ambiguous bare id lookup should not return an arbitrary path");
+            RefResolver duplicate_resolver(store);
+            expect_throws_contains(
+                [&]() {
+                    (void)duplicate_resolver.resolve(allocation_collision.id);
+                },
+                "Ambiguous reference",
+                "ambiguous bare item id should fail closed");
+            auto resolved_by_uid = duplicate_resolver.resolve(allocation_collision.uid);
+            expect(resolved_by_uid.uid == allocation_collision.uid, "UID lookup should remain available for duplicate-id recovery");
+            auto uid_recovery_update = WorkitemOps::update_state(index, root, allocation_collision.uid, ItemState::InProgress, "opencode", std::string("UID recovery transition"), std::nullopt, true, false);
+            expect(uid_recovery_update.item_id == allocation_collision.id, "UID-based state update should preserve duplicated bare id while targeting one file");
+            expect_throws_contains(
+                [&]() {
+                    (void)WorkitemOps::remap_id(index, root, created.uid, allocation_collision.id, "opencode");
+                },
+                "duplicate_item_id.remap_target_exists",
+                "remap should fail closed when target bare id already exists");
+
             auto override_created = WorkitemOps::create_item(index, root, "TST", ItemType::Task, "Duplicate override with rationale", "opencode", std::nullopt, "P2", {}, "general", "backlog", std::nullopt, std::nullopt, "", "", duplicate_admission("Duplicate override with rationale", {created.id}, {created.id}, true, "urgent minimal follow-up"));
             expect(std::filesystem::exists(root / "_meta" / "duplicate-admission" / (override_created.id + ".json")), "override create should write duplicate admission receipt");
             expect(read_text(override_created.path).find("Duplicate admission:") != std::string::npos, "override create should write duplicate admission worklog");

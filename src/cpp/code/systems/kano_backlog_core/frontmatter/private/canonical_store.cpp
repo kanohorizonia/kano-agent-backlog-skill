@@ -512,54 +512,60 @@ std::vector<std::filesystem::path> CanonicalStore::list_items(std::optional<Item
 
 std::optional<std::filesystem::path> CanonicalStore::find_item_path_by_id(const std::string& id) const {
     diagnostics::ScopedMutationSpan span("canonical_store.find_item_path_by_id", id);
-    auto parsed = parse_display_id_type_and_number(id);
-    if (!parsed) {
-        return std::nullopt;
-    }
-
-    const auto [type, number] = *parsed;
-    const int bucket = (number / 100) * 100;
-    std::ostringstream bucket_ss;
-    bucket_ss << std::setfill('0') << std::setw(4) << bucket;
-
-    const auto bucket_dir = items_root_ / item_type_directory(type) / bucket_ss.str();
-    if (!std::filesystem::exists(bucket_dir)) {
-        return std::nullopt;
-    }
-
-    std::vector<std::filesystem::path> candidates;
-    for (const auto& entry : std::filesystem::directory_iterator(bucket_dir)) {
-        if (!entry.is_regular_file() || entry.path().extension() != ".md") {
-            continue;
-        }
-        const auto filename = entry.path().filename().string();
-        if (filename.rfind(id, 0) != 0) {
-            continue;
-        }
-        if (filename.size() == id.size() || filename[id.size()] == '_' || filename[id.size()] == '.') {
-            candidates.push_back(entry.path());
-        }
-    }
-
+    const auto candidates = find_item_paths_by_id(id);
     if (candidates.size() == 1) {
         return candidates.front();
     }
     return std::nullopt;
 }
 
+std::vector<std::filesystem::path> CanonicalStore::find_item_paths_by_id(const std::string& id) const {
+    diagnostics::ScopedMutationSpan span("canonical_store.find_item_paths_by_id", id);
+    std::vector<std::filesystem::path> matches;
+    if (!parse_display_id_type_and_number(id)) {
+        return matches;
+    }
+
+    for (const auto& path : list_items()) {
+        try {
+            const auto item = read_metadata(path);
+            if (item.id == id) {
+                matches.push_back(path);
+            }
+        } catch (const std::exception&) {
+            // Keep lookup tolerant so malformed unrelated items do not hide resolvable refs.
+        }
+    }
+
+    std::sort(matches.begin(), matches.end(), [](const auto& left, const auto& right) {
+        return left.generic_string() < right.generic_string();
+    });
+    return matches;
+}
+
 int CanonicalStore::get_next_id_number(ItemType type) const {
     auto items = list_items(type);
     int max_num = 0;
-    
-    // Pattern: prefix-<TYPE>-(\d{4})
-    std::regex re(R"(-(\d{4})_)"); 
-    
+
     for (const auto& p : items) {
-        std::string name = p.filename().string();
-        std::smatch match;
-        if (std::regex_search(name, match, re)) {
-            int num = std::stoi(match[1].str());
-            if (num > max_num) max_num = num;
+        try {
+            const auto item = read_metadata(p);
+            if (item.type != type) {
+                continue;
+            }
+            const auto parsed = parse_display_id_type_and_number(item.id);
+            if (parsed && parsed->first == type && parsed->second > max_num) {
+                max_num = parsed->second;
+            }
+        } catch (const std::exception&) {
+            // Fall back to the filename so malformed legacy items still reserve their number.
+            static const std::regex filename_number_regex(R"(-(\d{4})_)");
+            std::string name = p.filename().string();
+            std::smatch match;
+            if (std::regex_search(name, match, filename_number_regex)) {
+                int num = std::stoi(match[1].str());
+                if (num > max_num) max_num = num;
+            }
         }
     }
     return max_num + 1;

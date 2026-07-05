@@ -15,6 +15,7 @@
 #include <cctype>
 #include <set>
 #include <array>
+#include <regex>
 
 namespace kano::backlog_ops {
 
@@ -683,6 +684,82 @@ std::string path_for_diagnostic(
     return "outside-active-root/<redacted>";
 }
 
+std::string diagnostic_path_list(
+    const std::vector<std::filesystem::path>& paths,
+    const std::filesystem::path& product_root
+) {
+    if (paths.empty()) {
+        return "<none>";
+    }
+
+    const std::size_t max_paths = 5;
+    const std::size_t shown = std::min(paths.size(), max_paths);
+    std::string result;
+    for (std::size_t i = 0; i < shown; ++i) {
+        if (i > 0) result += "; ";
+        result += path_for_diagnostic(paths[i], product_root);
+    }
+    if (paths.size() > max_paths) {
+        result += "; ... and " + std::to_string(paths.size() - max_paths) + " more";
+    }
+    return result;
+}
+
+std::vector<std::filesystem::path> item_paths_for_diagnostic(
+    const std::vector<BacklogItem>& items
+) {
+    std::vector<std::filesystem::path> paths;
+    for (const auto& item : items) {
+        if (item.file_path) {
+            paths.push_back(*item.file_path);
+        }
+    }
+    return paths;
+}
+
+std::string item_id_type_code(const std::string& id) {
+    const auto first_dash = id.find('-');
+    if (first_dash == std::string::npos) {
+        return {};
+    }
+    const auto second_dash = id.find('-', first_dash + 1);
+    if (second_dash == std::string::npos) {
+        return {};
+    }
+    return id.substr(first_dash + 1, second_dash - first_dash - 1);
+}
+
+void validate_remap_target_id(
+    const CanonicalStore& store,
+    const BacklogItem& item,
+    const std::string& new_id,
+    const std::filesystem::path& product_root
+) {
+    static const std::regex id_regex(R"(^[A-Z][A-Z0-9]{1,15}-(INIT|EPIC|FTR|USR|TSK|SUBTSK|BUG|ISS)-\d{4}$)");
+    if (!std::regex_match(new_id, id_regex)) {
+        throw std::runtime_error(
+            "duplicate_item_id.remap_target_invalid: new item id has invalid format: " +
+            new_id + " (expected <PREFIX>-(INIT|EPIC|FTR|USR|TSK|SUBTSK|BUG|ISS)-<NNNN>)");
+    }
+    if (new_id == item.id) {
+        throw std::runtime_error("duplicate_item_id.remap_target_same: new item id matches current id: " + new_id);
+    }
+    if (item_id_type_code(new_id) != item_id_type_code(item.id)) {
+        throw std::runtime_error(
+            "duplicate_item_id.remap_target_type_mismatch: new item id type code must match current item type: " +
+            item.id + " -> " + new_id);
+    }
+
+    const auto existing_target_paths = store.find_item_paths_by_id(new_id);
+    if (!existing_target_paths.empty()) {
+        throw std::runtime_error(
+            "duplicate_item_id.remap_target_exists: target item id " + new_id +
+            " already exists in active product root at " +
+            diagnostic_path_list(existing_target_paths, product_root) +
+            "; choose an unused id or repair duplicate bare IDs before retrying");
+    }
+}
+
 struct ParentIndexedRead {
     std::optional<BacklogItem> item;
     bool stale_indexed_path = false;
@@ -753,7 +830,11 @@ BacklogItem resolve_parent_by_identity(
 
     if (matches.size() > 1) {
         throw std::runtime_error(
-            "Ambiguous parent item reference: " + parent_ref_for_diagnostic(parent_ref));
+            "duplicate_item_id.ambiguous_ref: parent item reference " +
+            parent_ref_for_diagnostic(parent_ref) + " matched " +
+            std::to_string(matches.size()) + " items: " +
+            diagnostic_path_list(item_paths_for_diagnostic(matches), product_root) +
+            "; use a UID/path-qualified recovery flow or repair duplicate bare IDs before retrying");
     }
 
     std::string message =
@@ -958,6 +1039,26 @@ CreateItemResult WorkitemOps::create_item(
     {
         diagnostics::ScopedMutationSpan span("workitem.create_item.prepare");
         item = store.create(prefix, type, title, number, parent);
+    }
+    if (!item.file_path) {
+        throw std::runtime_error("duplicate_item_id.path_missing: generated item has no target file path");
+    }
+    {
+        diagnostics::ScopedMutationSpan span("workitem.create_item.collision_check", item.id);
+        const auto existing_paths = store.find_item_paths_by_id(item.id);
+        if (!existing_paths.empty()) {
+            throw std::runtime_error(
+                "duplicate_item_id.allocation_collision: allocated item id " + item.id +
+                " already exists in active product root at " +
+                diagnostic_path_list(existing_paths, backlog_root) +
+                "; repair/remap the existing item by UID before retrying");
+        }
+        std::error_code exists_error;
+        if (std::filesystem::exists(*item.file_path, exists_error)) {
+            throw std::runtime_error(
+                "duplicate_item_id.path_collision: generated item path already exists: " +
+                path_for_diagnostic(*item.file_path, backlog_root));
+        }
     }
     item.state = ItemState::Proposed;
     item.priority = priority;
@@ -1299,6 +1400,7 @@ RemapIdResult WorkitemOps::remap_id(
     if (!item.file_path) {
         throw std::runtime_error("Resolved item has no file path: " + item_ref);
     }
+    validate_remap_target_id(store, item, new_id, backlog_root);
 
     std::filesystem::path old_path = *item.file_path;
     std::string old_id = item.id;
@@ -1308,6 +1410,12 @@ RemapIdResult WorkitemOps::remap_id(
     size_t underscore_pos = filename.find('_');
     std::string tail = (underscore_pos != std::string::npos) ? filename.substr(underscore_pos) : ".md";
     std::filesystem::path new_path = old_path.parent_path() / (new_id + tail);
+    std::error_code exists_error;
+    if (old_path != new_path && std::filesystem::exists(new_path, exists_error)) {
+        throw std::runtime_error(
+            "duplicate_item_id.remap_path_collision: target item path already exists: " +
+            path_for_diagnostic(new_path, backlog_root));
+    }
     
     // 3. Update ID in item and add worklog
     item.id = new_id;

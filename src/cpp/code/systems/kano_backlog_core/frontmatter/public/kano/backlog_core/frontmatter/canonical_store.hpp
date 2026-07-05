@@ -53,6 +53,12 @@ public:
      */
     std::optional<std::filesystem::path> find_item_path_by_id(const std::string& id) const;
 
+    /**
+     * Find every active item whose frontmatter id matches the display id.
+     * The result is sorted for deterministic diagnostics.
+     */
+    std::vector<std::filesystem::path> find_item_paths_by_id(const std::string& id) const;
+
     // Helpers
     int get_next_id_number(ItemType type) const;
     static std::string slugify(const std::string& text);

@@ -9872,6 +9872,203 @@ int main(int InArgc, char* InArgv[]) {
                 }
                 std::cout << json_to_string(response, true) << "\n";
             });
+
+            // migrate-prefix subcommand (dry-run planner)
+            auto* migratePrefixCmd = configCmd->add_subcommand("migrate-prefix", "Plan product prefix migration");
+            std::string migpf_path = ".";
+            std::string migpf_product;
+            std::string migpf_to;
+            std::string migpf_from;
+            bool migpf_write = false;
+            migratePrefixCmd->add_option("--path", migpf_path, "Resource path to resolve config from");
+            migratePrefixCmd->add_option("--product", migpf_product, "Product name/slug");
+            migratePrefixCmd->add_option("--to", migpf_to, "Target new product prefix");
+            migratePrefixCmd->add_option("--from", migpf_from, "Expected current prefix");
+            migratePrefixCmd->add_flag("--write", migpf_write, "Apply migration");
+            migratePrefixCmd->callback([&]() {
+                if (migpf_write) {
+                    throw std::runtime_error("Apply mode not supported in this task; only dry-run planning is implemented.");
+                }
+
+                Json::Value response(Json::objectValue);
+                response["command"] = "config migrate-prefix";
+                response["status"] = "dry-run";
+                response["product"] = migpf_product.empty() ? product_name_opt : migpf_product;
+                response["to_prefix"] = migpf_to;
+                response["valid"] = true;
+                response["conflicts"] = Json::Value(Json::arrayValue);
+                response["blocked_reasons"] = Json::Value(Json::arrayValue);
+
+                if (migpf_to.empty()) {
+                    response["valid"] = false;
+                    response["blocked_reasons"].append("Target prefix (--to) is required");
+                    std::cout << json_to_string(response, true) << "\n";
+                    throw std::runtime_error("Target prefix (--to) is required");
+                }
+
+                // Grammar check
+                static const std::regex prefix_regex("^[A-Z][A-Z0-9]{1,15}$");
+                if (!std::regex_match(migpf_to, prefix_regex)) {
+                    response["valid"] = false;
+                    response["blocked_reasons"].append("New prefix does not match grammar: length 2-16, starts with A-Z, containing A-Z and 0-9");
+                }
+
+                // Resolve BacklogContext
+                BacklogContext ctx;
+                try {
+                    ctx = BacklogContext::resolve(
+                        migpf_path,
+                        migpf_product.empty()
+                            ? (product_name_opt.empty() ? std::nullopt : std::optional<std::string>(product_name_opt))
+                            : std::optional<std::string>(migpf_product),
+                        std::nullopt
+                    );
+                } catch (const std::exception& e) {
+                    response["valid"] = false;
+                    response["blocked_reasons"].append("Failed to resolve product configuration context: " + std::string(e.what()));
+                    std::cout << json_to_string(response, true) << "\n";
+                    throw std::runtime_error("Failed to resolve product configuration context");
+                }
+
+                if (response["product"].asString().empty()) {
+                    response["product"] = ctx.product_name;
+                }
+
+                std::string resolved_old_prefix = ctx.product_def.prefix;
+                response["from_prefix"] = resolved_old_prefix;
+
+                if (!migpf_from.empty() && migpf_from != resolved_old_prefix) {
+                    response["valid"] = false;
+                    response["blocked_reasons"].append("Specified current prefix '" + migpf_from + "' does not match resolved prefix '" + resolved_old_prefix + "'");
+                }
+
+                // Collision detection in the project config
+                auto mp_config_path = ConfigLoader::find_project_config(std::filesystem::absolute(migpf_path));
+                if (mp_config_path) {
+                    auto project_config = ProjectConfig::load_from_toml(*mp_config_path);
+                    if (project_config) {
+                        for (const auto& [name, def] : project_config->products) {
+                            if (name != response["product"].asString() && def.prefix == migpf_to) {
+                                response["valid"] = false;
+                                response["conflicts"].append("Prefix collision: target prefix '" + migpf_to + "' is already used by product '" + name + "'");
+                            }
+                        }
+                    }
+                }
+
+                // Planning proposed changes
+                Json::Value proposed_changes(Json::objectValue);
+                proposed_changes["config_files"] = Json::Value(Json::arrayValue);
+                proposed_changes["item_renames"] = Json::Value(Json::arrayValue);
+                proposed_changes["item_content_updates"] = Json::Value(Json::arrayValue);
+                proposed_changes["duplicate_admissions"] = Json::Value(Json::arrayValue);
+                proposed_changes["other_references"] = Json::Value(Json::arrayValue);
+
+                if (response["valid"].asBool()) {
+                    // 1. Proposed config file modification
+                    if (mp_config_path) {
+                        Json::Value cf(Json::objectValue);
+                        cf["path"] = mp_config_path->generic_string();
+                        cf["action"] = "modify";
+                        cf["description"] = "Change prefix for products." + response["product"].asString() + " from '" + resolved_old_prefix + "' to '" + migpf_to + "'";
+                        proposed_changes["config_files"].append(cf);
+                    }
+
+                    // 2. Scan items & references across all products
+                    if (mp_config_path) {
+                        auto project_config = ProjectConfig::load_from_toml(*mp_config_path);
+                        if (project_config) {
+                            for (const auto& [name, def] : project_config->products) {
+                                auto p_root = project_config->resolve_backlog_root(name, *mp_config_path);
+                                if (!p_root) continue;
+                                CanonicalStore p_store(*p_root);
+                                for (const auto& item_path : p_store.list_items()) {
+                                    try {
+                                        auto item = p_store.read(item_path);
+                                        
+                                        // A. Target product: item renames and ID updates
+                                        if (name == response["product"].asString()) {
+                                            if (item.id.starts_with(resolved_old_prefix + "-")) {
+                                                std::string new_id = migpf_to + item.id.substr(resolved_old_prefix.size());
+                                                std::string old_filename = item_path.filename().generic_string();
+                                                std::string new_filename = new_id + old_filename.substr(item.id.size());
+                                                std::filesystem::path new_path = item_path.parent_path() / new_filename;
+
+                                                Json::Value rename_op(Json::objectValue);
+                                                rename_op["old_path"] = item_path.generic_string();
+                                                rename_op["new_path"] = new_path.generic_string();
+                                                rename_op["old_id"] = item.id;
+                                                rename_op["new_id"] = new_id;
+                                                proposed_changes["item_renames"].append(rename_op);
+
+                                                Json::Value update_op(Json::objectValue);
+                                                update_op["path"] = item_path.generic_string();
+                                                update_op["action"] = "modify_frontmatter_and_content";
+                                                Json::Value ref_list(Json::arrayValue);
+                                                ref_list.append(item.id + " -> " + new_id);
+                                                update_op["references_updated"] = ref_list;
+                                                proposed_changes["item_content_updates"].append(update_op);
+
+                                                // Check for duplicate admission json file
+                                                std::filesystem::path dup_json = *p_root / "_meta" / "duplicate-admission" / (item.id + ".json");
+                                                if (std::filesystem::exists(dup_json)) {
+                                                    std::filesystem::path new_dup_json = *p_root / "_meta" / "duplicate-admission" / (new_id + ".json");
+                                                    Json::Value dup_op(Json::objectValue);
+                                                    dup_op["old_path"] = dup_json.generic_string();
+                                                    dup_op["new_path"] = new_dup_json.generic_string();
+                                                    proposed_changes["duplicate_admissions"].append(dup_op);
+                                                }
+                                            }
+                                        } else {
+                                            // B. Other products: check if they refer to the old prefix IDs
+                                            auto refs = RefResolver::get_references(item);
+                                            std::vector<std::string> matching_refs;
+                                            for (const auto& ref : refs) {
+                                                if (ref.starts_with(resolved_old_prefix + "-")) {
+                                                    std::string target_new_ref = migpf_to + ref.substr(resolved_old_prefix.size());
+                                                    matching_refs.push_back(ref + " -> " + target_new_ref);
+                                                }
+                                            }
+                                            if (!matching_refs.empty()) {
+                                                Json::Value other_ref_op(Json::objectValue);
+                                                other_ref_op["path"] = item_path.generic_string();
+                                                other_ref_op["action"] = "update_body_text";
+                                                std::string details = "Update reference(s):";
+                                                for (const auto& r : matching_refs) {
+                                                    details += " " + r;
+                                                }
+                                                other_ref_op["details"] = details;
+                                                proposed_changes["other_references"].append(other_ref_op);
+                                            }
+                                        }
+                                    } catch (...) {}
+                                }
+                            }
+                        }
+                    }
+                }
+
+                response["proposed_changes"] = proposed_changes;
+
+                Json::Value val_cmds(Json::arrayValue);
+                val_cmds.append("pixi run test");
+                val_cmds.append("kano-backlog config validate");
+                response["validation_commands"] = val_cmds;
+
+                Json::Value aliases(Json::objectValue);
+                aliases["policy"] = "legacy-compatibility";
+                Json::Value mappings(Json::objectValue);
+                mappings[resolved_old_prefix] = migpf_to;
+                aliases["mappings"] = mappings;
+                response["aliases"] = aliases;
+
+                response["rollback_notes"] = "Since this is a dry-run, no files have been mutated. No rollback is required.";
+
+                std::cout << json_to_string(response, true) << "\n";
+                if (!response["valid"].asBool()) {
+                    throw std::runtime_error("Prefix migration plan is invalid or blocked");
+                }
+            });
         }
 
         // ============================================================

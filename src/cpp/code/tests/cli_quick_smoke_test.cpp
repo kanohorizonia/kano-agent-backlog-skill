@@ -710,6 +710,46 @@ int main(int argc, char** argv) {
         expect(read_text(topic_output).find("\"builtin_count\"") != std::string::npos,
             "topic create --list-templates did not emit builtin_count");
 
+        // Test config migrate-prefix (dry-run planner)
+        const auto migpf_ok_output = temp_root / "migpf_ok.json";
+        expect_command_capture_success(
+            run_command_capture(binary, {
+                "-P", "quick-smoke-product", "config", "migrate-prefix", "--to", "NEWQS"
+            }, migpf_ok_output),
+            migpf_ok_output,
+            "config migrate-prefix failed"
+        );
+        const auto migpf_ok_text = read_text(migpf_ok_output);
+        expect(migpf_ok_text.find("\"valid\" : true") != std::string::npos, "migrate-prefix should be valid");
+        expect(migpf_ok_text.find("\"from_prefix\" : \"QS\"") != std::string::npos, "migrate-prefix from_prefix should be QS");
+        expect(migpf_ok_text.find("\"to_prefix\" : \"NEWQS\"") != std::string::npos, "migrate-prefix to_prefix should be NEWQS");
+        expect(migpf_ok_text.find("QS-TSK-0001 -> NEWQS-TSK-0001") != std::string::npos, "migrate-prefix should update references");
+        expect(migpf_ok_text.find("QS-TSK-0002 -> NEWQS-TSK-0002") != std::string::npos, "migrate-prefix should update child references");
+
+        const auto migpf_fail_output = temp_root / "migpf_fail.json";
+        expect(run_command_capture(binary, {
+            "-P", "quick-smoke-product", "config", "migrate-prefix"
+        }, migpf_fail_output) != 0, "migrate-prefix without --to should fail");
+        const auto migpf_fail_text = read_text(migpf_fail_output);
+        expect(migpf_fail_text.find("\"valid\" : false") != std::string::npos, "migrate-prefix without --to should be invalid");
+        expect(migpf_fail_text.find("Target prefix (--to) is required") != std::string::npos, "migrate-prefix should list missing target error");
+
+        const auto migpf_bad_to_output = temp_root / "migpf_bad_to.json";
+        expect(run_command_capture(binary, {
+            "-P", "quick-smoke-product", "config", "migrate-prefix", "--to", "123QS"
+        }, migpf_bad_to_output) != 0, "migrate-prefix with invalid grammar --to should fail");
+        const auto migpf_bad_to_text = read_text(migpf_bad_to_output);
+        expect(migpf_bad_to_text.find("\"valid\" : false") != std::string::npos, "migrate-prefix with invalid grammar --to should be invalid");
+        expect(migpf_bad_to_text.find("New prefix does not match grammar") != std::string::npos, "migrate-prefix should list grammar error");
+
+        const auto migpf_bad_from_output = temp_root / "migpf_bad_from.json";
+        expect(run_command_capture(binary, {
+            "-P", "quick-smoke-product", "config", "migrate-prefix", "--to", "NEWQS", "--from", "WRONG"
+        }, migpf_bad_from_output) != 0, "migrate-prefix with mismatching --from should fail");
+        const auto migpf_bad_from_text = read_text(migpf_bad_from_output);
+        expect(migpf_bad_from_text.find("\"valid\" : false") != std::string::npos, "migrate-prefix with mismatching --from should be invalid");
+        expect(migpf_bad_from_text.find("does not match resolved prefix") != std::string::npos, "migrate-prefix should list mismatching from error");
+
         std::filesystem::current_path(original_cwd);
         std::filesystem::remove_all(temp_root);
         std::cout << "cli_quick_smoke_test: PASS\n";

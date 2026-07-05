@@ -750,6 +750,31 @@ int main(int argc, char** argv) {
         expect(migpf_bad_from_text.find("\"valid\" : false") != std::string::npos, "migrate-prefix with mismatching --from should be invalid");
         expect(migpf_bad_from_text.find("does not match resolved prefix") != std::string::npos, "migrate-prefix should list mismatching from error");
 
+        // Step 67: apply migration with --write
+        const auto migpf_apply_output = temp_root / "migpf_apply.json";
+        expect_command_capture_success(
+            run_command_capture(binary, {
+                "-P", "quick-smoke-product", "config", "migrate-prefix", "--to", "NEWQS2", "--write"
+            }, migpf_apply_output),
+            migpf_apply_output,
+            "config migrate-prefix --write failed"
+        );
+        const auto migpf_apply_text = read_text(migpf_apply_output);
+        expect(migpf_apply_text.find("\"status\" : \"applied\"") != std::string::npos, "apply should report applied status");
+        expect(migpf_apply_text.find("\"valid\" : true") != std::string::npos, "apply should be valid");
+        expect(migpf_apply_text.find("\"from_prefix\" : \"QS\"") != std::string::npos, "apply from_prefix should be QS");
+        expect(migpf_apply_text.find("\"to_prefix\" : \"NEWQS2\"") != std::string::npos, "apply to_prefix should be NEWQS2");
+        expect(migpf_apply_text.find("\"items_renamed\"") != std::string::npos, "apply should report items_renamed count");
+
+        // Step 68: verify --write blocked when --from mismatches (prefix was already changed to NEWQS2)
+        const auto migpf_write_fail_output = temp_root / "migpf_write_fail.json";
+        expect(run_command_capture(binary, {
+            "-P", "quick-smoke-product", "config", "migrate-prefix", "--to", "NEWQS3", "--from", "QS", "--write"
+        }, migpf_write_fail_output) != 0, "migrate-prefix --write with mismatched --from should fail and not apply");
+        const auto migpf_write_fail_text = read_text(migpf_write_fail_output);
+        expect(migpf_write_fail_text.find("apply-blocked") != std::string::npos || migpf_write_fail_text.find("\"valid\" : false") != std::string::npos,
+            "apply-blocked output should report invalid plan");
+
         std::filesystem::current_path(original_cwd);
         std::filesystem::remove_all(temp_root);
         std::cout << "cli_quick_smoke_test: PASS\n";

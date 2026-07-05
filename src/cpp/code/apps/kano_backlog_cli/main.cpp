@@ -9886,9 +9886,6 @@ int main(int InArgc, char* InArgv[]) {
             migratePrefixCmd->add_option("--from", migpf_from, "Expected current prefix");
             migratePrefixCmd->add_flag("--write", migpf_write, "Apply migration");
             migratePrefixCmd->callback([&]() {
-                if (migpf_write) {
-                    throw std::runtime_error("Apply mode not supported in this task; only dry-run planning is implemented.");
-                }
 
                 Json::Value response(Json::objectValue);
                 response["command"] = "config migrate-prefix";
@@ -10049,6 +10046,155 @@ int main(int InArgc, char* InArgv[]) {
                 }
 
                 response["proposed_changes"] = proposed_changes;
+
+                // ---- Apply mode ----
+                if (migpf_write) {
+                    if (!response["valid"].asBool()) {
+                        response["status"] = "apply-blocked";
+                        response["rollback_notes"] = "Plan is invalid. No files were mutated.";
+                        std::cout << json_to_string(response, true) << "\n";
+                        throw std::runtime_error("Prefix migration plan is invalid or blocked; apply aborted");
+                    }
+
+                    std::vector<std::string> renamed_items;
+                    std::vector<std::string> updated_files;
+                    std::vector<std::string> dup_admissions_renamed;
+
+                    // 1. Update backlog_config.toml prefix line
+                    if (mp_config_path && std::filesystem::exists(*mp_config_path)) {
+                        std::string toml_text = read_text_file_path(*mp_config_path);
+                        // Find the product section header, then replace the first prefix = "OLD" after it
+                        const std::string section_header = "[products." + response["product"].asString() + "]";
+                        const std::string old_prefix_line = "prefix = \"" + resolved_old_prefix + "\"";
+                        const std::string new_prefix_line = "prefix = \"" + migpf_to + "\"";
+                        auto sec_pos = toml_text.find(section_header);
+                        if (sec_pos != std::string::npos) {
+                            auto prefix_pos = toml_text.find(old_prefix_line, sec_pos);
+                            if (prefix_pos != std::string::npos) {
+                                toml_text.replace(prefix_pos, old_prefix_line.size(), new_prefix_line);
+                                write_text_file(*mp_config_path, toml_text);
+                                updated_files.push_back(mp_config_path->generic_string());
+                            }
+                        }
+                    }
+
+                    // 2. Rename + rewrite items in the target product
+                    if (mp_config_path) {
+                        auto project_config2 = ProjectConfig::load_from_toml(*mp_config_path);
+                        if (project_config2) {
+                            for (const auto& [pname, pdef] : project_config2->products) {
+                                auto p_root2 = project_config2->resolve_backlog_root(pname, *mp_config_path);
+                                if (!p_root2) continue;
+                                CanonicalStore p_store2(*p_root2);
+
+                                if (pname == response["product"].asString()) {
+                                    // Target product: rename + rewrite items
+                                    for (const auto& item_path : p_store2.list_items()) {
+                                        try {
+                                            auto item2 = p_store2.read(item_path);
+                                            if (!item2.id.starts_with(resolved_old_prefix + "-")) continue;
+                                            std::string new_id2 = migpf_to + item2.id.substr(resolved_old_prefix.size());
+                                            std::string old_fn = item_path.filename().generic_string();
+                                            std::string new_fn = new_id2 + old_fn.substr(item2.id.size());
+                                            std::filesystem::path new_item_path = item_path.parent_path() / new_fn;
+
+                                            // Rewrite content: replace all token-boundary occurrences of old_id -> new_id
+                                            std::string content = read_text_file_path(item_path);
+                                            content = replace_id_tokens(content, item2.id, new_id2);
+                                            write_text_file(new_item_path, content);
+                                            std::filesystem::remove(item_path);
+
+                                            renamed_items.push_back(item2.id + " -> " + new_id2);
+                                            updated_files.push_back(new_item_path.generic_string());
+
+                                            // Rename duplicate admission receipt
+                                            std::filesystem::path dup_src = *p_root2 / "_meta" / "duplicate-admission" / (item2.id + ".json");
+                                            std::filesystem::path dup_dst = *p_root2 / "_meta" / "duplicate-admission" / (new_id2 + ".json");
+                                            if (std::filesystem::exists(dup_src)) {
+                                                std::filesystem::rename(dup_src, dup_dst);
+                                                dup_admissions_renamed.push_back(item2.id + " -> " + new_id2);
+                                            }
+                                        } catch (...) {}
+                                    }
+                                } else {
+                                    // Other products: update cross-references
+                                    for (const auto& item_path : p_store2.list_items()) {
+                                        try {
+                                            std::string content = read_text_file_path(item_path);
+                                            bool changed = false;
+                                            // Replace all token-boundary old-prefix IDs with new prefix
+                                            // We scan for any token of form "OLD-TYPE-NNNN" and replace with "NEW-TYPE-NNNN"
+                                            std::string new_content = content;
+                                            static const std::regex cross_id_regex("[A-Z][A-Z0-9]{1,15}-(INIT|EPIC|FTR|USR|TSK|SUBTSK|BUG|ISS)-[0-9]{4}");
+                                            std::string result_text;
+                                            result_text.reserve(new_content.size());
+                                            std::sregex_iterator it(new_content.begin(), new_content.end(), cross_id_regex);
+                                            std::sregex_iterator end_it;
+                                            std::size_t last_pos = 0;
+                                            for (; it != end_it; ++it) {
+                                                const auto& match = *it;
+                                                result_text += new_content.substr(last_pos, match.position() - last_pos);
+                                                std::string matched = match.str();
+                                                if (matched.starts_with(resolved_old_prefix + "-")) {
+                                                    result_text += migpf_to + matched.substr(resolved_old_prefix.size());
+                                                    changed = true;
+                                                } else {
+                                                    result_text += matched;
+                                                }
+                                                last_pos = match.position() + match.length();
+                                            }
+                                            result_text += new_content.substr(last_pos);
+                                            if (changed) {
+                                                write_text_file(item_path, result_text);
+                                                updated_files.push_back(item_path.generic_string());
+                                            }
+                                        } catch (...) {}
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 3. Write migration receipt
+                    const auto receipt_dir = ctx.product_root / "_meta" / "receipts";
+                    std::filesystem::create_directories(receipt_dir);
+                    std::string ts_safe = current_utc_timestamp();
+                    std::replace(ts_safe.begin(), ts_safe.end(), ':', '-');
+                    const auto receipt_path = receipt_dir / ("migrate_prefix_" + ts_safe + ".json");
+                    Json::Value receipt(Json::objectValue);
+                    receipt["from_prefix"] = resolved_old_prefix;
+                    receipt["to_prefix"] = migpf_to;
+                    receipt["product"] = response["product"].asString();
+                    receipt["timestamp"] = current_utc_timestamp();
+                    Json::Value ri_arr(Json::arrayValue);
+                    for (const auto& s : renamed_items) ri_arr.append(s);
+                    receipt["renamed_items"] = ri_arr;
+                    Json::Value uf_arr(Json::arrayValue);
+                    for (const auto& s : updated_files) uf_arr.append(s);
+                    receipt["updated_files"] = uf_arr;
+                    Json::Value da_arr(Json::arrayValue);
+                    for (const auto& s : dup_admissions_renamed) da_arr.append(s);
+                    receipt["duplicate_admissions_renamed"] = da_arr;
+                    write_json_file(receipt_path, receipt);
+
+                    // 4. Refresh views
+                    try {
+                        ViewOps::refresh_dashboards(ctx.product_root, "kiro");
+                    } catch (...) {}
+
+                    // 5. Build applied response
+                    response["status"] = "applied";
+                    Json::Value applied_changes(Json::objectValue);
+                    applied_changes["items_renamed"] = static_cast<int>(renamed_items.size());
+                    applied_changes["files_updated"] = static_cast<int>(updated_files.size());
+                    applied_changes["duplicate_admissions_renamed"] = static_cast<int>(dup_admissions_renamed.size());
+                    response["applied_changes"] = applied_changes;
+                    response["receipt_path"] = receipt_path.generic_string();
+                    response["rollback_notes"] = "Migration applied. Use git reset --hard to rollback if needed.";
+                    std::cout << json_to_string(response, true) << "\n";
+                    return; // skip the dry-run output below
+                }
+                // ---- End apply mode ----
 
                 Json::Value val_cmds(Json::arrayValue);
                 val_cmds.append("pixi run test");

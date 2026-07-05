@@ -1,7 +1,9 @@
 #pragma once
 
+#include <cstddef>
 #include <filesystem>
 #include <map>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -55,6 +57,13 @@ struct ItemQueryOptions {
   bool forceRefresh = false;
 };
 
+struct GraphQueryCaps {
+  size_t maxDepth = 6;
+  size_t maxChildrenPerNode = 100;
+  size_t maxTotalNodes = 1000;
+  size_t maxTotalEdges = 1000;
+};
+
 class BacklogWebviewService {
  public:
   explicit BacklogWebviewService(std::filesystem::path productsRoot);
@@ -77,7 +86,7 @@ class BacklogWebviewService {
   Json::Value RunKobql(const std::string& query,
                        const ItemQueryOptions& options);
   Json::Value PreviewCommand(const std::string& phrase,
-                                const ItemQueryOptions& options);
+                             const ItemQueryOptions& options);
   Json::Value RecommendCapabilityRoute(const std::string& product,
                                         const std::string& itemId,
                                         bool forceRefresh = false);
@@ -97,13 +106,15 @@ class BacklogWebviewService {
   Json::Value DiscardReviewDecisionDraft(const Json::Value& request);
   Json::Value SubmitReviewDecision(const Json::Value& request);
   Json::Value GetEvidenceDetail(const std::string& product,
-                                 const std::string& id,
-                                 bool forceRefresh = false);
+                                const std::string& id,
+                                bool forceRefresh = false);
   Json::Value BuildTopicHome(const std::string& topic,
                              const ItemQueryOptions& options);
   Json::Value BuildDependencyGraph(const ItemQueryOptions& options,
                                    const std::string& itemId = "",
-                                   const std::string& topic = "");
+                                   const std::string& topic = "",
+                                   GraphQueryCaps caps = {},
+                                   std::optional<std::string> mode = std::nullopt);
   Json::Value BuildWorkOrderTimeline(const ItemQueryOptions& options,
                                      const std::string& itemId = "",
                                      const std::string& topic = "");

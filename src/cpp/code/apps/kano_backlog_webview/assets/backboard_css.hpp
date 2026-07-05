@@ -140,6 +140,11 @@ inline constexpr std::string_view kBackboardCss = R"CSS(
     .graph-meta { font-size: 10px; fill: #65738b; }
     .graph-edge-label { font-size: 10px; fill: #47536a; }
     .graph-diagnostics { display: grid; gap: 6px; margin-bottom: 12px; }
+    .graph-toolbar { display: grid; gap: 8px; margin-bottom: 12px; }
+    .graph-toolbar-row { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+    .graph-mode-field { display: flex; flex-direction: column; gap: 8px; min-width: min(320px, 100%); }
+    .graph-mode-select { min-width: 240px; max-width: 100%; border: 1px solid #cfd9ea; background: #fff; border-radius: 8px; padding: 6px 10px; color: #1a1f2e; }
+    .graph-mode-help { line-height: 1.45; }
 )CSS";
 
 inline constexpr std::string_view BackboardCss() noexcept {

@@ -908,6 +908,74 @@ int main(int argc, char** argv) {
         expect(replace_target_text.find("../items/task/0000/KAI-TSK-0003_link-target-smoke.md") != std::string::npos, "links replace-target did not write relative markdown target");
         expect(replace_target_text.find("[[KAI-TSK-0003_link-target-smoke|Target Alias]]") != std::string::npos, "links replace-target did not rewrite wikilink target");
 
+        expect(run_command(binary, with_duplicate_admission({"-P", "kano-ai-3d-asset-skill", "workitem", "create", "-t", "task", "--title", "Remap smoke", "--agent", "tester"}, "Remap smoke")) == 0, "workitem create remap target failed");
+        const auto remap_old_path = product_root / "items" / "task" / "0000" / "KAI-TSK-0004_remap-smoke.md";
+        const auto remap_new_path = product_root / "items" / "task" / "0000" / "KAI-TSK-0044_remap-smoke.md";
+        expect(std::filesystem::exists(remap_old_path), "workitem create did not create expected remap source file");
+        expect(run_command(binary, {
+            "-P", "kano-ai-3d-asset-skill",
+            "workitem", "update-state", "KAI-TSK-0004",
+            "--state", "InProgress",
+            "--agent", "tester",
+            "--force",
+            "--message", "Remap smoke state preservation"
+        }) == 0, "remap source update-state failed");
+        const auto remap_before_text = read_text(remap_old_path);
+        const auto uid_pos = remap_before_text.find("uid: ");
+        expect(uid_pos != std::string::npos, "remap source missing uid");
+        const auto uid_end = remap_before_text.find('\n', uid_pos);
+        const auto remap_uid_line = remap_before_text.substr(uid_pos, uid_end - uid_pos);
+        const auto remap_ref_path = product_root / "_meta" / "remap-id-source.md";
+        write_text(remap_ref_path, "# Remap ID Source\n\nReferences KAI-TSK-0004 before remap.\n");
+
+        const auto remap_dry_run_output = temp_root / "workitem-remap-id-dry-run.json";
+        expect(run_command_capture(binary, {
+            "-P", "kano-ai-3d-asset-skill",
+            "workitem", "remap-id", "KAI-TSK-0004",
+            "--to", "KAI-TSK-0044",
+            "--agent", "tester",
+            "--format", "json"
+        }, remap_dry_run_output) == 0, "workitem remap-id dry-run failed");
+        const auto remap_dry_run_text = read_text(remap_dry_run_output);
+        expect(remap_dry_run_text.find("\"status\" : \"dry-run\"") != std::string::npos, "workitem remap-id dry-run did not emit dry-run status");
+        expect(remap_dry_run_text.find("\"new_id\" : \"KAI-TSK-0044\"") != std::string::npos, "workitem remap-id dry-run did not emit new id");
+        expect(remap_dry_run_text.find("planned_updated_files") != std::string::npos, "workitem remap-id dry-run did not emit planned files");
+        expect(std::filesystem::exists(remap_old_path), "workitem remap-id dry-run removed old path");
+        expect(!std::filesystem::exists(remap_new_path), "workitem remap-id dry-run created new path");
+        expect(read_text(remap_ref_path).find("KAI-TSK-0004") != std::string::npos, "workitem remap-id dry-run updated references");
+
+        const auto links_remap_dry_run_output = temp_root / "links-remap-id-dry-run.json";
+        expect(run_command_capture(binary, {
+            "-P", "kano-ai-3d-asset-skill",
+            "links", "remap-id", "KAI-TSK-0004",
+            "--to", "KAI-TSK-0044",
+            "--agent", "tester",
+            "--format", "json"
+        }, links_remap_dry_run_output) == 0, "links remap-id dry-run failed");
+        expect(read_text(links_remap_dry_run_output).find("\"status\" : \"dry-run\"") != std::string::npos, "links remap-id dry-run did not emit dry-run status");
+        expect(std::filesystem::exists(remap_old_path), "links remap-id dry-run removed old path");
+
+        const auto links_remap_apply_output = temp_root / "links-remap-id-apply.json";
+        expect(run_command_capture(binary, {
+            "-P", "kano-ai-3d-asset-skill",
+            "links", "remap-id", "KAI-TSK-0004",
+            "--to", "KAI-TSK-0044",
+            "--agent", "tester",
+            "--apply",
+            "--format", "json"
+        }, links_remap_apply_output) == 0, "links remap-id apply failed");
+        const auto links_remap_apply_text = read_text(links_remap_apply_output);
+        expect(links_remap_apply_text.find("\"status\" : \"applied\"") != std::string::npos, "links remap-id apply did not emit applied status");
+        expect(!std::filesystem::exists(remap_old_path), "links remap-id apply left old path");
+        expect(std::filesystem::exists(remap_new_path), "links remap-id apply did not create new path");
+        const auto remap_after_text = read_text(remap_new_path);
+        expect(remap_after_text.find("id: KAI-TSK-0044") != std::string::npos, "links remap-id apply did not update frontmatter id");
+        expect(remap_after_text.find(remap_uid_line) != std::string::npos, "links remap-id apply did not preserve uid");
+        expect(remap_after_text.find("state: InProgress") != std::string::npos, "links remap-id apply did not preserve state");
+        expect(remap_after_text.find("Remapped ID: KAI-TSK-0004 -> KAI-TSK-0044") != std::string::npos, "links remap-id apply did not append worklog evidence");
+        expect(read_text(remap_ref_path).find("KAI-TSK-0044") != std::string::npos, "links remap-id apply did not update references");
+        expect(read_text(remap_ref_path).find("KAI-TSK-0004") == std::string::npos, "links remap-id apply left stale old reference");
+
         const auto restore_probe_path = product_root / "_meta" / "restore-probe.md";
         write_text(restore_probe_path, "# Restore Probe\n\n[missing](missing-target.md)\n");
         const auto restore_probe_output = temp_root / "links-restore-from-vcs.json";

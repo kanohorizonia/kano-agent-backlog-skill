@@ -37,13 +37,16 @@ inline constexpr std::string_view kBackboardAppJsPart1 = R"JS(
       selectedItemProduct: '',
       selectedItemVisibleIndex: -1,
       shortcutHelpOpen: false,
-      reviewActorAlias: 'human-reviewer'
+      reviewActorAlias: 'human-reviewer',
+      graphMode: 'dependency',
+      graphModePresets: []
     };
     const lanes = ['Backlog', 'Doing', 'Blocked', 'Review', 'Done'];
     const reviewQueueOrder = ['Needs Review', 'Done Candidate', 'False Done Suspect', 'Evidence Gap', 'Blocked/Dirty', 'Stale/Drift', 'Ready Frontier'];
     const itemStates = ['Proposed', 'Ready', 'InProgress', 'Blocked', 'Review', 'Done', 'Dropped'];
     const itemTypes = ['Theme', 'Initiative', 'Epic', 'Feature', 'UserStory', 'Task', 'Bug', 'Issue', 'ADR', 'Topic', 'Workset'];
     const refreshableTabs = ['review', 'handoff', 'tree', 'roadmap', 'decision-radar', 'kanban', 'context', 'graph', 'runs'];
+    const graphModeOrder = ['dependency', 'structure', 'cycles', 'related', 'product_memory'];
     const tabLabels = {
       review: 'Review Inbox',
       handoff: 'Handoff Readiness',
@@ -82,6 +85,9 @@ inline constexpr std::string_view kBackboardAppJsPart1 = R"JS(
       }
       if (query.tab && ['review', 'handoff', 'tree', 'roadmap', 'decision-radar', 'kanban', 'context', 'graph', 'runs', 'command'].includes(query.tab)) {
         state.activeTab = query.tab;
+      }
+      if (graphModeOrder.includes(query.mode)) {
+        state.graphMode = query.mode;
       }
     })();
 
@@ -456,6 +462,44 @@ inline constexpr std::string_view kBackboardAppJsPart1 = R"JS(
 
 inline constexpr std::string_view kBackboardAppJsPart1b = R"JS(
 
+    const defaultGraphModePresets = [
+      {
+        id: 'dependency',
+        label: 'Dependencies',
+        description: 'Review blockers, blocked items, and the nearby structure already recorded for this backlog area.',
+        review_question: 'What blocks delivery here, what is blocked, and what surrounding context matters for review?',
+        scope_note: 'Keeps the current dependency graph breadth so existing Focus Graph and dependency review flows stay readable.'
+      },
+      {
+        id: 'structure',
+        label: 'Structure',
+        description: 'Show the explicit parent-child hierarchy without mixing in blocking or non-blocking references.',
+        review_question: 'How is this work item structured inside the current Product Map hierarchy?',
+        scope_note: 'Uses only recorded parent links; no extra dependency or design-history inference is added.'
+      },
+      {
+        id: 'cycles',
+        label: 'Dependency cycles',
+        description: 'Reduce the canvas to dependency edges so cycle diagnostics stay focused on blocker relationships.',
+        review_question: 'Is there a blocker loop that needs a human break-the-cycle decision?',
+        scope_note: 'Dependency cycle semantics remain based only on dependency edges.'
+      },
+      {
+        id: 'related',
+        label: 'Related refs',
+        description: 'Show non-blocking reference links that connect nearby work without claiming a delivery dependency.',
+        review_question: 'Which neighboring items are relevant context but not true blockers?',
+        scope_note: 'Uses recorded relates links only; it does not invent implied dependencies.'
+      },
+      {
+        id: 'product_memory',
+        label: 'Product memory',
+        description: 'Show grouping and context edges already present in the backlog metadata.',
+        review_question: 'What shared topic context is already recorded for this work?',
+        scope_note: 'Currently limited to recorded topic membership; it does not promise unsupported design-history or evolution edges.'
+      },
+    ];
+
     function isRefreshableTab(tab = state.activeTab) {
       return refreshableTabs.includes(tab);
     }
@@ -696,12 +740,66 @@ inline constexpr std::string_view kBackboardAppJsPart1b = R"JS(
       return params.toString();
     }
 
+    function normalizeGraphMode(value) {
+      const mode = String(value || '').trim();
+      return graphModeOrder.includes(mode) ? mode : 'dependency';
+    }
+
+    function graphModePresetsFor(data) {
+      const presets = Array.isArray(data?.mode_presets)
+        ? data.mode_presets.filter((preset) => preset && graphModeOrder.includes(String(preset.id || '')))
+        : [];
+      return presets.length ? presets : defaultGraphModePresets;
+    }
+
+    function graphPresetForMode(presets, mode) {
+      return presets.find((preset) => String(preset.id || '') === mode) || presets[0] || defaultGraphModePresets[0];
+    }
+
+    function updateGraphModeHelp(preset) {
+      const target = document.getElementById('graph-mode-help');
+      if (!target) return;
+      const details = [
+        preset?.description ? `<span>${esc(preset.description)}</span>` : '',
+        preset?.review_question ? `<span><strong>Review question:</strong> ${esc(preset.review_question)}</span>` : '',
+        preset?.scope_note ? `<span>${esc(preset.scope_note)}</span>` : '',
+      ].filter(Boolean);
+      target.innerHTML = details.join(' ');
+    }
+
+    function syncGraphModeControls(data = null) {
+      const presets = graphModePresetsFor(data);
+      state.graphModePresets = presets;
+      const select = document.getElementById('graph-mode');
+      const signature = presets.map((preset) => `${preset.id}:${preset.label || preset.id}`).join('|');
+      if (select && select.dataset.signature !== signature) {
+        select.innerHTML = presets.map((preset) =>
+          `<option value="${escAttr(preset.id || 'dependency')}">${esc(preset.label || preset.id || 'dependency')}</option>`
+        ).join('');
+        select.dataset.signature = signature;
+      }
+      state.graphMode = normalizeGraphMode(data?.mode || state.graphMode);
+      if (select) {
+        select.value = state.graphMode;
+      }
+      const preset = graphPresetForMode(presets, state.graphMode);
+      updateGraphModeHelp(preset);
+      return preset;
+    }
+
+    function graphQueryString() {
+      const params = new URLSearchParams(queryString());
+      params.set('mode', normalizeGraphMode(state.graphMode));
+      return params.toString();
+    }
+
     function updateUrlState() {
       const products = selectedProductValues();
       const update = {
         tab: state.activeTab,
         product: null,
         products: null,
+        mode: state.graphMode === 'dependency' ? null : state.graphMode,
         q: state.q || null,
         state: selectedTokens(state.selectedStates, itemStates) || null,
         type: selectedTokens(state.selectedTypes, itemTypes) || null,
@@ -1872,20 +1970,33 @@ inline constexpr std::string_view kBackboardAppJsPart5a = R"JS(
     }
 
     async function loadGraph(signal, refresh) {
-      const result = await getJson(`/api/review/graph?${queryString()}`, {
+      const result = await getJson(`/api/review/graph?${graphQueryString()}`, {
         signal,
         refresh,
         stage: 'graph.dependencies',
       });
       const data = result?.data || {};
+      const currentPreset = syncGraphModeControls(data);
       const nodes = data.nodes || [];
       const edges = data.edges || [];
       const missing = data.missing_nodes || [];
-      const truncated = data.truncated ? ' truncated' : '';
+      const hiddenNodes = Number(data.hidden_node_count || 0);
+      const hiddenEdges = Number(data.hidden_edge_count || 0);
+      const caps = [
+        `depth ${data.max_depth ?? 'n/a'}`,
+        `children ${data.max_children_per_node ?? 'n/a'}`,
+        `nodes ${data.max_total_nodes ?? data.node_limit ?? 'n/a'}`,
+        `edges ${data.max_total_edges ?? data.edge_limit ?? 'n/a'}`,
+      ].join(' / ');
+      const truncated = data.truncated ? `, truncated (${hiddenNodes} hidden node(s), ${hiddenEdges} hidden edge(s))` : '';
+      const modeLabel = currentPreset?.label || 'Dependencies';
       document.getElementById('graph-summary').textContent =
-        `${nodes.length} node(s), ${edges.length} edge(s), ${missing.length} missing node(s)${truncated}`;
+        `${modeLabel}: ${nodes.length} node(s), ${edges.length} edge(s), ${missing.length} missing node(s)${truncated} | caps ${caps}`;
 
       const diagnostics = [
+        ...((data.diagnostics || []).slice(0, 20).map((diagnostic) =>
+          `<div class="card"><strong>${esc(diagnostic.code || 'Graph diagnostic')}</strong><div class="muted">${esc(diagnostic.target || 'graph')}</div><div>${esc(diagnostic.message || '')}</div></div>`
+        )),
         ...missing.slice(0, 20).map((node) =>
           `<div class="card"><strong>Missing</strong> <code>${esc(node.id || node.ref || '')}</code><div class="muted">${esc(node.kind || '')} from ${esc(node.source || '')}</div></div>`
         ),
@@ -2405,6 +2516,28 @@ inline constexpr std::string_view kBackboardAppJsPart6 = R"JS(
       markLoadedViewsStale('limit changed');
       scheduleRefresh(0);
     });
+
+    document.getElementById('graph-mode').addEventListener('change', async (event) => {
+      const nextMode = normalizeGraphMode(event.target.value);
+      state.graphMode = nextMode;
+      const preset = syncGraphModeControls();
+      updateUrlState();
+      if (state.loadedTabs.has('graph')) {
+        state.staleTabs.add('graph');
+        state.tabCacheStatus.graph = {
+          status: 'stale',
+          reason: 'graph mode changed',
+          updated_at: nowIso(),
+          request_id: '',
+        };
+      }
+      if (state.activeTab === 'graph') {
+        scheduleRefresh(0);
+        return;
+      }
+      updateAllPageRefreshStates();
+      setStatus(`Graph mode set to ${preset?.label || nextMode}`);
+    });
 )JS";
 
 inline constexpr std::string_view kBackboardAppJsPart7 = R"JS(
@@ -2534,6 +2667,7 @@ inline constexpr std::string_view kBackboardAppJsPart7 = R"JS(
 
     (async () => {
       setActiveTab(state.activeTab);
+      syncGraphModeControls();
       state.workspaces = loadSavedWorkspaces();
       renderWorkspaceList();
       await loadWorkspaceInfo();

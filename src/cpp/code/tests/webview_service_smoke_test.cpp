@@ -193,10 +193,20 @@ std::optional<Json::Value> find_decision_row(const Json::Value& rows,
 }
 
 std::optional<Json::Value> find_feature_event(const Json::Value& events,
-                                              const std::string& event_id) {
+                                               const std::string& event_id) {
     for (const auto& event : events) {
         if (event["event_id"].asString() == event_id) {
             return event;
+        }
+    }
+    return std::nullopt;
+}
+
+std::optional<Json::Value> find_mode_preset(const Json::Value& presets,
+                                            const std::string& id) {
+    for (const auto& preset : presets) {
+        if (preset["id"].asString() == id) {
+            return preset;
         }
     }
     return std::nullopt;
@@ -1918,9 +1928,141 @@ int main() {
                "dependency graph should include cross-product relates reference");
         expect(has_edge(graph["edges"], "product-alpha:PRA-TSK-0001", "product-alpha:PRA-TSK-0003", "relates"),
                "dependency graph should include non-blocking relates reference");
+        expect(graph["mode"].asString() == "dependency",
+               "dependency graph should expose the resolved dependency mode");
+        expect(graph["mode_preset"]["id"].asString() == "dependency",
+               "dependency graph should expose the resolved dependency preset metadata");
+        expect(graph["mode_presets"].size() == 5,
+               "dependency graph should expose all supported graph mode presets");
+        const auto dependencyPreset = find_mode_preset(graph["mode_presets"], "dependency");
+        expect(dependencyPreset.has_value(),
+               "dependency graph should include dependency mode preset metadata");
+        expect(has_string_value((*dependencyPreset)["default_edge_kinds"], "blocks") &&
+                   has_string_value((*dependencyPreset)["default_edge_kinds"], "blocked_by"),
+               "dependency preset metadata should document dependency edge defaults");
+        expect(!has_string_value((*dependencyPreset)["default_edge_kinds"], "parent") &&
+                   !has_string_value((*dependencyPreset)["default_edge_kinds"], "relates") &&
+                   !has_string_value((*dependencyPreset)["default_edge_kinds"], "topic-membership"),
+               "dependency preset metadata should keep structural, related, and grouping edges out of the default dependency mode");
+        expect(!(*dependencyPreset)["description"].asString().empty() &&
+                   !(*dependencyPreset)["review_question"].asString().empty(),
+               "dependency preset metadata should include review-facing description and question text");
         expect(graph["missing_nodes"].size() >= 1, "dependency graph should expose unresolved references");
         expect(graph["dependency_cycles"].empty(),
                "related-only cycles should not participate in dependency cycle semantics");
+
+        auto dependencyModeGraph = service.BuildDependencyGraph(
+            allOptions, "PRA-TSK-0001", "", webview::GraphQueryCaps{}, std::string("dependency"));
+        expect(dependencyModeGraph["mode"].asString() == "dependency",
+               "explicit dependency graph should keep dependency mode");
+        expect(has_edge(dependencyModeGraph["edges"], "product-alpha:PRA-TSK-0001", "product-alpha:PRA-TSK-0002", "blocks"),
+               "explicit dependency graph should keep blocks edges");
+        expect(has_edge(dependencyModeGraph["edges"], "product-alpha:PRA-TSK-0001", "product-alpha:PRA-TSK-0002", "blocked_by"),
+               "explicit dependency graph should keep blocked_by edges");
+        expect(!has_edge(dependencyModeGraph["edges"], "product-alpha:PRA-EPIC-0001", "product-alpha:PRA-TSK-0001", "parent"),
+               "explicit dependency graph should filter structural parent edges");
+        expect(!has_edge(dependencyModeGraph["edges"], "topic:Native Migration", "product-alpha:PRA-TSK-0001", "topic-membership"),
+               "explicit dependency graph should filter grouping topic edges");
+        expect(!has_edge(dependencyModeGraph["edges"], "product-alpha:PRA-TSK-0001", "product-alpha:PRA-TSK-0003", "relates"),
+               "explicit dependency graph should filter non-blocking relates edges");
+
+        auto structureGraph = service.BuildDependencyGraph(
+            allOptions, "PRA-TSK-0001", "", webview::GraphQueryCaps{}, std::string("structure"));
+        expect(structureGraph["mode"].asString() == "structure",
+               "structure graph should keep the requested structure mode");
+        expect(has_edge(structureGraph["edges"], "product-alpha:PRA-EPIC-0001", "product-alpha:PRA-TSK-0001", "parent"),
+               "structure graph should keep structural parent edges");
+        expect(!has_edge(structureGraph["edges"], "topic:Native Migration", "product-alpha:PRA-TSK-0001", "topic-membership"),
+               "structure graph should filter grouping topic edges by default");
+        expect(!has_edge(structureGraph["edges"], "product-alpha:PRA-TSK-0001", "product-alpha:PRA-TSK-0002", "blocks"),
+               "structure graph should filter dependency edges by default");
+        expect(!has_edge(structureGraph["edges"], "product-alpha:PRA-TSK-0001", "product-alpha:PRA-TSK-0003", "relates"),
+               "structure graph should filter non-blocking relates edges by default");
+
+        auto cyclesGraph = service.BuildDependencyGraph(
+            allOptions, "PRA-TSK-0001", "", webview::GraphQueryCaps{}, std::string("cycles"));
+        expect(cyclesGraph["mode"].asString() == "cycles",
+               "cycles graph should keep the requested cycles mode");
+        expect(has_edge(cyclesGraph["edges"], "product-alpha:PRA-TSK-0001", "product-alpha:PRA-TSK-0002", "blocks"),
+               "cycles graph should keep dependency blocks edges");
+        expect(has_edge(cyclesGraph["edges"], "product-alpha:PRA-TSK-0001", "product-alpha:PRA-TSK-0002", "blocked_by"),
+               "cycles graph should keep dependency blocked_by edges");
+        expect(!has_edge(cyclesGraph["edges"], "product-alpha:PRA-EPIC-0001", "product-alpha:PRA-TSK-0001", "parent"),
+               "cycles graph should filter structural parent edges by default");
+        expect(cyclesGraph["mode_preset"]["shows_dependency_cycles"].asBool(),
+               "cycles graph preset should keep dependency cycle diagnostics visible");
+
+        auto relatedGraph = service.BuildDependencyGraph(
+            allOptions, "PRA-TSK-0001", "", webview::GraphQueryCaps{}, std::string("related"));
+        expect(relatedGraph["mode"].asString() == "related",
+               "related graph should keep the requested related mode");
+        expect(has_edge(relatedGraph["edges"], "product-alpha:PRA-TSK-0001", "product-beta:PRB-BUG-0001", "relates") &&
+                   has_edge(relatedGraph["edges"], "product-alpha:PRA-TSK-0001", "product-alpha:PRA-TSK-0003", "relates"),
+               "related graph should keep non-blocking relates edges");
+        expect(!has_edge(relatedGraph["edges"], "product-alpha:PRA-EPIC-0001", "product-alpha:PRA-TSK-0001", "parent"),
+               "related graph should filter structural parent edges by default");
+        expect(!has_edge(relatedGraph["edges"], "product-alpha:PRA-TSK-0001", "product-alpha:PRA-TSK-0002", "blocks"),
+               "related graph should filter dependency edges by default");
+
+        auto productMemoryGraph = service.BuildDependencyGraph(
+            allOptions, "PRA-TSK-0001", "", webview::GraphQueryCaps{}, std::string("product_memory"));
+        expect(productMemoryGraph["mode"].asString() == "product_memory",
+               "product memory graph should keep the requested product_memory mode");
+        expect(has_edge(productMemoryGraph["edges"], "topic:Native Migration", "product-alpha:PRA-TSK-0001", "topic-membership"),
+               "product memory graph should keep topic membership grouping edges");
+        expect(!has_edge(productMemoryGraph["edges"], "product-alpha:PRA-EPIC-0001", "product-alpha:PRA-TSK-0001", "parent"),
+               "product memory graph should not overreach into structural edges by default");
+        expect(!has_edge(productMemoryGraph["edges"], "product-alpha:PRA-TSK-0001", "product-alpha:PRA-TSK-0002", "blocks"),
+               "product memory graph should not overreach into dependency edges by default");
+
+        auto unknownModeGraph = service.BuildDependencyGraph(
+            allOptions, "PRA-TSK-0001", "", webview::GraphQueryCaps{}, std::string("mystery_mode"));
+        expect(unknownModeGraph["mode"].asString() == "dependency",
+               "unknown graph modes should fall back to the dependency preset");
+        expect(has_diagnostic(unknownModeGraph["diagnostics"], "graph_unknown_mode", "mystery_mode"),
+               "unknown graph modes should emit a fallback diagnostic when practical");
+
+        webview::GraphQueryCaps cappedGraphOptions;
+        cappedGraphOptions.maxDepth = 1;
+        cappedGraphOptions.maxChildrenPerNode = 1;
+        cappedGraphOptions.maxTotalNodes = 3;
+        cappedGraphOptions.maxTotalEdges = 2;
+        auto cappedGraph = service.BuildDependencyGraph(
+            allOptions, "PRA-TSK-0001", "", cappedGraphOptions);
+        expect(cappedGraph["max_depth"].asUInt64() == 1,
+               "dependency graph should echo max_depth cap");
+        expect(cappedGraph["max_children_per_node"].asUInt64() == 1,
+               "dependency graph should echo max_children_per_node cap");
+        expect(cappedGraph["max_total_nodes"].asUInt64() == 3,
+               "dependency graph should echo max_total_nodes cap");
+        expect(cappedGraph["max_total_edges"].asUInt64() == 2,
+               "dependency graph should echo max_total_edges cap");
+        expect(cappedGraph["truncated"].asBool(),
+               "dependency graph should report graph cap truncation");
+        expect(cappedGraph["hidden_node_count"].asUInt64() > 0,
+               "dependency graph should count nodes hidden by graph caps");
+        expect(cappedGraph["hidden_edge_count"].asUInt64() > 0,
+               "dependency graph should count edges hidden by graph caps");
+        expect(has_diagnostic(cappedGraph["diagnostics"], "graph_children_truncated", "product-alpha:PRA-TSK-0001"),
+               "dependency graph should explain child cap truncation");
+        expect(has_diagnostic(cappedGraph["diagnostics"], "graph_node_limit_truncated", "graph"),
+               "dependency graph should explain total node cap truncation");
+        expect(has_diagnostic(cappedGraph["diagnostics"], "graph_edge_limit_truncated", "graph"),
+               "dependency graph should explain total edge cap truncation");
+
+        webview::GraphQueryCaps missingGraphOptions;
+        missingGraphOptions.maxDepth = 2;
+        missingGraphOptions.maxChildrenPerNode = 10;
+        missingGraphOptions.maxTotalNodes = 20;
+        missingGraphOptions.maxTotalEdges = 20;
+        auto missingGraph = service.BuildDependencyGraph(
+            allOptions, "PRA-TSK-0001", "", missingGraphOptions);
+        expect(missingGraph["missing_nodes"].size() >= 1,
+               "dependency graph should keep visible missing refs when caps allow them");
+        expect(missingGraph["missing_node_count"].asUInt64() == missingGraph["missing_nodes"].size(),
+               "dependency graph missing_node_count should match visible missing nodes");
+        expect(has_diagnostic(missingGraph["diagnostics"], "graph_missing_refs", "graph"),
+               "dependency graph should explain visible missing refs");
 
         webview::ItemQueryOptions boundedOptions;
         boundedOptions.limit = 1;
@@ -2019,6 +2161,37 @@ int main() {
         auto filterPartial = service.RenderFiltersPartial(allOptions);
         expect(filterPartial.find("product-alpha") != std::string::npos,
                "filters partial should render products");
+
+        auto focusGraphItemPartial = service.RenderItemPartial("product-alpha", "PRA-TSK-0001");
+        expect(focusGraphItemPartial.find("Focus Graph") != std::string::npos,
+               "item partial should render the compact Focus Graph summary section");
+        expect(focusGraphItemPartial.find("data-navigation-model=\"focus-graph-summary\"") != std::string::npos,
+               "item partial should expose DOM-readable Focus Graph summary markup");
+        expect(focusGraphItemPartial.find(">Blockers<") != std::string::npos,
+               "item partial Focus Graph summary should group blocker counts");
+        expect(focusGraphItemPartial.find(">Blocked items<") != std::string::npos,
+               "item partial Focus Graph summary should group blocked item counts");
+        expect(focusGraphItemPartial.find(">Children<") != std::string::npos,
+               "item partial Focus Graph summary should group child counts");
+        expect(focusGraphItemPartial.find(">Related refs<") != std::string::npos,
+               "item partial Focus Graph summary should group related ref counts");
+        expect(focusGraphItemPartial.find(">Evidence refs<") != std::string::npos,
+               "item partial Focus Graph summary should group evidence ref counts");
+        expect(focusGraphItemPartial.find("Hidden nodes") != std::string::npos,
+               "item partial should render bounded hidden node counts");
+        expect(focusGraphItemPartial.find("Hidden edges") != std::string::npos,
+               "item partial should render bounded hidden edge counts");
+        expect(focusGraphItemPartial.find("Missing refs") != std::string::npos ||
+                   focusGraphItemPartial.find("Missing") != std::string::npos,
+               "item partial should render missing ref counts for the Focus Graph summary");
+        expect(focusGraphItemPartial.find("Open Canvas") != std::string::npos,
+               "item partial should link to the full graph canvas view");
+        expect(focusGraphItemPartial.find("item=PRA-TSK-0001") != std::string::npos,
+               "item partial should carry the current item root graph query in the Open Canvas link");
+        expect(focusGraphItemPartial.find("graph-canvas") == std::string::npos,
+               "item partial should not embed the full graph canvas in the modal detail view");
+        expect(focusGraphItemPartial.find("graph-svg") == std::string::npos,
+               "item partial should not embed the full graph SVG in the modal detail view");
 
         auto itemPartial = service.RenderItemPartial("product-alpha", "PRA-TSK-0004");
         expect(itemPartial.find("Alpha review panel task") != std::string::npos,

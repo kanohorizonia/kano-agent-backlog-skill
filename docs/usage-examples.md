@@ -280,6 +280,45 @@ kob workitem set-ready MYAPP-TSK-0001 --product my-app \
 - Appends worklog entry with timestamp and agent
 - Enforces the Ready gate before work can begin
 
+### Remap a Pre-1.0 Display ID
+
+Use remap only for intentional pre-1.0 clean migrations where the same backlog
+item should keep its UID, state, and history while receiving a better display ID.
+The command is dry-run by default.
+
+**Dry-run command:**
+```bash
+kob workitem remap-id MYAPP-TSK-0001 \
+  --to MYAPP-TSK-0042 \
+  --agent kiro --product my-app \
+  --format json
+```
+
+**Expected dry-run output:**
+```json
+{
+  "status" : "dry-run",
+  "old_id" : "MYAPP-TSK-0001",
+  "new_id" : "MYAPP-TSK-0042",
+  "planned_updated_files" : 3
+}
+```
+
+**Apply command:**
+```bash
+kob workitem remap-id MYAPP-TSK-0001 \
+  --to MYAPP-TSK-0042 \
+  --agent kiro --product my-app \
+  --apply
+```
+
+**What It Does:**
+- Renames the item Markdown file and updates frontmatter `id`.
+- Preserves the immutable `uid` and current `state`.
+- Rewrites references to the old display ID across the product.
+- Appends Worklog evidence and refreshes derived views.
+- Avoids creating deprecated, duplicate, or superseded items for a clean migration.
+
 ---
 
 ## State Commands

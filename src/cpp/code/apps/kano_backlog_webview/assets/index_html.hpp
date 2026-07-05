@@ -143,6 +143,15 @@ inline constexpr std::string_view kIndexHtmlBetweenAssets = R"HTML(
 
   <div id="page-graph" class="panel page">
     <h3>Dependency Graph</h3>
+    <div class="graph-toolbar">
+      <div class="graph-toolbar-row">
+        <label class="graph-mode-field" for="graph-mode">
+          <span class="filter-group-title">Review mode</span>
+          <select id="graph-mode" class="graph-mode-select" aria-label="Dependency graph mode"></select>
+        </label>
+      </div>
+      <div id="graph-mode-help" class="muted graph-mode-help"></div>
+    </div>
     <div id="graph-summary" class="muted" style="margin-bottom:8px;"></div>
     <div id="graph-list"></div>
   </div>

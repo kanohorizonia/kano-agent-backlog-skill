@@ -489,6 +489,29 @@ kob items trash \
 find _kano/backlog/products/<product>/items -name "KABSD-TSK-0001*.md"
 ```
 
+### Pre-1.0 Display ID remaps
+
+For pre-1.0 clean migrations, prefer a single in-place remap over creating a
+deprecated or superseded duplicate item. `workitem remap-id` and
+`links remap-id` are dry-run by default; they report the planned filename and
+reference updates without changing files. Add `--apply` only after reviewing the
+plan.
+
+```bash
+# Preview the item file rename and reference rewrites.
+kob workitem remap-id KABSD-TSK-0001 --to KABSD-TSK-0042 \
+  --agent <agent-id> --product <product> --format json
+
+# Apply the clean migration.
+kob workitem remap-id KABSD-TSK-0001 --to KABSD-TSK-0042 \
+  --agent <agent-id> --product <product> --apply
+```
+
+The remap keeps the item's UID and state, updates frontmatter `id`, renames the
+Markdown file, rewrites item ID references across the product, appends Worklog
+evidence, and refreshes derived views. Use this only for intentional display-ID
+migrations; routine new work should still use normal item creation.
+
 ### Best practices
 
 **DO**:

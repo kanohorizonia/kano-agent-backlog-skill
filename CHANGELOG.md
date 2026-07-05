@@ -30,6 +30,9 @@ only until release gates, tags, and public artifacts are prepared separately.
   the Intent Engineering feature wave.
 - Public-facing docs distinguish the `0.0.5` development line from the existing
   `0.0.4` native release target.
+- `workitem remap-id` and `links remap-id` now default to dry-run planning and
+  require `--apply` before mutating item filenames, frontmatter IDs, or product
+  references for pre-1.0 clean display-ID migrations.
 
 ## [0.0.4] - Unreleased
 

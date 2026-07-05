@@ -26,6 +26,122 @@ namespace {
 
 constexpr const char* kDefaultReviewActorAlias = "human-reviewer";
 
+std::string Trim(const std::string& value);
+
+struct GraphModePreset {
+  std::string id;
+  std::string label;
+  std::string description;
+  std::string reviewQuestion;
+  std::string scopeNote;
+  std::set<std::string> defaultEdgeKinds;
+  std::vector<std::string> semanticFocus;
+  bool showDependencyCycles = false;
+};
+
+const std::vector<GraphModePreset>& GraphModePresets() {
+  static const std::vector<GraphModePreset> kPresets = {
+      {"dependency",
+       "Dependencies",
+       "Review blockers, blocked items, and the nearby structure already recorded for this backlog area.",
+       "What blocks delivery here, what is blocked, and what surrounding context matters for review?",
+       "Keeps the current dependency graph breadth so existing Focus Graph and dependency review flows stay readable.",
+       {"blocks", "blocked_by", "parent", "topic-membership", "relates"},
+       {"dependency", "structural", "grouping", "reference"},
+       true},
+      {"structure",
+       "Structure",
+       "Show the explicit parent-child hierarchy without mixing in blocking or non-blocking references.",
+       "How is this work item structured inside the current Product Map hierarchy?",
+       "Uses only recorded parent links; no extra dependency or design-history inference is added.",
+       {"parent"},
+       {"structural"},
+       false},
+      {"cycles",
+       "Dependency cycles",
+       "Reduce the canvas to dependency edges so cycle diagnostics stay focused on blocker relationships.",
+       "Is there a blocker loop that needs a human break-the-cycle decision?",
+       "Dependency cycle semantics remain based only on dependency edges.",
+       {"blocks", "blocked_by"},
+       {"dependency"},
+       true},
+      {"related",
+       "Related refs",
+       "Show non-blocking reference links that connect nearby work without claiming a delivery dependency.",
+       "Which neighboring items are relevant context but not true blockers?",
+       "Uses recorded relates links only; it does not invent implied dependencies.",
+       {"relates"},
+       {"reference"},
+       false},
+      {"product_memory",
+       "Product memory",
+       "Show grouping and context edges already present in the backlog metadata.",
+       "What shared topic context is already recorded for this work?",
+       "Currently limited to recorded topic membership; it does not promise unsupported design-history or evolution edges.",
+       {"topic-membership"},
+       {"grouping"},
+       false},
+  };
+  return kPresets;
+}
+
+const GraphModePreset& DefaultGraphModePreset() {
+  return GraphModePresets().front();
+}
+
+const GraphModePreset* FindGraphModePreset(const std::string& mode) {
+  for (const auto& preset : GraphModePresets()) {
+    if (preset.id == mode) {
+      return &preset;
+    }
+  }
+  return nullptr;
+}
+
+Json::Value GraphModePresetJson(const GraphModePreset& preset) {
+  Json::Value value(Json::objectValue);
+  value["id"] = preset.id;
+  value["label"] = preset.label;
+  value["description"] = preset.description;
+  value["review_question"] = preset.reviewQuestion;
+  value["scope_note"] = preset.scopeNote;
+  value["shows_dependency_cycles"] = preset.showDependencyCycles;
+  value["default_edge_kinds"] = Json::arrayValue;
+  for (const auto& edgeKind : preset.defaultEdgeKinds) {
+    value["default_edge_kinds"].append(edgeKind);
+  }
+  value["semantic_focus"] = Json::arrayValue;
+  for (const auto& semantic : preset.semanticFocus) {
+    value["semantic_focus"].append(semantic);
+  }
+  return value;
+}
+
+struct ResolvedGraphMode {
+  const GraphModePreset* preset = nullptr;
+  std::string requested;
+  bool explicitMode = false;
+  bool fallbackUsed = false;
+  bool unknownMode = false;
+};
+
+ResolvedGraphMode ResolveGraphMode(std::optional<std::string> mode) {
+  ResolvedGraphMode resolved;
+  resolved.preset = &DefaultGraphModePreset();
+  resolved.explicitMode = mode.has_value();
+  resolved.requested = text::ToLower(Trim(mode.value_or("")));
+  if (resolved.requested.empty()) {
+    return resolved;
+  }
+  if (const auto* preset = FindGraphModePreset(resolved.requested)) {
+    resolved.preset = preset;
+    return resolved;
+  }
+  resolved.fallbackUsed = true;
+  resolved.unknownMode = true;
+  return resolved;
+}
+
 std::string Trim(const std::string& value) {
   const auto first = value.find_first_not_of(" \t\r\n");
   if (first == std::string::npos) {
@@ -2140,6 +2256,123 @@ std::string RenderDiagnosticList(const Json::Value& diagnostics) {
             HtmlEscape(diagnostic.get("target", "").asString()) +
             "</div></div>";
   }
+  return html;
+}
+
+std::string RenderFocusGraphSummaryPartial(const Json::Value& item,
+                                           const Json::Value& graph) {
+  const auto product = item.get("product", "").asString();
+  const auto itemId = item.get("id", "").asString();
+  std::string openCanvasHref = "/?tab=graph";
+  if (!product.empty()) {
+    openCanvasHref += "&product=" + product;
+  }
+  if (!itemId.empty()) {
+    openCanvasHref += "&item=" + itemId;
+  }
+
+  std::string html =
+      "<section class=\"panel detail-section focus-graph-summary\" data-navigation-model=\"focus-graph-summary\"><div class=\"detail-title-row\"><h4>Focus Graph</h4>";
+  if (!itemId.empty()) {
+    html += "<a href=\"" + HtmlEscape(openCanvasHref) +
+            "\">Open Canvas</a>";
+  }
+  html += "</div>";
+
+  if (graph.isMember("error")) {
+    html += "<div class=\"muted\">" +
+            HtmlEscape(graph.get("error", "Unable to build focus graph.").asString()) +
+            "</div></section>";
+    return html;
+  }
+
+  const auto nodeCount =
+      graph.get("node_count", static_cast<Json::UInt64>(graph["nodes"].size())).asUInt64();
+  const auto edgeCount =
+      graph.get("edge_count", static_cast<Json::UInt64>(graph["edges"].size())).asUInt64();
+  const auto missingCount = graph.get(
+      "missing_node_count", static_cast<Json::UInt64>(graph["missing_nodes"].size())).asUInt64();
+  const auto hiddenNodeCount = graph.get("hidden_node_count", 0U).asUInt64();
+  const auto hiddenEdgeCount = graph.get("hidden_edge_count", 0U).asUInt64();
+  const auto maxDepth = graph.get("max_depth", 0U).asUInt64();
+  const auto maxChildrenPerNode =
+      graph.get("max_children_per_node", 0U).asUInt64();
+  const auto maxTotalNodes =
+      graph.get("max_total_nodes", graph.get("node_limit", 0U)).asUInt64();
+  const auto maxTotalEdges =
+      graph.get("max_total_edges", graph.get("edge_limit", 0U)).asUInt64();
+  const auto arraySize = [](const Json::Value& value) {
+    return value.isArray() ? static_cast<Json::UInt64>(value.size())
+                           : Json::UInt64{0};
+  };
+  const auto currentKey = product + ":" + itemId;
+  Json::UInt64 childCount = 0;
+  for (const auto& edge : graph["edges"]) {
+    if (edge.get("kind", "").asString() == "parent" &&
+        edge.get("from", "").asString() == currentKey) {
+      ++childCount;
+    }
+  }
+  const auto blockerCount = arraySize(item["links"]["blocked_by"]);
+  const auto blockedItemCount = arraySize(item["links"]["blocks"]);
+  const auto relatedCount = arraySize(item["links"]["relates"]);
+  const auto evidenceRefCount = arraySize(item["evidence_refs"]);
+
+  html += "<div class=\"detail-facts\">" +
+          RenderDetailFact("Nodes", std::to_string(nodeCount)) +
+          RenderDetailFact("Edges", std::to_string(edgeCount)) +
+          RenderDetailFact("Blockers", std::to_string(blockerCount)) +
+          RenderDetailFact("Blocked items", std::to_string(blockedItemCount)) +
+          RenderDetailFact("Children", std::to_string(childCount)) +
+          RenderDetailFact("Related refs", std::to_string(relatedCount)) +
+          RenderDetailFact("Evidence refs", std::to_string(evidenceRefCount)) +
+          RenderDetailFact("Missing refs", std::to_string(missingCount)) +
+          RenderDetailFact("Hidden nodes", std::to_string(hiddenNodeCount)) +
+          RenderDetailFact("Hidden edges", std::to_string(hiddenEdgeCount)) +
+          RenderDetailFact(
+              "Caps",
+              "depth " + std::to_string(maxDepth) + " / children " +
+                  std::to_string(maxChildrenPerNode) + " / nodes " +
+                  std::to_string(maxTotalNodes) + " / edges " +
+                  std::to_string(maxTotalEdges)) +
+          "</div>";
+
+  std::vector<std::string> missingRefs;
+  for (const auto& missing : graph["missing_nodes"]) {
+    auto label = missing.get("ref", "").asString();
+    if (label.empty()) {
+      label = missing.get("id", "").asString();
+    }
+    if (!label.empty()) {
+      missingRefs.push_back(label);
+    }
+    if (missingRefs.size() >= 6) {
+      break;
+    }
+  }
+  std::string missingRefsHtml;
+  for (const auto& value : missingRefs) {
+    const auto cleaned = CleanListToken(value);
+    if (cleaned.empty()) {
+      continue;
+    }
+    missingRefsHtml +=
+        "<span class=\"pill missing\">" + HtmlEscape(cleaned) + "</span>";
+  }
+  if (!missingRefsHtml.empty()) {
+    missingRefsHtml = "<div class=\"detail-links\">" + missingRefsHtml + "</div>";
+  }
+  if (!missingRefsHtml.empty()) {
+    html += "<div><div class=\"detail-label\">Missing refs</div>" +
+            missingRefsHtml + "</div>";
+  }
+
+  if (!graph["diagnostics"].empty()) {
+    html += "<div><div class=\"detail-label\">Diagnostics</div>" +
+            RenderDiagnosticList(graph["diagnostics"]) + "</div>";
+  }
+
+  html += "</section>";
   return html;
 }
 
@@ -7639,28 +7872,49 @@ Json::Value BacklogWebviewService::BuildTopicHome(const std::string& topic,
 }
 
 Json::Value BacklogWebviewService::BuildDependencyGraph(const ItemQueryOptions& options,
-                                                        const std::string& itemId,
-                                                        const std::string& topic) {
+                                                         const std::string& itemId,
+                                                         const std::string& topic,
+                                                         GraphQueryCaps caps,
+                                                         std::optional<std::string> mode) {
   Json::Value response(Json::objectValue);
   response["nodes"] = Json::arrayValue;
   response["edges"] = Json::arrayValue;
   response["missing_nodes"] = Json::arrayValue;
   response["invalid_refs"] = Json::arrayValue;
   response["dependency_cycles"] = Json::arrayValue;
+  response["diagnostics"] = Json::arrayValue;
   response["read_only"] = true;
   response["edge_list_debug"] = true;
   response["visualization"]["kind"] = "first-party-svg";
   response["visualization"]["layout"] = "deterministic-layered";
+  const auto graphMode = ResolveGraphMode(std::move(mode));
+  response["mode"] = graphMode.preset->id;
+  response["mode_defaulted"] = !graphMode.explicitMode || graphMode.fallbackUsed;
+  response["mode_preset"] = GraphModePresetJson(*graphMode.preset);
+  response["mode_presets"] = Json::arrayValue;
+  for (const auto& preset : GraphModePresets()) {
+    response["mode_presets"].append(GraphModePresetJson(preset));
+  }
+  if (graphMode.explicitMode) {
+    response["mode_requested"] = graphMode.requested;
+  }
 
   auto items = QueryItems(options);
   if (items.isMember("error")) {
     return items;
   }
 
-  const size_t maxNodes = 1000;
-  const size_t maxEdges = 1000;
-  response["node_limit"] = static_cast<Json::UInt64>(maxNodes);
-  response["edge_limit"] = static_cast<Json::UInt64>(maxEdges);
+  caps.maxDepth = std::min(caps.maxDepth, size_t{32});
+  caps.maxChildrenPerNode = std::min(caps.maxChildrenPerNode, size_t{1000});
+  caps.maxTotalNodes = std::min(caps.maxTotalNodes, size_t{1000});
+  caps.maxTotalEdges = std::min(caps.maxTotalEdges, size_t{1000});
+  response["max_depth"] = static_cast<Json::UInt64>(caps.maxDepth);
+  response["max_children_per_node"] =
+      static_cast<Json::UInt64>(caps.maxChildrenPerNode);
+  response["max_total_nodes"] = static_cast<Json::UInt64>(caps.maxTotalNodes);
+  response["max_total_edges"] = static_cast<Json::UInt64>(caps.maxTotalEdges);
+  response["node_limit"] = static_cast<Json::UInt64>(caps.maxTotalNodes);
+  response["edge_limit"] = static_cast<Json::UInt64>(caps.maxTotalEdges);
   response["query_limit"] = items["limit"];
   response["query_offset"] = items["offset"];
   response["query_total"] = items["total"];
@@ -7695,14 +7949,55 @@ Json::Value BacklogWebviewService::BuildDependencyGraph(const ItemQueryOptions& 
   std::set<std::string> edgeKeys;
   std::map<std::string, std::vector<std::string>> dependencyAdjacency;
   bool graphTruncated = response["truncated"].asBool();
+  size_t hiddenNodeCount = 0;
+  size_t hiddenEdgeCount = 0;
+
+  auto appendDiagnostic = [&](const std::string& code,
+                              const std::string& target,
+                              const std::string& message) {
+    for (const auto& diagnostic : response["diagnostics"]) {
+      if (diagnostic["code"].asString() == code &&
+          diagnostic["target"].asString() == target) {
+        return;
+      }
+    }
+    Json::Value diagnostic(Json::objectValue);
+    diagnostic["code"] = code;
+    diagnostic["target"] = target;
+    diagnostic["message"] = message;
+    response["diagnostics"].append(diagnostic);
+  };
+
+  if (graphMode.unknownMode) {
+    appendDiagnostic(
+        "graph_unknown_mode", graphMode.requested,
+        "Unknown graph mode requested; falling back to the dependency preset.");
+  }
+
+  auto markHiddenNode = [&](const std::string& code,
+                            const std::string& target,
+                            const std::string& message) {
+    ++hiddenNodeCount;
+    graphTruncated = true;
+    appendDiagnostic(code, target, message);
+  };
+
+  auto markHiddenEdge = [&](const std::string& code,
+                            const std::string& target,
+                            const std::string& message) {
+    ++hiddenEdgeCount;
+    graphTruncated = true;
+    appendDiagnostic(code, target, message);
+  };
 
   auto appendNode = [&](const Json::Value& node) {
     const auto key = node["id"].asString();
     if (key.empty() || nodesByKey.count(key) > 0) {
       return;
     }
-    if (nodesByKey.size() >= maxNodes) {
-      graphTruncated = true;
+    if (nodesByKey.size() >= caps.maxTotalNodes) {
+      markHiddenNode("graph_node_limit_truncated", "graph",
+                     "Dependency graph node cap hid additional nodes.");
       return;
     }
     nodesByKey[key] = node;
@@ -7835,8 +8130,14 @@ Json::Value BacklogWebviewService::BuildDependencyGraph(const ItemQueryOptions& 
     if (!edgeKeys.insert(edgeKey).second) {
       return;
     }
-    if (edges.size() >= maxEdges) {
-      graphTruncated = true;
+    if (edges.size() >= caps.maxTotalEdges) {
+      markHiddenEdge("graph_edge_limit_truncated", "graph",
+                     "Dependency graph edge cap hid additional edges.");
+      return;
+    }
+    if (nodesByKey.count(from) == 0 || nodesByKey.count(to) == 0) {
+      markHiddenEdge("graph_node_limit_truncated", "graph",
+                     "Dependency graph node cap hid edges attached to hidden nodes.");
       return;
     }
     Json::Value edge(Json::objectValue);
@@ -7852,6 +8153,10 @@ Json::Value BacklogWebviewService::BuildDependencyGraph(const ItemQueryOptions& 
     }
   };
 
+  const auto includeEdgeKind = [&](const std::string& kind) {
+    return graphMode.preset->defaultEdgeKinds.count(kind) > 0;
+  };
+
   for (const auto& key : activeKeys) {
     const auto itemIt = allByKey.find(key);
     if (itemIt != allByKey.end()) {
@@ -7859,47 +8164,111 @@ Json::Value BacklogWebviewService::BuildDependencyGraph(const ItemQueryOptions& 
     }
   }
 
+  std::set<std::string> expandedKeys;
+  std::map<std::string, size_t> depthByKey;
+  for (const auto& key : activeKeys) {
+    depthByKey[key] = 0;
+  }
+
+  auto shouldExpandRef = [&](const std::string& sourceKey,
+                             const RefTarget& target,
+                             size_t& childCount,
+                             const bool countChildRef) {
+    if (!target.valid) {
+      return true;
+    }
+    if (countChildRef && childCount >= caps.maxChildrenPerNode) {
+      markHiddenNode("graph_children_truncated", sourceKey,
+                     "Dependency graph child cap hid additional references from this node.");
+      markHiddenEdge("graph_children_truncated", sourceKey,
+                     "Dependency graph child cap hid additional references from this node.");
+      return false;
+    }
+    const auto depthIt = depthByKey.find(sourceKey);
+    const size_t sourceDepth = depthIt == depthByKey.end() ? 0 : depthIt->second;
+    if (sourceDepth >= caps.maxDepth) {
+      markHiddenNode("graph_depth_truncated", sourceKey,
+                     "Dependency graph depth cap hid deeper references from this node.");
+      markHiddenEdge("graph_depth_truncated", sourceKey,
+                     "Dependency graph depth cap hid deeper references from this node.");
+      return false;
+    }
+    if (countChildRef) {
+      ++childCount;
+    }
+    const size_t targetDepth = sourceDepth + 1;
+    const auto targetDepthIt = depthByKey.find(target.key);
+    if (targetDepthIt == depthByKey.end() || targetDepth < targetDepthIt->second) {
+      depthByKey[target.key] = targetDepth;
+    }
+    return true;
+  };
+
   for (const auto& [key, item] : allByKey) {
-    if (activeKeys.count(key) == 0) {
+    if (depthByKey.count(key) == 0) {
       continue;
     }
+    if (!expandedKeys.insert(key).second) {
+      continue;
+    }
+    size_t childCount = 0;
 
-    for (const auto& itemTopic : SplitCsv(item["topic"].asString())) {
-      const auto topicKey = "topic:" + itemTopic;
-      appendTopicNode(itemTopic);
-      appendEdge(topicKey, key, "topic-membership", "grouping", key);
+    if (includeEdgeKind("topic-membership")) {
+      for (const auto& itemTopic : SplitCsv(item["topic"].asString())) {
+        const auto topicKey = "topic:" + itemTopic;
+        appendTopicNode(itemTopic);
+        appendEdge(topicKey, key, "topic-membership", "grouping", key);
+      }
     }
 
     const auto parent = item["parent"].asString();
-    if (!parent.empty()) {
+    if (includeEdgeKind("parent") && !parent.empty()) {
       const auto target = resolveRef(parent, item["product"].asString());
-      ensureRefNode(key, "parent", target);
-      if (target.valid) {
+      const bool includeRef = shouldExpandRef(key, target, childCount, false);
+      if (includeRef) {
+        ensureRefNode(key, "parent", target);
+      }
+      if (includeRef && target.valid) {
         appendEdge(target.key, key, "parent", "structural", key);
       }
     }
 
-    for (const auto& ref : item["links"]["blocks"]) {
-      const auto target = resolveRef(ref.asString(), item["product"].asString());
-      ensureRefNode(key, "blocks", target);
-      if (target.valid) {
-        appendEdge(key, target.key, "blocks", "dependency", key);
+    if (includeEdgeKind("blocks")) {
+      for (const auto& ref : item["links"]["blocks"]) {
+        const auto target = resolveRef(ref.asString(), item["product"].asString());
+        const bool includeRef = shouldExpandRef(key, target, childCount, true);
+        if (includeRef) {
+          ensureRefNode(key, "blocks", target);
+        }
+        if (includeRef && target.valid) {
+          appendEdge(key, target.key, "blocks", "dependency", key);
+        }
       }
     }
 
-    for (const auto& ref : item["links"]["blocked_by"]) {
-      const auto target = resolveRef(ref.asString(), item["product"].asString());
-      ensureRefNode(key, "blocked_by", target);
-      if (target.valid) {
-        appendEdge(target.key, key, "blocked_by", "dependency", key);
+    if (includeEdgeKind("blocked_by")) {
+      for (const auto& ref : item["links"]["blocked_by"]) {
+        const auto target = resolveRef(ref.asString(), item["product"].asString());
+        const bool includeRef = shouldExpandRef(key, target, childCount, true);
+        if (includeRef) {
+          ensureRefNode(key, "blocked_by", target);
+        }
+        if (includeRef && target.valid) {
+          appendEdge(target.key, key, "blocked_by", "dependency", key);
+        }
       }
     }
 
-    for (const auto& ref : item["links"]["relates"]) {
-      const auto target = resolveRef(ref.asString(), item["product"].asString());
-      ensureRefNode(key, "relates", target);
-      if (target.valid) {
-        appendEdge(key, target.key, "relates", "reference", key);
+    if (includeEdgeKind("relates")) {
+      for (const auto& ref : item["links"]["relates"]) {
+        const auto target = resolveRef(ref.asString(), item["product"].asString());
+        const bool includeRef = shouldExpandRef(key, target, childCount, true);
+        if (includeRef) {
+          ensureRefNode(key, "relates", target);
+        }
+        if (includeRef && target.valid) {
+          appendEdge(key, target.key, "relates", "reference", key);
+        }
       }
     }
   }
@@ -7981,6 +8350,12 @@ Json::Value BacklogWebviewService::BuildDependencyGraph(const ItemQueryOptions& 
   response["edge_count"] = static_cast<Json::UInt64>(response["edges"].size());
   response["missing_node_count"] =
       static_cast<Json::UInt64>(response["missing_nodes"].size());
+  response["hidden_node_count"] = static_cast<Json::UInt64>(hiddenNodeCount);
+  response["hidden_edge_count"] = static_cast<Json::UInt64>(hiddenEdgeCount);
+  if (!response["missing_nodes"].empty()) {
+    appendDiagnostic("graph_missing_refs", "graph",
+                     "Dependency graph includes unresolved item references.");
+  }
   response["truncated"] = graphTruncated;
   return response;
 }
@@ -8363,7 +8738,15 @@ std::string BacklogWebviewService::RenderItemPartial(const std::string& product,
     navigationOptions.products = {itemProduct};
   }
   navigationOptions.limit = 2000;
+  GraphQueryCaps focusGraphCaps;
+  focusGraphCaps.maxDepth = 1;
+  focusGraphCaps.maxChildrenPerNode = 10;
+  focusGraphCaps.maxTotalNodes = 24;
+  focusGraphCaps.maxTotalEdges = 32;
   const auto productMapNavigation = BuildProductMapNavigation(navigationOptions);
+  const auto focusGraph = BuildDependencyGraph(
+      navigationOptions, item.get("id", "").asString(),
+      item.get("topic", "").asString(), focusGraphCaps);
   Json::Value decisionRadar(Json::objectValue);
   if (item.get("type", "").asString() != "ADR") {
     decisionRadar = BuildDecisionDebtRadar(navigationOptions);
@@ -8407,6 +8790,8 @@ std::string BacklogWebviewService::RenderItemPartial(const std::string& product,
       }
     }
   }
+
+  html += RenderFocusGraphSummaryPartial(item, focusGraph);
 
   html += "<section class=\"panel detail-section\"><h4>Gate status</h4><div class=\"review-grid\">" +
           RenderGateStatusCard(item["gate_status"]["ready"]) +
@@ -9235,9 +9620,27 @@ void RegisterBacklogWebviewRoutes(
       "/api/review/graph",
       [metaAppender, &service, queryOptionsFromRequest](const HttpRequestPtr& request,
           std::function<void(const HttpResponsePtr&)>&& callback) {
+        GraphQueryCaps graphCaps;
+        graphCaps.maxDepth =
+            ParseSizeOrDefault(request->getParameter("max_depth"), graphCaps.maxDepth, 32);
+        graphCaps.maxChildrenPerNode = ParseSizeOrDefault(
+            request->getParameter("max_children_per_node"), graphCaps.maxChildrenPerNode, 1000);
+        const auto nodeLimitParam = request->getParameter("max_total_nodes").empty()
+                                      ? request->getParameter("node_limit")
+                                      : request->getParameter("max_total_nodes");
+        const auto edgeLimitParam = request->getParameter("max_total_edges").empty()
+                                      ? request->getParameter("edge_limit")
+                                      : request->getParameter("max_total_edges");
+        graphCaps.maxTotalNodes =
+            ParseSizeOrDefault(nodeLimitParam, graphCaps.maxTotalNodes, 1000);
+        graphCaps.maxTotalEdges =
+            ParseSizeOrDefault(edgeLimitParam, graphCaps.maxTotalEdges, 1000);
+        const auto requestedMode = request->getParameter("mode");
         auto data = service.BuildDependencyGraph(
             queryOptionsFromRequest(request), request->getParameter("item"),
-            request->getParameter("topic"));
+            request->getParameter("topic"), graphCaps,
+            requestedMode.empty() ? std::nullopt
+                                  : std::optional<std::string>(requestedMode));
         Json::Value body(Json::objectValue);
         body["ok"] = !data.isMember("error");
         body["data"] = data;

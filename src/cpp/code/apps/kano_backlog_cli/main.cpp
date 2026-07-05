@@ -247,6 +247,150 @@ std::string json_to_string(const Json::Value& value, bool pretty = true) {
     return Json::writeString(builder, value);
 }
 
+bool is_item_id_token_boundary(char ch) {
+    return !std::isalnum(static_cast<unsigned char>(ch)) && ch != '-';
+}
+
+int count_item_id_token_occurrences(const std::string& content, const std::string& old_id) {
+    int occurrences = 0;
+    std::size_t pos = 0;
+    while ((pos = content.find(old_id, pos)) != std::string::npos) {
+        const bool boundary_before = pos == 0 || is_item_id_token_boundary(content[pos - 1]);
+        const auto end_pos = pos + old_id.size();
+        const bool boundary_after = end_pos == content.size() || is_item_id_token_boundary(content[end_pos]);
+        if (boundary_before && boundary_after) {
+            ++occurrences;
+        }
+        pos += old_id.size();
+    }
+    return occurrences;
+}
+
+std::string item_id_type_code(const std::string& id) {
+    const auto first_dash = id.find('-');
+    if (first_dash == std::string::npos) {
+        return {};
+    }
+    const auto second_dash = id.find('-', first_dash + 1);
+    if (second_dash == std::string::npos) {
+        return {};
+    }
+    return id.substr(first_dash + 1, second_dash - first_dash - 1);
+}
+
+void validate_remap_target_id(
+    const CanonicalStore& store,
+    const BacklogItem& item,
+    const std::string& new_id
+) {
+    static const std::regex id_regex(R"(^[A-Z][A-Z0-9]{1,15}-(INIT|EPIC|FTR|USR|TSK|SUBTSK|BUG|ISS)-\d{4}$)");
+    if (!std::regex_match(new_id, id_regex)) {
+        throw std::runtime_error("New item id has invalid format: " + new_id + " (expected <PREFIX>-(INIT|EPIC|FTR|USR|TSK|SUBTSK|BUG|ISS)-<NNNN>)");
+    }
+    if (new_id == item.id) {
+        throw std::runtime_error("New item id matches current id: " + new_id);
+    }
+    if (item_id_type_code(new_id) != item_id_type_code(item.id)) {
+        throw std::runtime_error("New item id type code must match current item type: " + item.id + " -> " + new_id);
+    }
+    if (store.find_item_path_by_id(new_id)) {
+        throw std::runtime_error("New item id already exists: " + new_id);
+    }
+}
+
+Json::Value remap_path_vector_to_json(const std::vector<std::filesystem::path>& paths) {
+    Json::Value array(Json::arrayValue);
+    for (const auto& path : paths) {
+        array.append(path.string());
+    }
+    return array;
+}
+
+struct RemapIdCliPlan {
+    std::string old_id;
+    std::string new_id;
+    std::filesystem::path old_path;
+    std::filesystem::path new_path;
+    std::vector<std::filesystem::path> planned_paths;
+    int planned_occurrences = 0;
+};
+
+RemapIdCliPlan plan_remap_id_cli(
+    const std::filesystem::path& product_root,
+    const std::string& item_ref,
+    const std::string& new_id
+) {
+    CanonicalStore store(product_root);
+    RefResolver resolver(store);
+    auto item = resolver.resolve(item_ref);
+    if (!item.file_path) {
+        throw std::runtime_error("Resolved item has no file path: " + item_ref);
+    }
+    validate_remap_target_id(store, item, new_id);
+
+    const auto old_path = *item.file_path;
+    const auto filename = old_path.filename().string();
+    const auto underscore_pos = filename.find('_');
+    const auto tail = underscore_pos != std::string::npos ? filename.substr(underscore_pos) : std::string(".md");
+
+    RemapIdCliPlan plan;
+    plan.old_id = item.id;
+    plan.new_id = new_id;
+    plan.old_path = old_path;
+    plan.new_path = old_path.parent_path() / (new_id + tail);
+    plan.planned_paths.push_back(old_path);
+
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(product_root)) {
+        if (!entry.is_regular_file() || entry.path().extension() != ".md") {
+            continue;
+        }
+        if (entry.path() == old_path) {
+            continue;
+        }
+        const auto content = read_text_file_path(entry.path());
+        const auto occurrences = count_item_id_token_occurrences(content, item.id);
+        if (occurrences > 0) {
+            plan.planned_paths.push_back(entry.path());
+            plan.planned_occurrences += occurrences;
+        }
+    }
+    return plan;
+}
+
+Json::Value remap_plan_to_json(const RemapIdCliPlan& plan, const std::string& status) {
+    Json::Value payload(Json::objectValue);
+    payload["status"] = status;
+    payload["old_id"] = plan.old_id;
+    payload["new_id"] = plan.new_id;
+    payload["old_path"] = plan.old_path.string();
+    payload["new_path"] = plan.new_path.string();
+    payload["planned_path"] = plan.new_path.string();
+    payload["planned_updated_files"] = static_cast<int>(plan.planned_paths.size());
+    payload["planned_occurrences"] = plan.planned_occurrences;
+    payload["planned_paths"] = remap_path_vector_to_json(plan.planned_paths);
+    return payload;
+}
+
+Json::Value remap_result_to_json(const RemapIdResult& result, const std::string& status) {
+    Json::Value payload(Json::objectValue);
+    payload["status"] = status;
+    payload["old_id"] = result.old_id;
+    payload["new_id"] = result.new_id;
+    payload["old_path"] = result.old_path.string();
+    payload["new_path"] = result.new_path.string();
+    payload["updated_files"] = result.updated_files;
+    return payload;
+}
+
+void print_remap_plan_markdown(const RemapIdCliPlan& plan) {
+    std::cout << "# Remap ID dry-run: " << plan.old_id << " -> " << plan.new_id << "\n";
+    std::cout << "- old_path: " << plan.old_path.string() << "\n";
+    std::cout << "- new_path: " << plan.new_path.string() << "\n";
+    std::cout << "- planned_updated_files: " << plan.planned_paths.size() << "\n";
+    std::cout << "- planned_occurrences: " << plan.planned_occurrences << "\n";
+    std::cout << "Run with --apply to rename and update references.\n";
+}
+
 std::string toml_quote_string(const std::string& value) {
     std::string out = "\"";
     for (char ch : value) {
@@ -9204,16 +9348,37 @@ int main(int InArgc, char* InArgv[]) {
         // workitem remap-id
         {
             auto* remapIdCmd = workitemCmd->add_subcommand("remap-id", "Rename an item's ID and update references");
-            std::string ri_ref, ri_to, ri_agent;
+            std::string ri_ref, ri_to, ri_agent, ri_format = "plain";
+            bool ri_apply = false;
             remapIdCmd->add_option("ref", ri_ref, "Current item ID or UID")->required();
             remapIdCmd->add_option("--to", ri_to, "New ID")->required();
             remapIdCmd->add_option("--agent", ri_agent, "Agent ID")->required();
+            remapIdCmd->add_flag("--apply", ri_apply, "Apply the remap; defaults to dry-run");
+            remapIdCmd->add_option("--format", ri_format, "Output format: plain|json");
             remapIdCmd->callback([&]() {
                 auto ctx = resolve_ctx();
+                const auto format_norm = lower_copy(trim_copy(ri_format));
+                if (format_norm != "plain" && format_norm != "json") {
+                    throw std::runtime_error("format must be plain or json");
+                }
+                if (!ri_apply) {
+                    const auto plan = plan_remap_id_cli(ctx.product_root, ri_ref, ri_to);
+                    if (format_norm == "json") {
+                        std::cout << json_to_string(remap_plan_to_json(plan, "dry-run"), true) << "\n";
+                    } else {
+                        print_remap_plan_markdown(plan);
+                    }
+                    return;
+                }
+
                 BacklogIndex index(ctx.backlog_root / ".cache" / "index" / "backlog.db");
                 auto result = WorkitemOps::remap_id(index, ctx.product_root, ri_ref, ri_to, ri_agent);
-                std::cout << "Remapped ID: " << result.old_id << " -> " << result.new_id << "\n";
-                std::cout << "Updated " << result.updated_files << " files.\n";
+                if (format_norm == "json") {
+                    std::cout << json_to_string(remap_result_to_json(result, "applied"), true) << "\n";
+                } else {
+                    std::cout << "Remapped ID: " << result.old_id << " -> " << result.new_id << "\n";
+                    std::cout << "Updated " << result.updated_files << " files.\n";
+                }
             });
         }
 
@@ -20269,7 +20434,7 @@ int main(int InArgc, char* InArgv[]) {
             // links remap-id
             {
                 auto* lriCmd = linksGroupCmd->add_subcommand("remap-id", "Remap item ID and update references");
-                std::string lri_ref, lri_new_id, lri_agent;
+                std::string lri_ref, lri_new_id, lri_agent, lri_format = "markdown";
                 bool lri_update_refs = true;
                 bool lri_apply = false;
                 lriCmd->add_option("ref", lri_ref, "Current item ID or UID")->required();
@@ -20277,12 +20442,34 @@ int main(int InArgc, char* InArgv[]) {
                 lriCmd->add_option("--agent", lri_agent, "Agent identifier")->required();
                 lriCmd->add_flag("--update-refs", lri_update_refs, "Update references across backlog");
                 lriCmd->add_flag("--apply", lri_apply, "Apply changes");
+                lriCmd->add_option("--format", lri_format, "Output format: markdown|json");
                 lriCmd->callback([&]() {
+                    const auto format_norm = lower_copy(trim_copy(lri_format));
+                    if (format_norm != "markdown" && format_norm != "json") {
+                        throw std::runtime_error("format must be markdown or json");
+                    }
+                    if (!lri_update_refs) {
+                        throw std::runtime_error("links remap-id requires --update-refs; partial ID remaps are not supported");
+                    }
                     auto ctx = resolve_ctx();
+                    if (!lri_apply) {
+                        const auto plan = plan_remap_id_cli(ctx.product_root, lri_ref, lri_new_id);
+                        if (format_norm == "json") {
+                            std::cout << json_to_string(remap_plan_to_json(plan, "dry-run"), true) << "\n";
+                        } else {
+                            print_remap_plan_markdown(plan);
+                        }
+                        return;
+                    }
+
                     BacklogIndex index(ctx.backlog_root / ".cache" / "index" / "backlog.db");
                     auto result = WorkitemOps::remap_id(index, ctx.product_root, lri_ref, lri_new_id, lri_agent);
-                    std::cout << "Remapped ID: " << result.old_id << " -> " << result.new_id << "\n";
-                    std::cout << "Updated " << result.updated_files << " files.\n";
+                    if (format_norm == "json") {
+                        std::cout << json_to_string(remap_result_to_json(result, "applied"), true) << "\n";
+                    } else {
+                        std::cout << "Remapped ID: " << result.old_id << " -> " << result.new_id << "\n";
+                        std::cout << "Updated " << result.updated_files << " files.\n";
+                    }
                 });
             }
 

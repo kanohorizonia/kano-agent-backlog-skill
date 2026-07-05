@@ -370,3 +370,7 @@ Console coupling.
 - Display IDs are human-friendly and stable for day-to-day work within a product.
 - Parent drives hierarchy and state propagation; limiting it to a product keeps behavior predictable.
 - Cross-product collisions are expected in a multi-product platform; disambiguated refs in links ensure correctness without sacrificing readability in the common case.
+- During pre-1.0 clean migrations, a display ID may be remapped in place with
+  `workitem remap-id` / `links remap-id`; the item UID remains the immutable
+  identity while filename, frontmatter `id`, and same-product references are
+  updated together.

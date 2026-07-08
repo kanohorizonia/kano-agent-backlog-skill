@@ -39,7 +39,13 @@ inline constexpr std::string_view kBackboardAppJsPart1 = R"JS(
       shortcutHelpOpen: false,
       reviewActorAlias: 'human-reviewer',
       graphMode: 'dependency',
-      graphModePresets: []
+      graphModePresets: [],
+      graphItemId: '',
+      graphItemProduct: '',
+      graphMaxDepth: 2,
+      graphMaxChildrenPerNode: 25,
+      graphMaxTotalNodes: 80,
+      graphMaxTotalEdges: 120
     };
     const lanes = ['Backlog', 'Doing', 'Blocked', 'Review', 'Done'];
     const reviewQueueOrder = ['Needs Review', 'Done Candidate', 'False Done Suspect', 'Evidence Gap', 'Blocked/Dirty', 'Stale/Drift', 'Ready Frontier'];
@@ -47,6 +53,12 @@ inline constexpr std::string_view kBackboardAppJsPart1 = R"JS(
     const itemTypes = ['Theme', 'Initiative', 'Epic', 'Feature', 'UserStory', 'Task', 'Bug', 'Issue', 'ADR', 'Topic', 'Workset'];
     const refreshableTabs = ['review', 'handoff', 'tree', 'roadmap', 'decision-radar', 'kanban', 'context', 'graph', 'runs'];
     const graphModeOrder = ['dependency', 'structure', 'cycles', 'related', 'product_memory'];
+    const defaultGraphCaps = Object.freeze({
+      maxDepth: 2,
+      maxChildrenPerNode: 25,
+      maxTotalNodes: 80,
+      maxTotalEdges: 120,
+    });
     const tabLabels = {
       review: 'Review Inbox',
       handoff: 'Handoff Readiness',
@@ -66,6 +78,18 @@ inline constexpr std::string_view kBackboardAppJsPart1 = R"JS(
       if (value === '__none__') return new Set();
       return new Set(String(value).split(',').map((x) => x.trim()).filter(Boolean));
     }
+
+    function boundedPositiveInt(value, fallback, max) {
+      const parsed = Number.parseInt(value, 10);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        return fallback;
+      }
+      return Math.min(parsed, max);
+    }
+
+)JS";
+
+inline constexpr std::string_view kBackboardAppJsPart1a = R"JS(
 
     (function applyInitialQueryState() {
       const query = window.KobUi?.readQueryState?.() || {};
@@ -88,6 +112,14 @@ inline constexpr std::string_view kBackboardAppJsPart1 = R"JS(
       }
       if (graphModeOrder.includes(query.mode)) {
         state.graphMode = query.mode;
+      }
+      if (query.item) {
+        state.graphItemId = String(query.item).trim();
+        state.graphItemProduct = String(query.product || '').trim();
+        state.graphMaxDepth = boundedPositiveInt(query.max_depth, defaultGraphCaps.maxDepth, 32);
+        state.graphMaxChildrenPerNode = boundedPositiveInt(query.max_children_per_node, defaultGraphCaps.maxChildrenPerNode, 1000);
+        state.graphMaxTotalNodes = boundedPositiveInt(query.max_total_nodes || query.node_limit, defaultGraphCaps.maxTotalNodes, 1000);
+        state.graphMaxTotalEdges = boundedPositiveInt(query.max_total_edges || query.edge_limit, defaultGraphCaps.maxTotalEdges, 1000);
       }
     })();
 
@@ -790,16 +822,81 @@ inline constexpr std::string_view kBackboardAppJsPart1b = R"JS(
     function graphQueryString() {
       const params = new URLSearchParams(queryString());
       params.set('mode', normalizeGraphMode(state.graphMode));
+      if (state.graphItemProduct) {
+        params.delete('products');
+        params.set('product', state.graphItemProduct);
+      }
+      if (state.graphItemId) {
+        params.set('item', state.graphItemId);
+        params.set('max_depth', String(state.graphMaxDepth));
+        params.set('max_children_per_node', String(state.graphMaxChildrenPerNode));
+        params.set('max_total_nodes', String(state.graphMaxTotalNodes));
+        params.set('max_total_edges', String(state.graphMaxTotalEdges));
+      }
       return params.toString();
     }
 
+    function focusGraphProductScope() {
+      if (state.graphItemProduct) {
+        return state.graphItemProduct;
+      }
+      const products = selectedProductValues();
+      return products.length === 1 && products[0] !== 'all' ? products[0] : '';
+    }
+
+    function focusGraphReviewHref() {
+      const params = new URLSearchParams();
+      params.set('tab', 'review');
+      const product = focusGraphProductScope();
+      if (product) {
+        params.set('product', product);
+      }
+      if (state.graphItemId) {
+        params.set('item', state.graphItemId);
+      }
+      return `/?${params.toString()}`;
+    }
+
+    function updateFocusGraphPageChrome() {
+      const rootLabel = document.getElementById('focus-graph-root-label');
+      const backLink = document.getElementById('focus-graph-back-link');
+      const product = focusGraphProductScope();
+      if (rootLabel) {
+        rootLabel.textContent = state.graphItemId
+          ? (product ? `${state.graphItemId} / ${product}` : state.graphItemId)
+          : 'No item root selected';
+      }
+      if (backLink) {
+        backLink.href = focusGraphReviewHref();
+        backLink.textContent = state.graphItemId ? 'Back to Item Review' : 'Back to Review Inbox';
+      }
+    }
+
+    function renderFocusGraphScaffold() {
+      syncGraphModeControls();
+      updateFocusGraphPageChrome();
+      document.getElementById('graph-summary').textContent = '';
+      document.getElementById('graph-list').innerHTML =
+        '<div class="card graph-empty-state"><div class="muted">Select an item to open a bounded Focus Graph canvas.</div></div>';
+    }
+
+)JS";
+
+inline constexpr std::string_view kBackboardAppJsPart1c = R"JS(
+
     function updateUrlState() {
       const products = selectedProductValues();
+      const graphRouteActive = state.activeTab === 'graph' && !!state.graphItemId;
       const update = {
         tab: state.activeTab,
         product: null,
         products: null,
         mode: state.graphMode === 'dependency' ? null : state.graphMode,
+        item: graphRouteActive ? state.graphItemId : null,
+        max_depth: graphRouteActive ? String(state.graphMaxDepth) : null,
+        max_children_per_node: graphRouteActive ? String(state.graphMaxChildrenPerNode) : null,
+        max_total_nodes: graphRouteActive ? String(state.graphMaxTotalNodes) : null,
+        max_total_edges: graphRouteActive ? String(state.graphMaxTotalEdges) : null,
         q: state.q || null,
         state: selectedTokens(state.selectedStates, itemStates) || null,
         type: selectedTokens(state.selectedTypes, itemTypes) || null,
@@ -809,6 +906,10 @@ inline constexpr std::string_view kBackboardAppJsPart1b = R"JS(
         update.product = products[0];
       } else {
         update.products = products.join(',');
+      }
+      if (graphRouteActive && state.graphItemProduct) {
+        update.product = state.graphItemProduct;
+        update.products = null;
       }
       window.KobUi?.setQueryState?.(update, { replace: true });
     }
@@ -1365,6 +1466,13 @@ inline constexpr std::string_view kBackboardAppJsPart3 = R"JS(
         }
         openModal(itemId, `<div class="muted">Unable to load item detail: ${esc(describeItemDetailError(error, state.lastDetailDiagnostic))}</div>`);
       }
+    }
+
+    async function restoreItemModalFromQuery() {
+      if (!state.graphItemId || state.activeTab === 'graph') {
+        return;
+      }
+      await openItemModal(state.graphItemId, state.graphItemProduct || '');
     }
 
     function isTypingContext(target) {
@@ -1970,6 +2078,11 @@ inline constexpr std::string_view kBackboardAppJsPart5a = R"JS(
     }
 
     async function loadGraph(signal, refresh) {
+      if (!state.graphItemId) {
+        renderFocusGraphScaffold();
+        return;
+      }
+
       const result = await getJson(`/api/review/graph?${graphQueryString()}`, {
         signal,
         refresh,
@@ -1990,6 +2103,7 @@ inline constexpr std::string_view kBackboardAppJsPart5a = R"JS(
       ].join(' / ');
       const truncated = data.truncated ? `, truncated (${hiddenNodes} hidden node(s), ${hiddenEdges} hidden edge(s))` : '';
       const modeLabel = currentPreset?.label || 'Dependencies';
+      updateFocusGraphPageChrome();
       document.getElementById('graph-summary').textContent =
         `${modeLabel}: ${nodes.length} node(s), ${edges.length} edge(s), ${missing.length} missing node(s)${truncated} | caps ${caps}`;
 
@@ -2142,6 +2256,7 @@ inline constexpr std::string_view kBackboardAppJsPart5b = R"JS(
       document.getElementById('page-command').classList.toggle('active', isCommand);
       updateAllPageRefreshStates();
       updateUrlState();
+      updateFocusGraphPageChrome();
       syncSelectableItems();
     }
 )JS";
@@ -2676,6 +2791,7 @@ inline constexpr std::string_view kBackboardAppJsPart7 = R"JS(
       document.getElementById('limit').value = String(state.limit);
       await loadProducts();
       await ensureActiveTabLoaded({ reason: 'initial active tab load' });
+      await restoreItemModalFromQuery();
     })();
 )JS";
 
@@ -2683,7 +2799,8 @@ inline const std::string& BackboardAppJs() {
   static const std::string js = [] {
     std::string text;
     text.reserve(
-        kBackboardAppJsPart1.size() + kBackboardAppJsPart1b.size() +
+        kBackboardAppJsPart1.size() + kBackboardAppJsPart1a.size() +
+        kBackboardAppJsPart1b.size() + kBackboardAppJsPart1c.size() +
         kBackboardAppJsPart2.size() +
         kBackboardAppJsPart3.size() + kBackboardAppJsPart4.size() +
         kBackboardAppJsPart5.size() + kBackboardAppJsPart5a.size() +
@@ -2691,7 +2808,9 @@ inline const std::string& BackboardAppJs() {
         kBackboardAppJsPart6.size() +
         kBackboardAppJsPart7.size());
     text.append(kBackboardAppJsPart1);
+    text.append(kBackboardAppJsPart1a);
     text.append(kBackboardAppJsPart1b);
+    text.append(kBackboardAppJsPart1c);
     text.append(kBackboardAppJsPart2);
     text.append(kBackboardAppJsPart3);
     text.append(kBackboardAppJsPart4);

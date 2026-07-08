@@ -29,6 +29,7 @@ Design contracts:
   - `GET /api/review/evidence-quality?product=all|<name>[&products=a,b][&q=...][&state=...][&type=...]`
   - `GET /api/review/handoff-readiness?product=all|<name>[&products=a,b][&q=...][&state=...][&type=...]`
   - `GET /api/review/context-recovery?area=...&product=all|<name>[&products=a,b][&q=...][&state=...][&type=...]`
+  - `GET /api/review/graph?product=all|<name>[&products=a,b][&item=<id>][&mode=dependency|structure|cycles|related|product_memory][&max_depth=2][&max_children_per_node=25][&max_total_nodes=80|&node_limit=80][&max_total_edges=120|&edge_limit=120]`
   - `GET /api/review/feature-evolution?product=<name>&feature_id=<id>`
   - `GET /api/review/roadmap?product=all|<name>[&products=a,b]`
   - `GET /api/review/decision-radar?product=all|<name>[&products=a,b]`
@@ -47,8 +48,14 @@ Design contracts:
   - `GET /partials/item/<id>?product=all|<name>`
 - First-party UI runtime:
   - `GET /assets/kob-ui.js`
+  - `GET /graph?tab=graph[&product=<name>][&item=<id>][&mode=dependency][&max_depth=2][&max_children_per_node=25][&max_total_nodes=80][&max_total_edges=120]`
 - UI: Backboard Review Inbox, Agent Handoff Readiness, product map, flow,
   context, dependencies, agent runs, and command preview at `/`
+
+The full-page Dependencies canvas is item-rooted and bounded by query caps. The
+default graph page shell keeps the mode selector/help visible, but when no
+`item` root is present it renders a scaffold-only prompt instead of fetching or
+rendering a global all-node graph by default.
 
 `kob-ui.js` is intentionally small and first-party. It owns partial fetch/swap,
 delegated partial links, filter debounce support, URL query-state helpers, and

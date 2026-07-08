@@ -2186,8 +2186,18 @@ int main() {
                "item partial should render missing ref counts for the Focus Graph summary");
         expect(focusGraphItemPartial.find("Open Canvas") != std::string::npos,
                "item partial should link to the full graph canvas view");
+        expect(focusGraphItemPartial.find("/graph?tab=graph") != std::string::npos &&
+                   focusGraphItemPartial.find("product=product-alpha") != std::string::npos &&
+                   focusGraphItemPartial.find("item=PRA-TSK-0001") != std::string::npos &&
+                   focusGraphItemPartial.find("mode=dependency") != std::string::npos,
+               "item partial should link to an item-rooted dependency graph canvas route via /graph");
         expect(focusGraphItemPartial.find("item=PRA-TSK-0001") != std::string::npos,
                "item partial should carry the current item root graph query in the Open Canvas link");
+        expect(focusGraphItemPartial.find("max_depth=2") != std::string::npos &&
+                   focusGraphItemPartial.find("max_children_per_node=25") != std::string::npos &&
+                   focusGraphItemPartial.find("max_total_nodes=80") != std::string::npos &&
+                   focusGraphItemPartial.find("max_total_edges=120") != std::string::npos,
+               "item partial should link to the bounded default Focus Graph caps");
         expect(focusGraphItemPartial.find("graph-canvas") == std::string::npos,
                "item partial should not embed the full graph canvas in the modal detail view");
         expect(focusGraphItemPartial.find("graph-svg") == std::string::npos,
@@ -2294,6 +2304,8 @@ int main() {
             webviewAppRoot / "assets" / "backboard_app_js.hpp");
         const auto kobUiJsSource = read_text(
             webviewAppRoot / "assets" / "kob_ui_js.hpp");
+        const auto mainSource = read_text(
+            webviewAppRoot / "main.cpp");
         const auto assetSource =
             indexHtmlSource + "\n" + indexCssSource + "\n" +
             indexAppJsSource + "\n" + kobUiJsSource;
@@ -2304,6 +2316,9 @@ int main() {
                "index html asset should compose the dedicated page app javascript module");
         expect(indexHtmlSource.find("BackboardCss()") != std::string::npos,
                "index html asset should compose the dedicated css module");
+        expect(mainSource.find("\"/graph\"") != std::string::npos &&
+                   mainSource.find("IndexHtml()") != std::string::npos,
+               "webview app main should expose /graph and serve the embedded IndexHtml shell");
         expect(assetSource.find("data-selectable-item") != std::string::npos,
                "embedded webview assets should expose selectable card markup hooks");
         expect(assetSource.find("Shortcuts ?") != std::string::npos,
@@ -2346,12 +2361,28 @@ int main() {
         expect(indexHtmlSource.find("tab-handoff") != std::string::npos &&
                    indexHtmlSource.find("page-handoff") != std::string::npos,
                "embedded webview assets should expose the Handoff Readiness tab shell");
+        expect(indexHtmlSource.find("focus-graph-page") != std::string::npos &&
+                   indexHtmlSource.find("focus-graph-back-link") != std::string::npos &&
+                   indexHtmlSource.find("focus-graph-root-label") != std::string::npos,
+               "embedded webview assets should expose the full-page Focus Graph route chrome");
         expect(assetSource.find("function loadHandoffReadiness") != std::string::npos &&
                    assetSource.find("/api/review/handoff-readiness") != std::string::npos &&
                    assetSource.find("handoff.readiness") != std::string::npos,
                "embedded webview assets should lazy-load the handoff readiness tab");
         expect(assetSource.find("function ensureActiveTabLoaded") != std::string::npos,
                "embedded webview assets should lazy-load inactive tabs when selected");
+        expect(assetSource.find("params.set('item', state.graphItemId);") != std::string::npos &&
+                   assetSource.find("params.set('max_depth', String(state.graphMaxDepth));") != std::string::npos &&
+                   assetSource.find("params.set('max_children_per_node', String(state.graphMaxChildrenPerNode));") != std::string::npos &&
+                   assetSource.find("params.set('max_total_nodes', String(state.graphMaxTotalNodes));") != std::string::npos &&
+                   assetSource.find("params.set('max_total_edges', String(state.graphMaxTotalEdges));") != std::string::npos,
+               "embedded webview assets should carry item-rooted graph query and cap params");
+        expect(assetSource.find("Select an item to open a bounded Focus Graph canvas.") != std::string::npos,
+               "embedded webview assets should render the no-root Focus Graph scaffold text");
+        expect(assetSource.find("async function restoreItemModalFromQuery()") != std::string::npos &&
+                   assetSource.find("if (!state.graphItemId || state.activeTab === 'graph')") != std::string::npos &&
+                   assetSource.find("await openItemModal(state.graphItemId, state.graphItemProduct || '')") != std::string::npos,
+               "embedded webview assets should restore item modal context from item query on non-graph initial loads");
         expect(assetSource.find("loadedTabs") != std::string::npos &&
                    assetSource.find("staleTabs") != std::string::npos,
                "embedded webview assets should track loaded and stale tab state");
@@ -2400,6 +2431,19 @@ int main() {
                "webview README should list the handoff readiness partial route");
         expect(webviewReadme.find("/api/review/context-recovery") != std::string::npos,
                "webview README should list the context recovery API route");
+        expect(webviewReadme.find("/api/review/graph?product=all|<name>") != std::string::npos &&
+                   webviewReadme.find("[&item=<id>]") != std::string::npos &&
+                   webviewReadme.find("[&mode=dependency|structure|cycles|related|product_memory]") != std::string::npos &&
+                   webviewReadme.find("[&max_depth=2]") != std::string::npos &&
+                   webviewReadme.find("[&max_children_per_node=25]") != std::string::npos &&
+                   webviewReadme.find("[&max_total_nodes=80|&node_limit=80]") != std::string::npos &&
+                   webviewReadme.find("[&max_total_edges=120|&edge_limit=120]") != std::string::npos,
+               "webview README should document the bounded review graph API query params");
+        expect(webviewReadme.find("GET /graph?tab=graph") != std::string::npos,
+               "webview README should document the /graph shell route for the full-page Focus Graph canvas");
+        expect(webviewReadme.find("item-rooted and bounded") != std::string::npos &&
+                   webviewReadme.find("global all-node graph") != std::string::npos,
+               "webview README should describe the item-rooted bounded graph canvas and no-global-default behavior");
         expect(webviewReadme.find("/api/review/feature-evolution") != std::string::npos,
                "webview README should list the feature evolution API route");
         expect(webviewReadme.find("/api/review/roadmap") != std::string::npos,

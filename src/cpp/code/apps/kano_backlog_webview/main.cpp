@@ -109,6 +109,18 @@ int main(int argc, char** argv) {
       },
       {drogon::Get});
 
+  drogon::app().registerHandler(
+      "/graph",
+      [](const drogon::HttpRequestPtr&,
+         std::function<void(const drogon::HttpResponsePtr&)>&& callback) {
+        auto response = drogon::HttpResponse::newHttpResponse();
+        response->setStatusCode(drogon::k200OK);
+        response->setContentTypeCode(drogon::CT_TEXT_HTML);
+        response->setBody(kano::backlog::webview::assets::IndexHtml());
+        callback(response);
+      },
+      {drogon::Get});
+
   drogon::app().setLogLevel(trantor::Logger::kWarn);
   drogon::app().setThreadNum(1);
   drogon::app().addListener(host, port);

@@ -58,7 +58,7 @@ inline constexpr std::string_view kBackboardCss = R"CSS(
     .tree .node-line { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
     .tree .tree-nav { display: inline-flex; gap: 4px; align-items: center; flex-wrap: wrap; margin-left: 8px; }
     .tree .leaf-spacer { display: inline-block; width: 12px; }
-    .btn { border: 1px solid #cfd9ea; background: #fff; border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+    .btn { border: 1px solid #cfd9ea; background: #fff; border-radius: 6px; padding: 4px 10px; cursor: pointer; color: #1a1f2e; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; }
     .btn:hover { background: #f2f6ff; }
     .status-wrap { display: inline-flex; align-items: center; gap: 7px; min-width: 190px; }
     .spinner { width: 14px; height: 14px; border: 2px solid #cbd6e8; border-top-color: #1f4fa3; border-radius: 50%; animation: spin 0.8s linear infinite; }
@@ -140,6 +140,10 @@ inline constexpr std::string_view kBackboardCss = R"CSS(
     .graph-meta { font-size: 10px; fill: #65738b; }
     .graph-edge-label { font-size: 10px; fill: #47536a; }
     .graph-diagnostics { display: grid; gap: 6px; margin-bottom: 12px; }
+    .graph-page-head { display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; margin-bottom: 12px; }
+    .graph-page-title { display: grid; gap: 4px; }
+    .graph-page-title h3 { margin: 0; }
+    .graph-empty-state { margin-top: 4px; }
     .graph-toolbar { display: grid; gap: 8px; margin-bottom: 12px; }
     .graph-toolbar-row { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
     .graph-mode-field { display: flex; flex-direction: column; gap: 8px; min-width: min(320px, 100%); }

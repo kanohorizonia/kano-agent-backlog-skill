@@ -323,7 +323,7 @@ int main() {
             auto resolved_by_uid = duplicate_resolver.resolve(allocation_collision.uid);
             expect(resolved_by_uid.uid == allocation_collision.uid, "UID lookup should remain available for duplicate-id recovery");
             auto uid_recovery_update = WorkitemOps::update_state(index, root, allocation_collision.uid, ItemState::InProgress, "opencode", std::string("UID recovery transition"), std::nullopt, true, false);
-            expect(uid_recovery_update.item_id == allocation_collision.id, "UID-based state update should preserve duplicated bare id while targeting one file");
+            expect(uid_recovery_update.id == allocation_collision.id, "UID-based state update should preserve duplicated bare id while targeting one file");
             expect_throws_contains(
                 [&]() {
                     (void)WorkitemOps::remap_id(index, root, created.uid, allocation_collision.id, "opencode");

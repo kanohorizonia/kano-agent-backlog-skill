@@ -2263,12 +2263,17 @@ std::string RenderFocusGraphSummaryPartial(const Json::Value& item,
                                            const Json::Value& graph) {
   const auto product = item.get("product", "").asString();
   const auto itemId = item.get("id", "").asString();
-  std::string openCanvasHref = "/?tab=graph";
+  std::string openCanvasHref = "/graph?tab=graph";
   if (!product.empty()) {
     openCanvasHref += "&product=" + product;
   }
   if (!itemId.empty()) {
-    openCanvasHref += "&item=" + itemId;
+    openCanvasHref += "&item=" + itemId +
+                      "&mode=dependency"
+                      "&max_depth=2"
+                      "&max_children_per_node=25"
+                      "&max_total_nodes=80"
+                      "&max_total_edges=120";
   }
 
   std::string html =

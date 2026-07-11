@@ -823,6 +823,14 @@ int main(int argc, char** argv) {
         }, issue_view_refresh_output) == 0, "view refresh after issue update failed");
         expect(read_text(issue_view_refresh_output).find("Refreshed") != std::string::npos, "view refresh did not report refreshed dashboards");
 
+        const auto leaf_product_view_refresh_output = temp_root / "leaf-product-view-refresh.txt";
+        expect(run_command_capture(binary, {
+            "view", "refresh",
+            "--product", "kano-ai-3d-asset-skill",
+            "--agent", "tester"
+        }, leaf_product_view_refresh_output) == 0, "view refresh ignored leaf --product without --backlog-root");
+        expect(read_text(leaf_product_view_refresh_output).find("Refreshed") != std::string::npos, "leaf product view refresh did not report refreshed dashboards");
+
         const auto artifact_source = temp_root / "artifact-note.md";
         write_text(artifact_source, "# Artifact\n\nNative attach artifact smoke.\n");
         const auto attach_artifact_output = temp_root / "attach-artifact.json";

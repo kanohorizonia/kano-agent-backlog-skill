@@ -18635,23 +18635,8 @@ int main(int InArgc, char* InArgv[]) {
                 refreshCmd->add_option("--backlog-root", view_backlog_root_str, "Backlog root path");
                 refreshCmd->add_option("--agent", view_agent, "Agent ID")->required();
                 refreshCmd->callback([&]() {
-                    std::filesystem::path product_root;
-                    if (!view_backlog_root_str.empty()) {
-                        // Explicit backlog root provided — construct product root directly
-                        std::string prod_name;
-                        if (!view_product.empty()) {
-                            prod_name = view_product;
-                        } else {
-                            auto ctx = resolve_ctx();
-                            prod_name = ctx.product_name;
-                        }
-                        product_root = std::filesystem::path(view_backlog_root_str) / "products" / prod_name;
-                    } else {
-                        // Use standard resolution
-                        auto ctx = resolve_ctx();
-                        product_root = ctx.product_root;
-                    }
-                    auto result = ViewOps::refresh_dashboards(product_root, view_agent);
+                    const auto ctx = resolve_ctx_for_product_and_backlog(view_product, view_backlog_root_str);
+                    auto result = ViewOps::refresh_dashboards(ctx.product_root, view_agent);
                     std::cout << "Refreshed " << result.views_refreshed.size() << " dashboards\n";
                     for (const auto& path : result.views_refreshed) {
                         std::cout << "- " << path.string() << "\n";

@@ -150,14 +150,36 @@ inline constexpr std::string_view kIndexHtmlBetweenAssets = R"HTML(
       <a id="focus-graph-back-link" class="btn" href="/?tab=review">Back to Review Inbox</a>
     </div>
     <div class="graph-toolbar">
-      <div class="graph-toolbar-row">
-        <label class="graph-mode-field" for="graph-mode">
-          <span class="filter-group-title">Review mode</span>
-          <select id="graph-mode" class="graph-mode-select" aria-label="Dependency graph mode"></select>
+       <div class="graph-toolbar-row">
+         <label class="graph-mode-field" for="graph-mode">
+           <span class="filter-group-title">Review mode</span>
+           <select id="graph-mode" class="graph-mode-select" aria-label="Dependency graph mode"></select>
+         </label>
+        <label class="graph-toolbar-field" for="graph-max-depth">
+          <span class="filter-group-title">Neighborhood depth</span>
+          <input id="graph-max-depth" class="graph-depth-input" type="number" min="1" max="32" step="1" inputmode="numeric" aria-label="Focused graph neighborhood depth" value="2" />
         </label>
-      </div>
-      <div id="graph-mode-help" class="muted graph-mode-help"></div>
-    </div>
+        <label class="graph-toolbar-field" for="graph-isolation-mode">
+          <span class="filter-group-title">Isolation display</span>
+          <select id="graph-isolation-mode" class="graph-mode-select" aria-label="Focused graph isolation display mode"></select>
+        </label>
+         <div class="graph-toolbar-actions">
+           <button id="graph-reset-scope" class="btn" type="button">Reset scope</button>
+         </div>
+       </div>
+       <div class="graph-toolbar-row graph-toolbar-row-secondary">
+         <div class="graph-toolbar-actions graph-viewport-actions" role="toolbar" aria-label="Graph viewport controls">
+           <button id="graph-zoom-out" class="btn graph-viewport-btn" type="button" aria-label="Zoom out">Zoom out</button>
+           <button id="graph-zoom-in" class="btn graph-viewport-btn" type="button" aria-label="Zoom in">Zoom in</button>
+           <button id="graph-fit-all" class="btn graph-viewport-btn" type="button" aria-label="Fit all graph nodes">Fit all</button>
+           <button id="graph-fit-focus" class="btn graph-viewport-btn" type="button" aria-label="Fit focused subgraph">Fit focused subgraph</button>
+           <button id="graph-reset-view" class="btn graph-viewport-btn" type="button" aria-label="Reset graph view">Reset view</button>
+         </div>
+         <div class="muted graph-viewport-help">Focus the graph canvas to pan with arrow keys and zoom with +, -, or 0. Drag to pan and use the mouse wheel to zoom around the pointer.</div>
+       </div>
+       <div id="graph-scope-help" class="muted graph-scope-help">Click a node to re-root this bounded graph and keep diagnostics visible for unrelated nodes.</div>
+       <div id="graph-mode-help" class="muted graph-mode-help"></div>
+     </div>
     <div id="graph-summary" class="muted" style="margin-bottom:8px;"></div>
     <div id="graph-list"></div>
   </div>

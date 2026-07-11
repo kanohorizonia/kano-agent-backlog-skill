@@ -212,6 +212,26 @@ std::optional<Json::Value> find_mode_preset(const Json::Value& presets,
     return std::nullopt;
 }
 
+std::optional<Json::Value> find_entry_by_id(const Json::Value& rows,
+                                            const std::string& id) {
+    for (const auto& row : rows) {
+        if (row["id"].asString() == id) {
+            return row;
+        }
+    }
+    return std::nullopt;
+}
+
+std::optional<Json::Value> find_entry_by_item_id(const Json::Value& rows,
+                                                 const std::string& item_id) {
+    for (const auto& row : rows) {
+        if (row["item_id"].asString() == item_id) {
+            return row;
+        }
+    }
+    return std::nullopt;
+}
+
 bool has_string_value(const Json::Value& array,
                       const std::string& value) {
     for (const auto& entry : array) {
@@ -243,6 +263,19 @@ bool has_edge(const Json::Value& edges,
             edge["to"].asString() == to &&
             edgeKind == kind) {
             return true;
+        }
+    }
+    return false;
+}
+
+bool has_any_edge_kind(const Json::Value& edges,
+                       const std::vector<std::string>& forbidden_kinds) {
+    for (const auto& edge : edges) {
+        const auto edgeKind = edge.isMember("edge_type") ? edge["edge_type"].asString() : edge["kind"].asString();
+        for (const auto& forbiddenKind : forbidden_kinds) {
+            if (edgeKind == forbiddenKind) {
+                return true;
+            }
         }
     }
     return false;
@@ -386,14 +419,17 @@ int main() {
                      "2026-06-14 10:00 [agent=codex] Work order dispatched for native migration review.\n"
                      "2026-06-14 10:10 [agent=codex] Artifact attached: [report](../artifacts/PRA-TSK-0001/report.md).\n"
                      "2026-06-14 10:20 [agent=codex] Validation: pixi run quick-test PASS.\n",
-                     "links:\n"
-                     "  relates:\n"
-                     "    - product-beta:PRB-BUG-0001\n"
-                     "    - PRA-TSK-0003\n"
-                     "    - PRA-TSK-9999\n"
+                      "links:\n"
+                      "  relates:\n"
+                      "    - product-beta:PRB-BUG-0001\n"
+                      "    - PRA-TSK-0003\n"
+                      "    - PRA-TSK-9999\n"
                       "  blocks:\n"
                       "    - PRA-TSK-0002\n"
-                      "  blocked_by: []\n"));
+                      "    - PRA-TSK-0012\n"
+                      "    - PRA-TSK-9998\n"
+                      "  blocked_by:\n"
+                      "    - PRA-TSK-0010\n"));
         write_text(
             products / "product-alpha" / "items" / "task" / "0004" / "PRA-TSK-0004.md",
             item_doc("PRA-TSK-0004",
@@ -513,6 +549,72 @@ int main() {
                      "## Risks / Dependencies\n\n"
                      "- Dirty worktree overlap risk must block handoff.\n"));
         write_text(
+            products / "product-alpha" / "items" / "task" / "0010" / "PRA-TSK-0010.md",
+            item_doc("PRA-TSK-0010",
+                     "019ec100-0000-7000-8000-000000000023",
+                     "Task",
+                     "Alpha upstream root blocker",
+                     "Blocked",
+                     "PRA-EPIC-0001",
+                     "Root dependency blocker for blocker-chain review coverage.",
+                     "links:\n"
+                     "  relates: []\n"
+                     "  blocks:\n"
+                     "    - PRA-TSK-0001\n"
+                     "    - PRA-TSK-0011\n"
+                     "  blocked_by: []\n"));
+        write_text(
+            products / "product-alpha" / "items" / "task" / "0011" / "PRA-TSK-0011.md",
+            item_doc("PRA-TSK-0011",
+                     "019ec100-0000-7000-8000-000000000024",
+                     "Task",
+                     "Alpha parallel blocked branch",
+                     "Blocked",
+                     "PRA-EPIC-0001",
+                     "Parallel branch kept outside the main blocker chain.",
+                     "links:\n"
+                     "  relates: []\n"
+                     "  blocks: []\n"
+                     "  blocked_by:\n"
+                     "    - PRA-TSK-0010\n"));
+        write_text(
+            products / "product-alpha" / "items" / "task" / "0012" / "PRA-TSK-0012.md",
+            item_doc("PRA-TSK-0012",
+                     "019ec100-0000-7000-8000-000000000025",
+                     "Task",
+                     "Alpha secondary downstream impact",
+                     "Blocked",
+                     "PRA-EPIC-0001",
+                     "Second downstream branch for blocker-chain truncation evidence.",
+                     "links:\n"
+                     "  relates: []\n"
+                     "  blocks: []\n"
+                     "  blocked_by:\n"
+                     "    - PRA-TSK-0001\n"));
+        write_text(
+            products / "product-alpha" / "items" / "task" / "0020" / "PRA-TSK-0020.md",
+            item_doc("PRA-TSK-0020",
+                     "019ec100-0000-7000-8000-000000000026",
+                     "Task",
+                     "Alpha cross-product dependency root",
+                     "Blocked",
+                     "PRA-EPIC-0001",
+                     "Selected root for cross-product blocker-chain traversal coverage.",
+                     "links:\n"
+                     "  relates: []\n"
+                     "  blocks: []\n"
+                     "  blocked_by:\n"
+                     "    - product-beta:PRB-TSK-0002\n"));
+        write_text(
+            products / "product-alpha" / "items" / "task" / "shared" / "SHARED-TSK-0001.md",
+            item_doc("SHARED-TSK-0001",
+                     "019ec100-0000-7000-8000-000000000027",
+                     "Bug",
+                     "Alpha ambiguous bare root",
+                     "Blocked",
+                     "",
+                     "Alpha half of an isolated duplicate bare graph root fixture."));
+        write_text(
             products / "product-alpha" / "items" / "task" / "0002" / "PRA-TSK-0002.md",
             item_doc("PRA-TSK-0002",
                      "019ec100-0000-7000-8000-000000000004",
@@ -588,9 +690,47 @@ int main() {
                      "Review",
                      "",
                       "Review candidate with durable evidence.\n\n"
-                       "## Worklog\n\n"
-                       "2026-06-14 12:00 [agent=codex] Artifact attached: [report](../artifacts/PRB-BUG-0004/report.md).\n"
-                       "2026-06-14 12:10 [agent=codex] Validation: pixi run quick-test PASS.\n"));
+                        "## Worklog\n\n"
+                        "2026-06-14 12:00 [agent=codex] Artifact attached: [report](../artifacts/PRB-BUG-0004/report.md).\n"
+                        "2026-06-14 12:10 [agent=codex] Validation: pixi run quick-test PASS.\n"));
+        write_text(
+            products / "product-beta" / "items" / "task" / "0001" / "PRB-TSK-0001.md",
+            item_doc("PRB-TSK-0001",
+                     "019ec100-0000-7000-8000-000000000028",
+                     "Bug",
+                     "Beta second-hop root blocker",
+                     "Blocked",
+                     "",
+                     "Lexically earlier blocker discovered through PRB-TSK-0002.",
+                     "links:\n"
+                     "  relates: []\n"
+                     "  blocks:\n"
+                     "    - product-beta:PRB-TSK-0002\n"
+                     "  blocked_by: []\n"));
+        write_text(
+            products / "product-beta" / "items" / "task" / "0002" / "PRB-TSK-0002.md",
+            item_doc("PRB-TSK-0002",
+                     "019ec100-0000-7000-8000-000000000029",
+                     "Bug",
+                     "Beta direct cross-product blocker",
+                     "Blocked",
+                     "",
+                     "Direct blocker that discovers a lexically earlier second-hop blocker.",
+                     "links:\n"
+                     "  relates: []\n"
+                     "  blocks:\n"
+                     "    - product-alpha:PRA-TSK-0020\n"
+                     "  blocked_by:\n"
+                     "    - product-beta:PRB-TSK-0001\n"));
+        write_text(
+            products / "product-beta" / "items" / "task" / "shared" / "SHARED-TSK-0001.md",
+            item_doc("SHARED-TSK-0001",
+                     "019ec100-0000-7000-8000-000000000030",
+                     "Bug",
+                     "Beta ambiguous bare root",
+                     "Blocked",
+                     "",
+                     "Beta half of an isolated duplicate bare graph root fixture."));
         const auto missingCommitPath = products / "product-beta" / "items" / "bug" / "0005" / "PRB-BUG-0005.md";
         write_text(
             missingCommitPath,
@@ -1037,7 +1177,7 @@ int main() {
         auto all = service.QueryItems(allOptions);
         expect(!all.isMember("error"), "all-products query should not fail");
         expect(all["products"].size() == 2, "all-products query should include both products");
-        expect(all["total"].asUInt64() == 29, "all-products query should include items, ADRs, plus unique topic pseudo-items");
+        expect(all["total"].asUInt64() == 37, "all-products query should include items, ADRs, plus unique topic pseudo-items");
         for (const auto& item : all["items"]) {
             expect(item.isMember("gate_status"), "all-products items should include gate_status");
             expect(item["gate_status"].isMember("ready"), "gate_status should include ready gate");
@@ -1434,7 +1574,7 @@ int main() {
         for (const auto& rootNode : tree["roots"]) {
             if (rootNode["id"].asString() == "PRA-EPIC-0001") {
                 foundEpicRoot = true;
-                expect(rootNode["children"].size() == 8, "tree should attach task children under the epic root");
+                expect(rootNode["children"].size() == 12, "tree should attach task children under the epic root");
             }
             if (rootNode["id"].asString() == "PRA-TSK-0004") {
                 foundStandaloneTaskRoot = true;
@@ -1913,21 +2053,19 @@ int main() {
 
         auto graph = service.BuildDependencyGraph(allOptions, "PRA-TSK-0001");
         expect(graph["nodes"].size() >= 1, "dependency graph should include selected item node");
-        expect(graph["edges"].size() >= 1, "dependency graph should include parent or topic edges");
+        expect(graph["edges"].size() >= 1, "dependency graph should include visible dependency edges");
         expect(graph["visualization"]["kind"].asString() == "first-party-svg",
                "dependency graph should advertise the first-party visualization payload");
         expect(has_edge(graph["edges"], "product-alpha:PRA-EPIC-0001", "product-alpha:PRA-TSK-0001", "parent"),
-               "dependency graph should include structural parent edge");
+               "dependency graph with omitted mode should retain structural parent context");
         expect(has_edge(graph["edges"], "topic:Native Migration", "product-alpha:PRA-TSK-0001", "topic-membership"),
-               "dependency graph should include grouping topic edge");
+               "dependency graph with omitted mode should retain grouping topic context");
+        expect(has_edge(graph["edges"], "product-alpha:PRA-TSK-0001", "product-beta:PRB-BUG-0001", "relates"),
+               "dependency graph with omitted mode should retain cross-product relates context");
         expect(has_edge(graph["edges"], "product-alpha:PRA-TSK-0001", "product-alpha:PRA-TSK-0002", "blocks"),
                "links.blocks should render A -> B dependency direction");
         expect(has_edge(graph["edges"], "product-alpha:PRA-TSK-0001", "product-alpha:PRA-TSK-0002", "blocked_by"),
                "links.blocked_by should render blocker -> blocked dependency direction");
-        expect(has_edge(graph["edges"], "product-alpha:PRA-TSK-0001", "product-beta:PRB-BUG-0001", "relates"),
-               "dependency graph should include cross-product relates reference");
-        expect(has_edge(graph["edges"], "product-alpha:PRA-TSK-0001", "product-alpha:PRA-TSK-0003", "relates"),
-               "dependency graph should include non-blocking relates reference");
         expect(graph["mode"].asString() == "dependency",
                "dependency graph should expose the resolved dependency mode");
         expect(graph["mode_preset"]["id"].asString() == "dependency",
@@ -1940,6 +2078,57 @@ int main() {
         expect(has_string_value((*dependencyPreset)["default_edge_kinds"], "blocks") &&
                    has_string_value((*dependencyPreset)["default_edge_kinds"], "blocked_by"),
                "dependency preset metadata should document dependency edge defaults");
+        webview::GraphQueryCaps blockerChainCaps;
+        blockerChainCaps.maxDepth = 2;
+        blockerChainCaps.maxChildrenPerNode = 1;
+        blockerChainCaps.maxTotalNodes = 4;
+        blockerChainCaps.maxTotalEdges = 3;
+        auto blockerChainGraph = service.BuildDependencyGraph(
+            allOptions, "PRA-TSK-0001", "", blockerChainCaps, std::string("dependency"));
+        expect(blockerChainGraph["mode"].asString() == "dependency",
+               "blocker chain smoke should stay in dependency mode");
+        expect(!has_any_edge_kind(blockerChainGraph["edges"], {"parent", "relates", "topic-membership"}),
+               "blocker chain smoke should keep dependency-only edges and exclude parent, relates, and topic-membership defaults");
+        expect(blockerChainGraph.isMember("blocker_chain") && blockerChainGraph["blocker_chain"].isObject(),
+               "dependency graph should expose blocker_chain payload for bounded dependency-only review");
+        const auto& blockerChain = blockerChainGraph["blocker_chain"];
+        expect(blockerChain["root_item"]["id"].asString() == "PRA-TSK-0001",
+               "blocker chain should expose the selected item as the root item");
+        expect(!blockerChain["edge_direction_note"].asString().empty(),
+               "blocker chain should explain dependency edge direction semantics");
+        expect(blockerChain["upstream_blockers"].isArray() && blockerChain["downstream_blocked_items"].isArray() &&
+                   blockerChain["root_blockers"].isArray(),
+               "blocker chain should expose upstream blockers, downstream blocked items, and root blockers arrays");
+        const auto upstreamBlocker = find_entry_by_id(blockerChain["upstream_blockers"], "PRA-TSK-0010");
+        expect(upstreamBlocker.has_value(),
+               "blocker chain should include the upstream blocker that blocks the selected item");
+        const auto downstreamPrimary = find_entry_by_id(blockerChain["downstream_blocked_items"], "PRA-TSK-0002");
+        expect(downstreamPrimary.has_value(),
+               "blocker chain should include the directly blocked downstream impact item");
+        const auto rootBlocker = find_entry_by_id(blockerChain["root_blockers"], "PRA-TSK-0010");
+        expect(rootBlocker.has_value(),
+               "blocker chain should surface upstream root blockers separately from the full upstream path");
+        expect(blockerChain["ranking_basis"].isObject() &&
+                   blockerChain["ranking_basis"].isMember("uses_priority") &&
+                   !blockerChain["ranking_basis"]["uses_priority"].asBool() &&
+                   !blockerChain["ranking_basis"]["summary"].asString().empty(),
+               "blocker chain should expose an explainable non-priority ranking basis");
+        expect(blockerChain["parallel_branch_count"].asUInt64() >= 1,
+               "blocker chain should count dependency-only parallel branches outside the selected path");
+        expect(blockerChain["truncated_branch_count"].asUInt64() >= 1,
+               "blocker chain should report truncated branch counts when graph caps hide sibling branches");
+        expect(blockerChain["jump_targets"].isArray(),
+               "blocker chain should expose jump targets for graph rerooting");
+        const auto jumpToUpstream = find_entry_by_item_id(blockerChain["jump_targets"], "PRA-TSK-0010");
+        expect(jumpToUpstream.has_value(),
+               "blocker chain should expose a jump target for the upstream root blocker");
+        expect(blockerChain["summary"].isObject() &&
+                   blockerChain["summary"]["max_depth"].asUInt64() == 2 &&
+                   blockerChain["summary"]["max_children_per_node"].asUInt64() == 1 &&
+                   blockerChain["summary"]["max_total_nodes"].asUInt64() == 4 &&
+                   blockerChain["summary"]["max_total_edges"].asUInt64() == 3 &&
+                   blockerChain["summary"]["truncated"].asBool(),
+               "blocker chain should echo bounded summary metadata and truncation state");
         expect(!has_string_value((*dependencyPreset)["default_edge_kinds"], "parent") &&
                    !has_string_value((*dependencyPreset)["default_edge_kinds"], "relates") &&
                    !has_string_value((*dependencyPreset)["default_edge_kinds"], "topic-membership"),
@@ -1948,6 +2137,8 @@ int main() {
                    !(*dependencyPreset)["review_question"].asString().empty(),
                "dependency preset metadata should include review-facing description and question text");
         expect(graph["missing_nodes"].size() >= 1, "dependency graph should expose unresolved references");
+        expect(json_to_string(graph["missing_nodes"]).find("PRA-TSK-9998") != std::string::npos,
+               "dependency graph missing nodes should include unresolved dependency refs from links.blocks");
         expect(graph["dependency_cycles"].empty(),
                "related-only cycles should not participate in dependency cycle semantics");
 
@@ -1965,6 +2156,64 @@ int main() {
                "explicit dependency graph should filter grouping topic edges");
         expect(!has_edge(dependencyModeGraph["edges"], "product-alpha:PRA-TSK-0001", "product-alpha:PRA-TSK-0003", "relates"),
                "explicit dependency graph should filter non-blocking relates edges");
+        expect(!has_any_edge_kind(dependencyModeGraph["edges"], {"parent", "relates", "topic-membership"}),
+               "dependency graph should keep default dependency mode free of parent, relates, and topic-membership edges");
+
+        webview::GraphQueryCaps crossProductCaps;
+        crossProductCaps.maxDepth = 3;
+        crossProductCaps.maxChildrenPerNode = 10;
+        crossProductCaps.maxTotalNodes = 20;
+        crossProductCaps.maxTotalEdges = 20;
+        auto crossProductGraph = service.BuildDependencyGraph(
+            allOptions,
+            "PRA-TSK-0020",
+            "",
+            crossProductCaps,
+            std::string("dependency"),
+            "product-alpha");
+        expect(crossProductGraph.isMember("blocker_chain") && crossProductGraph["blocker_chain"].isObject(),
+               "explicit cross-product dependency graph should expose blocker_chain");
+        const auto& crossProductChain = crossProductGraph["blocker_chain"];
+        const auto directBetaBlocker = find_entry_by_id(
+            crossProductChain["upstream_blockers"], "PRB-TSK-0002");
+        expect(directBetaBlocker.has_value() &&
+                   (*directBetaBlocker)["product"].asString() == "product-beta" &&
+                   (*directBetaBlocker)["distance"].asUInt64() == 1,
+               "cross-product blocker chain should resolve the direct beta blocker at distance one");
+        const auto secondHopBetaBlocker = find_entry_by_id(
+            crossProductChain["upstream_blockers"], "PRB-TSK-0001");
+        expect(secondHopBetaBlocker.has_value(),
+               "cross-product blocker chain should discover the lexically earlier second-hop beta blocker");
+        expect((*secondHopBetaBlocker)["product"].asString() == "product-beta" &&
+                   (*secondHopBetaBlocker)["distance"].asUInt64() == 2 &&
+                   (*secondHopBetaBlocker)["path_item_ids"].size() == 3 &&
+                   (*secondHopBetaBlocker)["path_item_ids"][0].asString() == "PRB-TSK-0001" &&
+                   (*secondHopBetaBlocker)["path_item_ids"][1].asString() == "PRB-TSK-0002" &&
+                   (*secondHopBetaBlocker)["path_item_ids"][2].asString() == "PRA-TSK-0020",
+               "cross-product second-hop blocker should expose its exact distance and path to the selected root");
+        const auto crossProductRootBlocker = find_entry_by_id(
+            crossProductChain["root_blockers"], "PRB-TSK-0001");
+        expect(crossProductRootBlocker.has_value() &&
+                   (*crossProductRootBlocker)["product"].asString() == "product-beta",
+               "cross-product blocker chain should classify the second-hop beta item as a root blocker");
+        const auto crossProductJumpTarget = find_entry_by_item_id(
+            crossProductChain["jump_targets"], "PRB-TSK-0001");
+        expect(crossProductJumpTarget.has_value() &&
+                   (*crossProductJumpTarget)["reroot_product"].asString() == "product-beta",
+               "cross-product root blocker jump target should preserve the beta reroot product");
+
+        auto ambiguousRootGraph = service.BuildDependencyGraph(
+            allOptions,
+            "SHARED-TSK-0001",
+            "",
+            webview::GraphQueryCaps{},
+            std::string("dependency"));
+        expect(has_diagnostic(ambiguousRootGraph["diagnostics"],
+                              "graph_root_ambiguous",
+                              "SHARED-TSK-0001"),
+               "unqualified duplicate graph root should emit graph_root_ambiguous");
+        expect(!ambiguousRootGraph.isMember("blocker_chain"),
+               "ambiguous unqualified graph root should omit blocker_chain instead of selecting one product");
 
         auto structureGraph = service.BuildDependencyGraph(
             allOptions, "PRA-TSK-0001", "", webview::GraphQueryCaps{}, std::string("structure"));
@@ -2363,22 +2612,117 @@ int main() {
                "embedded webview assets should expose the Handoff Readiness tab shell");
         expect(indexHtmlSource.find("focus-graph-page") != std::string::npos &&
                    indexHtmlSource.find("focus-graph-back-link") != std::string::npos &&
-                   indexHtmlSource.find("focus-graph-root-label") != std::string::npos,
-               "embedded webview assets should expose the full-page Focus Graph route chrome");
+                    indexHtmlSource.find("focus-graph-root-label") != std::string::npos &&
+                    indexHtmlSource.find("graph-max-depth") != std::string::npos &&
+                    indexHtmlSource.find("graph-isolation-mode") != std::string::npos &&
+                    indexHtmlSource.find("graph-reset-scope") != std::string::npos,
+                "embedded webview assets should expose the full-page Focus Graph route chrome");
+        expect(indexHtmlSource.find("graph-zoom-out") != std::string::npos &&
+                    indexHtmlSource.find("graph-zoom-in") != std::string::npos &&
+                    indexHtmlSource.find("graph-fit-all") != std::string::npos &&
+                    indexHtmlSource.find("graph-fit-focus") != std::string::npos &&
+                    indexHtmlSource.find("graph-reset-view") != std::string::npos &&
+                    indexHtmlSource.find("graph-viewport-actions") != std::string::npos,
+                "embedded webview assets should expose first-party graph viewport control IDs and toolbar classes");
         expect(assetSource.find("function loadHandoffReadiness") != std::string::npos &&
                    assetSource.find("/api/review/handoff-readiness") != std::string::npos &&
                    assetSource.find("handoff.readiness") != std::string::npos,
                "embedded webview assets should lazy-load the handoff readiness tab");
         expect(assetSource.find("function ensureActiveTabLoaded") != std::string::npos,
                "embedded webview assets should lazy-load inactive tabs when selected");
+        expect(assetSource.find("function graphQueryString() {\n      const params = new URLSearchParams();") != std::string::npos &&
+                    assetSource.find("params.set('product', 'all');") != std::string::npos &&
+                    assetSource.find("params.set('limit', '1000');") != std::string::npos &&
+                    assetSource.find("params.set('root_product', state.graphItemProduct);") != std::string::npos &&
+                    assetSource.find("params.set('item', state.graphItemId);") != std::string::npos,
+                "graphQueryString should build a graph-only bounded all-product query with root product and bare item");
+        expect(assetSource.find("function graphQueryString() {\n      const params = new URLSearchParams(queryString());") == std::string::npos,
+                "graphQueryString should not inherit general filters or product narrowing");
+        expect(assetSource.find("const rootProduct = String(query.root_product || '').trim();") != std::string::npos &&
+                    assetSource.find("const fallbackProduct = String(query.product || '').trim();") != std::string::npos &&
+                    assetSource.find("const graphProduct = rootProduct || (fallbackProduct && fallbackProduct !== 'all' ? fallbackProduct : '');") != std::string::npos &&
+                    assetSource.find("state.graphItemProduct = graphProduct;") != std::string::npos,
+                "initial graph query state should prefer qualified root_product, fall back only to a non-all product, and never use all as a root product");
+        expect(assetSource.find("function updateUrlState()") != std::string::npos &&
+                    assetSource.find("root_product: null,") != std::string::npos &&
+                    assetSource.find("update.product = 'all';") != std::string::npos &&
+                    assetSource.find("update.products = null;") != std::string::npos &&
+                    assetSource.find("update.root_product = state.graphItemProduct || null;") != std::string::npos,
+                "rooted graph URLs should retain qualified root_product while serializing the graph route as product=all without list product filters");
+        expect(assetSource.find("const locale = String(navigator.language || '').trim();") != std::string::npos &&
+                    assetSource.find("document.documentElement.lang = /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(locale) ? locale : 'en';") != std::string::npos,
+                "webview initialization should set document language from a sanitized browser locale with an English fallback");
         expect(assetSource.find("params.set('item', state.graphItemId);") != std::string::npos &&
-                   assetSource.find("params.set('max_depth', String(state.graphMaxDepth));") != std::string::npos &&
-                   assetSource.find("params.set('max_children_per_node', String(state.graphMaxChildrenPerNode));") != std::string::npos &&
-                   assetSource.find("params.set('max_total_nodes', String(state.graphMaxTotalNodes));") != std::string::npos &&
-                   assetSource.find("params.set('max_total_edges', String(state.graphMaxTotalEdges));") != std::string::npos,
-               "embedded webview assets should carry item-rooted graph query and cap params");
+                    assetSource.find("params.set('max_depth', String(graphFetchMaxDepth()));") != std::string::npos &&
+                    assetSource.find("params.set('graph_isolation', normalizeGraphIsolationMode(state.graphIsolationMode));") != std::string::npos &&
+                    assetSource.find("params.set('max_children_per_node', String(state.graphMaxChildrenPerNode));") != std::string::npos &&
+                    assetSource.find("params.set('max_total_nodes', String(state.graphMaxTotalNodes));") != std::string::npos &&
+                    assetSource.find("params.set('max_total_edges', String(state.graphMaxTotalEdges));") != std::string::npos,
+                "embedded webview assets should carry item-rooted graph query and cap params");
+        expect(assetSource.find("graphIsolationMode: 'fade'") != std::string::npos &&
+                    assetSource.find("graphBaseItemId") != std::string::npos &&
+                    assetSource.find("graphPayload") != std::string::npos,
+                "embedded webview assets should track graph isolation mode, base scope, and cached payload state");
+        expect(assetSource.find("function normalizeGraphIsolationMode") != std::string::npos &&
+                    assetSource.find("function graphFetchMaxDepth") != std::string::npos &&
+                    assetSource.find("Math.min(localDepth + 1, graphDepthBounds.max)") != std::string::npos &&
+                     assetSource.find("function buildGraphIsolation") != std::string::npos &&
+                     assetSource.find("function bindGraphNodeRerooting") != std::string::npos &&
+                     assetSource.find("function resetGraphScope") != std::string::npos,
+                 "embedded webview assets should expose graph isolation helpers, bounded outer-ring fetch, node rerooting, and reset scope behavior");
+        expect(assetSource.find("function fitAllGraphView") != std::string::npos &&
+                    assetSource.find("function fitFocusedGraphView") != std::string::npos &&
+                    assetSource.find("function resetGraphView") != std::string::npos &&
+                    assetSource.find("function bindGraphViewportControls") != std::string::npos &&
+                    assetSource.find("function zoomGraphAtPoint") != std::string::npos &&
+                    assetSource.find("function panGraphViewportBy") != std::string::npos,
+                "embedded webview assets should expose client-side graph viewport fit, reset, zoom, pan, and control-binding helpers");
+        expect(assetSource.find("graph-viewport-layer") != std::string::npos &&
+                    assetSource.find("data-graph-scale") != std::string::npos &&
+                    assetSource.find("canvas.addEventListener('pointerdown'") != std::string::npos &&
+                    assetSource.find("canvas.addEventListener('wheel'") != std::string::npos &&
+                    assetSource.find("event.key === '0'") != std::string::npos,
+                "embedded webview assets should keep graph viewport transform markers plus pointer, wheel, and focused keyboard event handlers");
+        expect(assetSource.find("Click a node to re-root this bounded graph") != std::string::npos &&
+                    assetSource.find("Unrelated nodes are never removed silently") != std::string::npos,
+                "embedded webview assets should describe rerooting and diagnosable isolation behavior");
+        expect(assetSource.find("data-graph-node-id") != std::string::npos &&
+                    assetSource.find("setGraphRoot(nextId, nextProduct") != std::string::npos,
+                "embedded webview assets should reroot from graph node data attributes");
+        expect(assetSource.find("function renderBlockerChain") != std::string::npos &&
+                    assetSource.find("function bindBlockerChainJumpActions") != std::string::npos &&
+                    assetSource.find("data.blocker_chain") != std::string::npos,
+                "embedded webview assets should expose named blocker-chain renderer and jump binder helpers");
+        expect(assetSource.find("Blocker chain") != std::string::npos &&
+                    assetSource.find("Root blockers") != std::string::npos &&
+                    assetSource.find("Upstream blockers") != std::string::npos &&
+                    assetSource.find("Downstream impact") != std::string::npos &&
+                    assetSource.find("Branch evidence") != std::string::npos &&
+                    assetSource.find("blocker-chain-section") != std::string::npos,
+                "embedded webview assets should render semantic blocker-chain sections before the graph canvas");
+        expect(assetSource.find("data-blocker-chain-jump-id") != std::string::npos &&
+                    assetSource.find("type=\"button\"") != std::string::npos &&
+                    assetSource.find("aria-label=\"Re-root bounded graph at") != std::string::npos &&
+                    assetSource.find("setGraphRoot(itemId, product, { reason: 'blocker-chain jump' })") != std::string::npos,
+                "blocker-chain jump actions should use accessible buttons to reroot the existing bounded graph");
+        expect(assetSource.find("visible impact, shorter path, and stable ID") != std::string::npos &&
+                    assetSource.find("not business priority") != std::string::npos &&
+                    assetSource.find("edge_direction_note") != std::string::npos,
+                "blocker-chain renderer should expose ranking basis and dependency direction as visible text");
+        expect(assetSource.find("visible_bounded_downstream_impact ?? entry?.visible_bounded_impact") != std::string::npos,
+                "blocker-chain root facts should prefer the authoritative visible bounded downstream impact field");
+        expect(assetSource.find("const entryProduct = String(entry?.product || '').trim();") != std::string::npos &&
+                    assetSource.find("const candidateProduct = String(candidate?.reroot_product || candidate?.product || '').trim();") != std::string::npos &&
+                    assetSource.find("(!entryProduct || candidateProduct === entryProduct)") != std::string::npos,
+                "blocker-chain jump targets should require a matching product when the entry product is known");
+        expect(assetSource.find("Array.isArray(ranking.ordering) ? ranking.ordering.join(', ') : blockerChainValue(ranking.ordering, '')") != std::string::npos,
+                "blocker-chain renderer should preserve backend ranking ordering supplied as either an array or string");
+        expect(assetSource.find("React") == std::string::npos &&
+                    assetSource.find("Vite") == std::string::npos &&
+                    assetSource.find("npm") == std::string::npos,
+                "blocker-chain frontend should remain within the first-party no-framework boundary");
         expect(assetSource.find("Select an item to open a bounded Focus Graph canvas.") != std::string::npos,
-               "embedded webview assets should render the no-root Focus Graph scaffold text");
+                "embedded webview assets should render the no-root Focus Graph scaffold text");
         expect(assetSource.find("async function restoreItemModalFromQuery()") != std::string::npos &&
                    assetSource.find("if (!state.graphItemId || state.activeTab === 'graph')") != std::string::npos &&
                    assetSource.find("await openItemModal(state.graphItemId, state.graphItemProduct || '')") != std::string::npos,
@@ -2403,8 +2747,37 @@ int main() {
                    assetSource.find("active_endpoint") != std::string::npos,
                "refresh diagnostics should include request, timing, abort, cache, and endpoint metadata");
         expect(indexCssSource.find(".page.is-stale::before") != std::string::npos &&
-                   indexCssSource.find(".page.is-refreshing::before") != std::string::npos,
-               "embedded webview css should mark stale or refreshing visible data without clearing it");
+                    indexCssSource.find(".page.is-refreshing::before") != std::string::npos &&
+                    indexCssSource.find(".graph-node.is-focus-root rect") != std::string::npos &&
+                    indexCssSource.find(".graph-node.is-faded") != std::string::npos &&
+                    indexCssSource.find(".graph-edge.is-faded") != std::string::npos &&
+                    indexCssSource.find(".graph-toolbar-field") != std::string::npos &&
+                    indexCssSource.find(".graph-canvas.is-panning") != std::string::npos &&
+                    indexCssSource.find(".graph-viewport-actions") != std::string::npos &&
+                    indexCssSource.find(".blocker-chain") != std::string::npos &&
+                    indexCssSource.find(".blocker-chain-grid") != std::string::npos &&
+                    indexCssSource.find(".blocker-chain-jump:focus-visible") != std::string::npos,
+                "embedded webview css should mark stale or refreshing visible data without clearing it");
+        expect(indexCssSource.find("@media (max-width: 720px)") != std::string::npos &&
+                    indexCssSource.find("body { padding: 12px; }") != std::string::npos &&
+                    indexCssSource.find(".app-shell { grid-template-columns: minmax(0, 1fr); }") != std::string::npos &&
+                    indexCssSource.find(".sidebar { position: static; top: auto; }") != std::string::npos,
+                "embedded webview css should collapse the desktop shell and unstick the sidebar on narrow viewports");
+        expect(indexCssSource.find("font-family: \"Segoe UI\", \"Yu Gothic UI\", Meiryo, \"Microsoft JhengHei UI\", \"Microsoft YaHei UI\", \"Malgun Gothic\", \"PingFang SC\", \"Hiragino Sans\", sans-serif;") != std::string::npos &&
+                    indexCssSource.find(".blocker-chain-header, .blocker-chain-section, .blocker-chain-item { overflow-wrap: break-word; word-break: normal; }") != std::string::npos &&
+                    indexCssSource.find(".blocker-chain-section { display: grid; align-content: start; align-self: start; gap: 8px; min-width: 0; }") != std::string::npos &&
+                    indexCssSource.find(".blocker-chain-list { display: grid; align-content: start; gap: 8px; }") != std::string::npos &&
+                    indexCssSource.find(".blocker-chain-path, .blocker-chain code, .blocker-chain-id { overflow-wrap: anywhere; word-break: break-word; }") != std::string::npos &&
+                    indexCssSource.find(".blocker-chain-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: 8px; min-width: 0; align-items: start; }") != std::string::npos &&
+                    indexCssSource.find(".blocker-chain-facts { min-width: 0; }") != std::string::npos,
+                "embedded webview css should top-align blocker panels, preserve semantic prose wrapping, and constrain emergency wrapping to paths, code, and IDs");
+        expect(indexCssSource.find(".graph-node.is-rerootable:focus-visible rect") != std::string::npos &&
+                    indexCssSource.find("stroke-width: 2.5") != std::string::npos,
+                "embedded webview css should provide a distinct focus-visible treatment for rerootable SVG graph nodes");
+        expect(indexCssSource.find(".app-shell > main { min-width: 0; }") != std::string::npos &&
+                    indexCssSource.find(".tabs { display: flex; gap: 8px; flex-wrap: wrap; }") != std::string::npos &&
+                    indexCssSource.find(".row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }") != std::string::npos,
+                "embedded webview css should let shared shell chrome shrink and wrap without horizontal overflow");
 
         const auto smokeScript = read_text(
             locate_repo_file(std::filesystem::path("src") / "shell" / "webview" /
@@ -2432,18 +2805,46 @@ int main() {
         expect(webviewReadme.find("/api/review/context-recovery") != std::string::npos,
                "webview README should list the context recovery API route");
         expect(webviewReadme.find("/api/review/graph?product=all|<name>") != std::string::npos &&
-                   webviewReadme.find("[&item=<id>]") != std::string::npos &&
-                   webviewReadme.find("[&mode=dependency|structure|cycles|related|product_memory]") != std::string::npos &&
-                   webviewReadme.find("[&max_depth=2]") != std::string::npos &&
-                   webviewReadme.find("[&max_children_per_node=25]") != std::string::npos &&
-                   webviewReadme.find("[&max_total_nodes=80|&node_limit=80]") != std::string::npos &&
-                   webviewReadme.find("[&max_total_edges=120|&edge_limit=120]") != std::string::npos,
-               "webview README should document the bounded review graph API query params");
+                    webviewReadme.find("[&item=<id>]") != std::string::npos &&
+                    webviewReadme.find("[&mode=dependency|structure|cycles|related|product_memory]") != std::string::npos &&
+                    webviewReadme.find("[&graph_isolation=fade|hide]") != std::string::npos &&
+                    webviewReadme.find("[&max_depth=2]") != std::string::npos &&
+                    webviewReadme.find("[&max_children_per_node=25]") != std::string::npos &&
+                    webviewReadme.find("[&max_total_nodes=80|&node_limit=80]") != std::string::npos &&
+                    webviewReadme.find("[&max_total_edges=120|&edge_limit=120]") != std::string::npos,
+                "webview README should document the bounded review graph API query params");
         expect(webviewReadme.find("GET /graph?tab=graph") != std::string::npos,
                "webview README should document the /graph shell route for the full-page Focus Graph canvas");
         expect(webviewReadme.find("item-rooted and bounded") != std::string::npos &&
-                   webviewReadme.find("global all-node graph") != std::string::npos,
-               "webview README should describe the item-rooted bounded graph canvas and no-global-default behavior");
+                    webviewReadme.find("global all-node graph") != std::string::npos &&
+                    webviewReadme.find("click a graph node to re-root the bounded graph query") != std::string::npos &&
+                    webviewReadme.find("Hidden or faded nodes and edges always stay diagnosable") != std::string::npos,
+                "webview README should describe the item-rooted bounded graph canvas and no-global-default behavior");
+        expect(webviewReadme.find("zoom out, zoom in, fit all, fit focused subgraph, and reset view") != std::string::npos &&
+                    webviewReadme.find("pointer drag panning") != std::string::npos &&
+                    webviewReadme.find("Reset view only") != std::string::npos,
+                "webview README should document the client-side graph viewport controls and reset-view boundary");
+        expect(webviewReadme.find("Dependency mode is dependency-only by default") != std::string::npos &&
+                    webviewReadme.find("`blocker_chain` object") != std::string::npos &&
+                    webviewReadme.find("Root blockers, Upstream blockers,\nDownstream impact, and Branch evidence") != std::string::npos &&
+                    webviewReadme.find("It is not business priority") != std::string::npos,
+                "webview README should document the blocker-chain sections and explainable non-priority root ordering");
+        expect(webviewReadme.find("Branch truncation is bounded and diagnosable") != std::string::npos &&
+                    webviewReadme.find("Hierarchy, relates, topic, and product-memory views require\nexplicit modes") != std::string::npos &&
+                    webviewReadme.find("no global graph or saved query support") != std::string::npos,
+                "webview README should document bounded diagnostics, explicit graph modes, and no-global-query support");
+        expect(webviewReadme.find("root_product") != std::string::npos,
+               "webview README should document root_product for qualified graph rerooting");
+        expect(webviewReadme.find("explicit dependency mode") != std::string::npos &&
+                    webviewReadme.find("omitted mode") != std::string::npos &&
+                    webviewReadme.find("broad context") != std::string::npos,
+               "webview README should distinguish explicit dependency-only graphs from omitted-mode broad context");
+        expect(webviewReadme.find("graph_root_ambiguous") != std::string::npos,
+               "webview README should document ambiguity diagnostics for duplicate bare roots");
+        expect(webviewReadme.find("bounded all-product scan") != std::string::npos,
+               "webview README should document the bounded all-product graph query scope");
+        expect(webviewReadme.find("does not render a global graph") != std::string::npos,
+               "webview README should state that bounded all-product resolution does not render a global graph");
         expect(webviewReadme.find("/api/review/feature-evolution") != std::string::npos,
                "webview README should list the feature evolution API route");
         expect(webviewReadme.find("/api/review/roadmap") != std::string::npos,

@@ -29,7 +29,7 @@ Design contracts:
   - `GET /api/review/evidence-quality?product=all|<name>[&products=a,b][&q=...][&state=...][&type=...]`
   - `GET /api/review/handoff-readiness?product=all|<name>[&products=a,b][&q=...][&state=...][&type=...]`
   - `GET /api/review/context-recovery?area=...&product=all|<name>[&products=a,b][&q=...][&state=...][&type=...]`
-  - `GET /api/review/graph?product=all|<name>[&products=a,b][&item=<id>][&mode=dependency|structure|cycles|related|product_memory][&max_depth=2][&max_children_per_node=25][&max_total_nodes=80|&node_limit=80][&max_total_edges=120|&edge_limit=120]`
+  - `GET /api/review/graph?product=all|<name>[&products=a,b][&item=<id>][&root_product=<name>][&mode=dependency|structure|cycles|related|product_memory][&graph_isolation=fade|hide][&max_depth=2][&max_children_per_node=25][&max_total_nodes=80|&node_limit=80][&max_total_edges=120|&edge_limit=120]`
   - `GET /api/review/feature-evolution?product=<name>&feature_id=<id>`
   - `GET /api/review/roadmap?product=all|<name>[&products=a,b]`
   - `GET /api/review/decision-radar?product=all|<name>[&products=a,b]`
@@ -48,7 +48,7 @@ Design contracts:
   - `GET /partials/item/<id>?product=all|<name>`
 - First-party UI runtime:
   - `GET /assets/kob-ui.js`
-  - `GET /graph?tab=graph[&product=<name>][&item=<id>][&mode=dependency][&max_depth=2][&max_children_per_node=25][&max_total_nodes=80][&max_total_edges=120]`
+  - `GET /graph?tab=graph[&product=<name>][&item=<id>][&root_product=<name>][&mode=dependency][&graph_isolation=fade|hide][&max_depth=2][&max_children_per_node=25][&max_total_nodes=80][&max_total_edges=120]`
 - UI: Backboard Review Inbox, Agent Handoff Readiness, product map, flow,
   context, dependencies, agent runs, and command preview at `/`
 
@@ -56,6 +56,54 @@ The full-page Dependencies canvas is item-rooted and bounded by query caps. The
 default graph page shell keeps the mode selector/help visible, but when no
 `item` root is present it renders a scaffold-only prompt instead of fetching or
 rendering a global all-node graph by default.
+
+When an item root exists, the normal Backboard UI sends a graph-only bounded all-product scan
+(`product=all`, `limit=1000`, `offset=0`) only to resolve qualified cross-product dependencies.
+It does not forward list filters such as search, state, type, topic, selected products, or list
+offsets. The response remains item-rooted and bounded by depth, child, node, and edge caps, and
+does not render a global graph.
+
+The graph toolbar also keeps the root-focused isolation contract local and
+bounded: reviewers can change `max_depth`, switch between fade or hide for
+unrelated nodes, click a graph node to re-root the bounded graph query, and use
+Reset scope to restore the incoming root (or clear back to the scaffold when no
+incoming root exists). Hidden or faded nodes and edges always stay diagnosable
+through the graph summary and diagnostics cards; Backboard does not silently
+drop unrelated blockers from review context.
+
+The same bounded item-rooted graph data now has client-side viewport controls:
+zoom out, zoom in, fit all, fit focused subgraph, and reset view. The SVG graph
+canvas supports pointer drag panning, mouse-wheel zoom centered on the pointer,
+button zoom controls, and focused keyboard shortcuts (`+`/`=`, `-`, `0`, and
+arrow-key pan) without changing the bounded query itself. Reset view only
+changes the client-side pan/zoom state; it does not change root scope, depth,
+isolation mode, URL query state, or fetched graph data.
+
+Dependency mode is dependency-only by default: its bounded item-rooted response
+may include a native `blocker_chain` object with `root_item`,
+`edge_direction_note`, `upstream_blockers`, `downstream_blocked_items`,
+`root_blockers`, `jump_targets`, `ranking_basis`, branch counts, and bounded
+summary counts/caps. Backboard renders Root blockers, Upstream blockers,
+Downstream impact, and Branch evidence before the SVG canvas when that object is
+present. Root ordering is explainable bounded review order: visible bounded
+impact, shorter path, then stable ID. It is not business priority.
+
+In explicit dependency mode (`mode=dependency`), the graph contains only
+`blocks` and `blocked_by` edges and emits `blocker_chain` when the requested
+root is unambiguous. An omitted mode preserves legacy broad context for the
+internal Focus Graph summary. If duplicate products share a bare root ID and
+`root_product` is omitted, the response emits `graph_root_ambiguous` and no
+`blocker_chain`; callers provide `root_product=<name>` to disambiguate that
+item-rooted graph request.
+
+Branch truncation is bounded and diagnosable: parallel and truncated branch
+counts, hidden node and edge counts, invalid references, visible dependency edge
+counts, and the returned query caps remain visible rather than being inferred.
+Jump actions only re-root the existing bounded graph query; they do not request
+a global graph. Hierarchy, relates, topic, and product-memory views require
+explicit modes (`structure`, `related`, or `product_memory`) rather than being
+mixed into dependency mode. Backboard has no global graph or saved query support.
+It has no saved queries, global graph, or framework scope.
 
 `kob-ui.js` is intentionally small and first-party. It owns partial fetch/swap,
 delegated partial links, filter debounce support, URL query-state helpers, and

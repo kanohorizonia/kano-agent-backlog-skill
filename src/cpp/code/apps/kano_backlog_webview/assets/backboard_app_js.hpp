@@ -42,11 +42,30 @@ inline constexpr std::string_view kBackboardAppJsPart1 = R"JS(
       graphModePresets: [],
       graphItemId: '',
       graphItemProduct: '',
+      graphBaseItemId: '',
+      graphBaseItemProduct: '',
       graphMaxDepth: 2,
-      graphMaxChildrenPerNode: 25,
-      graphMaxTotalNodes: 80,
-      graphMaxTotalEdges: 120
-    };
+      graphBaseMaxDepth: 2,
+       graphIsolationMode: 'fade',
+       graphMaxChildrenPerNode: 25,
+       graphMaxTotalNodes: 80,
+       graphMaxTotalEdges: 120,
+       graphPayload: null,
+       graphViewport: {
+         scale: 1,
+         x: 0,
+         y: 0,
+         viewportWidth: 0,
+         viewportHeight: 0,
+         fullBounds: null,
+         focusBounds: null,
+         focusNodeCount: 0,
+         defaultMode: 'all',
+         dragging: null,
+         suppressClick: false,
+         resizeObserver: null,
+       }
+     };
     const lanes = ['Backlog', 'Doing', 'Blocked', 'Review', 'Done'];
     const reviewQueueOrder = ['Needs Review', 'Done Candidate', 'False Done Suspect', 'Evidence Gap', 'Blocked/Dirty', 'Stale/Drift', 'Ready Frontier'];
     const itemStates = ['Proposed', 'Ready', 'InProgress', 'Blocked', 'Review', 'Done', 'Dropped'];
@@ -59,6 +78,21 @@ inline constexpr std::string_view kBackboardAppJsPart1 = R"JS(
       maxTotalNodes: 80,
       maxTotalEdges: 120,
     });
+     const graphDepthBounds = Object.freeze({
+       min: 1,
+       max: 32,
+     });
+     const graphViewportBounds = Object.freeze({
+       minScale: 0.35,
+       maxScale: 3,
+       zoomStep: 1.18,
+       fitPadding: 36,
+       panPadding: 84,
+       keyboardPanStep: 72,
+       minViewportWidth: 320,
+       minViewportHeight: 240,
+     });
+     const graphIsolationModeOrder = ['fade', 'hide'];
     const tabLabels = {
       review: 'Review Inbox',
       handoff: 'Handoff Readiness',
@@ -93,6 +127,8 @@ inline constexpr std::string_view kBackboardAppJsPart1a = R"JS(
 
     (function applyInitialQueryState() {
       const query = window.KobUi?.readQueryState?.() || {};
+      const locale = String(navigator.language || '').trim();
+      document.documentElement.lang = /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(locale) ? locale : 'en';
       if (query.products) {
         state.selectedProducts = tokenSetFromQuery(query.products, []);
       } else if (query.product) {
@@ -113,10 +149,17 @@ inline constexpr std::string_view kBackboardAppJsPart1a = R"JS(
       if (graphModeOrder.includes(query.mode)) {
         state.graphMode = query.mode;
       }
+      state.graphMaxDepth = boundedPositiveInt(query.max_depth, defaultGraphCaps.maxDepth, graphDepthBounds.max);
+      state.graphIsolationMode = normalizeGraphIsolationMode(query.graph_isolation);
       if (query.item) {
+        const rootProduct = String(query.root_product || '').trim();
+        const fallbackProduct = String(query.product || '').trim();
+        const graphProduct = rootProduct || (fallbackProduct && fallbackProduct !== 'all' ? fallbackProduct : '');
         state.graphItemId = String(query.item).trim();
-        state.graphItemProduct = String(query.product || '').trim();
-        state.graphMaxDepth = boundedPositiveInt(query.max_depth, defaultGraphCaps.maxDepth, 32);
+        state.graphItemProduct = graphProduct;
+        state.graphBaseItemId = state.graphItemId;
+        state.graphBaseItemProduct = state.graphItemProduct;
+        state.graphBaseMaxDepth = state.graphMaxDepth;
         state.graphMaxChildrenPerNode = boundedPositiveInt(query.max_children_per_node, defaultGraphCaps.maxChildrenPerNode, 1000);
         state.graphMaxTotalNodes = boundedPositiveInt(query.max_total_nodes || query.node_limit, defaultGraphCaps.maxTotalNodes, 1000);
         state.graphMaxTotalEdges = boundedPositiveInt(query.max_total_edges || query.edge_limit, defaultGraphCaps.maxTotalEdges, 1000);
@@ -777,6 +820,32 @@ inline constexpr std::string_view kBackboardAppJsPart1b = R"JS(
       return graphModeOrder.includes(mode) ? mode : 'dependency';
     }
 
+    function normalizeGraphIsolationMode(value) {
+      const mode = String(value || '').trim().toLowerCase();
+      return graphIsolationModeOrder.includes(mode) ? mode : 'fade';
+    }
+
+    function graphIsolationModeLabel(mode) {
+      return normalizeGraphIsolationMode(mode) === 'hide'
+        ? 'hide unrelated nodes'
+        : 'fade unrelated nodes';
+    }
+
+    function graphFetchMaxDepth() {
+      const localDepth = boundedPositiveInt(state.graphMaxDepth, defaultGraphCaps.maxDepth, graphDepthBounds.max);
+      return Math.min(localDepth + 1, graphDepthBounds.max);
+    }
+
+    function graphIsolationReasonLabel(reason) {
+      const value = String(reason || '').trim();
+      if (value === 'focus-root') return 'focus root';
+      if (value === 'within-depth') return 'within depth';
+      if (value === 'outside-depth') return 'outside requested depth';
+      if (value === 'disconnected') return 'disconnected from focused root';
+      if (value === 'root-missing') return 'focused root missing from graph response';
+      return value || 'included';
+    }
+
     function graphModePresetsFor(data) {
       const presets = Array.isArray(data?.mode_presets)
         ? data.mode_presets.filter((preset) => preset && graphModeOrder.includes(String(preset.id || '')))
@@ -819,16 +888,65 @@ inline constexpr std::string_view kBackboardAppJsPart1b = R"JS(
       return preset;
     }
 
-    function graphQueryString() {
-      const params = new URLSearchParams(queryString());
-      params.set('mode', normalizeGraphMode(state.graphMode));
-      if (state.graphItemProduct) {
-        params.delete('products');
-        params.set('product', state.graphItemProduct);
+)JS";
+
+inline constexpr std::string_view kBackboardAppJsPart1bb = R"JS(
+
+    function graphScopeDirty() {
+      const baseId = String(state.graphBaseItemId || '');
+      const baseProduct = String(state.graphBaseItemProduct || '');
+      const currentId = String(state.graphItemId || '');
+      const currentProduct = String(state.graphItemProduct || '');
+      const baseDepth = boundedPositiveInt(state.graphBaseMaxDepth, defaultGraphCaps.maxDepth, graphDepthBounds.max);
+      return currentId !== baseId ||
+        currentProduct !== baseProduct ||
+        state.graphMaxDepth !== baseDepth ||
+        normalizeGraphIsolationMode(state.graphIsolationMode) !== 'fade';
+    }
+
+    function syncGraphIsolationControls() {
+      const depthInput = document.getElementById('graph-max-depth');
+      if (depthInput) {
+        depthInput.value = String(state.graphMaxDepth);
       }
+      const modeSelect = document.getElementById('graph-isolation-mode');
+      if (modeSelect && !modeSelect.dataset.signature) {
+        modeSelect.innerHTML = [
+          { id: 'fade', label: 'Fade unrelated' },
+          { id: 'hide', label: 'Hide unrelated' },
+        ].map((option) =>
+          `<option value="${escAttr(option.id)}">${esc(option.label)}</option>`
+        ).join('');
+        modeSelect.dataset.signature = 'fade|hide';
+      }
+      if (modeSelect) {
+        modeSelect.value = normalizeGraphIsolationMode(state.graphIsolationMode);
+      }
+      const resetButton = document.getElementById('graph-reset-scope');
+      if (resetButton) {
+        resetButton.disabled = !graphScopeDirty();
+      }
+      const scopeHelp = document.getElementById('graph-scope-help');
+      if (scopeHelp) {
+        scopeHelp.textContent = state.graphItemId
+          ? 'Click a node to re-root this bounded graph. Depth updates the bounded neighborhood; unrelated nodes stay diagnosable when faded or hidden.'
+          : 'Select an item to enable bounded graph isolation. Reset scope restores the incoming root or scaffold.';
+      }
+    }
+
+    function graphQueryString() {
+      const params = new URLSearchParams();
+      params.set('product', 'all');
+      params.set('limit', '1000');
+      params.set('offset', '0');
+      params.set('mode', normalizeGraphMode(state.graphMode));
+      params.set('graph_isolation', normalizeGraphIsolationMode(state.graphIsolationMode));
+      params.set('max_depth', String(graphFetchMaxDepth()));
       if (state.graphItemId) {
         params.set('item', state.graphItemId);
-        params.set('max_depth', String(state.graphMaxDepth));
+        if (state.graphItemProduct) {
+          params.set('root_product', state.graphItemProduct);
+        }
         params.set('max_children_per_node', String(state.graphMaxChildrenPerNode));
         params.set('max_total_nodes', String(state.graphMaxTotalNodes));
         params.set('max_total_edges', String(state.graphMaxTotalEdges));
@@ -863,21 +981,84 @@ inline constexpr std::string_view kBackboardAppJsPart1b = R"JS(
       const product = focusGraphProductScope();
       if (rootLabel) {
         rootLabel.textContent = state.graphItemId
-          ? (product ? `${state.graphItemId} / ${product}` : state.graphItemId)
+          ? `${product ? `${state.graphItemId} / ${product}` : state.graphItemId} • depth ${state.graphMaxDepth} • ${graphIsolationModeLabel(state.graphIsolationMode)}`
           : 'No item root selected';
       }
       if (backLink) {
         backLink.href = focusGraphReviewHref();
         backLink.textContent = state.graphItemId ? 'Back to Item Review' : 'Back to Review Inbox';
       }
+      syncGraphIsolationControls();
     }
 
     function renderFocusGraphScaffold() {
+      state.graphPayload = null;
+      state.graphViewport.fullBounds = null;
+      state.graphViewport.focusBounds = null;
+      state.graphViewport.focusNodeCount = 0;
+      state.graphViewport.dragging = null;
+      disconnectGraphViewportResizeObserver();
       syncGraphModeControls();
       updateFocusGraphPageChrome();
       document.getElementById('graph-summary').textContent = '';
       document.getElementById('graph-list').innerHTML =
         '<div class="card graph-empty-state"><div class="muted">Select an item to open a bounded Focus Graph canvas.</div></div>';
+      updateGraphViewportButtons();
+    }
+
+    function markGraphTabStale(reason) {
+      if (state.loadedTabs.has('graph')) {
+        state.staleTabs.add('graph');
+        state.tabCacheStatus.graph = {
+          status: 'stale',
+          reason: reason || 'graph scope changed',
+          updated_at: nowIso(),
+          request_id: '',
+        };
+      }
+    }
+
+    function resetGraphScope() {
+      state.graphItemId = String(state.graphBaseItemId || '').trim();
+      state.graphItemProduct = String(state.graphBaseItemProduct || '').trim();
+      state.graphMaxDepth = boundedPositiveInt(state.graphBaseMaxDepth, defaultGraphCaps.maxDepth, graphDepthBounds.max);
+      state.graphIsolationMode = 'fade';
+      updateFocusGraphPageChrome();
+      updateUrlState();
+      markGraphTabStale(state.graphItemId ? 'graph scope reset to initial root' : 'graph scope reset to scaffold');
+      if (state.activeTab === 'graph') {
+        scheduleRefresh(0);
+        return;
+      }
+      updateAllPageRefreshStates();
+      setStatus(state.graphItemId ? `Graph scope reset to ${state.graphItemId}` : 'Graph scope reset');
+    }
+
+    function setGraphRoot(itemId, product = '', options = {}) {
+      const nextId = String(itemId || '').trim();
+      const nextProduct = String(product || '').trim();
+      if (!nextId) {
+        return;
+      }
+      if (!state.graphBaseItemId) {
+        state.graphBaseItemId = state.graphItemId || nextId;
+        state.graphBaseItemProduct = state.graphItemProduct || nextProduct;
+        state.graphBaseMaxDepth = state.graphMaxDepth;
+      }
+      const changed = nextId !== state.graphItemId || nextProduct !== state.graphItemProduct;
+      state.graphItemId = nextId;
+      state.graphItemProduct = nextProduct;
+      updateFocusGraphPageChrome();
+      updateUrlState();
+      markGraphTabStale(options.reason || 'graph root changed');
+      if (state.activeTab === 'graph') {
+        scheduleRefresh(0);
+      } else {
+        updateAllPageRefreshStates();
+      }
+      if (changed && options.announce !== false) {
+        setStatus(`Focused graph root ${nextId}`);
+      }
     }
 
 )JS";
@@ -886,14 +1067,19 @@ inline constexpr std::string_view kBackboardAppJsPart1c = R"JS(
 
     function updateUrlState() {
       const products = selectedProductValues();
-      const graphRouteActive = state.activeTab === 'graph' && !!state.graphItemId;
+      const graphTabActive = state.activeTab === 'graph';
+      const graphRouteActive = graphTabActive && !!state.graphItemId;
       const update = {
         tab: state.activeTab,
         product: null,
         products: null,
-        mode: state.graphMode === 'dependency' ? null : state.graphMode,
+        root_product: null,
+        mode: graphTabActive || state.graphMode !== 'dependency'
+          ? (state.graphMode === 'dependency' ? null : state.graphMode)
+          : null,
+        graph_isolation: graphTabActive ? normalizeGraphIsolationMode(state.graphIsolationMode) : null,
         item: graphRouteActive ? state.graphItemId : null,
-        max_depth: graphRouteActive ? String(state.graphMaxDepth) : null,
+        max_depth: graphTabActive ? String(state.graphMaxDepth) : null,
         max_children_per_node: graphRouteActive ? String(state.graphMaxChildrenPerNode) : null,
         max_total_nodes: graphRouteActive ? String(state.graphMaxTotalNodes) : null,
         max_total_edges: graphRouteActive ? String(state.graphMaxTotalEdges) : null,
@@ -902,14 +1088,14 @@ inline constexpr std::string_view kBackboardAppJsPart1c = R"JS(
         type: selectedTokens(state.selectedTypes, itemTypes) || null,
         limit: String(state.limit || 200),
       };
-      if (products.length === 1) {
+      if (graphRouteActive) {
+        update.product = 'all';
+        update.products = null;
+        update.root_product = state.graphItemProduct || null;
+      } else if (products.length === 1) {
         update.product = products[0];
       } else {
         update.products = products.join(',');
-      }
-      if (graphRouteActive && state.graphItemProduct) {
-        update.product = state.graphItemProduct;
-        update.products = null;
       }
       window.KobUi?.setQueryState?.(update, { replace: true });
     }
@@ -1986,6 +2172,10 @@ inline constexpr std::string_view kBackboardAppJsPart5a = R"JS(
       bindItemLinks('#roadmap-list');
     }
 
+)JS";
+
+inline constexpr std::string_view kBackboardAppJsPart5aa = R"JS(
+
     function graphEdgeClass(kind) {
       return String(kind || '').replace(/[^A-Za-z0-9_-]/g, '-');
     }
@@ -2003,16 +2193,644 @@ inline constexpr std::string_view kBackboardAppJsPart5a = R"JS(
       return text.length > max ? `${text.slice(0, max - 1)}...` : text;
     }
 
+    function incrementGraphReasonCount(counts, reason) {
+      if (!reason) {
+        return;
+      }
+      counts.set(reason, (counts.get(reason) || 0) + 1);
+    }
+
+    function graphFocusNodeId(nodes) {
+      const requested = String(state.graphItemId || '').trim();
+      if (!requested) {
+        return '';
+      }
+      const direct = nodes.find((node) => String(node.id || '') === requested);
+      if (direct) {
+        return String(direct.id || '');
+      }
+      const byItemId = nodes.find((node) => String(node.item_id || '') === requested);
+      return byItemId ? String(byItemId.id || '') : '';
+    }
+
+    function graphEdgeIsolationReason(fromReason, toReason) {
+      if (!fromReason && !toReason) {
+        return '';
+      }
+      if (fromReason === 'disconnected' || toReason === 'disconnected') {
+        return 'disconnected';
+      }
+      if (fromReason === 'outside-depth' || toReason === 'outside-depth') {
+        return 'outside-depth';
+      }
+      if (fromReason === 'root-missing' || toReason === 'root-missing') {
+        return 'root-missing';
+      }
+      return fromReason || toReason || 'unrelated';
+    }
+
+    function buildGraphIsolation(nodes, edges) {
+      const mode = normalizeGraphIsolationMode(state.graphIsolationMode);
+      const maxDepth = boundedPositiveInt(state.graphMaxDepth, defaultGraphCaps.maxDepth, graphDepthBounds.max);
+      const focusNodeId = graphFocusNodeId(nodes);
+      const adjacency = new Map(nodes.map((node) => [String(node.id || ''), new Set()]));
+      edges.forEach((edge) => {
+        const fromId = String(edge.from || '');
+        const toId = String(edge.to || '');
+        if (!adjacency.has(fromId) || !adjacency.has(toId)) {
+          return;
+        }
+        adjacency.get(fromId).add(toId);
+        adjacency.get(toId).add(fromId);
+      });
+
+      const distances = new Map();
+      if (focusNodeId && adjacency.has(focusNodeId)) {
+        const queue = [{ id: focusNodeId, depth: 0 }];
+        distances.set(focusNodeId, 0);
+        while (queue.length) {
+          const current = queue.shift();
+          const neighbors = adjacency.get(current.id) || new Set();
+          neighbors.forEach((neighborId) => {
+            if (distances.has(neighborId)) {
+              return;
+            }
+            const nextDepth = current.depth + 1;
+            distances.set(neighborId, nextDepth);
+            queue.push({ id: neighborId, depth: nextDepth });
+          });
+        }
+      }
+
+      const rootMissing = !focusNodeId && !!state.graphItemId;
+      const nodeVisibility = new Map();
+      const nodeReason = new Map();
+      const nodeReasonCounts = new Map();
+      nodes.forEach((node) => {
+        const nodeId = String(node.id || '');
+        let reason = 'within-depth';
+        let visibility = 'visible';
+        if (rootMissing) {
+          reason = 'root-missing';
+        } else if (nodeId === focusNodeId) {
+          reason = 'focus-root';
+        } else {
+          const distance = distances.get(nodeId);
+          if (Number.isFinite(distance) && distance <= maxDepth) {
+            reason = 'within-depth';
+          } else if (Number.isFinite(distance)) {
+            reason = 'outside-depth';
+            visibility = mode === 'hide' ? 'hidden' : 'faded';
+          } else {
+            reason = 'disconnected';
+            visibility = mode === 'hide' ? 'hidden' : 'faded';
+          }
+        }
+        nodeVisibility.set(nodeId, visibility);
+        nodeReason.set(nodeId, reason);
+        if (visibility !== 'visible') {
+          incrementGraphReasonCount(nodeReasonCounts, reason);
+        }
+      });
+
+      const edgeVisibility = new Map();
+      const edgeReason = new Map();
+      const edgeReasonCounts = new Map();
+      edges.forEach((edge, index) => {
+        const key = `${String(edge.from || '')}->${String(edge.to || '')}#${index}`;
+        const fromVisibility = nodeVisibility.get(String(edge.from || '')) || 'visible';
+        const toVisibility = nodeVisibility.get(String(edge.to || '')) || 'visible';
+        const relatedToUnscopedNode = fromVisibility !== 'visible' || toVisibility !== 'visible';
+        const visibility = mode === 'hide' && relatedToUnscopedNode
+          ? 'hidden'
+          : (relatedToUnscopedNode ? 'faded' : 'visible');
+        const reason = graphEdgeIsolationReason(
+          nodeReason.get(String(edge.from || '')) || '',
+          nodeReason.get(String(edge.to || '')) || ''
+        );
+        edgeVisibility.set(key, visibility);
+        edgeReason.set(key, visibility === 'visible' ? '' : reason);
+        if (visibility !== 'visible') {
+          incrementGraphReasonCount(edgeReasonCounts, reason);
+        }
+      });
+
+      return {
+        mode,
+        maxDepth,
+        focusNodeId,
+        rootMissing,
+        nodeVisibility,
+        nodeReason,
+        nodeReasonCounts,
+        edgeVisibility,
+        edgeReason,
+        edgeReasonCounts,
+        visibleNodeCount: [...nodeVisibility.values()].filter((value) => value === 'visible').length,
+        fadedNodeCount: [...nodeVisibility.values()].filter((value) => value === 'faded').length,
+        hiddenNodeCount: [...nodeVisibility.values()].filter((value) => value === 'hidden').length,
+        visibleEdgeCount: [...edgeVisibility.values()].filter((value) => value === 'visible').length,
+        fadedEdgeCount: [...edgeVisibility.values()].filter((value) => value === 'faded').length,
+        hiddenEdgeCount: [...edgeVisibility.values()].filter((value) => value === 'hidden').length,
+      };
+    }
+
+    function normalizeGraphBounds(bounds) {
+      if (!bounds) {
+        return null;
+      }
+      const x = Number(bounds.x);
+      const y = Number(bounds.y);
+      const width = Number(bounds.width);
+      const height = Number(bounds.height);
+      if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+        return null;
+      }
+      return { x, y, width, height };
+    }
+
+    function mergeGraphBounds(current, next) {
+      const a = normalizeGraphBounds(current);
+      const b = normalizeGraphBounds(next);
+      if (!a) return b;
+      if (!b) return a;
+      const minX = Math.min(a.x, b.x);
+      const minY = Math.min(a.y, b.y);
+      const maxX = Math.max(a.x + a.width, b.x + b.width);
+      const maxY = Math.max(a.y + a.height, b.y + b.height);
+      return {
+        x: minX,
+        y: minY,
+        width: maxX - minX,
+        height: maxY - minY,
+      };
+    }
+
+    function expandGraphBounds(bounds, padding) {
+      const value = normalizeGraphBounds(bounds);
+      if (!value) {
+        return null;
+      }
+      const inset = Math.max(0, Number(padding) || 0);
+      return {
+        x: value.x - inset,
+        y: value.y - inset,
+        width: value.width + inset * 2,
+        height: value.height + inset * 2,
+      };
+    }
+
+    function graphCanvasElements() {
+      return {
+        canvas: document.getElementById('graph-canvas'),
+        svg: document.getElementById('graph-svg'),
+        viewportLayer: document.getElementById('graph-viewport-layer'),
+      };
+    }
+
+    function measureGraphViewport() {
+      const { canvas, svg } = graphCanvasElements();
+      if (!canvas || !svg) {
+        return null;
+      }
+      const rect = canvas.getBoundingClientRect();
+      const width = Math.max(graphViewportBounds.minViewportWidth, Math.round(rect.width || canvas.clientWidth || 0));
+      const height = Math.max(graphViewportBounds.minViewportHeight, Math.round(rect.height || canvas.clientHeight || 0));
+      state.graphViewport.viewportWidth = width;
+      state.graphViewport.viewportHeight = height;
+      svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+      return { width, height };
+    }
+
+    function clampGraphViewport(viewport = state.graphViewport) {
+      const fullBounds = normalizeGraphBounds(viewport.fullBounds);
+      const viewportWidth = Math.max(graphViewportBounds.minViewportWidth, Number(viewport.viewportWidth) || 0);
+      const viewportHeight = Math.max(graphViewportBounds.minViewportHeight, Number(viewport.viewportHeight) || 0);
+      const scale = Math.min(
+        graphViewportBounds.maxScale,
+        Math.max(graphViewportBounds.minScale, Number(viewport.scale) || 1)
+      );
+      let x = Number(viewport.x) || 0;
+      let y = Number(viewport.y) || 0;
+      if (!fullBounds) {
+        return { scale, x, y };
+      }
+
+      const scaledWidth = fullBounds.width * scale;
+      const scaledHeight = fullBounds.height * scale;
+      const centeredX = ((viewportWidth - scaledWidth) / 2) - (fullBounds.x * scale);
+      const centeredY = ((viewportHeight - scaledHeight) / 2) - (fullBounds.y * scale);
+
+      if (scaledWidth + graphViewportBounds.panPadding * 2 <= viewportWidth) {
+        x = centeredX;
+      } else {
+        const minX = viewportWidth - ((fullBounds.x + fullBounds.width) * scale) - graphViewportBounds.panPadding;
+        const maxX = graphViewportBounds.panPadding - (fullBounds.x * scale);
+        x = Math.max(minX, Math.min(maxX, x));
+      }
+
+      if (scaledHeight + graphViewportBounds.panPadding * 2 <= viewportHeight) {
+        y = centeredY;
+      } else {
+        const minY = viewportHeight - ((fullBounds.y + fullBounds.height) * scale) - graphViewportBounds.panPadding;
+        const maxY = graphViewportBounds.panPadding - (fullBounds.y * scale);
+        y = Math.max(minY, Math.min(maxY, y));
+      }
+
+      return { scale, x, y };
+    }
+
+    function updateGraphViewportButtons() {
+      const zoomOut = document.getElementById('graph-zoom-out');
+      const zoomIn = document.getElementById('graph-zoom-in');
+      const fitAll = document.getElementById('graph-fit-all');
+      const fitFocus = document.getElementById('graph-fit-focus');
+      const resetView = document.getElementById('graph-reset-view');
+      const scale = Number(state.graphViewport.scale) || 1;
+      if (zoomOut) {
+        zoomOut.disabled = scale <= graphViewportBounds.minScale + 0.0001;
+      }
+      if (zoomIn) {
+        zoomIn.disabled = scale >= graphViewportBounds.maxScale - 0.0001;
+      }
+      if (fitAll) {
+        fitAll.disabled = !normalizeGraphBounds(state.graphViewport.fullBounds);
+      }
+      if (fitFocus) {
+        fitFocus.disabled = !normalizeGraphBounds(state.graphViewport.focusBounds);
+      }
+      if (resetView) {
+        resetView.disabled = !normalizeGraphBounds(state.graphViewport.fullBounds);
+      }
+    }
+
+    function applyGraphViewport() {
+      const elements = graphCanvasElements();
+      if (!elements.canvas || !elements.viewportLayer) {
+        return;
+      }
+      if (!measureGraphViewport()) {
+        return;
+      }
+      const clamped = clampGraphViewport();
+      state.graphViewport.scale = clamped.scale;
+      state.graphViewport.x = clamped.x;
+      state.graphViewport.y = clamped.y;
+      elements.viewportLayer.setAttribute(
+        'transform',
+        `translate(${state.graphViewport.x} ${state.graphViewport.y}) scale(${state.graphViewport.scale})`
+      );
+      elements.canvas.setAttribute('data-graph-scale', state.graphViewport.scale.toFixed(2));
+      updateGraphViewportButtons();
+    }
+
+    function setGraphViewport(nextViewport = {}, options = {}) {
+      state.graphViewport.scale = Number(nextViewport.scale ?? state.graphViewport.scale) || 1;
+      state.graphViewport.x = Number(nextViewport.x ?? state.graphViewport.x) || 0;
+      state.graphViewport.y = Number(nextViewport.y ?? state.graphViewport.y) || 0;
+      applyGraphViewport();
+      if (options.announce) {
+        setStatus(options.announce);
+      }
+    }
+
+    function fitGraphBounds(bounds, options = {}) {
+      const target = normalizeGraphBounds(bounds);
+      if (!target || !measureGraphViewport()) {
+        return false;
+      }
+      const viewportWidth = state.graphViewport.viewportWidth;
+      const viewportHeight = state.graphViewport.viewportHeight;
+      const padded = expandGraphBounds(target, graphViewportBounds.fitPadding);
+      const scale = Math.min(
+        graphViewportBounds.maxScale,
+        Math.max(
+          graphViewportBounds.minScale,
+          Math.min(viewportWidth / padded.width, viewportHeight / padded.height)
+        )
+      );
+      const nextViewport = {
+        scale,
+        x: ((viewportWidth - (padded.width * scale)) / 2) - (padded.x * scale),
+        y: ((viewportHeight - (padded.height * scale)) / 2) - (padded.y * scale),
+      };
+      if (options.rememberDefault) {
+        state.graphViewport.defaultMode = options.defaultMode || 'all';
+      }
+      setGraphViewport(nextViewport, { announce: options.announce || '' });
+      return true;
+    }
+
+)JS";
+
+inline constexpr std::string_view kBackboardAppJsPart5aaa = R"JS(
+
+    function fitAllGraphView(options = {}) {
+      return fitGraphBounds(state.graphViewport.fullBounds, {
+        ...options,
+        defaultMode: options.defaultMode || 'all',
+      });
+    }
+
+    function fitFocusedGraphView(options = {}) {
+      const focusBounds = normalizeGraphBounds(state.graphViewport.focusBounds);
+      if (focusBounds && state.graphViewport.focusNodeCount > 0) {
+        return fitGraphBounds(focusBounds, {
+          ...options,
+          defaultMode: options.defaultMode || 'focus',
+        });
+      }
+      if (options.fallback === false) {
+        return false;
+      }
+      return fitAllGraphView({
+        ...options,
+        defaultMode: options.defaultMode || 'all',
+      });
+    }
+
+    function resetGraphView(options = {}) {
+      const announce = options.announce === false ? '' : 'Graph viewport reset';
+      if (state.graphViewport.defaultMode === 'focus') {
+        return fitFocusedGraphView({ announce, rememberDefault: false });
+      }
+      return fitAllGraphView({ announce, rememberDefault: false });
+    }
+
+    function graphViewportLocalPoint(clientX, clientY) {
+      const { canvas } = graphCanvasElements();
+      if (!canvas || !measureGraphViewport()) {
+        return null;
+      }
+      const rect = canvas.getBoundingClientRect();
+      return {
+        x: clientX - rect.left,
+        y: clientY - rect.top,
+      };
+    }
+
+    function zoomGraphAtPoint(multiplier, clientX, clientY, options = {}) {
+      const point = graphViewportLocalPoint(clientX, clientY);
+      if (!point) {
+        return false;
+      }
+      const nextScale = Math.min(
+        graphViewportBounds.maxScale,
+        Math.max(graphViewportBounds.minScale, state.graphViewport.scale * multiplier)
+      );
+      if (Math.abs(nextScale - state.graphViewport.scale) < 0.0001) {
+        return false;
+      }
+      const worldX = (point.x - state.graphViewport.x) / state.graphViewport.scale;
+      const worldY = (point.y - state.graphViewport.y) / state.graphViewport.scale;
+      setGraphViewport({
+        scale: nextScale,
+        x: point.x - (worldX * nextScale),
+        y: point.y - (worldY * nextScale),
+      }, { announce: options.announce || '' });
+      return true;
+    }
+
+    function zoomGraphFromCenter(multiplier, options = {}) {
+      const { canvas } = graphCanvasElements();
+      if (!canvas || !measureGraphViewport()) {
+        return false;
+      }
+      const rect = canvas.getBoundingClientRect();
+      return zoomGraphAtPoint(
+        multiplier,
+        rect.left + (rect.width / 2),
+        rect.top + (rect.height / 2),
+        options
+      );
+    }
+
+    function panGraphViewportBy(deltaX, deltaY, options = {}) {
+      setGraphViewport({
+        x: state.graphViewport.x + deltaX,
+        y: state.graphViewport.y + deltaY,
+      }, { announce: options.announce || '' });
+    }
+
+    function disconnectGraphViewportResizeObserver() {
+      if (state.graphViewport.resizeObserver) {
+        state.graphViewport.resizeObserver.disconnect();
+        state.graphViewport.resizeObserver = null;
+      }
+    }
+
+)JS";
+
+inline constexpr std::string_view kBackboardAppJsPart5aaab = R"JS(
+
+    function bindGraphViewportControls() {
+      const { canvas } = graphCanvasElements();
+      const zoomOut = document.getElementById('graph-zoom-out');
+      const zoomIn = document.getElementById('graph-zoom-in');
+      const fitAll = document.getElementById('graph-fit-all');
+      const fitFocus = document.getElementById('graph-fit-focus');
+      const resetView = document.getElementById('graph-reset-view');
+
+      if (zoomOut && !zoomOut.__kobGraphViewportBound) {
+        zoomOut.__kobGraphViewportBound = true;
+        zoomOut.addEventListener('click', () => {
+          zoomGraphFromCenter(1 / graphViewportBounds.zoomStep, { announce: 'Graph zoomed out' });
+        });
+      }
+      if (zoomIn && !zoomIn.__kobGraphViewportBound) {
+        zoomIn.__kobGraphViewportBound = true;
+        zoomIn.addEventListener('click', () => {
+          zoomGraphFromCenter(graphViewportBounds.zoomStep, { announce: 'Graph zoomed in' });
+        });
+      }
+      if (fitAll && !fitAll.__kobGraphViewportBound) {
+        fitAll.__kobGraphViewportBound = true;
+        fitAll.addEventListener('click', () => {
+          fitAllGraphView({ announce: 'Graph fit to all nodes' });
+        });
+      }
+      if (fitFocus && !fitFocus.__kobGraphViewportBound) {
+        fitFocus.__kobGraphViewportBound = true;
+        fitFocus.addEventListener('click', () => {
+          fitFocusedGraphView({ announce: 'Graph fit to focused subgraph' });
+        });
+      }
+      if (resetView && !resetView.__kobGraphViewportBound) {
+        resetView.__kobGraphViewportBound = true;
+        resetView.addEventListener('click', () => {
+          resetGraphView();
+        });
+      }
+
+      if (canvas && !canvas.__kobGraphViewportBound) {
+        canvas.__kobGraphViewportBound = true;
+        canvas.addEventListener('pointerdown', (event) => {
+          if (event.button !== 0) {
+            return;
+          }
+          const nodeTarget = event.target?.closest?.('[data-graph-node-id]') || null;
+          state.graphViewport.dragging = {
+            pointerId: event.pointerId,
+            startClientX: event.clientX,
+            startClientY: event.clientY,
+            startX: state.graphViewport.x,
+            startY: state.graphViewport.y,
+            moved: false,
+            nodeTarget,
+          };
+          if (!nodeTarget) {
+            canvas.focus({ preventScroll: true });
+          }
+          canvas.setPointerCapture?.(event.pointerId);
+        });
+        canvas.addEventListener('pointermove', (event) => {
+          const drag = state.graphViewport.dragging;
+          if (!drag || drag.pointerId !== event.pointerId) {
+            return;
+          }
+          const deltaX = event.clientX - drag.startClientX;
+          const deltaY = event.clientY - drag.startClientY;
+          if (!drag.moved && Math.hypot(deltaX, deltaY) > 4) {
+            drag.moved = true;
+            state.graphViewport.suppressClick = true;
+            canvas.classList.add('is-panning');
+          }
+          if (!drag.moved) {
+            return;
+          }
+          setGraphViewport({
+            x: drag.startX + deltaX,
+            y: drag.startY + deltaY,
+          });
+          event.preventDefault();
+        });
+        const finishDrag = (event) => {
+          const drag = state.graphViewport.dragging;
+          if (!drag || (event?.pointerId && drag.pointerId !== event.pointerId)) {
+            return;
+          }
+          if (drag.moved) {
+            canvas.focus({ preventScroll: true });
+          }
+          state.graphViewport.dragging = null;
+          canvas.classList.remove('is-panning');
+          if (event?.pointerId) {
+            canvas.releasePointerCapture?.(event.pointerId);
+          }
+        };
+        canvas.addEventListener('pointerup', finishDrag);
+        canvas.addEventListener('pointercancel', finishDrag);
+        canvas.addEventListener('lostpointercapture', finishDrag);
+        canvas.addEventListener('click', (event) => {
+          if (!state.graphViewport.suppressClick) {
+            return;
+          }
+          state.graphViewport.suppressClick = false;
+          event.preventDefault();
+          event.stopPropagation();
+        }, true);
+        canvas.addEventListener('wheel', (event) => {
+          if (!state.graphPayload) {
+            return;
+          }
+          event.preventDefault();
+          const multiplier = event.deltaY < 0
+            ? graphViewportBounds.zoomStep
+            : (1 / graphViewportBounds.zoomStep);
+          zoomGraphAtPoint(multiplier, event.clientX, event.clientY);
+        }, { passive: false });
+        canvas.addEventListener('keydown', (event) => {
+          if (!state.graphPayload) {
+            return;
+          }
+          if (event.key === '+' || event.key === '=') {
+            if (zoomGraphFromCenter(graphViewportBounds.zoomStep, { announce: 'Graph zoomed in' })) {
+              event.preventDefault();
+            }
+            return;
+          }
+          if (event.key === '-') {
+            if (zoomGraphFromCenter(1 / graphViewportBounds.zoomStep, { announce: 'Graph zoomed out' })) {
+              event.preventDefault();
+            }
+            return;
+          }
+          if (event.key === '0') {
+            if (resetGraphView()) {
+              event.preventDefault();
+            }
+            return;
+          }
+          if (event.key === 'ArrowLeft') {
+            panGraphViewportBy(graphViewportBounds.keyboardPanStep, 0, { announce: 'Graph panned left' });
+            event.preventDefault();
+            return;
+          }
+          if (event.key === 'ArrowRight') {
+            panGraphViewportBy(-graphViewportBounds.keyboardPanStep, 0, { announce: 'Graph panned right' });
+            event.preventDefault();
+            return;
+          }
+          if (event.key === 'ArrowUp') {
+            panGraphViewportBy(0, graphViewportBounds.keyboardPanStep, { announce: 'Graph panned up' });
+            event.preventDefault();
+            return;
+          }
+          if (event.key === 'ArrowDown') {
+            panGraphViewportBy(0, -graphViewportBounds.keyboardPanStep, { announce: 'Graph panned down' });
+            event.preventDefault();
+          }
+        });
+      }
+
+      disconnectGraphViewportResizeObserver();
+      if (canvas && typeof ResizeObserver !== 'undefined') {
+        state.graphViewport.resizeObserver = new ResizeObserver(() => {
+          applyGraphViewport();
+        });
+        state.graphViewport.resizeObserver.observe(canvas);
+      }
+      updateGraphViewportButtons();
+    }
+
+    function initializeGraphViewport(layout = {}) {
+      state.graphViewport.fullBounds = normalizeGraphBounds(layout.fullBounds);
+      state.graphViewport.focusBounds = normalizeGraphBounds(layout.focusBounds);
+      state.graphViewport.focusNodeCount = Number(layout.focusNodeCount) || 0;
+      state.graphViewport.dragging = null;
+      state.graphViewport.suppressClick = false;
+      bindGraphViewportControls();
+      const defaultMode = state.graphViewport.focusNodeCount > 0 && state.graphViewport.focusBounds
+        ? 'focus'
+        : 'all';
+      state.graphViewport.defaultMode = defaultMode;
+      if (defaultMode === 'focus') {
+        fitFocusedGraphView({ rememberDefault: true });
+        return;
+      }
+      fitAllGraphView({ rememberDefault: true });
+    }
+
     function renderGraphSvg(nodes, edges) {
+      const isolation = buildGraphIsolation(nodes, edges);
       if (!nodes.length) {
-        return '<div class="muted">No graph nodes for the current filters.</div>';
+        return {
+          markup: '<div class="muted">No graph nodes for the current filters.</div>',
+          isolation,
+          layout: {
+            fullBounds: null,
+            focusBounds: null,
+            focusNodeCount: 0,
+          },
+        };
       }
 
       const incomingDependency = new Set(edges
         .filter((edge) => edge.dependency)
         .map((edge) => edge.to));
-      const byId = new Map(nodes.map((node) => [node.id, node]));
-      const sortedNodes = [...nodes].sort((a, b) => {
+      const sortedNodes = [...nodes].filter((node) =>
+        (isolation.nodeVisibility.get(String(node.id || '')) || 'visible') !== 'hidden'
+      ).sort((a, b) => {
         const layerA = Number(a.visual_layer ?? 1);
         const layerB = Number(b.visual_layer ?? 1);
         if (layerA !== layerB) return layerA - layerB;
@@ -2043,8 +2861,24 @@ inline constexpr std::string_view kBackboardAppJsPart5a = R"JS(
       const maxRows = Math.max(1, ...[...layerCounts.values()]);
       const width = margin * 2 + (maxLayer + 1) * layerGap + nodeW;
       const height = margin * 2 + maxRows * rowGap + nodeH;
+      let fullBounds = null;
+      let focusBounds = null;
+      let focusNodeCount = 0;
+      positioned.forEach((pos, nodeId) => {
+        const bounds = { x: pos.x, y: pos.y, width: pos.w, height: pos.h };
+        fullBounds = mergeGraphBounds(fullBounds, bounds);
+        const reason = isolation.nodeReason.get(String(nodeId || '')) || 'within-depth';
+        const visibility = isolation.nodeVisibility.get(String(nodeId || '')) || 'visible';
+        if ((reason === 'focus-root' || reason === 'within-depth') && visibility !== 'hidden') {
+          focusBounds = mergeGraphBounds(focusBounds, bounds);
+          focusNodeCount += 1;
+        }
+      });
 
       const edgeMarkup = edges.slice(0, 160).map((edge, index) => {
+        const edgeKey = `${String(edge.from || '')}->${String(edge.to || '')}#${index}`;
+        const visibility = isolation.edgeVisibility.get(edgeKey) || 'visible';
+        if (visibility === 'hidden') return '';
         const from = positioned.get(edge.from);
         const to = positioned.get(edge.to);
         if (!from || !to) return '';
@@ -2056,45 +2890,252 @@ inline constexpr std::string_view kBackboardAppJsPart5a = R"JS(
         const c1x = x1 + Math.max(40, Math.abs(x2 - x1) / 3);
         const c2x = x2 - Math.max(40, Math.abs(x2 - x1) / 3);
         const labelY = (y1 + y2) / 2 - 5 - (index % 3) * 12;
-        return `<path class="graph-edge ${escAttr(graphEdgeClass(edge.kind))}" d="M ${x1} ${y1} C ${c1x} ${y1}, ${c2x} ${y2}, ${x2} ${y2}" marker-end="url(#graph-arrow)" />` +
-          `<text class="graph-edge-label" x="${midX}" y="${labelY}" text-anchor="middle">${esc(edge.kind || '')}</text>`;
+        const fadedClass = visibility === 'faded' ? ' is-faded' : '';
+        const reason = isolation.edgeReason.get(edgeKey) || '';
+        return `<path class="graph-edge ${escAttr(graphEdgeClass(edge.kind))}${fadedClass}" data-edge-visibility="${escAttr(visibility)}" data-edge-reason="${escAttr(reason)}" d="M ${x1} ${y1} C ${c1x} ${y1}, ${c2x} ${y2}, ${x2} ${y2}" marker-end="url(#graph-arrow)" />` +
+          `<text class="graph-edge-label${fadedClass}" x="${midX}" y="${labelY}" text-anchor="middle">${esc(edge.kind || '')}</text>`;
       }).join('');
 
       const nodeMarkup = sortedNodes.map((node) => {
         const pos = positioned.get(node.id);
         const meta = [node.product, node.kind, node.state].filter(Boolean).join(' / ');
-        return `<g class="${escAttr(graphNodeClass(node, incomingDependency.has(node.id)))}" transform="translate(${pos.x}, ${pos.y})">` +
+        const nodeId = String(node.id || '');
+        const visibility = isolation.nodeVisibility.get(nodeId) || 'visible';
+        const reason = isolation.nodeReason.get(nodeId) || 'within-depth';
+        const isFocusRoot = nodeId === isolation.focusNodeId;
+        const rerootId = String(node.item_id || node.id || '');
+        const rerootProduct = String(node.product || state.graphItemProduct || '');
+        const rerootable = Boolean(rerootId);
+        const classes = [graphNodeClass(node, incomingDependency.has(node.id))];
+        if (visibility === 'faded') classes.push('is-faded');
+        if (reason === 'focus-root' || reason === 'within-depth') classes.push('is-included-neighborhood');
+        if (isFocusRoot) classes.push('is-focus-root');
+        if (rerootable) classes.push('is-rerootable');
+        return `<g class="${escAttr(classes.join(' '))}" transform="translate(${pos.x}, ${pos.y})" data-graph-node-id="${escAttr(rerootId)}" data-graph-node-product="${escAttr(rerootProduct)}" data-node-visibility="${escAttr(visibility)}" data-node-reason="${escAttr(reason)}" data-focus-root="${isFocusRoot ? 'true' : 'false'}"${rerootable ? ' tabindex="0" role="button"' : ''}>` +
           `<rect width="${pos.w}" height="${pos.h}"></rect>` +
           `<text class="graph-label" x="10" y="20">${esc(shortGraphLabel(node.item_id || node.id, 24))}</text>` +
           `<text class="graph-meta" x="10" y="38">${esc(shortGraphLabel(node.label || '', 30))}</text>` +
-          `<title>${esc(`${node.id || ''} ${meta}`)}</title>` +
+          `<title>${esc(`${node.id || ''} ${meta} / ${graphIsolationReasonLabel(reason)}${rerootable ? ' / click to re-root' : ''}`)}</title>` +
         `</g>`;
       }).join('');
 
-      return `<div class="graph-canvas"><svg class="graph-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Dependency graph visualization">` +
+      return {
+        markup: `<div id="graph-canvas" class="graph-canvas" tabindex="0" role="region" aria-label="Dependency graph canvas" aria-describedby="graph-scope-help graph-mode-help">` +
+        `<svg id="graph-svg" class="graph-svg" role="img" aria-label="Dependency graph visualization">` +
         `<defs><marker id="graph-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#6c778d"></path></marker></defs>` +
+        `<g id="graph-viewport-layer" class="graph-viewport-layer" transform="translate(0 0) scale(1)">` +
+        `<g id="graph-content-layer" class="graph-content-layer" data-graph-width="${width}" data-graph-height="${height}">` +
         edgeMarkup + nodeMarkup +
-      `</svg></div>`;
+        `</g></g></svg></div>`,
+        isolation,
+        layout: {
+          fullBounds,
+          focusBounds,
+          focusNodeCount,
+        },
+      };
     }
 
-    async function loadGraph(signal, refresh) {
-      if (!state.graphItemId) {
-        renderFocusGraphScaffold();
+    function renderGraphIsolationCountPills(counts) {
+      const entries = [...counts.entries()];
+      if (!entries.length) {
+        return '<span class="muted">none</span>';
+      }
+      return entries.map(([reason, count]) =>
+        `<span class="pill">${count} ${esc(graphIsolationReasonLabel(reason))}</span>`
+      ).join('');
+    }
+
+    function bindGraphNodeRerooting() {
+      const container = document.getElementById('graph-list');
+      if (!container) {
         return;
       }
-
-      const result = await getJson(`/api/review/graph?${graphQueryString()}`, {
-        signal,
-        refresh,
-        stage: 'graph.dependencies',
+      container.querySelectorAll('[data-graph-node-id]').forEach((node) => {
+        if (node.__kobGraphNodeBound) {
+          return;
+        }
+        node.__kobGraphNodeBound = true;
+        const activate = async () => {
+          const nextId = node.getAttribute('data-graph-node-id') || '';
+          const nextProduct = node.getAttribute('data-graph-node-product') || '';
+          if (!nextId) {
+            return;
+          }
+          setGraphRoot(nextId, nextProduct, { reason: 'graph node re-rooted' });
+        };
+        node.addEventListener('click', async (event) => {
+          event.preventDefault();
+          await activate();
+        });
+        node.addEventListener('keydown', async (event) => {
+          if (event.key !== 'Enter' && event.key !== ' ') {
+            return;
+          }
+          event.preventDefault();
+          await activate();
+        });
       });
-      const data = result?.data || {};
+    }
+
+)JS";
+
+inline constexpr std::string_view kBackboardAppJsPart5ab = R"JS(
+
+    function blockerChainRows(value) {
+      return Array.isArray(value) ? value : [];
+    }
+
+    function blockerChainValue(value, fallback = 'not reported') {
+      return value === undefined || value === null || value === ''
+        ? fallback
+        : String(value);
+    }
+
+    function blockerChainPath(entry) {
+      const path = Array.isArray(entry?.path_item_ids)
+        ? entry.path_item_ids
+        : (Array.isArray(entry?.path) ? entry.path : []);
+      if (path.length) {
+        return path.map((item) => String(item || '')).filter(Boolean).join(' -> ');
+      }
+      return blockerChainValue(entry?.path, 'No path context reported.');
+    }
+
+    function blockerChainJumpTarget(entry, jumpTargets) {
+      const entryId = String(entry?.item_id || entry?.id || '').trim();
+      const entryProduct = String(entry?.product || '').trim();
+      const target = blockerChainRows(jumpTargets).find((candidate) => {
+        const candidateId = String(candidate?.reroot_item_id || candidate?.item_id || candidate?.id || '').trim();
+        const candidateProduct = String(candidate?.reroot_product || candidate?.product || '').trim();
+        return candidateId && candidateId === entryId && (!entryProduct || candidateProduct === entryProduct);
+      }) || entry || {};
+      return {
+        itemId: String(target.reroot_item_id || target.item_id || target.id || entryId).trim(),
+        product: String(target.reroot_product || target.product || entry?.product || '').trim(),
+      };
+    }
+
+    function renderBlockerChainEntry(entry, kind, jumpTargets) {
+      const itemId = blockerChainValue(entry?.item_id || entry?.id, 'unknown item');
+      const title = blockerChainValue(entry?.title, itemId);
+      const state = blockerChainValue(entry?.state, 'unknown state');
+      const direct = entry && Object.prototype.hasOwnProperty.call(entry, 'direct')
+        ? (entry.direct ? 'direct' : 'indirect')
+        : 'not reported';
+      const jump = blockerChainJumpTarget(entry, jumpTargets);
+      const rootFacts = kind === 'root'
+        ? `<div class="detail-fact"><span class="detail-label">Rank</span><div class="detail-value">${esc(blockerChainValue(entry?.rank))}</div></div>` +
+          `<div class="detail-fact"><span class="detail-label">Visible bounded impact</span><div class="detail-value">${esc(blockerChainValue(entry?.visible_bounded_downstream_impact ?? entry?.visible_bounded_impact ?? entry?.visible_impact))}</div></div>`
+        : '';
+      const jumpButton = jump.itemId
+        ? `<button type="button" class="btn blocker-chain-jump" data-blocker-chain-jump-id="${escAttr(jump.itemId)}" data-blocker-chain-jump-product="${escAttr(jump.product)}" aria-label="Re-root bounded graph at ${escAttr(jump.itemId)}">Jump to ${esc(jump.itemId)}</button>`
+        : '';
+      return `<article class="card blocker-chain-item">` +
+        `<div class="detail-title-row"><strong>${esc(title)}</strong>${pill(state)}</div>` +
+        `<div class="muted"><code class="blocker-chain-id">${esc(itemId)}</code>${entry?.product ? ` / ${esc(entry.product)}` : ''}</div>` +
+        `<div class="blocker-chain-facts">${rootFacts}` +
+          `<div class="detail-fact"><span class="detail-label">Distance</span><div class="detail-value">${esc(blockerChainValue(entry?.distance))}</div></div>` +
+          `<div class="detail-fact"><span class="detail-label">Connection</span><div class="detail-value">${esc(direct)}</div></div>` +
+          `<div class="detail-fact"><span class="detail-label">Path count</span><div class="detail-value">${esc(blockerChainValue(entry?.path_count))}</div></div>` +
+        `</div>` +
+        `<div><span class="detail-label">Path context</span><div class="detail-value blocker-chain-path">${esc(blockerChainPath(entry))}</div></div>` +
+        jumpButton +
+      `</article>`;
+    }
+
+    function renderBlockerChainSection(title, rows, kind, jumpTargets, emptyState) {
+      const entries = blockerChainRows(rows);
+      return `<section class="blocker-chain-section" aria-labelledby="blocker-chain-${escAttr(kind)}">` +
+        `<h5 id="blocker-chain-${escAttr(kind)}">${esc(title)}</h5>` +
+        `<div class="blocker-chain-list">${entries.length
+          ? entries.map((entry) => renderBlockerChainEntry(entry, kind, jumpTargets)).join('')
+          : `<div class="muted">${esc(emptyState)}</div>`}</div>` +
+      `</section>`;
+    }
+
+    function renderBlockerChainMetric(label, value) {
+      return `<div class="detail-fact"><span class="detail-label">${esc(label)}</span><div class="detail-value">${esc(blockerChainValue(value))}</div></div>`;
+    }
+
+    function renderBlockerChain(blockerChain) {
+      if (!blockerChain || typeof blockerChain !== 'object' || Array.isArray(blockerChain)) {
+        return '';
+      }
+      const ranking = blockerChain.ranking_basis && typeof blockerChain.ranking_basis === 'object'
+        ? blockerChain.ranking_basis
+        : {};
+      const summary = blockerChain.summary && typeof blockerChain.summary === 'object'
+        ? blockerChain.summary
+        : {};
+      const ordering = Array.isArray(ranking.ordering) ? ranking.ordering.join(', ') : blockerChainValue(ranking.ordering, '');
+      const rankingSummary = blockerChainValue(
+        ranking.summary,
+        'Bounded review order uses visible impact, shorter path, and stable ID; it is not business priority.'
+      );
+      const rankingDetail = ordering ? ` Ordering: ${ordering}.` : '';
+      return `<section class="blocker-chain" aria-labelledby="blocker-chain-title">` +
+        `<div class="blocker-chain-header"><h4 id="blocker-chain-title">Blocker chain</h4>` +
+          `<div class="muted">${esc(blockerChainValue(blockerChain.edge_direction_note, 'Dependency edge direction was not reported.'))}</div>` +
+          `<div class="muted">${esc(rankingSummary + rankingDetail)} This ordering is bounded review order, not business priority.</div>` +
+        `</div>` +
+        `<div class="blocker-chain-grid">` +
+          renderBlockerChainSection('Root blockers', blockerChain.root_blockers, 'root', blockerChain.jump_targets, 'No root blockers are visible in this bounded graph.') +
+          renderBlockerChainSection('Upstream blockers', blockerChain.upstream_blockers, 'upstream', blockerChain.jump_targets, 'No upstream blockers are visible in this bounded graph.') +
+          renderBlockerChainSection('Downstream impact', blockerChain.downstream_blocked_items, 'downstream', blockerChain.jump_targets, 'No downstream impact is visible in this bounded graph.') +
+        `</div>` +
+        `<section class="blocker-chain-section" aria-labelledby="blocker-chain-branches"><h5 id="blocker-chain-branches">Branch evidence</h5>` +
+          `<div class="muted">Collapsed and truncated branch evidence remains bounded and diagnosable; counts are reported exactly as returned by the dependency payload.</div>` +
+          `<div class="blocker-chain-facts">` +
+            renderBlockerChainMetric('Parallel branches', blockerChain.parallel_branch_count) +
+            renderBlockerChainMetric('Truncated branches', blockerChain.truncated_branch_count) +
+            renderBlockerChainMetric('Visible dependency edges', summary.visible_dependency_edge_count) +
+            renderBlockerChainMetric('Hidden nodes', summary.hidden_node_count) +
+            renderBlockerChainMetric('Hidden edges', summary.hidden_edge_count) +
+            renderBlockerChainMetric('Invalid refs', summary.invalid_ref_count) +
+            renderBlockerChainMetric('Bounded query', summary.bounded_query) +
+            renderBlockerChainMetric('Depth cap', summary.max_depth) +
+            renderBlockerChainMetric('Children cap', summary.max_children_per_node) +
+            renderBlockerChainMetric('Node cap', summary.max_total_nodes) +
+            renderBlockerChainMetric('Edge cap', summary.max_total_edges) +
+          `</div>` +
+        `</section>` +
+      `</section>`;
+    }
+
+    function bindBlockerChainJumpActions() {
+      const container = document.getElementById('graph-list');
+      if (!container) {
+        return;
+      }
+      container.querySelectorAll('[data-blocker-chain-jump-id]').forEach((button) => {
+        if (button.__kobBlockerChainJumpBound) {
+          return;
+        }
+        button.__kobBlockerChainJumpBound = true;
+        button.addEventListener('click', () => {
+          const itemId = button.getAttribute('data-blocker-chain-jump-id') || '';
+          const product = button.getAttribute('data-blocker-chain-jump-product') || '';
+          if (itemId) {
+            setGraphRoot(itemId, product, { reason: 'blocker-chain jump' });
+          }
+        });
+      });
+    }
+
+    function renderGraphView(data = {}) {
+      state.graphPayload = data;
       const currentPreset = syncGraphModeControls(data);
+      syncGraphIsolationControls();
       const nodes = data.nodes || [];
       const edges = data.edges || [];
       const missing = data.missing_nodes || [];
       const hiddenNodes = Number(data.hidden_node_count || 0);
       const hiddenEdges = Number(data.hidden_edge_count || 0);
+      const graphRender = renderGraphSvg(nodes, edges);
+      const isolation = graphRender.isolation;
+      const displayedNodeCount = nodes.length - isolation.hiddenNodeCount;
+      const displayedEdgeCount = edges.length - isolation.hiddenEdgeCount;
       const caps = [
         `depth ${data.max_depth ?? 'n/a'}`,
         `children ${data.max_children_per_node ?? 'n/a'}`,
@@ -2103,11 +3144,20 @@ inline constexpr std::string_view kBackboardAppJsPart5a = R"JS(
       ].join(' / ');
       const truncated = data.truncated ? `, truncated (${hiddenNodes} hidden node(s), ${hiddenEdges} hidden edge(s))` : '';
       const modeLabel = currentPreset?.label || 'Dependencies';
+      const isolationCounts = isolation.mode === 'hide'
+        ? `${isolation.hiddenNodeCount} hidden node(s), ${isolation.hiddenEdgeCount} hidden edge(s)`
+        : `${isolation.fadedNodeCount} faded node(s), ${isolation.fadedEdgeCount} faded edge(s)`;
+      const focusLabel = isolation.focusNodeId || state.graphItemId || 'n/a';
       updateFocusGraphPageChrome();
       document.getElementById('graph-summary').textContent =
-        `${modeLabel}: ${nodes.length} node(s), ${edges.length} edge(s), ${missing.length} missing node(s)${truncated} | caps ${caps}`;
+        `${modeLabel}: ${nodes.length} node(s), ${edges.length} edge(s), ${missing.length} missing node(s)${truncated} | focus ${focusLabel} | neighborhood depth ${isolation.maxDepth} | isolation ${graphIsolationModeLabel(isolation.mode)} | ${isolationCounts} | caps ${caps}`;
 
       const diagnostics = [
+        `<div class="card"><strong>Isolation scope</strong><div class="muted">Focus root ${esc(focusLabel)} / ${esc(graphIsolationModeLabel(isolation.mode))} / depth ${esc(String(isolation.maxDepth))}</div><div class="graph-diagnostic-pills"><span class="pill">canvas nodes ${displayedNodeCount}</span><span class="pill">canvas edges ${displayedEdgeCount}</span><span class="pill">included nodes ${isolation.visibleNodeCount}</span></div></div>`,
+        `<div class="card"><strong>${esc(isolation.mode === 'hide' ? 'Hidden' : 'Faded')} unrelated graph elements</strong><div class="muted">Unrelated nodes are never removed silently; counts and reasons stay visible here even when the canvas hides them.</div><div class="graph-diagnostic-pills">${renderGraphIsolationCountPills(isolation.nodeReasonCounts)}</div><div class="graph-diagnostic-pills">${renderGraphIsolationCountPills(isolation.edgeReasonCounts)}</div></div>`,
+        ...(isolation.rootMissing
+          ? [`<div class="card"><strong>Focused root missing</strong><div class="muted">${esc(state.graphItemId || 'requested root')} was not returned in the bounded graph response, so all returned nodes stay visible with a root-missing diagnostic.</div></div>`]
+          : []),
         ...((data.diagnostics || []).slice(0, 20).map((diagnostic) =>
           `<div class="card"><strong>${esc(diagnostic.code || 'Graph diagnostic')}</strong><div class="muted">${esc(diagnostic.target || 'graph')}</div><div>${esc(diagnostic.message || '')}</div></div>`
         )),
@@ -2123,17 +3173,42 @@ inline constexpr std::string_view kBackboardAppJsPart5a = R"JS(
       ].join('');
 
       document.getElementById('graph-list').innerHTML = [
-        renderGraphSvg(nodes, edges),
+        renderBlockerChain(data.blocker_chain),
+        graphRender.markup,
         diagnostics ? `<div class="graph-diagnostics">${diagnostics}</div>` : '',
         `<h4>Edge details</h4>`,
-        ...(edges.slice(0, 120).map((edge) =>
-          `<div class="card"><code>${esc(edge.from || '')}</code> -> <code>${esc(edge.to || '')}</code><div class="muted">${esc(edge.kind || '')} / ${esc(edge.semantic || '')}</div></div>`
-        )),
+        ...(edges.slice(0, 120).map((edge, index) => {
+          const edgeKey = `${String(edge.from || '')}->${String(edge.to || '')}#${index}`;
+          const visibility = isolation.edgeVisibility.get(edgeKey) || 'visible';
+          const reason = isolation.edgeReason.get(edgeKey) || '';
+          return `<div class="card"><code>${esc(edge.from || '')}</code> -> <code>${esc(edge.to || '')}</code><div class="muted">${esc(edge.kind || '')} / ${esc(edge.semantic || '')} / ${esc(visibility)}${reason ? ` / ${esc(graphIsolationReasonLabel(reason))}` : ''}</div></div>`;
+        })),
         `<h4>Node details</h4>`,
-        ...(nodes.slice(0, 120).map((node) =>
-          `<div class="card"><code>${esc(node.id || '')}</code><div>${esc(node.label || '')}</div><div class="muted">${esc(node.kind || '')} ${esc(node.state || '')}</div></div>`
-        )),
+        ...(nodes.slice(0, 120).map((node) => {
+          const nodeId = String(node.id || '');
+          const visibility = isolation.nodeVisibility.get(nodeId) || 'visible';
+          const reason = isolation.nodeReason.get(nodeId) || 'within-depth';
+          const rerootId = String(node.item_id || node.id || '');
+          return `<div class="card"><code>${esc(node.id || '')}</code><div>${esc(node.label || '')}</div><div class="muted">${esc(node.kind || '')} ${esc(node.state || '')} / ${esc(visibility)} / ${esc(graphIsolationReasonLabel(reason))}${rerootId ? ` / re-root ${esc(rerootId)}` : ''}</div></div>`;
+        })),
       ].join('');
+      bindBlockerChainJumpActions();
+      bindGraphNodeRerooting();
+      initializeGraphViewport(graphRender.layout || {});
+    }
+
+    async function loadGraph(signal, refresh) {
+      if (!state.graphItemId) {
+        renderFocusGraphScaffold();
+        return;
+      }
+
+      const result = await getJson(`/api/review/graph?${graphQueryString()}`, {
+        signal,
+        refresh,
+        stage: 'graph.dependencies',
+      });
+      renderGraphView(result?.data || {});
     }
 
 )JS";
@@ -2637,21 +3712,48 @@ inline constexpr std::string_view kBackboardAppJsPart6 = R"JS(
       state.graphMode = nextMode;
       const preset = syncGraphModeControls();
       updateUrlState();
-      if (state.loadedTabs.has('graph')) {
-        state.staleTabs.add('graph');
-        state.tabCacheStatus.graph = {
-          status: 'stale',
-          reason: 'graph mode changed',
-          updated_at: nowIso(),
-          request_id: '',
-        };
-      }
+      markGraphTabStale('graph mode changed');
       if (state.activeTab === 'graph') {
         scheduleRefresh(0);
         return;
       }
       updateAllPageRefreshStates();
       setStatus(`Graph mode set to ${preset?.label || nextMode}`);
+    });
+
+    document.getElementById('graph-max-depth').addEventListener('change', async (event) => {
+      const nextDepth = boundedPositiveInt(event.target.value, state.graphMaxDepth, graphDepthBounds.max);
+      state.graphMaxDepth = Math.max(graphDepthBounds.min, nextDepth);
+      event.target.value = String(state.graphMaxDepth);
+      updateFocusGraphPageChrome();
+      updateUrlState();
+      markGraphTabStale('graph depth changed');
+      if (state.activeTab === 'graph') {
+        scheduleRefresh(0);
+        return;
+      }
+      updateAllPageRefreshStates();
+      setStatus(`Graph depth set to ${state.graphMaxDepth}`);
+    });
+
+    document.getElementById('graph-isolation-mode').addEventListener('change', async (event) => {
+      state.graphIsolationMode = normalizeGraphIsolationMode(event.target.value);
+      updateFocusGraphPageChrome();
+      updateUrlState();
+      if (state.activeTab === 'graph' && state.graphPayload && state.graphItemId) {
+        renderGraphView(state.graphPayload);
+        setStatus(`Graph isolation set to ${graphIsolationModeLabel(state.graphIsolationMode)}`);
+        return;
+      }
+      if (state.activeTab === 'graph') {
+        scheduleRefresh(0);
+        return;
+      }
+      setStatus(`Graph isolation set to ${graphIsolationModeLabel(state.graphIsolationMode)}`);
+    });
+
+    document.getElementById('graph-reset-scope').addEventListener('click', async () => {
+      resetGraphScope();
     });
 )JS";
 
@@ -2800,22 +3902,31 @@ inline const std::string& BackboardAppJs() {
     std::string text;
     text.reserve(
         kBackboardAppJsPart1.size() + kBackboardAppJsPart1a.size() +
-        kBackboardAppJsPart1b.size() + kBackboardAppJsPart1c.size() +
+        kBackboardAppJsPart1b.size() + kBackboardAppJsPart1bb.size() +
+        kBackboardAppJsPart1c.size() +
         kBackboardAppJsPart2.size() +
         kBackboardAppJsPart3.size() + kBackboardAppJsPart4.size() +
         kBackboardAppJsPart5.size() + kBackboardAppJsPart5a.size() +
+        kBackboardAppJsPart5aa.size() + kBackboardAppJsPart5aaa.size() +
+        kBackboardAppJsPart5aaab.size() +
+        kBackboardAppJsPart5ab.size() +
         kBackboardAppJsPart5b.size() +
         kBackboardAppJsPart6.size() +
         kBackboardAppJsPart7.size());
     text.append(kBackboardAppJsPart1);
     text.append(kBackboardAppJsPart1a);
     text.append(kBackboardAppJsPart1b);
+    text.append(kBackboardAppJsPart1bb);
     text.append(kBackboardAppJsPart1c);
     text.append(kBackboardAppJsPart2);
     text.append(kBackboardAppJsPart3);
     text.append(kBackboardAppJsPart4);
     text.append(kBackboardAppJsPart5);
     text.append(kBackboardAppJsPart5a);
+    text.append(kBackboardAppJsPart5aa);
+    text.append(kBackboardAppJsPart5aaa);
+    text.append(kBackboardAppJsPart5aaab);
+    text.append(kBackboardAppJsPart5ab);
     text.append(kBackboardAppJsPart5b);
     text.append(kBackboardAppJsPart6);
     text.append(kBackboardAppJsPart7);

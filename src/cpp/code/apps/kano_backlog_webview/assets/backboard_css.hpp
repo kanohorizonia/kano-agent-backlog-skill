@@ -6,8 +6,9 @@ namespace kano::backlog::webview::assets {
 
 inline constexpr std::string_view kBackboardCss = R"CSS(
     :root { --kob-accent: #1f4fa3; --kob-accent-soft: #f2f6ff; --kob-accent-border: #9fb5de; --kob-border: #cfd9ea; --kob-border-strong: #9eb3d7; --kob-surface: #fcfdff; --kob-surface-strong: #ffffff; --kob-shadow: rgba(30, 55, 95, 0.12); }
-    body { font-family: "Segoe UI", sans-serif; margin: 0; padding: 16px; background: #f7f8fa; color: #1a1f2e; }
+    body { font-family: "Segoe UI", "Yu Gothic UI", Meiryo, "Microsoft JhengHei UI", "Microsoft YaHei UI", "Malgun Gothic", "PingFang SC", "Hiragino Sans", sans-serif; margin: 0; padding: 16px; background: #f7f8fa; color: #1a1f2e; }
     .app-shell { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 12px; align-items: start; }
+    .app-shell > main { min-width: 0; }
     .sidebar { position: sticky; top: 16px; }
     .workspace-list { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; max-height: 45vh; overflow: auto; }
     .workspace-row { display: grid; grid-template-columns: minmax(0,1fr) auto auto; gap: 6px; align-items: center; }
@@ -16,9 +17,9 @@ inline constexpr std::string_view kBackboardCss = R"CSS(
     .workspace-meta { font-size: 11px; color: #70809f; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .icon-btn { border: 1px solid #cfd9ea; background: #fff; border-radius: 6px; padding: 4px 6px; cursor: pointer; }
     .icon-btn:hover { background: #f2f6ff; }
-    .row { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; }
+    .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
     .panel { background: #fff; border: 1px solid #dde3f0; border-radius: 10px; padding: 12px; margin-bottom: 12px; }
-    .tabs { display: flex; gap: 8px; }
+    .tabs { display: flex; gap: 8px; flex-wrap: wrap; }
     .tab-btn { border: 1px solid #cfd9ea; background: #fff; border-radius: 8px; padding: 6px 12px; cursor: pointer; }
     .tab-btn.active { background: #1f4fa3; color: #fff; border-color: #1f4fa3; }
     .page { display: none; position: relative; }
@@ -125,30 +126,67 @@ inline constexpr std::string_view kBackboardCss = R"CSS(
     .md-view a { color: #1f4fa3; text-decoration: none; }
     .md-view a:hover { text-decoration: underline; }
     .muted { color: #586074; font-size: 12px; }
-    .graph-canvas { width: 100%; overflow: auto; border: 1px solid #dbe4f2; border-radius: 8px; background: #fbfcff; margin-bottom: 12px; }
-    .graph-svg { min-width: 760px; display: block; }
+    .graph-canvas { position: relative; width: 100%; height: clamp(360px, 58vh, 720px); overflow: hidden; border: 1px solid #dbe4f2; border-radius: 10px; background: linear-gradient(180deg, #fbfcff 0%, #f5f8ff 100%); margin-bottom: 12px; outline: none; touch-action: none; cursor: grab; }
+    .graph-canvas.is-panning { cursor: grabbing; }
+    .graph-canvas:focus-visible { box-shadow: 0 0 0 3px rgba(159, 181, 222, 0.85); }
+    .graph-svg { width: 100%; height: 100%; min-width: 0; display: block; }
     .graph-edge { stroke: #7a879d; stroke-width: 1.5; fill: none; }
     .graph-edge.blocks,.graph-edge.blocked_by { stroke: #b44646; stroke-width: 2; }
     .graph-edge.parent { stroke: #4f6fa9; }
     .graph-edge.topic-membership { stroke: #498264; stroke-dasharray: 5 4; }
     .graph-edge.relates { stroke: #7d6aa6; stroke-dasharray: 3 4; }
+    .graph-edge.is-faded, .graph-edge-label.is-faded { opacity: 0.3; }
     .graph-node rect { fill: #fff; stroke: #b9c7de; rx: 8; }
     .graph-node.topic rect { fill: #eef8f2; stroke: #7eb58d; }
     .graph-node.missing rect { fill: #fff4f4; stroke: #d48b8b; stroke-dasharray: 5 4; }
     .graph-node.dependency rect { stroke: #c65f5f; }
+    .graph-node.is-included-neighborhood:not(.is-focus-root) rect { stroke: var(--kob-border-strong); }
+    .graph-node.is-focus-root rect { fill: var(--kob-accent-soft); stroke: var(--kob-accent); stroke-width: 2.5; }
+    .graph-node.is-faded { opacity: 0.34; }
+    .graph-node.is-rerootable { cursor: pointer; }
+    .graph-node.is-rerootable:hover rect { stroke: var(--kob-accent); stroke-width: 2; filter: drop-shadow(0 4px 10px var(--kob-shadow)); }
+    .graph-node.is-rerootable:focus-visible rect { stroke: var(--kob-accent); stroke-width: 2.5; filter: drop-shadow(0 4px 10px var(--kob-shadow)); }
     .graph-label { font-size: 12px; fill: #1a1f2e; }
     .graph-meta { font-size: 10px; fill: #65738b; }
     .graph-edge-label { font-size: 10px; fill: #47536a; }
     .graph-diagnostics { display: grid; gap: 6px; margin-bottom: 12px; }
+    .graph-diagnostic-pills { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
     .graph-page-head { display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; margin-bottom: 12px; }
     .graph-page-title { display: grid; gap: 4px; }
     .graph-page-title h3 { margin: 0; }
     .graph-empty-state { margin-top: 4px; }
     .graph-toolbar { display: grid; gap: 8px; margin-bottom: 12px; }
     .graph-toolbar-row { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+    .graph-toolbar-row-secondary { align-items: center; justify-content: space-between; }
     .graph-mode-field { display: flex; flex-direction: column; gap: 8px; min-width: min(320px, 100%); }
-    .graph-mode-select { min-width: 240px; max-width: 100%; border: 1px solid #cfd9ea; background: #fff; border-radius: 8px; padding: 6px 10px; color: #1a1f2e; }
+    .graph-toolbar-field { display: flex; flex-direction: column; gap: 8px; min-width: 160px; }
+    .graph-mode-select, .graph-depth-input { min-width: 140px; max-width: 100%; border: 1px solid #cfd9ea; background: #fff; border-radius: 8px; padding: 6px 10px; color: #1a1f2e; }
+    .graph-depth-input { width: 96px; }
+    .graph-toolbar-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .graph-toolbar-actions .btn[disabled] { opacity: 0.65; cursor: default; }
+    .graph-viewport-actions { row-gap: 8px; }
+    .graph-viewport-btn { min-height: 32px; }
+    .graph-viewport-help { flex: 1; min-width: min(320px, 100%); line-height: 1.45; }
     .graph-mode-help { line-height: 1.45; }
+    .graph-scope-help { line-height: 1.45; }
+    .blocker-chain { display: grid; gap: 8px; margin-bottom: 12px; min-width: 0; }
+    .blocker-chain-header { display: grid; gap: 4px; min-width: 0; }
+    .blocker-chain-header h4, .blocker-chain-section h5 { margin: 0; }
+    .blocker-chain-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: 8px; min-width: 0; align-items: start; }
+    .blocker-chain-section { display: grid; align-content: start; align-self: start; gap: 8px; min-width: 0; }
+    .blocker-chain-list { display: grid; align-content: start; gap: 8px; }
+    .blocker-chain-item { display: grid; gap: 8px; margin: 0; min-width: 0; }
+    .blocker-chain-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(120px, 100%), 1fr)); gap: 8px; }
+    .blocker-chain-header, .blocker-chain-section, .blocker-chain-item { overflow-wrap: break-word; word-break: normal; }
+    .blocker-chain-facts { min-width: 0; }
+    .blocker-chain-path, .blocker-chain code, .blocker-chain-id { overflow-wrap: anywhere; word-break: break-word; }
+    .blocker-chain-jump { justify-self: start; }
+    .blocker-chain-jump:focus-visible { outline: 3px solid var(--kob-accent-border); outline-offset: 2px; }
+    @media (max-width: 720px) {
+      body { padding: 12px; }
+      .app-shell { grid-template-columns: minmax(0, 1fr); }
+      .sidebar { position: static; top: auto; }
+    }
 )CSS";
 
 inline constexpr std::string_view BackboardCss() noexcept {

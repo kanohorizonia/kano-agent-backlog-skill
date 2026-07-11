@@ -114,7 +114,8 @@ class BacklogWebviewService {
                                    const std::string& itemId = "",
                                    const std::string& topic = "",
                                    GraphQueryCaps caps = {},
-                                   std::optional<std::string> mode = std::nullopt);
+                                   std::optional<std::string> mode = std::nullopt,
+                                   const std::string& rootProduct = "");
   Json::Value BuildWorkOrderTimeline(const ItemQueryOptions& options,
                                      const std::string& itemId = "",
                                      const std::string& topic = "");

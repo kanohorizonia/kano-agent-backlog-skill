@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cctype>
+#include <deque>
 #include <fstream>
 #include <functional>
 #include <iomanip>
@@ -43,11 +44,11 @@ const std::vector<GraphModePreset>& GraphModePresets() {
   static const std::vector<GraphModePreset> kPresets = {
       {"dependency",
        "Dependencies",
-       "Review blockers, blocked items, and the nearby structure already recorded for this backlog area.",
-       "What blocks delivery here, what is blocked, and what surrounding context matters for review?",
-       "Keeps the current dependency graph breadth so existing Focus Graph and dependency review flows stay readable.",
-       {"blocks", "blocked_by", "parent", "topic-membership", "relates"},
-       {"dependency", "structural", "grouping", "reference"},
+       "Review only recorded blocker relationships and their bounded upstream/downstream impact.",
+       "What blocks this item, and what delivery work is blocked by it?",
+       "Uses only links.blocks and links.blocked_by; structure, topics, and related refs require their explicit modes.",
+       {"blocks", "blocked_by"},
+       {"dependency"},
        true},
       {"structure",
        "Structure",
@@ -7880,7 +7881,8 @@ Json::Value BacklogWebviewService::BuildDependencyGraph(const ItemQueryOptions& 
                                                          const std::string& itemId,
                                                          const std::string& topic,
                                                          GraphQueryCaps caps,
-                                                         std::optional<std::string> mode) {
+                                                         std::optional<std::string> mode,
+                                                         const std::string& rootProduct) {
   Json::Value response(Json::objectValue);
   response["nodes"] = Json::arrayValue;
   response["edges"] = Json::arrayValue;
@@ -7939,13 +7941,59 @@ Json::Value BacklogWebviewService::BuildDependencyGraph(const ItemQueryOptions& 
     keysByBareId[item["id"].asString()].push_back(key);
   }
 
+  std::vector<std::string> rootCandidates;
+  if (!itemId.empty()) {
+    if (!rootProduct.empty()) {
+      const auto key = rootProduct + ":" + itemId;
+      const auto itemIt = allByKey.find(key);
+      if (itemIt != allByKey.end() &&
+          (topic.empty() || ItemMatchesTopic(itemIt->second, topic))) {
+        rootCandidates.push_back(key);
+      }
+    } else {
+      const auto bareIt = keysByBareId.find(itemId);
+      if (bareIt != keysByBareId.end()) {
+        for (const auto& key : bareIt->second) {
+          const auto itemIt = allByKey.find(key);
+          if (itemIt != allByKey.end() &&
+              (topic.empty() || ItemMatchesTopic(itemIt->second, topic))) {
+            rootCandidates.push_back(key);
+          }
+        }
+      }
+    }
+  }
+  std::sort(rootCandidates.begin(), rootCandidates.end());
+  rootCandidates.erase(std::unique(rootCandidates.begin(), rootCandidates.end()),
+                       rootCandidates.end());
+  const bool bAmbiguousRoot = rootCandidates.size() > 1;
+  std::optional<std::string> rootItemKey;
+  if (rootCandidates.size() == 1) {
+    rootItemKey = rootCandidates.front();
+  }
+
   std::set<std::string> activeKeys;
-  for (const auto& [key, item] : allByKey) {
-    const bool matchesItem = itemId.empty() || item["id"].asString() == itemId ||
-                             item["parent"].asString() == itemId;
-    const bool matchesTopic = topic.empty() || ItemMatchesTopic(item, topic);
-    if (matchesItem && matchesTopic) {
-      activeKeys.insert(key);
+  if (rootItemKey) {
+    activeKeys.insert(*rootItemKey);
+    const bool bIncludeDirectChildren =
+        !graphMode.explicitMode || graphMode.preset->id != "dependency";
+    if (bIncludeDirectChildren) {
+      const auto& rootItem = allByKey.at(*rootItemKey);
+      const auto selectedProduct = rootItem["product"].asString();
+      const auto selectedItemId = rootItem["id"].asString();
+      for (const auto& [key, item] : allByKey) {
+        if (item["product"].asString() == selectedProduct &&
+            item["parent"].asString() == selectedItemId &&
+            (topic.empty() || ItemMatchesTopic(item, topic))) {
+          activeKeys.insert(key);
+        }
+      }
+    }
+  } else if (itemId.empty()) {
+    for (const auto& [key, item] : allByKey) {
+      if (topic.empty() || ItemMatchesTopic(item, topic)) {
+        activeKeys.insert(key);
+      }
     }
   }
 
@@ -7953,6 +8001,8 @@ Json::Value BacklogWebviewService::BuildDependencyGraph(const ItemQueryOptions& 
   Json::Value edges(Json::arrayValue);
   std::set<std::string> edgeKeys;
   std::map<std::string, std::vector<std::string>> dependencyAdjacency;
+  std::set<std::string> dependencyAdjacencyKeys;
+  std::map<std::string, std::set<std::string>> semanticDownstreamByKey;
   bool graphTruncated = response["truncated"].asBool();
   size_t hiddenNodeCount = 0;
   size_t hiddenEdgeCount = 0;
@@ -7978,6 +8028,15 @@ Json::Value BacklogWebviewService::BuildDependencyGraph(const ItemQueryOptions& 
         "graph_unknown_mode", graphMode.requested,
         "Unknown graph mode requested; falling back to the dependency preset.");
   }
+  if (bAmbiguousRoot) {
+    appendDiagnostic(
+        "graph_root_ambiguous", itemId,
+        "Multiple compatible graph roots share this item ID; provide root_product to select one.");
+  } else if (!itemId.empty() && rootCandidates.empty()) {
+    appendDiagnostic(
+        "graph_root_not_found", itemId,
+        "No compatible graph root matched the requested item ID and root product.");
+  }
 
   auto markHiddenNode = [&](const std::string& code,
                             const std::string& target,
@@ -7985,6 +8044,11 @@ Json::Value BacklogWebviewService::BuildDependencyGraph(const ItemQueryOptions& 
     ++hiddenNodeCount;
     graphTruncated = true;
     appendDiagnostic(code, target, message);
+    if (code != "graph_node_limit_truncated" &&
+        nodesByKey.size() >= caps.maxTotalNodes) {
+      appendDiagnostic("graph_node_limit_truncated", "graph",
+                       "Dependency graph node cap hid additional nodes.");
+    }
   };
 
   auto markHiddenEdge = [&](const std::string& code,
@@ -7993,6 +8057,11 @@ Json::Value BacklogWebviewService::BuildDependencyGraph(const ItemQueryOptions& 
     ++hiddenEdgeCount;
     graphTruncated = true;
     appendDiagnostic(code, target, message);
+    if (code != "graph_edge_limit_truncated" &&
+        edges.size() >= caps.maxTotalEdges) {
+      appendDiagnostic("graph_edge_limit_truncated", "graph",
+                       "Dependency graph edge cap hid additional edges.");
+    }
   };
 
   auto appendNode = [&](const Json::Value& node) {
@@ -8123,6 +8192,32 @@ Json::Value BacklogWebviewService::BuildDependencyGraph(const ItemQueryOptions& 
     }
   };
 
+  auto recordSemanticDependency = [&](const std::string& blockerKey,
+                                      const std::string& blockedKey) {
+    if (blockerKey.empty() || blockedKey.empty()) {
+      return;
+    }
+    if (allByKey.count(blockerKey) == 0 || allByKey.count(blockedKey) == 0) {
+      return;
+    }
+    semanticDownstreamByKey[blockerKey].insert(blockedKey);
+  };
+
+  for (const auto& [key, item] : allByKey) {
+    for (const auto& ref : item["links"]["blocks"]) {
+      const auto target = resolveRef(ref.asString(), item["product"].asString());
+      if (target.valid) {
+        recordSemanticDependency(key, target.key);
+      }
+    }
+    for (const auto& ref : item["links"]["blocked_by"]) {
+      const auto target = resolveRef(ref.asString(), item["product"].asString());
+      if (target.valid) {
+        recordSemanticDependency(target.key, key);
+      }
+    }
+  }
+
   auto appendEdge = [&](const std::string& from,
                         const std::string& to,
                         const std::string& kind,
@@ -8154,12 +8249,20 @@ Json::Value BacklogWebviewService::BuildDependencyGraph(const ItemQueryOptions& 
     edge["dependency"] = semantic == "dependency";
     edges.append(edge);
     if (semantic == "dependency") {
-      dependencyAdjacency[from].push_back(to);
+      const auto semanticEdgeKey = from + "\n" + to;
+      if (dependencyAdjacencyKeys.insert(semanticEdgeKey).second) {
+        dependencyAdjacency[from].push_back(to);
+      }
     }
   };
 
   const auto includeEdgeKind = [&](const std::string& kind) {
-    return graphMode.preset->defaultEdgeKinds.count(kind) > 0;
+    static const std::set<std::string> kLegacyBroadEdgeKinds = {
+        "parent", "blocks", "blocked_by", "relates", "topic-membership"};
+    const auto& edgeKinds = graphMode.explicitMode
+                                ? graphMode.preset->defaultEdgeKinds
+                                : kLegacyBroadEdgeKinds;
+    return edgeKinds.count(kind) > 0;
   };
 
   for (const auto& key : activeKeys) {
@@ -8170,9 +8273,18 @@ Json::Value BacklogWebviewService::BuildDependencyGraph(const ItemQueryOptions& 
   }
 
   std::set<std::string> expandedKeys;
+  std::map<std::string, size_t> expandedDepthByKey;
   std::map<std::string, size_t> depthByKey;
+  std::deque<std::string> expansionQueue;
+  std::set<std::string> queuedKeys;
+  auto queueForExpansion = [&](const std::string& key) {
+    if (allByKey.count(key) > 0 && queuedKeys.insert(key).second) {
+      expansionQueue.push_back(key);
+    }
+  };
   for (const auto& key : activeKeys) {
     depthByKey[key] = 0;
+    queueForExpansion(key);
   }
 
   auto shouldExpandRef = [&](const std::string& sourceKey,
@@ -8205,18 +8317,32 @@ Json::Value BacklogWebviewService::BuildDependencyGraph(const ItemQueryOptions& 
     const auto targetDepthIt = depthByKey.find(target.key);
     if (targetDepthIt == depthByKey.end() || targetDepth < targetDepthIt->second) {
       depthByKey[target.key] = targetDepth;
+      queueForExpansion(target.key);
     }
     return true;
   };
 
-  for (const auto& [key, item] : allByKey) {
-    if (depthByKey.count(key) == 0) {
+  while (!expansionQueue.empty()) {
+    const auto key = expansionQueue.front();
+    expansionQueue.pop_front();
+    queuedKeys.erase(key);
+    const auto itemIt = allByKey.find(key);
+    const auto depthIt = depthByKey.find(key);
+    if (itemIt == allByKey.end() || depthIt == depthByKey.end()) {
       continue;
     }
-    if (!expandedKeys.insert(key).second) {
+    const auto expandedDepthIt = expandedDepthByKey.find(key);
+    if (expandedDepthIt != expandedDepthByKey.end() &&
+        expandedDepthIt->second <= depthIt->second) {
       continue;
     }
-    size_t childCount = 0;
+    expandedKeys.insert(key);
+    expandedDepthByKey[key] = depthIt->second;
+    const auto& item = itemIt->second;
+    size_t parentChildCount = 0;
+    size_t blocksChildCount = 0;
+    size_t blockedByChildCount = 0;
+    size_t relatesChildCount = 0;
 
     if (includeEdgeKind("topic-membership")) {
       for (const auto& itemTopic : SplitCsv(item["topic"].asString())) {
@@ -8229,7 +8355,7 @@ Json::Value BacklogWebviewService::BuildDependencyGraph(const ItemQueryOptions& 
     const auto parent = item["parent"].asString();
     if (includeEdgeKind("parent") && !parent.empty()) {
       const auto target = resolveRef(parent, item["product"].asString());
-      const bool includeRef = shouldExpandRef(key, target, childCount, false);
+      const bool includeRef = shouldExpandRef(key, target, parentChildCount, false);
       if (includeRef) {
         ensureRefNode(key, "parent", target);
       }
@@ -8241,7 +8367,7 @@ Json::Value BacklogWebviewService::BuildDependencyGraph(const ItemQueryOptions& 
     if (includeEdgeKind("blocks")) {
       for (const auto& ref : item["links"]["blocks"]) {
         const auto target = resolveRef(ref.asString(), item["product"].asString());
-        const bool includeRef = shouldExpandRef(key, target, childCount, true);
+        const bool includeRef = shouldExpandRef(key, target, blocksChildCount, true);
         if (includeRef) {
           ensureRefNode(key, "blocks", target);
         }
@@ -8254,7 +8380,7 @@ Json::Value BacklogWebviewService::BuildDependencyGraph(const ItemQueryOptions& 
     if (includeEdgeKind("blocked_by")) {
       for (const auto& ref : item["links"]["blocked_by"]) {
         const auto target = resolveRef(ref.asString(), item["product"].asString());
-        const bool includeRef = shouldExpandRef(key, target, childCount, true);
+        const bool includeRef = shouldExpandRef(key, target, blockedByChildCount, true);
         if (includeRef) {
           ensureRefNode(key, "blocked_by", target);
         }
@@ -8267,7 +8393,7 @@ Json::Value BacklogWebviewService::BuildDependencyGraph(const ItemQueryOptions& 
     if (includeEdgeKind("relates")) {
       for (const auto& ref : item["links"]["relates"]) {
         const auto target = resolveRef(ref.asString(), item["product"].asString());
-        const bool includeRef = shouldExpandRef(key, target, childCount, true);
+        const bool includeRef = shouldExpandRef(key, target, relatesChildCount, true);
         if (includeRef) {
           ensureRefNode(key, "relates", target);
         }
@@ -8362,6 +8488,365 @@ Json::Value BacklogWebviewService::BuildDependencyGraph(const ItemQueryOptions& 
                      "Dependency graph includes unresolved item references.");
   }
   response["truncated"] = graphTruncated;
+  if (graphMode.explicitMode && graphMode.preset->id == "dependency" &&
+      rootItemKey &&
+      nodesByKey.count(*rootItemKey) > 0) {
+    const auto dependencyPairKey = [](const std::string& from,
+                                      const std::string& to) {
+      return from + "\n" + to;
+    };
+    auto isResolvedItemNode = [&](const std::string& key) {
+      const auto nodeIt = nodesByKey.find(key);
+      if (nodeIt == nodesByKey.end()) {
+        return false;
+      }
+      const auto& node = nodeIt->second;
+      return !node.get("missing", false).asBool() &&
+             !node.get("item_id", "").asString().empty() &&
+             !node.get("product", "").asString().empty() &&
+             !StartsWith(key, "topic:");
+    };
+
+    std::map<std::string, std::set<std::string>> visibleDownstream;
+    std::map<std::string, std::set<std::string>> visibleUpstream;
+    std::set<std::string> visibleDependencyPairs;
+    for (const auto& edge : response["edges"]) {
+      if (!edge.get("dependency", false).asBool()) {
+        continue;
+      }
+      const auto from = edge["from"].asString();
+      const auto to = edge["to"].asString();
+      if (from.empty() || to.empty()) {
+        continue;
+      }
+      const auto pairKey = dependencyPairKey(from, to);
+      if (!visibleDependencyPairs.insert(pairKey).second) {
+        continue;
+      }
+      visibleDownstream[from].insert(to);
+      visibleUpstream[to].insert(from);
+    }
+
+    struct ChainVisit {
+      std::string key;
+      size_t distance = 0;
+      std::vector<std::string> path;
+    };
+
+    auto pathContains = [](const std::vector<std::string>& path,
+                           const std::string& key) {
+      return std::find(path.begin(), path.end(), key) != path.end();
+    };
+
+    std::map<std::string, size_t> upstreamDistance;
+    std::map<std::string, std::vector<std::string>> upstreamPaths;
+    std::vector<ChainVisit> upstreamQueue;
+    const auto directUpstreamIt = visibleUpstream.find(*rootItemKey);
+    if (directUpstreamIt != visibleUpstream.end()) {
+      for (const auto& upstreamKey : directUpstreamIt->second) {
+        upstreamQueue.push_back({upstreamKey, 1, {upstreamKey, *rootItemKey}});
+      }
+    }
+    std::set<std::string> seenUpstream;
+    for (size_t index = 0; index < upstreamQueue.size(); ++index) {
+      const auto visit = upstreamQueue[index];
+      if (!seenUpstream.insert(visit.key).second || !isResolvedItemNode(visit.key)) {
+        continue;
+      }
+      upstreamDistance[visit.key] = visit.distance;
+      upstreamPaths[visit.key] = visit.path;
+      const auto nextIt = visibleUpstream.find(visit.key);
+      if (nextIt == visibleUpstream.end()) {
+        continue;
+      }
+      for (const auto& upstreamKey : nextIt->second) {
+        if (pathContains(visit.path, upstreamKey)) {
+          continue;
+        }
+        auto nextPath = visit.path;
+        nextPath.insert(nextPath.begin(), upstreamKey);
+        upstreamQueue.push_back({upstreamKey, visit.distance + 1, nextPath});
+      }
+    }
+
+    std::map<std::string, size_t> downstreamDistance;
+    std::map<std::string, std::vector<std::string>> downstreamPaths;
+    std::vector<ChainVisit> downstreamQueue;
+    const auto directDownstreamIt = visibleDownstream.find(*rootItemKey);
+    if (directDownstreamIt != visibleDownstream.end()) {
+      for (const auto& downstreamKey : directDownstreamIt->second) {
+        downstreamQueue.push_back({downstreamKey, 1, {*rootItemKey, downstreamKey}});
+      }
+    }
+    std::set<std::string> seenDownstream;
+    for (size_t index = 0; index < downstreamQueue.size(); ++index) {
+      const auto visit = downstreamQueue[index];
+      if (!seenDownstream.insert(visit.key).second || !isResolvedItemNode(visit.key)) {
+        continue;
+      }
+      downstreamDistance[visit.key] = visit.distance;
+      downstreamPaths[visit.key] = visit.path;
+      const auto nextIt = visibleDownstream.find(visit.key);
+      if (nextIt == visibleDownstream.end()) {
+        continue;
+      }
+      for (const auto& downstreamKey : nextIt->second) {
+        if (pathContains(visit.path, downstreamKey)) {
+          continue;
+        }
+        auto nextPath = visit.path;
+        nextPath.push_back(downstreamKey);
+        downstreamQueue.push_back({downstreamKey, visit.distance + 1, nextPath});
+      }
+    }
+
+    auto pathToJson = [&](const std::vector<std::string>& path) {
+      Json::Value pathJson(Json::arrayValue);
+      for (const auto& key : path) {
+        pathJson.append(key);
+      }
+      return pathJson;
+    };
+
+    auto pathItemIdsToJson = [&](const std::vector<std::string>& path) {
+      Json::Value pathJson(Json::arrayValue);
+      for (const auto& key : path) {
+        const auto nodeIt = nodesByKey.find(key);
+        pathJson.append(nodeIt == nodesByKey.end()
+                            ? key
+                            : nodeIt->second.get("item_id", key).asString());
+      }
+      return pathJson;
+    };
+
+    auto makeChainEntry = [&](const std::string& key,
+                              size_t distance,
+                              const std::string& direction,
+                              const std::vector<std::string>& path) {
+      const auto& node = nodesByKey[key];
+      const auto id = node.get("item_id", key).asString();
+      const auto label = node.get("label", id).asString();
+      Json::Value entry(Json::objectValue);
+      entry["id"] = id;
+      entry["item_id"] = id;
+      entry["canonical_node_key"] = key;
+      entry["node_key"] = key;
+      entry["product"] = node.get("product", "").asString();
+      entry["title"] = label;
+      entry["label"] = label;
+      entry["state"] = node.get("state", "").asString();
+      entry["kind"] = node.get("kind", "").asString();
+      entry["distance"] = static_cast<Json::UInt64>(distance);
+      entry["direct"] = distance == 1;
+      entry["direction"] = direction;
+      entry["path"] = pathToJson(path);
+      entry["path_item_ids"] = pathItemIdsToJson(path);
+      entry["path_length"] = static_cast<Json::UInt64>(distance);
+      entry["path_count"] = Json::UInt64{1};
+      return entry;
+    };
+
+    auto visibleDownstreamImpact = [&](const std::string& key) {
+      std::set<std::string> seen;
+      std::vector<std::string> queue = {key};
+      size_t impact = 0;
+      for (size_t index = 0; index < queue.size(); ++index) {
+        const auto current = queue[index];
+        const auto nextIt = visibleDownstream.find(current);
+        if (nextIt == visibleDownstream.end()) {
+          continue;
+        }
+        for (const auto& next : nextIt->second) {
+          if (!seen.insert(next).second) {
+            continue;
+          }
+          if (isResolvedItemNode(next)) {
+            ++impact;
+          }
+          queue.push_back(next);
+        }
+      }
+      return impact;
+    };
+
+    Json::Value blockerChain(Json::objectValue);
+    blockerChain["root_item"] = makeChainEntry(*rootItemKey, 0, "root", {*rootItemKey});
+    blockerChain["edge_direction_note"] =
+        "Dependency edges are normalized as blocker -> blocked; links.blocks and links.blocked_by both remain visible as source metadata without double-counting semantic paths.";
+    blockerChain["upstream_blockers"] = Json::arrayValue;
+    blockerChain["downstream_blocked_items"] = Json::arrayValue;
+    blockerChain["root_blockers"] = Json::arrayValue;
+    blockerChain["jump_targets"] = Json::arrayValue;
+
+    for (const auto& [key, distance] : upstreamDistance) {
+      blockerChain["upstream_blockers"].append(
+          makeChainEntry(key, distance, "upstream_blocker", upstreamPaths[key]));
+    }
+    for (const auto& [key, distance] : downstreamDistance) {
+      blockerChain["downstream_blocked_items"].append(
+          makeChainEntry(key, distance, "downstream_blocked_item", downstreamPaths[key]));
+    }
+
+    struct RootBlockerCandidate {
+      std::string key;
+      size_t visibleImpact = 0;
+      size_t distance = 0;
+    };
+    std::vector<RootBlockerCandidate> rootBlockerCandidates;
+    for (const auto& [key, distance] : upstreamDistance) {
+      const auto upstreamIt = visibleUpstream.find(key);
+      const bool hasVisiblePredecessor =
+          upstreamIt != visibleUpstream.end() && !upstreamIt->second.empty();
+      if (!hasVisiblePredecessor) {
+        rootBlockerCandidates.push_back(
+            {key, visibleDownstreamImpact(key), distance});
+      }
+    }
+    std::sort(rootBlockerCandidates.begin(), rootBlockerCandidates.end(),
+              [](const RootBlockerCandidate& left,
+                 const RootBlockerCandidate& right) {
+                if (left.visibleImpact != right.visibleImpact) {
+                  return left.visibleImpact > right.visibleImpact;
+                }
+                if (left.distance != right.distance) {
+                  return left.distance < right.distance;
+                }
+                return left.key < right.key;
+              });
+
+    Json::Value rankingBasis(Json::objectValue);
+    rankingBasis["uses_priority"] = false;
+    rankingBasis["summary"] =
+        "Root blockers are ordered by visible bounded downstream impact, then shorter visible path to the selected item, then canonical node key; this is not business priority.";
+    rankingBasis["ordering"] =
+        "visible_downstream_impact_desc,path_to_selected_item_asc,canonical_node_key_asc";
+    rankingBasis["bounded_graph"] = true;
+    blockerChain["ranking_basis"] = rankingBasis;
+
+    size_t rank = 1;
+    for (const auto& candidate : rootBlockerCandidates) {
+      auto entry = makeChainEntry(candidate.key, candidate.distance,
+                                  "root_blocker", upstreamPaths[candidate.key]);
+      entry["rank"] = static_cast<Json::UInt64>(rank++);
+      entry["visible_bounded_downstream_impact"] =
+          static_cast<Json::UInt64>(candidate.visibleImpact);
+      entry["ranking_note"] = rankingBasis["summary"].asString();
+      blockerChain["root_blockers"].append(entry);
+    }
+
+    auto appendJumpTarget = [&](const std::string& key,
+                                const std::string& direction,
+                                size_t distance,
+                                const std::string& reason) {
+      if (!isResolvedItemNode(key)) {
+        return;
+      }
+      auto target = makeChainEntry(key, distance, direction, {key});
+      target["reroot_item_id"] = target["item_id"].asString();
+      target["reroot_product"] = target["product"].asString();
+      target["target_mode"] = "dependency";
+      target["reason"] = reason;
+      Json::Value targetCaps(Json::objectValue);
+      targetCaps["max_depth"] = static_cast<Json::UInt64>(caps.maxDepth);
+      targetCaps["max_children_per_node"] =
+          static_cast<Json::UInt64>(caps.maxChildrenPerNode);
+      targetCaps["max_total_nodes"] = static_cast<Json::UInt64>(caps.maxTotalNodes);
+      targetCaps["max_total_edges"] = static_cast<Json::UInt64>(caps.maxTotalEdges);
+      target["target_caps"] = targetCaps;
+      blockerChain["jump_targets"].append(target);
+    };
+
+    std::set<std::string> emittedJumpTargets;
+    for (const auto& candidate : rootBlockerCandidates) {
+      if (emittedJumpTargets.insert(candidate.key).second) {
+        appendJumpTarget(candidate.key, "jump_to_root_blocker", candidate.distance,
+                         "Reroot on this upstream root blocker.");
+      }
+    }
+    for (const auto& [key, distance] : upstreamDistance) {
+      if (emittedJumpTargets.insert(key).second) {
+        appendJumpTarget(key, "jump_to_upstream_blocker", distance,
+                         "Reroot on this visible upstream blocker.");
+      }
+    }
+    for (const auto& [key, distance] : downstreamDistance) {
+      if (emittedJumpTargets.insert(key).second) {
+        appendJumpTarget(key, "jump_to_downstream_blocked_item", distance,
+                         "Reroot on this visible downstream blocked item.");
+      }
+    }
+
+    std::set<std::string> selectedPathPairs;
+    for (const auto& candidate : rootBlockerCandidates) {
+      const auto pathIt = upstreamPaths.find(candidate.key);
+      if (pathIt == upstreamPaths.end()) {
+        continue;
+      }
+      const auto& path = pathIt->second;
+      for (size_t index = 1; index < path.size(); ++index) {
+        selectedPathPairs.insert(dependencyPairKey(path[index - 1], path[index]));
+      }
+    }
+
+    std::set<std::string> chainContextKeys;
+    chainContextKeys.insert(*rootItemKey);
+    for (const auto& [key, _] : upstreamDistance) {
+      chainContextKeys.insert(key);
+    }
+
+    std::set<std::string> countedParallelBranches;
+    std::set<std::string> countedTruncatedBranches;
+    for (const auto& key : chainContextKeys) {
+      const auto downstreamIt = semanticDownstreamByKey.find(key);
+      if (downstreamIt == semanticDownstreamByKey.end()) {
+        continue;
+      }
+      for (const auto& downstreamKey : downstreamIt->second) {
+        const auto pairKey = dependencyPairKey(key, downstreamKey);
+        if (selectedPathPairs.count(pairKey) == 0) {
+          countedParallelBranches.insert(pairKey);
+        }
+        if (visibleDependencyPairs.count(pairKey) == 0) {
+          countedTruncatedBranches.insert(pairKey);
+        }
+      }
+    }
+    size_t truncatedBranchCount = countedTruncatedBranches.size();
+    blockerChain["parallel_branch_count"] =
+        static_cast<Json::UInt64>(countedParallelBranches.size());
+    blockerChain["truncated_branch_count"] =
+        static_cast<Json::UInt64>(truncatedBranchCount);
+
+    Json::Value summary(Json::objectValue);
+    summary["bounded_query"] = true;
+    summary["max_depth"] = static_cast<Json::UInt64>(caps.maxDepth);
+    summary["max_children_per_node"] =
+        static_cast<Json::UInt64>(caps.maxChildrenPerNode);
+    summary["max_total_nodes"] = static_cast<Json::UInt64>(caps.maxTotalNodes);
+    summary["max_total_edges"] = static_cast<Json::UInt64>(caps.maxTotalEdges);
+    summary["truncated"] = graphTruncated;
+    summary["hidden_node_count"] = static_cast<Json::UInt64>(hiddenNodeCount);
+    summary["hidden_edge_count"] = static_cast<Json::UInt64>(hiddenEdgeCount);
+    summary["missing_node_count"] =
+        static_cast<Json::UInt64>(response["missing_nodes"].size());
+    summary["invalid_ref_count"] =
+        static_cast<Json::UInt64>(response["invalid_refs"].size());
+    summary["visible_dependency_edge_count"] =
+        static_cast<Json::UInt64>(visibleDependencyPairs.size());
+    summary["upstream_blocker_count"] =
+        static_cast<Json::UInt64>(blockerChain["upstream_blockers"].size());
+    summary["downstream_blocked_item_count"] =
+        static_cast<Json::UInt64>(blockerChain["downstream_blocked_items"].size());
+    summary["root_blocker_count"] =
+        static_cast<Json::UInt64>(blockerChain["root_blockers"].size());
+    summary["parallel_branch_count"] =
+        blockerChain["parallel_branch_count"].asUInt64();
+    summary["truncated_branch_count"] =
+        blockerChain["truncated_branch_count"].asUInt64();
+    blockerChain["summary"] = summary;
+
+    response["blocker_chain"] = blockerChain;
+  }
   return response;
 }
 
@@ -8751,7 +9236,8 @@ std::string BacklogWebviewService::RenderItemPartial(const std::string& product,
   const auto productMapNavigation = BuildProductMapNavigation(navigationOptions);
   const auto focusGraph = BuildDependencyGraph(
       navigationOptions, item.get("id", "").asString(),
-      item.get("topic", "").asString(), focusGraphCaps);
+      item.get("topic", "").asString(), focusGraphCaps, std::nullopt,
+      itemProduct);
   Json::Value decisionRadar(Json::objectValue);
   if (item.get("type", "").asString() != "ADR") {
     decisionRadar = BuildDecisionDebtRadar(navigationOptions);
@@ -9645,7 +10131,8 @@ void RegisterBacklogWebviewRoutes(
             queryOptionsFromRequest(request), request->getParameter("item"),
             request->getParameter("topic"), graphCaps,
             requestedMode.empty() ? std::nullopt
-                                  : std::optional<std::string>(requestedMode));
+                                  : std::optional<std::string>(requestedMode),
+            request->getParameter("root_product"));
         Json::Value body(Json::objectValue);
         body["ok"] = !data.isMember("error");
         body["data"] = data;

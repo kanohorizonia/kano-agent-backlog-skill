@@ -414,11 +414,10 @@ The DB sequence must be synchronized with the filesystem after certain operation
 
 **How to sync**:
 
-```bash
-# Preview changes (dry run)
-kob admin sync-sequences --product <product> --dry-run
+`sync-sequences` updates the derived sequence database immediately. The current
+native command does not provide a preview or `--dry-run` mode.
 
-# Apply synchronization
+```bash
 kob admin sync-sequences --product <product>
 ```
 

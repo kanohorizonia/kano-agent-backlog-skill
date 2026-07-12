@@ -8488,6 +8488,195 @@ Json::Value BacklogWebviewService::BuildDependencyGraph(const ItemQueryOptions& 
                      "Dependency graph includes unresolved item references.");
   }
   response["truncated"] = graphTruncated;
+  if (graphMode.explicitMode && graphMode.preset->id == "cycles") {
+    auto isVisibleResolvedDependencyNode = [&](const std::string& key) {
+      const auto nodeIt = nodesByKey.find(key);
+      if (nodeIt == nodesByKey.end() || allByKey.count(key) == 0) {
+        return false;
+      }
+      const auto& node = nodeIt->second;
+      return !node.get("missing", false).asBool() &&
+             !node.get("item_id", "").asString().empty() &&
+             !node.get("product", "").asString().empty() &&
+             !StartsWith(key, "topic:");
+    };
+
+    std::set<std::string> visibleDependencyVertices;
+    std::map<std::string, std::vector<std::string>> visibleDependencyAdjacency;
+    std::map<std::string, std::vector<std::string>> visibleDependencyReverseAdjacency;
+    for (const auto& [from, targets] : dependencyAdjacency) {
+      if (!isVisibleResolvedDependencyNode(from)) {
+        continue;
+      }
+      for (const auto& to : targets) {
+        if (!isVisibleResolvedDependencyNode(to)) {
+          continue;
+        }
+        visibleDependencyVertices.insert(from);
+        visibleDependencyVertices.insert(to);
+        visibleDependencyAdjacency[from].push_back(to);
+        visibleDependencyReverseAdjacency[to].push_back(from);
+      }
+    }
+
+    auto sortAndUnique = [](std::vector<std::string>& values) {
+      std::sort(values.begin(), values.end());
+      values.erase(std::unique(values.begin(), values.end()), values.end());
+    };
+    for (const auto& key : visibleDependencyVertices) {
+      sortAndUnique(visibleDependencyAdjacency[key]);
+      sortAndUnique(visibleDependencyReverseAdjacency[key]);
+    }
+
+    std::set<std::string> orderedVisited;
+    std::vector<std::string> finishOrder;
+    std::function<void(const std::string&)> collectFinishOrder =
+        [&](const std::string& key) {
+          if (!orderedVisited.insert(key).second) {
+            return;
+          }
+          for (const auto& next : visibleDependencyAdjacency[key]) {
+            collectFinishOrder(next);
+          }
+          finishOrder.push_back(key);
+        };
+    for (const auto& key : visibleDependencyVertices) {
+      collectFinishOrder(key);
+    }
+
+    std::set<std::string> componentVisited;
+    std::function<void(const std::string&, std::vector<std::string>&)>
+        collectComponent = [&](const std::string& key,
+                               std::vector<std::string>& members) {
+          if (!componentVisited.insert(key).second) {
+            return;
+          }
+          members.push_back(key);
+          for (const auto& previous : visibleDependencyReverseAdjacency[key]) {
+            collectComponent(previous, members);
+          }
+        };
+
+    struct CycleAuditGroup {
+      std::string canonicalKey;
+      Json::Value value;
+    };
+    std::vector<CycleAuditGroup> groups;
+    for (auto orderIt = finishOrder.rbegin(); orderIt != finishOrder.rend(); ++orderIt) {
+      if (componentVisited.count(*orderIt) > 0) {
+        continue;
+      }
+      std::vector<std::string> members;
+      collectComponent(*orderIt, members);
+      std::sort(members.begin(), members.end());
+      const bool bSelfLoop =
+          members.size() == 1 &&
+          std::binary_search(visibleDependencyAdjacency[members.front()].begin(),
+                             visibleDependencyAdjacency[members.front()].end(),
+                             members.front());
+      if (members.size() <= 1 && !bSelfLoop) {
+        continue;
+      }
+
+      std::ostringstream canonicalKeyStream;
+      for (size_t index = 0; index < members.size(); ++index) {
+        if (index > 0) {
+          canonicalKeyStream << '|';
+        }
+        canonicalKeyStream << members[index];
+      }
+      const auto canonicalKey = canonicalKeyStream.str();
+
+      Json::Value group(Json::objectValue);
+      group["canonical_key"] = canonicalKey;
+      group["member_count"] = static_cast<Json::UInt64>(members.size());
+      group["members"] = Json::arrayValue;
+      group["offending_edges"] = Json::arrayValue;
+      group["involved_products"] = Json::arrayValue;
+
+      std::set<std::string> memberKeys(members.begin(), members.end());
+      std::set<std::string> involvedProducts;
+      for (const auto& key : members) {
+        const auto& node = nodesByKey.at(key);
+        const auto product = node["product"].asString();
+        const auto itemId = node["item_id"].asString();
+        involvedProducts.insert(product);
+
+        Json::Value member(Json::objectValue);
+        member["canonical_node_key"] = key;
+        member["product"] = product;
+        member["item_id"] = itemId;
+        member["title"] = node["label"].asString();
+        member["kind"] = node["kind"].asString();
+        member["state"] = node["state"].asString();
+        Json::Value jumpTarget(Json::objectValue);
+        jumpTarget["reroot_product"] = product;
+        jumpTarget["reroot_item_id"] = itemId;
+        jumpTarget["target_mode"] = "cycles";
+        member["jump_target"] = jumpTarget;
+        group["members"].append(member);
+      }
+
+      std::vector<std::pair<std::string, std::string>> offendingEdges;
+      for (const auto& from : members) {
+        for (const auto& to : visibleDependencyAdjacency[from]) {
+          if (memberKeys.count(to) > 0) {
+            offendingEdges.emplace_back(from, to);
+          }
+        }
+      }
+      std::sort(offendingEdges.begin(), offendingEdges.end());
+      offendingEdges.erase(std::unique(offendingEdges.begin(), offendingEdges.end()),
+                           offendingEdges.end());
+      for (const auto& [from, to] : offendingEdges) {
+        Json::Value edge(Json::objectValue);
+        edge["from"] = from;
+        edge["to"] = to;
+        edge["direction"] = "blocker_to_blocked";
+        group["offending_edges"].append(edge);
+      }
+
+      for (const auto& product : involvedProducts) {
+        group["involved_products"].append(product);
+      }
+      group["crosses_product_boundary"] = involvedProducts.size() > 1;
+      groups.push_back({canonicalKey, group});
+    }
+    std::sort(groups.begin(), groups.end(),
+              [](const CycleAuditGroup& left, const CycleAuditGroup& right) {
+                return left.canonicalKey < right.canonicalKey;
+              });
+
+    Json::Value cycleAudit(Json::objectValue);
+    cycleAudit["semantics"] = "strongly_connected_dependency_groups";
+    cycleAudit["scope"] = "visible_bounded_dependency_graph";
+    cycleAudit["edge_direction"] = "blocker_to_blocked";
+    cycleAudit["edge_direction_note"] =
+        "Dependency edges are normalized from blocker to blocked; cycle groups include only accepted visible resolved dependency edges in this bounded graph.";
+    cycleAudit["groups"] = Json::arrayValue;
+    for (const auto& group : groups) {
+      cycleAudit["groups"].append(group.value);
+    }
+
+    size_t visibleDependencyEdgeCount = 0;
+    for (const auto& [_, targets] : visibleDependencyAdjacency) {
+      visibleDependencyEdgeCount += targets.size();
+    }
+    Json::Value summary(Json::objectValue);
+    summary["group_count"] = static_cast<Json::UInt64>(groups.size());
+    summary["visible_dependency_node_count"] =
+        static_cast<Json::UInt64>(visibleDependencyVertices.size());
+    summary["visible_dependency_edge_count"] =
+        static_cast<Json::UInt64>(visibleDependencyEdgeCount);
+    summary["graph_truncated"] = graphTruncated;
+    summary["max_depth"] = static_cast<Json::UInt64>(caps.maxDepth);
+    summary["max_children_per_node"] =
+        static_cast<Json::UInt64>(caps.maxChildrenPerNode);
+    summary["max_total_nodes"] = static_cast<Json::UInt64>(caps.maxTotalNodes);
+    summary["max_total_edges"] = static_cast<Json::UInt64>(caps.maxTotalEdges);
+    cycleAudit["summary"] = summary;
+    response["cycle_audit"] = cycleAudit;
+  }
   if (graphMode.explicitMode && graphMode.preset->id == "dependency" &&
       rootItemKey &&
       nodesByKey.count(*rootItemKey) > 0) {

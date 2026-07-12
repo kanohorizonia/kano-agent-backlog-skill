@@ -32,6 +32,15 @@ work-order scheduling semantics. A design decision can be motivated by an
 incident and implemented by a task without implying that the incident blocks the
 task.
 
+## Cycle Audit Boundary
+
+The Backboard cycle audit uses only normalized `blocks` and `blocked_by`
+execution edges, with direction normalized from blocker to blocked. `parent`,
+`relates`, topic-membership, and every design-history edge in this document never
+participate in cycle detection. Its count is the number of cyclic strongly
+connected components in the visible bounded dependency graph, not a count of
+simple loops and not a backlog-global count.
+
 ## Backboard Rules
 
 - Show edge labels and source refs so reviewers can challenge the explanation.

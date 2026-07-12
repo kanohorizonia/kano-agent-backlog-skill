@@ -96,6 +96,22 @@ internal Focus Graph summary. If duplicate products share a bare root ID and
 `blocker_chain`; callers provide `root_product=<name>` to disambiguate that
 item-rooted graph request.
 
+In explicit cycles mode (`mode=cycles`), Backboard shows a cycle audit before
+the SVG. It reports strongly connected dependency groups from the visible bounded dependency graph,
+using only `blocks` and `blocked_by` execution edges. Each group can contain
+multiple simple loops, so its count is not a simple-loop or backlog-global count.
+The audit presents sorted members, normalized offending edges in blocker-to-blocked
+direction, involved-product and cross-product facts, visible dependency node and
+edge counts, and the applied graph caps. member jump actions re-root the existing
+bounded graph using each member's product-qualified target; they do not fetch a
+global graph. A truncated graph warns that the bounded audit may be incomplete
+without claiming hidden group counts. The exact empty state is `No dependency cycles found.`
+Cycles mode has no `blocker_chain`.
+
+This cycle audit remains bounded, item-rooted, and local: Backboard has no
+global graph or saved query support. It does not enumerate simple loops or claim
+cycles outside the visible bounded dependency graph.
+
 Branch truncation is bounded and diagnosable: parallel and truncated branch
 counts, hidden node and edge counts, invalid references, visible dependency edge
 counts, and the returned query caps remain visible rather than being inferred.

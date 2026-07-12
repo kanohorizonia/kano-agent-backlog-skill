@@ -2982,6 +2982,112 @@ inline constexpr std::string_view kBackboardAppJsPart5aaab = R"JS(
 
 inline constexpr std::string_view kBackboardAppJsPart5ab = R"JS(
 
+    function cycleAuditRows(value) {
+      return Array.isArray(value) ? value : [];
+    }
+
+    function cycleAuditText(value, fallback = 'not reported') {
+      return value === undefined || value === null || value === ''
+        ? fallback
+        : String(value);
+    }
+
+    function cycleAuditMemberKey(member) {
+      return String(member?.canonical_node_key || `${member?.product || ''}:${member?.item_id || ''}`);
+    }
+
+    function renderCycleAuditMember(member) {
+      const itemId = cycleAuditText(member?.item_id, 'unknown item');
+      const product = cycleAuditText(member?.product, 'unknown product');
+      const title = cycleAuditText(member?.title, itemId);
+      const state = cycleAuditText(member?.state, 'unknown state');
+      const kind = cycleAuditText(member?.kind, 'unknown kind');
+      const memberJumpTarget = member && member.jump_target;
+      const jumpTarget = memberJumpTarget && typeof memberJumpTarget === 'object'
+        ? memberJumpTarget
+        : {};
+      const rerootProduct = String(jumpTarget.reroot_product || product).trim();
+      const rerootItemId = String(jumpTarget.reroot_item_id || '').trim();
+      const targetMode = String(jumpTarget.target_mode || 'cycles').trim();
+      const jumpButton = rerootItemId
+        ? `<button type="button" class="btn cycle-audit-jump blocker-chain-jump" data-blocker-chain-jump-id="${escAttr(rerootItemId)}" data-blocker-chain-jump-product="${escAttr(rerootProduct)}" data-cycle-audit-target-mode="${escAttr(targetMode)}" aria-label="Re-root bounded ${escAttr(targetMode)} graph at ${escAttr(rerootItemId)} in ${escAttr(rerootProduct)}">Jump to ${esc(rerootItemId)}</button>`
+        : '';
+      return `<li class="cycle-audit-member">` +
+        `<div class="detail-title-row"><strong>${esc(title)}</strong>${pill(state)}</div>` +
+        `<div class="muted"><code class="cycle-audit-member-id">${esc(cycleAuditMemberKey(member))}</code> / ${esc(product)} / ${esc(kind)}</div>` +
+        jumpButton +
+      `</li>`;
+    }
+
+    function renderCycleAuditEdge(edge) {
+      const from = cycleAuditText(edge?.from, 'unknown source');
+      const to = cycleAuditText(edge?.to, 'unknown target');
+      const direction = cycleAuditText(edge?.direction, 'blocker_to_blocked');
+      return `<li class="cycle-audit-edge"><code>${esc(from)}</code> -> <code>${esc(to)}</code><span class="muted">${esc(direction)}</span></li>`;
+    }
+
+    function renderCycleAudit(cycleAudit) {
+      if (!cycleAudit || typeof cycleAudit !== 'object' || Array.isArray(cycleAudit)) {
+        return '';
+      }
+      const summary = cycleAudit.summary && typeof cycleAudit.summary === 'object'
+        ? cycleAudit.summary
+        : {};
+      const groups = cycleAuditRows(cycleAudit.groups).sort((left, right) =>
+        String(left?.canonical_key || '').localeCompare(String(right?.canonical_key || ''))
+      );
+      const groupCount = Number.isFinite(Number(summary.group_count))
+        ? Number(summary.group_count)
+        : groups.length;
+      const summaryFacts = [
+        ['Visible dependency nodes', summary.visible_dependency_node_count],
+        ['Visible dependency edges', summary.visible_dependency_edge_count],
+        ['Depth cap', summary.max_depth],
+        ['Children cap', summary.max_children_per_node],
+        ['Node cap', summary.max_total_nodes],
+        ['Edge cap', summary.max_total_edges],
+      ];
+      const truncationWarning = summary.graph_truncated
+        ? '<div class="cycle-audit-warning" role="status">This bounded audit may be incomplete because the visible graph was truncated.</div>'
+        : '';
+      const groupCards = groups.map((group, index) => {
+        const members = cycleAuditRows(group?.members).sort((left, right) =>
+          cycleAuditMemberKey(left).localeCompare(cycleAuditMemberKey(right))
+        );
+        const edges = cycleAuditRows(group?.offending_edges).sort((left, right) => {
+          const leftKey = `${left?.from || ''}->${left?.to || ''}`;
+          const rightKey = `${right?.from || ''}->${right?.to || ''}`;
+          return leftKey.localeCompare(rightKey);
+        });
+        const products = cycleAuditRows(group?.involved_products).map((product) => String(product || ''))
+          .filter(Boolean).sort((left, right) => left.localeCompare(right));
+        const groupId = `cycle-audit-group-${index + 1}`;
+        return `<article class="card cycle-audit-group" aria-labelledby="${escAttr(groupId)}">` +
+          `<div class="detail-title-row"><h5 id="${escAttr(groupId)}">Group ${index + 1}</h5><span class="pill">${esc(cycleAuditText(group?.member_count, members.length))} member(s)</span></div>` +
+          `<div class="muted">Products: ${esc(products.join(', ') || 'not reported')} / ${group?.crosses_product_boundary ? 'cross-product' : 'single-product'}</div>` +
+          `<div class="cycle-audit-grid">` +
+            `<section><h6>Members</h6><ol class="cycle-audit-members">${members.map(renderCycleAuditMember).join('')}</ol></section>` +
+            `<section><h6>Offending edges</h6><ul class="cycle-audit-edges">${edges.length ? edges.map(renderCycleAuditEdge).join('') : '<li class="muted">No normalized offending edges reported.</li>'}</ul></section>` +
+          `</div>` +
+        `</article>`;
+      }).join('');
+      return `<section class="cycle-audit" aria-labelledby="cycle-audit-title">` +
+        `<div class="cycle-audit-header"><h4 id="cycle-audit-title">Cycle groups (${esc(String(groupCount))})</h4>` +
+          `<div class="muted">${esc(cycleAuditText(cycleAudit.edge_direction_note, 'Dependency edges are normalized from blocker to blocked.'))}</div>` +
+          `<div class="muted">Each group is a strongly connected dependency group in the visible bounded dependency graph and may contain multiple simple loops.</div>` +
+        `</div>` +
+        truncationWarning +
+        `<div class="cycle-audit-summary">${summaryFacts.map(([label, value]) =>
+          `<div class="detail-fact"><span class="detail-label">${esc(label)}</span><div class="detail-value">${esc(cycleAuditText(value))}</div></div>`
+        ).join('')}</div>` +
+        (groups.length ? `<div class="cycle-audit-groups">${groupCards}</div>` : '<div class="muted">No dependency cycles found.</div>') +
+      `</section>`;
+    }
+
+)JS";
+
+inline constexpr std::string_view kBackboardAppJsPart5ac = R"JS(
+
     function blockerChainRows(value) {
       return Array.isArray(value) ? value : [];
     }
@@ -3117,6 +3223,10 @@ inline constexpr std::string_view kBackboardAppJsPart5ab = R"JS(
           const itemId = button.getAttribute('data-blocker-chain-jump-id') || '';
           const product = button.getAttribute('data-blocker-chain-jump-product') || '';
           if (itemId) {
+            if (button.classList.contains('cycle-audit-jump')) {
+              setGraphRoot(itemId, product, { reason: 'cycle-audit jump' });
+              return;
+            }
             setGraphRoot(itemId, product, { reason: 'blocker-chain jump' });
           }
         });
@@ -3148,6 +3258,7 @@ inline constexpr std::string_view kBackboardAppJsPart5ab = R"JS(
         ? `${isolation.hiddenNodeCount} hidden node(s), ${isolation.hiddenEdgeCount} hidden edge(s)`
         : `${isolation.fadedNodeCount} faded node(s), ${isolation.fadedEdgeCount} faded edge(s)`;
       const focusLabel = isolation.focusNodeId || state.graphItemId || 'n/a';
+      const cycleAudit = data.mode === 'cycles' ? renderCycleAudit(data.cycle_audit) : '';
       updateFocusGraphPageChrome();
       document.getElementById('graph-summary').textContent =
         `${modeLabel}: ${nodes.length} node(s), ${edges.length} edge(s), ${missing.length} missing node(s)${truncated} | focus ${focusLabel} | neighborhood depth ${isolation.maxDepth} | isolation ${graphIsolationModeLabel(isolation.mode)} | ${isolationCounts} | caps ${caps}`;
@@ -3167,13 +3278,14 @@ inline constexpr std::string_view kBackboardAppJsPart5ab = R"JS(
         ...((data.invalid_refs || []).slice(0, 20).map((ref) =>
           `<div class="card"><strong>Invalid ref</strong> <code>${esc(ref.ref || '')}</code><div class="muted">${esc(ref.kind || '')} from ${esc(ref.source || '')}</div></div>`
         )),
-        ...((data.dependency_cycles || []).slice(0, 10).map((cycle) =>
+        ...(data.mode === 'cycles' ? [] : (data.dependency_cycles || []).slice(0, 10).map((cycle) =>
           `<div class="card"><strong>Dependency cycle</strong><div class="muted">${esc((cycle || []).join(' -> '))}</div></div>`
         )),
       ].join('');
 
       document.getElementById('graph-list').innerHTML = [
-        renderBlockerChain(data.blocker_chain),
+        data.mode === 'cycles' ? '' : renderBlockerChain(data.blocker_chain),
+        cycleAudit,
         graphRender.markup,
         diagnostics ? `<div class="graph-diagnostics">${diagnostics}</div>` : '',
         `<h4>Edge details</h4>`,
@@ -3910,6 +4022,7 @@ inline const std::string& BackboardAppJs() {
         kBackboardAppJsPart5aa.size() + kBackboardAppJsPart5aaa.size() +
         kBackboardAppJsPart5aaab.size() +
         kBackboardAppJsPart5ab.size() +
+        kBackboardAppJsPart5ac.size() +
         kBackboardAppJsPart5b.size() +
         kBackboardAppJsPart6.size() +
         kBackboardAppJsPart7.size());
@@ -3927,6 +4040,7 @@ inline const std::string& BackboardAppJs() {
     text.append(kBackboardAppJsPart5aaa);
     text.append(kBackboardAppJsPart5aaab);
     text.append(kBackboardAppJsPart5ab);
+    text.append(kBackboardAppJsPart5ac);
     text.append(kBackboardAppJsPart5b);
     text.append(kBackboardAppJsPart6);
     text.append(kBackboardAppJsPart7);

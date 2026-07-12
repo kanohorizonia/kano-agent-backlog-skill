@@ -245,13 +245,14 @@ inline constexpr std::string_view kIndexHtmlSuffix = R"HTML(
 
 inline const std::string& IndexHtml() {
   static const std::string html = [] {
+    const auto css = BackboardCss();
     std::string text;
     text.reserve(
-        kIndexHtmlPrefix.size() + BackboardCss().size() +
+        kIndexHtmlPrefix.size() + css.size() +
         kIndexHtmlBetweenAssets.size() + BackboardAppJs().size() +
         kIndexHtmlSuffix.size());
     text.append(kIndexHtmlPrefix);
-    text.append(BackboardCss());
+    text.append(css);
     text.append(kIndexHtmlBetweenAssets);
     text.append(BackboardAppJs());
     text.append(kIndexHtmlSuffix);

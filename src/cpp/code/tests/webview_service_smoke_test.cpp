@@ -281,6 +281,30 @@ bool has_any_edge_kind(const Json::Value& edges,
     return false;
 }
 
+bool has_normalized_edge(const Json::Value& edges,
+                         const std::string& from,
+                         const std::string& to) {
+    for (const auto& edge : edges) {
+        if (edge["from"].asString() == from &&
+            edge["to"].asString() == to) {
+            return true;
+        }
+    }
+    return false;
+}
+
+std::optional<Json::Value> find_cycle_group(const Json::Value& groups,
+                                             const std::string& member_key) {
+    for (const auto& group : groups) {
+        for (const auto& member : group["members"]) {
+            if (member["canonical_node_key"].asString() == member_key) {
+                return group;
+            }
+        }
+    }
+    return std::nullopt;
+}
+
 bool has_node(const Json::Value& nodes,
               const std::string& id,
               const std::string& node_type) {
@@ -612,8 +636,132 @@ int main() {
                      "Bug",
                      "Alpha ambiguous bare root",
                      "Blocked",
+                      "",
+                      "Alpha half of an isolated duplicate bare graph root fixture."));
+        write_text(
+            products / "product-alpha" / "items" / "task" / "0030" / "PRA-TSK-0030.md",
+            item_doc("PRA-TSK-0030",
+                     "019ec100-0000-7000-8000-000000000031",
+                     "Bug",
+                     "Alpha dependency cycle audit root",
+                     "Blocked",
                      "",
-                     "Alpha half of an isolated duplicate bare graph root fixture."));
+                     "Parentless root that reaches every isolated cycle-audit fixture.",
+                     "links:\n"
+                     "  relates: []\n"
+                     "  blocks:\n"
+                     "    - PRA-TSK-0031\n"
+                     "    - PRA-TSK-0041\n"
+                     "    - PRA-TSK-0050\n"
+                     "    - PRA-TSK-0060\n"
+                     "  blocked_by: []\n"));
+        write_text(
+            products / "product-alpha" / "items" / "task" / "0031" / "PRA-TSK-0031.md",
+            item_doc("PRA-TSK-0031",
+                     "019ec100-0000-7000-8000-000000000032",
+                     "Bug",
+                     "Alpha two-member cycle first node",
+                     "Blocked",
+                     "",
+                     "First member of a mirrored two-node dependency cycle.",
+                     "links:\n"
+                     "  relates: []\n"
+                     "  blocks:\n"
+                     "    - PRA-TSK-0032\n"
+                     "  blocked_by:\n"
+                     "    - PRA-TSK-0032\n"));
+        write_text(
+            products / "product-alpha" / "items" / "task" / "0032" / "PRA-TSK-0032.md",
+            item_doc("PRA-TSK-0032",
+                     "019ec100-0000-7000-8000-000000000033",
+                     "Bug",
+                     "Alpha two-member cycle second node",
+                     "Blocked",
+                     "",
+                     "Second member of a mirrored two-node dependency cycle.",
+                     "links:\n"
+                     "  relates: []\n"
+                     "  blocks:\n"
+                     "    - PRA-TSK-0031\n"
+                     "  blocked_by:\n"
+                     "    - PRA-TSK-0031\n"));
+        write_text(
+            products / "product-alpha" / "items" / "task" / "0041" / "PRA-TSK-0041.md",
+            item_doc("PRA-TSK-0041",
+                     "019ec100-0000-7000-8000-000000000034",
+                     "Bug",
+                     "Alpha three-member cycle first node",
+                     "Blocked",
+                     "",
+                     "First member of one SCC with multiple simple loops.",
+                     "links:\n"
+                     "  relates: []\n"
+                     "  blocks:\n"
+                     "    - PRA-TSK-0042\n"
+                     "    - PRA-TSK-0043\n"
+                     "  blocked_by:\n"
+                     "    - PRA-TSK-0043\n"));
+        write_text(
+            products / "product-alpha" / "items" / "task" / "0042" / "PRA-TSK-0042.md",
+            item_doc("PRA-TSK-0042",
+                     "019ec100-0000-7000-8000-000000000035",
+                     "Bug",
+                     "Alpha three-member cycle second node",
+                     "Blocked",
+                     "",
+                     "Second member of one SCC with multiple simple loops.",
+                     "links:\n"
+                     "  relates: []\n"
+                     "  blocks:\n"
+                     "    - PRA-TSK-0043\n"
+                     "  blocked_by:\n"
+                     "    - PRA-TSK-0041\n"));
+        write_text(
+            products / "product-alpha" / "items" / "task" / "0043" / "PRA-TSK-0043.md",
+            item_doc("PRA-TSK-0043",
+                     "019ec100-0000-7000-8000-000000000036",
+                     "Bug",
+                     "Alpha three-member cycle third node",
+                     "Blocked",
+                     "",
+                     "Third member of one SCC with multiple simple loops.",
+                     "links:\n"
+                     "  relates: []\n"
+                     "  blocks:\n"
+                     "    - PRA-TSK-0041\n"
+                     "  blocked_by:\n"
+                     "    - PRA-TSK-0041\n"
+                     "    - PRA-TSK-0042\n"));
+        write_text(
+            products / "product-alpha" / "items" / "task" / "0050" / "PRA-TSK-0050.md",
+            item_doc("PRA-TSK-0050",
+                     "019ec100-0000-7000-8000-000000000037",
+                     "Bug",
+                     "Alpha self dependency cycle",
+                     "Blocked",
+                     "",
+                     "Single-member SCC fixture with one normalized self edge.",
+                     "links:\n"
+                     "  relates: []\n"
+                     "  blocks:\n"
+                     "    - PRA-TSK-0050\n"
+                     "  blocked_by:\n"
+                     "    - PRA-TSK-0050\n"));
+        write_text(
+            products / "product-alpha" / "items" / "task" / "0060" / "PRA-TSK-0060.md",
+            item_doc("PRA-TSK-0060",
+                     "019ec100-0000-7000-8000-000000000038",
+                     "Bug",
+                     "Alpha cross-product cycle member",
+                     "Blocked",
+                     "",
+                     "Alpha member of a cross-product dependency SCC.",
+                     "links:\n"
+                     "  relates: []\n"
+                     "  blocks:\n"
+                     "    - product-beta:PRB-TSK-0060\n"
+                     "  blocked_by:\n"
+                     "    - product-beta:PRB-TSK-0060\n"));
         write_text(
             products / "product-alpha" / "items" / "task" / "0002" / "PRA-TSK-0002.md",
             item_doc("PRA-TSK-0002",
@@ -729,8 +877,23 @@ int main() {
                      "Bug",
                      "Beta ambiguous bare root",
                      "Blocked",
+                      "",
+                      "Beta half of an isolated duplicate bare graph root fixture."));
+        write_text(
+            products / "product-beta" / "items" / "task" / "0060" / "PRB-TSK-0060.md",
+            item_doc("PRB-TSK-0060",
+                     "019ec100-0000-7000-8000-000000000039",
+                     "Bug",
+                     "Beta cross-product cycle member",
+                     "Blocked",
                      "",
-                     "Beta half of an isolated duplicate bare graph root fixture."));
+                     "Beta member of a cross-product dependency SCC.",
+                     "links:\n"
+                     "  relates: []\n"
+                     "  blocks:\n"
+                     "    - product-alpha:PRA-TSK-0060\n"
+                     "  blocked_by:\n"
+                     "    - product-alpha:PRA-TSK-0060\n"));
         const auto missingCommitPath = products / "product-beta" / "items" / "bug" / "0005" / "PRB-BUG-0005.md";
         write_text(
             missingCommitPath,
@@ -1177,7 +1340,7 @@ int main() {
         auto all = service.QueryItems(allOptions);
         expect(!all.isMember("error"), "all-products query should not fail");
         expect(all["products"].size() == 2, "all-products query should include both products");
-        expect(all["total"].asUInt64() == 37, "all-products query should include items, ADRs, plus unique topic pseudo-items");
+        expect(all["total"].asUInt64() == 46, "all-products query should include items, ADRs, plus unique topic pseudo-items");
         for (const auto& item : all["items"]) {
             expect(item.isMember("gate_status"), "all-products items should include gate_status");
             expect(item["gate_status"].isMember("ready"), "gate_status should include ready gate");
@@ -2241,6 +2404,153 @@ int main() {
         expect(cyclesGraph["mode_preset"]["shows_dependency_cycles"].asBool(),
                "cycles graph preset should keep dependency cycle diagnostics visible");
 
+        webview::GraphQueryCaps cycleAuditCaps;
+        cycleAuditCaps.maxDepth = 4;
+        cycleAuditCaps.maxChildrenPerNode = 10;
+        cycleAuditCaps.maxTotalNodes = 20;
+        cycleAuditCaps.maxTotalEdges = 30;
+        auto cycleAuditGraph = service.BuildDependencyGraph(
+            allOptions,
+            "PRA-TSK-0030",
+            "",
+            cycleAuditCaps,
+            std::string("cycles"),
+            "product-alpha");
+        expect(cycleAuditGraph.isMember("cycle_audit") && cycleAuditGraph["cycle_audit"].isObject(),
+               "explicit cycles graph should expose cycle_audit");
+        const auto& cycleAudit = cycleAuditGraph["cycle_audit"];
+        expect(cycleAudit["semantics"].asString() == "strongly_connected_dependency_groups",
+               "cycle audit should use authoritative strongly connected dependency group semantics");
+        expect(cycleAudit["scope"].asString() == "visible_bounded_dependency_graph",
+               "cycle audit should stay scoped to the visible bounded dependency graph");
+        expect(cycleAudit["edge_direction"].asString() == "blocker_to_blocked" &&
+                   !cycleAudit["edge_direction_note"].asString().empty(),
+               "cycle audit should expose and explain normalized blocker-to-blocked direction");
+        expect(cycleAudit["summary"]["group_count"].asUInt64() == 4 &&
+                   cycleAudit["groups"].size() == 4,
+               "cycle audit should report exactly four visible cyclic SCC groups");
+        expect(!cycleAudit["summary"]["graph_truncated"].asBool() &&
+                   cycleAudit["summary"]["visible_dependency_node_count"].asUInt64() == 9 &&
+                   cycleAudit["summary"]["visible_dependency_edge_count"].asUInt64() == 13 &&
+                   cycleAudit["summary"]["max_depth"].asUInt64() == 4 &&
+                   cycleAudit["summary"]["max_children_per_node"].asUInt64() == 10 &&
+                   cycleAudit["summary"]["max_total_nodes"].asUInt64() == 20 &&
+                   cycleAudit["summary"]["max_total_edges"].asUInt64() == 30,
+               "cycle audit summary should echo caps and report the complete visible graph");
+        std::string previousGroupKey;
+        for (const auto& group : cycleAudit["groups"]) {
+            const auto groupKey = group["canonical_key"].asString();
+            expect(previousGroupKey.empty() || previousGroupKey < groupKey,
+                   "cycle audit groups should be sorted by canonical_key");
+            previousGroupKey = groupKey;
+            std::string previousMemberKey;
+            for (const auto& member : group["members"]) {
+                const auto memberKey = member["canonical_node_key"].asString();
+                expect(previousMemberKey.empty() || previousMemberKey < memberKey,
+                       "cycle audit members should be sorted by canonical_node_key");
+                previousMemberKey = memberKey;
+            }
+        }
+        const auto twoMemberCycle = find_cycle_group(
+            cycleAudit["groups"], "product-alpha:PRA-TSK-0031");
+        expect(twoMemberCycle.has_value() &&
+                   (*twoMemberCycle)["member_count"].asUInt64() == 2 &&
+                   (*twoMemberCycle)["offending_edges"].size() == 2 &&
+                   has_normalized_edge((*twoMemberCycle)["offending_edges"],
+                                       "product-alpha:PRA-TSK-0031",
+                                       "product-alpha:PRA-TSK-0032") &&
+                   has_normalized_edge((*twoMemberCycle)["offending_edges"],
+                                       "product-alpha:PRA-TSK-0032",
+                                       "product-alpha:PRA-TSK-0031"),
+               "mirrored declarations should deduplicate identical pairs while preserving both cycle directions");
+        const auto threeMemberCycle = find_cycle_group(
+            cycleAudit["groups"], "product-alpha:PRA-TSK-0041");
+        expect(threeMemberCycle.has_value() &&
+                   (*threeMemberCycle)["member_count"].asUInt64() == 3 &&
+                   (*threeMemberCycle)["offending_edges"].size() == 4 &&
+                   has_normalized_edge((*threeMemberCycle)["offending_edges"],
+                                       "product-alpha:PRA-TSK-0041",
+                                       "product-alpha:PRA-TSK-0042") &&
+                   has_normalized_edge((*threeMemberCycle)["offending_edges"],
+                                       "product-alpha:PRA-TSK-0041",
+                                       "product-alpha:PRA-TSK-0043") &&
+                   has_normalized_edge((*threeMemberCycle)["offending_edges"],
+                                       "product-alpha:PRA-TSK-0042",
+                                       "product-alpha:PRA-TSK-0043") &&
+                   has_normalized_edge((*threeMemberCycle)["offending_edges"],
+                                       "product-alpha:PRA-TSK-0043",
+                                       "product-alpha:PRA-TSK-0041"),
+               "multiple simple loops over three members should produce one SCC with every visible internal edge");
+        const auto selfCycle = find_cycle_group(
+            cycleAudit["groups"], "product-alpha:PRA-TSK-0050");
+        expect(selfCycle.has_value() &&
+                   (*selfCycle)["member_count"].asUInt64() == 1 &&
+                   (*selfCycle)["offending_edges"].size() == 1 &&
+                   has_normalized_edge((*selfCycle)["offending_edges"],
+                                       "product-alpha:PRA-TSK-0050",
+                                       "product-alpha:PRA-TSK-0050"),
+               "self dependency should produce one single-member SCC with one normalized self edge");
+        const auto crossProductCycle = find_cycle_group(
+            cycleAudit["groups"], "product-alpha:PRA-TSK-0060");
+        expect(crossProductCycle.has_value() &&
+                   (*crossProductCycle)["member_count"].asUInt64() == 2 &&
+                   (*crossProductCycle)["crosses_product_boundary"].asBool() &&
+                   (*crossProductCycle)["involved_products"].size() == 2 &&
+                   (*crossProductCycle)["involved_products"][0].asString() == "product-alpha" &&
+                   (*crossProductCycle)["involved_products"][1].asString() == "product-beta",
+               "cross-product SCC should expose sorted involved products and boundary status");
+        for (const auto& member : (*crossProductCycle)["members"]) {
+            const auto& jumpTarget = member["jump_target"];
+            expect(jumpTarget["reroot_product"].asString() == member["product"].asString() &&
+                        jumpTarget["reroot_item_id"].asString() == member["item_id"].asString() &&
+                       jumpTarget["target_mode"].asString() == "cycles",
+                   "cross-product cycle members should preserve member-local cycles-mode jump targets");
+        }
+        expect(!cycleAuditGraph.isMember("blocker_chain"),
+               "explicit cycles response should omit blocker_chain");
+        expect(!has_any_edge_kind(cycleAuditGraph["edges"],
+                                  {"parent", "relates", "topic-membership", "product-memory"}),
+               "explicit cycles response should contain only blocks and blocked_by edges");
+        for (const auto& edge : cycleAuditGraph["edges"]) {
+            const auto edgeKind = edge.isMember("edge_type")
+                ? edge["edge_type"].asString()
+                : edge["kind"].asString();
+            expect(edgeKind == "blocks" || edgeKind == "blocked_by",
+                   "every explicit cycles graph edge should be blocks or blocked_by");
+        }
+        expect(cycleAuditGraph.isMember("dependency_cycles") &&
+                   cycleAuditGraph["dependency_cycles"].isArray(),
+               "explicit cycles response should retain the legacy dependency_cycles compatibility field");
+
+        auto acyclicCyclesGraph = service.BuildDependencyGraph(
+            allOptions,
+            "PRA-TSK-0010",
+            "",
+            cycleAuditCaps,
+            std::string("cycles"),
+            "product-alpha");
+        expect(acyclicCyclesGraph["cycle_audit"]["summary"]["group_count"].asUInt64() == 0 &&
+                   acyclicCyclesGraph["cycle_audit"]["groups"].empty(),
+               "acyclic explicit cycles graph should expose an empty cycle audit");
+
+        webview::GraphQueryCaps cappedCycleAuditCaps = cycleAuditCaps;
+        cappedCycleAuditCaps.maxDepth = 1;
+        auto cappedCycleAuditGraph = service.BuildDependencyGraph(
+            allOptions,
+            "PRA-TSK-0030",
+            "",
+            cappedCycleAuditCaps,
+            std::string("cycles"),
+            "product-alpha");
+        expect(cappedCycleAuditGraph["cycle_audit"]["groups"].empty(),
+               "depth-capped cycle graph should not invent SCC groups outside the visible graph");
+        expect(cappedCycleAuditGraph["cycle_audit"]["summary"]["graph_truncated"].asBool() &&
+                   cappedCycleAuditGraph["cycle_audit"]["summary"]["max_depth"].asUInt64() == 1 &&
+                   cappedCycleAuditGraph["cycle_audit"]["summary"]["max_children_per_node"].asUInt64() == 10 &&
+                   cappedCycleAuditGraph["cycle_audit"]["summary"]["max_total_nodes"].asUInt64() == 20 &&
+                   cappedCycleAuditGraph["cycle_audit"]["summary"]["max_total_edges"].asUInt64() == 30,
+               "depth-capped cycle audit should report truncation and echo every graph cap");
+
         auto relatedGraph = service.BuildDependencyGraph(
             allOptions, "PRA-TSK-0001", "", webview::GraphQueryCaps{}, std::string("related"));
         expect(relatedGraph["mode"].asString() == "related",
@@ -2263,6 +2573,14 @@ int main() {
                "product memory graph should not overreach into structural edges by default");
         expect(!has_edge(productMemoryGraph["edges"], "product-alpha:PRA-TSK-0001", "product-alpha:PRA-TSK-0002", "blocks"),
                "product memory graph should not overreach into dependency edges by default");
+        expect(!graph.isMember("cycle_audit") &&
+                   !dependencyModeGraph.isMember("cycle_audit") &&
+                   !structureGraph.isMember("cycle_audit") &&
+                   !relatedGraph.isMember("cycle_audit") &&
+                   !productMemoryGraph.isMember("cycle_audit"),
+               "cycle_audit should exist only for explicit cycles mode");
+        expect(graph.isMember("dependency_cycles") && graph["dependency_cycles"].isArray(),
+               "omitted-mode broad graph should retain legacy dependency_cycles compatibility");
 
         auto unknownModeGraph = service.BuildDependencyGraph(
             allOptions, "PRA-TSK-0001", "", webview::GraphQueryCaps{}, std::string("mystery_mode"));
@@ -2716,7 +3034,25 @@ int main() {
                     assetSource.find("(!entryProduct || candidateProduct === entryProduct)") != std::string::npos,
                 "blocker-chain jump targets should require a matching product when the entry product is known");
         expect(assetSource.find("Array.isArray(ranking.ordering) ? ranking.ordering.join(', ') : blockerChainValue(ranking.ordering, '')") != std::string::npos,
-                "blocker-chain renderer should preserve backend ranking ordering supplied as either an array or string");
+                 "blocker-chain renderer should preserve backend ranking ordering supplied as either an array or string");
+        expect(assetSource.find("function renderCycleAudit") != std::string::npos &&
+                   assetSource.find("Cycle groups") != std::string::npos &&
+                   assetSource.find("Offending edges") != std::string::npos &&
+                   assetSource.find("No dependency cycles found.") != std::string::npos,
+               "embedded webview assets should expose the cycle-audit renderer and exact review copy");
+        expect(assetSource.find("member.jump_target") != std::string::npos &&
+                   assetSource.find("reroot_product") != std::string::npos &&
+                    assetSource.find("jumpTarget.reroot_item_id") != std::string::npos &&
+                   assetSource.find("target_mode") != std::string::npos,
+               "cycle-audit member actions should use member-local jump targets");
+        expect(assetSource.find("data.mode === 'cycles'") != std::string::npos &&
+                   assetSource.find("renderCycleAudit(data.cycle_audit)") != std::string::npos,
+               "cycle-audit panel should be gated to explicit cycles mode");
+        expect_in_order(assetSource,
+                        {"renderCycleAudit(data.cycle_audit)", "graphRender.markup"},
+                        "cycle-audit panel should render before the graph canvas");
+        expect(assetSource.find("data.mode === 'cycles' ? [] : (data.dependency_cycles || [])") != std::string::npos,
+               "cycles mode should not duplicate legacy flat dependency_cycles rows below the grouped audit");
         expect(assetSource.find("React") == std::string::npos &&
                     assetSource.find("Vite") == std::string::npos &&
                     assetSource.find("npm") == std::string::npos,
@@ -2755,15 +3091,21 @@ int main() {
                     indexCssSource.find(".graph-canvas.is-panning") != std::string::npos &&
                     indexCssSource.find(".graph-viewport-actions") != std::string::npos &&
                     indexCssSource.find(".blocker-chain") != std::string::npos &&
-                    indexCssSource.find(".blocker-chain-grid") != std::string::npos &&
-                    indexCssSource.find(".blocker-chain-jump:focus-visible") != std::string::npos,
-                "embedded webview css should mark stale or refreshing visible data without clearing it");
+                     indexCssSource.find(".blocker-chain-grid") != std::string::npos &&
+                     indexCssSource.find(".blocker-chain-jump:focus-visible") != std::string::npos &&
+                     indexCssSource.find(".cycle-audit") != std::string::npos &&
+                     indexCssSource.find(".cycle-audit-grid") != std::string::npos &&
+                     indexCssSource.find(".cycle-audit-members") != std::string::npos &&
+                     indexCssSource.find(".cycle-audit-edge") != std::string::npos &&
+                     indexCssSource.find(".cycle-audit-jump:focus-visible") != std::string::npos,
+                 "embedded webview css should mark stale or refreshing visible data without clearing it");
         expect(indexCssSource.find("@media (max-width: 720px)") != std::string::npos &&
                     indexCssSource.find("body { padding: 12px; }") != std::string::npos &&
                     indexCssSource.find(".app-shell { grid-template-columns: minmax(0, 1fr); }") != std::string::npos &&
                     indexCssSource.find(".sidebar { position: static; top: auto; }") != std::string::npos,
                 "embedded webview css should collapse the desktop shell and unstick the sidebar on narrow viewports");
         expect(indexCssSource.find("font-family: \"Segoe UI\", \"Yu Gothic UI\", Meiryo, \"Microsoft JhengHei UI\", \"Microsoft YaHei UI\", \"Malgun Gothic\", \"PingFang SC\", \"Hiragino Sans\", sans-serif;") != std::string::npos &&
+                    indexCssSource.find(".blocker-chain-header > *, .blocker-chain-section > * { min-width: 0; max-width: 100%; }") != std::string::npos &&
                     indexCssSource.find(".blocker-chain-header, .blocker-chain-section, .blocker-chain-item { overflow-wrap: break-word; word-break: normal; }") != std::string::npos &&
                     indexCssSource.find(".blocker-chain-section { display: grid; align-content: start; align-self: start; gap: 8px; min-width: 0; }") != std::string::npos &&
                     indexCssSource.find(".blocker-chain-list { display: grid; align-content: start; gap: 8px; }") != std::string::npos &&
@@ -2828,7 +3170,19 @@ int main() {
                     webviewReadme.find("`blocker_chain` object") != std::string::npos &&
                     webviewReadme.find("Root blockers, Upstream blockers,\nDownstream impact, and Branch evidence") != std::string::npos &&
                     webviewReadme.find("It is not business priority") != std::string::npos,
-                "webview README should document the blocker-chain sections and explainable non-priority root ordering");
+                 "webview README should document the blocker-chain sections and explainable non-priority root ordering");
+        expect(webviewReadme.find("strongly connected dependency groups") != std::string::npos &&
+                   webviewReadme.find("visible bounded dependency graph") != std::string::npos &&
+                   webviewReadme.find("`blocks` and `blocked_by`") != std::string::npos &&
+                   webviewReadme.find("normalized offending edges") != std::string::npos,
+               "webview README should document SCC semantics, bounded scope, and normalized dependency edges");
+        expect(webviewReadme.find("member jump actions") != std::string::npos &&
+                   webviewReadme.find("No dependency cycles found.") != std::string::npos &&
+                   webviewReadme.find("no `blocker_chain`") != std::string::npos,
+               "webview README should document cycle member actions, empty text, and blocker-chain omission");
+        expect(webviewReadme.find("no global graph or saved query support") != std::string::npos &&
+                   webviewReadme.find("cycle audit") != std::string::npos,
+               "webview README should keep cycle audit out of global and saved query scope");
         expect(webviewReadme.find("Branch truncation is bounded and diagnosable") != std::string::npos &&
                     webviewReadme.find("Hierarchy, relates, topic, and product-memory views require\nexplicit modes") != std::string::npos &&
                     webviewReadme.find("no global graph or saved query support") != std::string::npos,

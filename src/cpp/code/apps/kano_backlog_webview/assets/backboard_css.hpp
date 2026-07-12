@@ -1,10 +1,11 @@
 #pragma once
 
+#include <string>
 #include <string_view>
 
 namespace kano::backlog::webview::assets {
 
-inline constexpr std::string_view kBackboardCss = R"CSS(
+inline constexpr std::string_view kBackboardCssPart1 = R"CSS(
     :root { --kob-accent: #1f4fa3; --kob-accent-soft: #f2f6ff; --kob-accent-border: #9fb5de; --kob-border: #cfd9ea; --kob-border-strong: #9eb3d7; --kob-surface: #fcfdff; --kob-surface-strong: #ffffff; --kob-shadow: rgba(30, 55, 95, 0.12); }
     body { font-family: "Segoe UI", "Yu Gothic UI", Meiryo, "Microsoft JhengHei UI", "Microsoft YaHei UI", "Malgun Gothic", "PingFang SC", "Hiragino Sans", sans-serif; margin: 0; padding: 16px; background: #f7f8fa; color: #1a1f2e; }
     .app-shell { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 12px; align-items: start; }
@@ -92,6 +93,9 @@ inline constexpr std::string_view kBackboardCss = R"CSS(
     .shortcut-grid { display: grid; grid-template-columns: minmax(72px, auto) minmax(0, 1fr); gap: 10px 12px; align-items: start; }
     .kbd { display: inline-flex; align-items: center; justify-content: center; min-width: 42px; padding: 4px 8px; border-radius: 8px; border: 1px solid var(--kob-border-strong); background: var(--kob-accent-soft); font-size: 12px; font-weight: 700; }
     .shortcut-callout { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+)CSS";
+
+inline constexpr std::string_view kBackboardCssPart2 = R"CSS(
     .modal pre { white-space: pre-wrap; word-break: break-word; background: #f6f8fc; border: 1px solid #dfe6f3; border-radius: 8px; padding: 10px; }
     .detail-shell { display: grid; gap: 12px; }
     .detail-header { display: grid; gap: 10px; }
@@ -171,6 +175,7 @@ inline constexpr std::string_view kBackboardCss = R"CSS(
     .graph-scope-help { line-height: 1.45; }
     .blocker-chain { display: grid; gap: 8px; margin-bottom: 12px; min-width: 0; }
     .blocker-chain-header { display: grid; gap: 4px; min-width: 0; }
+    .blocker-chain-header > *, .blocker-chain-section > * { min-width: 0; max-width: 100%; }
     .blocker-chain-header h4, .blocker-chain-section h5 { margin: 0; }
     .blocker-chain-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: 8px; min-width: 0; align-items: start; }
     .blocker-chain-section { display: grid; align-content: start; align-self: start; gap: 8px; min-width: 0; }
@@ -182,6 +187,21 @@ inline constexpr std::string_view kBackboardCss = R"CSS(
     .blocker-chain-path, .blocker-chain code, .blocker-chain-id { overflow-wrap: anywhere; word-break: break-word; }
     .blocker-chain-jump { justify-self: start; }
     .blocker-chain-jump:focus-visible { outline: 3px solid var(--kob-accent-border); outline-offset: 2px; }
+    .cycle-audit { display: grid; gap: 10px; margin-bottom: 12px; min-width: 0; }
+    .cycle-audit-header, .cycle-audit-group, .cycle-audit-grid, .cycle-audit-members, .cycle-audit-edges, .cycle-audit-member { min-width: 0; }
+    .cycle-audit-header { display: grid; gap: 4px; }
+    .cycle-audit-header h4, .cycle-audit-group h5, .cycle-audit-group h6 { margin: 0; }
+    .cycle-audit-warning { border: 1px solid #d5b15d; border-left: 4px solid #b57b18; border-radius: 6px; padding: 8px 10px; background: #fff9e8; color: #6a4c0f; overflow-wrap: break-word; }
+    .cycle-audit-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(120px, 100%), 1fr)); gap: 8px; }
+    .cycle-audit-groups { display: grid; gap: 8px; }
+    .cycle-audit-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); gap: 10px; align-items: start; }
+    .cycle-audit-grid > section { display: grid; gap: 6px; min-width: 0; align-content: start; }
+    .cycle-audit-members, .cycle-audit-edges { display: grid; gap: 6px; margin: 0; padding-left: 20px; min-width: 0; }
+    .cycle-audit-member { display: grid; gap: 4px; overflow-wrap: break-word; word-break: normal; }
+    .cycle-audit-edge { display: flex; gap: 6px; flex-wrap: wrap; align-items: baseline; min-width: 0; overflow-wrap: break-word; word-break: normal; }
+    .cycle-audit-member-id, .cycle-audit-edge code { overflow-wrap: anywhere; word-break: break-word; }
+    .cycle-audit-jump { justify-self: start; }
+    .cycle-audit-jump:focus-visible { outline: 3px solid var(--kob-accent-border); outline-offset: 2px; }
     @media (max-width: 720px) {
       body { padding: 12px; }
       .app-shell { grid-template-columns: minmax(0, 1fr); }
@@ -189,8 +209,12 @@ inline constexpr std::string_view kBackboardCss = R"CSS(
     }
 )CSS";
 
-inline constexpr std::string_view BackboardCss() noexcept {
-  return kBackboardCss;
+inline std::string BackboardCss() {
+  std::string text;
+  text.reserve(kBackboardCssPart1.size() + kBackboardCssPart2.size());
+  text.append(kBackboardCssPart1);
+  text.append(kBackboardCssPart2);
+  return text;
 }
 
 }  // namespace kano::backlog::webview::assets

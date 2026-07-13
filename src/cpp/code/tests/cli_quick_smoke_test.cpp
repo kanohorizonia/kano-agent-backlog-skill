@@ -170,7 +170,7 @@ int main(int argc, char** argv) {
             "sync-sequences failed");
         expect(run_command(binary, {"-P", "quick-smoke-product", "workitem", "create", "-t", "task", "--title", "Missing duplicate admission", "--agent", "tester"}) != 0,
             "workitem create without duplicate admission should fail");
-        expect(run_command(binary, with_duplicate_admission({"-P", "quick-smoke-product", "workitem", "create", "-t", "task", "--title", "Quick smoke task", "--agent", "tester"}, "Quick smoke task")) == 0,
+        expect(run_command(binary, with_duplicate_admission({"-P", "quick-smoke-product", "workitem", "create", "-t", "task", "--title", "Quick smoke task", "--agent", "tester", "--profile-mutations"}, "Quick smoke task")) == 0,
             "workitem create failed");
         const auto task_receipt_path = temp_root / "_kano" / "backlog" / "products" / "quick-smoke-product" / "_meta" / "duplicate-admission" / "QS-TSK-0001.json";
         expect(std::filesystem::exists(task_receipt_path), "workitem create should write duplicate admission receipt");

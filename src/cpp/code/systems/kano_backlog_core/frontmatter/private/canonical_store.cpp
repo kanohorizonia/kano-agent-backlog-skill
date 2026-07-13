@@ -519,14 +519,50 @@ std::optional<std::filesystem::path> CanonicalStore::find_item_path_by_id(const 
     return std::nullopt;
 }
 
-std::vector<std::filesystem::path> CanonicalStore::find_item_paths_by_id(const std::string& id) const {
+std::vector<std::filesystem::path> CanonicalStore::find_item_paths_by_id(
+    const std::string& id,
+    ItemIdLookupDiagnostics* diagnostics
+) const {
     diagnostics::ScopedMutationSpan span("canonical_store.find_item_paths_by_id", id);
+    ItemIdLookupDiagnostics local_diagnostics;
+    ItemIdLookupDiagnostics& lookup = diagnostics ? *diagnostics : local_diagnostics;
+    lookup = {};
     std::vector<std::filesystem::path> matches;
     if (!parse_display_id_type_and_number(id)) {
         return matches;
     }
 
-    for (const auto& path : list_items()) {
+    if (!std::filesystem::exists(items_root_)) {
+        return matches;
+    }
+
+    std::error_code iterator_error;
+    std::filesystem::recursive_directory_iterator iterator(
+        items_root_,
+        std::filesystem::directory_options::skip_permission_denied,
+        iterator_error);
+    const std::filesystem::recursive_directory_iterator end;
+    for (; iterator != end; iterator.increment(iterator_error)) {
+        if (iterator_error) {
+            iterator_error.clear();
+            continue;
+        }
+        const auto& path = iterator->path();
+        if (path.extension() != ".md") {
+            continue;
+        }
+        ++lookup.item_files_scanned;
+        const std::string filename = path.filename().string();
+        if (filename.rfind(id, 0) != 0 ||
+            (filename.size() > id.size() && filename[id.size()] != '_' && filename[id.size()] != '.')) {
+            continue;
+        }
+
+        std::error_code file_error;
+        if (!iterator->is_regular_file(file_error) || file_error) {
+            continue;
+        }
+        ++lookup.candidate_files_read;
         try {
             const auto item = read_metadata(path);
             if (item.id == id) {
@@ -540,6 +576,7 @@ std::vector<std::filesystem::path> CanonicalStore::find_item_paths_by_id(const s
     std::sort(matches.begin(), matches.end(), [](const auto& left, const auto& right) {
         return left.generic_string() < right.generic_string();
     });
+    lookup.matches = matches.size();
     return matches;
 }
 

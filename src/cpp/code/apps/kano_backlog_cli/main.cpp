@@ -5583,6 +5583,7 @@ std::optional<int> try_run_workitem_create_fast_path(int argc, char** argv) {
     std::string parent;
     std::string owner;
     std::string reviewer;
+    bool profile_mutations = false;
     DuplicateAdmissionEvidence duplicate_admission;
 
     const auto option_value = [&](int& index, const std::string& option) -> std::optional<std::string> {
@@ -5700,11 +5701,18 @@ std::optional<int> try_run_workitem_create_fast_path(int argc, char** argv) {
             duplicate_admission.override_requested = true;
             continue;
         }
+        if (arg == "--profile-mutations") {
+            profile_mutations = true;
+            continue;
+        }
         return std::nullopt;
     }
 
     if (type_str.empty() || title.empty() || agent.empty()) {
         return std::nullopt;
+    }
+    if (profile_mutations) {
+        kano::backlog_core::diagnostics::enable_mutation_timing();
     }
 
     auto ctx = BacklogContext::resolve(
@@ -8459,6 +8467,7 @@ int main(int InArgc, char* InArgv[]) {
         {
             auto* createCmd = workitemCmd->add_subcommand("create", "Create a new work item");
             std::string type_str, title, agent, parent, owner, reviewer;
+            bool profile_mutations = false;
             auto duplicate_admission = std::make_shared<DuplicateAdmissionEvidence>();
             createCmd->add_option("-t,--type", type_str, "Item type (initiative, epic, feature, userstory, task, subtask, bug, issue)")->required();
             createCmd->add_option("--title", title, "Item title")->required();
@@ -8473,8 +8482,12 @@ int main(int InArgc, char* InArgv[]) {
             createCmd->add_option("--duplicate-decision", duplicate_admission->decision, "Duplicate admission decision, such as create, update, or continue");
             createCmd->add_option("--duplicate-rationale", duplicate_admission->rationale, "Rationale for creating despite similar duplicate candidates");
             createCmd->add_flag("--duplicate-override", duplicate_admission->override_requested, "Allow create when duplicate candidates were found and read");
+            createCmd->add_flag("--profile-mutations", profile_mutations, "Emit bounded KOB_TIMING mutation spans");
 
             createCmd->callback([&, duplicate_admission]() {
+                if (profile_mutations) {
+                    kano::backlog_core::diagnostics::enable_mutation_timing();
+                }
                 auto ctx = resolve_ctx();
                 BacklogIndex index(ctx.backlog_root / ".cache" / "index" / "backlog.db");
                 index.initialize();

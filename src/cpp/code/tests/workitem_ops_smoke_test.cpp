@@ -298,7 +298,13 @@ int main() {
                 "create override should require rationale");
             auto allocation_collision = store.create("TST", ItemType::Task, "Existing allocation collision", 2);
             store.write(allocation_collision);
-            expect(store.find_item_paths_by_id(allocation_collision.id).size() == 1, "collision fixture should be discoverable by frontmatter id");
+            kano::backlog_core::ItemIdLookupDiagnostics collision_lookup;
+            expect(store.find_item_paths_by_id(allocation_collision.id, &collision_lookup).size() == 1, "collision fixture should be discoverable by canonical id");
+            expect(collision_lookup.candidate_files_read == 1, "collision lookup should read only the matching filename candidate");
+            kano::backlog_core::ItemIdLookupDiagnostics missing_lookup;
+            expect(store.find_item_paths_by_id("TST-TSK-9999", &missing_lookup).empty(), "missing id lookup should return no paths");
+            expect(missing_lookup.item_files_scanned > 0, "missing id lookup should inspect canonical filenames");
+            expect(missing_lookup.candidate_files_read == 0, "missing id lookup should not open unrelated item frontmatter");
             expect_throws_contains(
                 [&]() {
                     (void)WorkitemOps::create_item(index, root, "TST", ItemType::Task, "Allocator collision should fail", "opencode", std::nullopt, "P2", {}, "general", "backlog", std::nullopt, std::nullopt, "", "", duplicate_admission("Allocator collision should fail"));
@@ -309,9 +315,11 @@ int main() {
                 "allocation collision should not write duplicate admission receipt");
             auto duplicate_identity = store.create("TST", ItemType::Task, "Duplicate identity fixture", 2);
             duplicate_identity.id = allocation_collision.id;
-            duplicate_identity.file_path = allocation_collision.file_path->parent_path() / (allocation_collision.id + "_duplicate-identity-fixture.md");
+            duplicate_identity.file_path = root / "items" / "feature" / "9900" / (allocation_collision.id + "_duplicate-identity-fixture.md");
             store.write(duplicate_identity);
-            expect(store.find_item_paths_by_id(allocation_collision.id).size() == 2, "duplicate identity fixture should report both active paths");
+            kano::backlog_core::ItemIdLookupDiagnostics duplicate_lookup;
+            expect(store.find_item_paths_by_id(allocation_collision.id, &duplicate_lookup).size() == 2, "duplicate identity fixture should report both active paths across product directories");
+            expect(duplicate_lookup.candidate_files_read == 2, "duplicate lookup should read only canonical filename candidates");
             expect(!store.find_item_path_by_id(allocation_collision.id).has_value(), "ambiguous bare id lookup should not return an arbitrary path");
             RefResolver duplicate_resolver(store);
             expect_throws_contains(

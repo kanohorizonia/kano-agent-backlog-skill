@@ -12,7 +12,19 @@
 
 namespace kano::backlog_core::diagnostics {
 
+inline bool& mutation_timing_forced() {
+    static bool forced = false;
+    return forced;
+}
+
+inline void enable_mutation_timing() {
+    mutation_timing_forced() = true;
+}
+
 inline bool mutation_timing_enabled() {
+    if (mutation_timing_forced()) {
+        return true;
+    }
     const char* raw = std::getenv("KANO_BACKLOG_PROFILE_MUTATIONS");
     if (raw == nullptr || *raw == '\0') {
         raw = std::getenv("KOB_PROFILE_MUTATIONS");

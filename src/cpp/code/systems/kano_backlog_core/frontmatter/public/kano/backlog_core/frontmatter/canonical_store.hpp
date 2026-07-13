@@ -1,12 +1,20 @@
 #pragma once
 
 #include "kano/backlog_core/models/models.hpp"
+#include <cstddef>
 #include <filesystem>
 #include <vector>
 #include <optional>
 #include <string>
 
 namespace kano::backlog_core {
+
+struct ItemIdLookupDiagnostics {
+    std::size_t item_files_scanned = 0;
+    std::size_t candidate_files_read = 0;
+    std::size_t matches = 0;
+    bool canonical_filename_filter = true;
+};
 
 class CanonicalStore {
 public:
@@ -54,10 +62,14 @@ public:
     std::optional<std::filesystem::path> find_item_path_by_id(const std::string& id) const;
 
     /**
-     * Find every active item whose frontmatter id matches the display id.
-     * The result is sorted for deterministic diagnostics.
+     * Find every canonical active item whose filename and frontmatter match the display id.
+     * Canonical filenames are scanned across the entire product, including unexpected
+     * type/bucket locations, while unrelated frontmatter files are not opened.
      */
-    std::vector<std::filesystem::path> find_item_paths_by_id(const std::string& id) const;
+    std::vector<std::filesystem::path> find_item_paths_by_id(
+        const std::string& id,
+        ItemIdLookupDiagnostics* diagnostics = nullptr
+    ) const;
 
     // Helpers
     int get_next_id_number(ItemType type) const;

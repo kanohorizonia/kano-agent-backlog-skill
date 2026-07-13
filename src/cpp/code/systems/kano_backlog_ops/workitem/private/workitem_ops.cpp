@@ -1096,7 +1096,10 @@ CreateItemResult WorkitemOps::create_item(
         ofs << content;
         ofs.close();
     }
-    write_duplicate_admission_receipt(backlog_root, item, normalized_duplicate_admission);
+    {
+        diagnostics::ScopedMutationSpan span("workitem.create_item.duplicate_admission_receipt", item.id);
+        write_duplicate_admission_receipt(backlog_root, item, normalized_duplicate_admission);
+    }
     
     // 5. Update index
     item.file_path = item_path;

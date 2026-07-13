@@ -3088,6 +3088,98 @@ inline constexpr std::string_view kBackboardAppJsPart5ab = R"JS(
 
 inline constexpr std::string_view kBackboardAppJsPart5ac = R"JS(
 
+    function hierarchyRows(value) {
+      return Array.isArray(value) ? value : [];
+    }
+
+    function hierarchyText(value, fallback = 'not reported') {
+      return value === undefined || value === null || value === ''
+        ? fallback
+        : String(value);
+    }
+
+    function hierarchyJumpButton(entry) {
+      const jump = entry && typeof entry.jump_target === 'object' ? entry.jump_target : {};
+      const itemId = String(jump.reroot_item_id || entry?.item_id || '').trim();
+      const product = String(jump.reroot_product || entry?.product || '').trim();
+      if (!itemId) return '';
+      return `<button type="button" class="btn hierarchy-jump blocker-chain-jump" data-blocker-chain-jump-id="${escAttr(itemId)}" data-blocker-chain-jump-product="${escAttr(product)}" aria-label="Re-root structure view at ${escAttr(itemId)}">Jump to ${esc(itemId)}</button>`;
+    }
+
+    function renderHierarchyTreeNode(entry, level = 0) {
+      const children = hierarchyRows(entry?.children);
+      const hiddenChildren = Number(entry?.hidden_child_count || 0);
+      const itemId = hierarchyText(entry?.item_id, 'unknown item');
+      const title = hierarchyText(entry?.title, itemId);
+      const stateLabel = hierarchyText(entry?.state, 'unknown state');
+      const kind = hierarchyText(entry?.kind, 'unknown kind');
+      const open = level < 2 ? ' open' : '';
+      const childSummary = `${hierarchyText(entry?.visible_child_count, children.length)} visible / ${hiddenChildren} hidden`;
+      return `<details class="hierarchy-node" data-hierarchy-level="${level}"${open}>` +
+        `<summary><span class="hierarchy-node-title">${esc(title)}</span>${pill(stateLabel)}<span class="muted">${esc(itemId)} / ${esc(kind)} / ${esc(childSummary)}</span></summary>` +
+        `<div class="hierarchy-node-body">${hierarchyJumpButton(entry)}` +
+          (children.length
+            ? `<div class="hierarchy-children">${children.map((child) => renderHierarchyTreeNode(child, level + 1)).join('')}</div>`
+            : '<div class="muted">No visible child items.</div>') +
+          (hiddenChildren > 0
+            ? `<div class="hierarchy-hidden" role="status">${hiddenChildren} recorded child item(s) hidden by the current bounds.</div>`
+            : '') +
+        `</div>` +
+      `</details>`;
+    }
+
+    function renderHierarchyReference(entry, relation) {
+      if (!entry || typeof entry !== 'object' || entry.missing) {
+        return `<div class="muted">No ${esc(relation)} is visible.</div>`;
+      }
+      return `<div class="hierarchy-reference"><div><strong>${esc(hierarchyText(entry.title, entry.item_id))}</strong>${pill(hierarchyText(entry.state, 'unknown state'))}</div>` +
+        `<div class="muted"><code>${esc(hierarchyText(entry.item_id, entry.canonical_node_key))}</code> / ${esc(hierarchyText(entry.product, 'unknown product'))} / ${esc(hierarchyText(entry.kind, 'unknown kind'))}</div>` +
+        hierarchyJumpButton(entry) +
+      `</div>`;
+    }
+
+    function renderHierarchySummary(hierarchy) {
+      if (!hierarchy || typeof hierarchy !== 'object' || Array.isArray(hierarchy)) return '';
+      const summary = hierarchy.summary && typeof hierarchy.summary === 'object' ? hierarchy.summary : {};
+      const ancestors = hierarchyRows(hierarchy.ancestors);
+      const roots = hierarchyRows(hierarchy.roots);
+      const gaps = hierarchyRows(hierarchy.gaps);
+      const facts = [
+        ['Visible roots', summary.visible_root_count],
+        ['Ancestors', summary.ancestor_count],
+        ['Visible hierarchy nodes', summary.visible_node_count],
+        ['Hidden children', summary.hidden_child_count],
+        ['Gaps', summary.gap_count],
+        ['Depth cap', summary.max_depth],
+        ['Children cap', summary.max_children_per_node],
+        ['Node cap', summary.max_total_nodes],
+        ['Edge cap', summary.max_total_edges],
+      ];
+      const truncation = summary.truncated
+        ? '<div class="hierarchy-warning" role="status">This hierarchy is bounded; hidden counts and gaps show where the visible projection stops.</div>'
+        : '';
+      const ancestorMarkup = ancestors.length
+        ? ancestors.map((entry) => renderHierarchyReference(entry, 'ancestor')).join('')
+        : '<div class="muted">No ancestors are recorded.</div>';
+      const gapMarkup = gaps.length
+        ? `<section class="hierarchy-gaps"><h5>Hierarchy gaps</h5>${gaps.map((gap) => `<div class="hierarchy-gap"><strong>${esc(hierarchyText(gap.code, 'gap'))}</strong><div>${esc(hierarchyText(gap.message, 'Hierarchy evidence is incomplete.'))}</div><div class="muted">${esc(hierarchyText(gap.target, 'unknown target'))}</div></div>`).join('')}</section>`
+        : '';
+      return `<section class="hierarchy-summary" aria-labelledby="hierarchy-summary-title">` +
+        `<div class="hierarchy-header"><h4 id="hierarchy-summary-title">Hierarchy structure</h4><div class="muted">Recorded parent/child organization only. Structure does not imply execution order or dependency.</div></div>` +
+        truncation +
+        `<div class="hierarchy-facts">${facts.map(([label, value]) => `<div class="detail-fact"><span class="detail-label">${esc(label)}</span><div class="detail-value">${esc(hierarchyText(value))}</div></div>`).join('')}</div>` +
+        `<div class="hierarchy-context"><section><h5>Direct parent</h5>${renderHierarchyReference(hierarchy.parent, 'parent')}</section><section><h5>Ancestors (nearest first)</h5>${ancestorMarkup}</section></div>` +
+        `<section class="hierarchy-tree" aria-labelledby="hierarchy-tree-title"><h5 id="hierarchy-tree-title">${hierarchy.root_kind === 'topic' ? `Topic roots: ${esc(hierarchyText(hierarchy.topic, 'selected topic'))}` : 'Selected item and children'}</h5>` +
+          (roots.length ? roots.map((root) => renderHierarchyTreeNode(root)).join('') : '<div class="muted">No hierarchy roots are visible.</div>') +
+        `</section>` +
+        gapMarkup +
+      `</section>`;
+    }
+
+)JS";
+
+inline constexpr std::string_view kBackboardAppJsPart5ad = R"JS(
+
     function blockerChainRows(value) {
       return Array.isArray(value) ? value : [];
     }
@@ -3259,6 +3351,7 @@ inline constexpr std::string_view kBackboardAppJsPart5ac = R"JS(
         : `${isolation.fadedNodeCount} faded node(s), ${isolation.fadedEdgeCount} faded edge(s)`;
       const focusLabel = isolation.focusNodeId || state.graphItemId || 'n/a';
       const cycleAudit = data.mode === 'cycles' ? renderCycleAudit(data.cycle_audit) : '';
+      const hierarchySummary = data.mode === 'structure' ? renderHierarchySummary(data.hierarchy_summary) : '';
       updateFocusGraphPageChrome();
       document.getElementById('graph-summary').textContent =
         `${modeLabel}: ${nodes.length} node(s), ${edges.length} edge(s), ${missing.length} missing node(s)${truncated} | focus ${focusLabel} | neighborhood depth ${isolation.maxDepth} | isolation ${graphIsolationModeLabel(isolation.mode)} | ${isolationCounts} | caps ${caps}`;
@@ -3284,8 +3377,9 @@ inline constexpr std::string_view kBackboardAppJsPart5ac = R"JS(
       ].join('');
 
       document.getElementById('graph-list').innerHTML = [
-        data.mode === 'cycles' ? '' : renderBlockerChain(data.blocker_chain),
+        data.mode === 'dependency' ? renderBlockerChain(data.blocker_chain) : '',
         cycleAudit,
+        hierarchySummary,
         graphRender.markup,
         diagnostics ? `<div class="graph-diagnostics">${diagnostics}</div>` : '',
         `<h4>Edge details</h4>`,
@@ -4023,6 +4117,7 @@ inline const std::string& BackboardAppJs() {
         kBackboardAppJsPart5aaab.size() +
         kBackboardAppJsPart5ab.size() +
         kBackboardAppJsPart5ac.size() +
+        kBackboardAppJsPart5ad.size() +
         kBackboardAppJsPart5b.size() +
         kBackboardAppJsPart6.size() +
         kBackboardAppJsPart7.size());
@@ -4041,6 +4136,7 @@ inline const std::string& BackboardAppJs() {
     text.append(kBackboardAppJsPart5aaab);
     text.append(kBackboardAppJsPart5ab);
     text.append(kBackboardAppJsPart5ac);
+    text.append(kBackboardAppJsPart5ad);
     text.append(kBackboardAppJsPart5b);
     text.append(kBackboardAppJsPart6);
     text.append(kBackboardAppJsPart7);

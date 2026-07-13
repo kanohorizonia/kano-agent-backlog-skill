@@ -455,6 +455,78 @@ int main() {
                       "  blocked_by:\n"
                       "    - PRA-TSK-0010\n"));
         write_text(
+            products / "product-alpha" / "items" / "subtask" / "0200" / "PRA-SUBTSK-0200.md",
+            item_doc("PRA-SUBTSK-0200",
+                     "019ec100-0000-7000-8000-000000000099",
+                     "SubTask",
+                     "Alpha hierarchy fixture root",
+                     "Ready",
+                     "PRA-EPIC-0001",
+                     "Dedicated hierarchy root kept separate from dependency fixtures."));
+        write_text(
+            products / "product-alpha" / "items" / "subtask" / "0100" / "PRA-SUBTSK-0100.md",
+            item_doc("PRA-SUBTSK-0100",
+                     "019ec100-0000-7000-8000-000000000100",
+                     "SubTask",
+                     "Alpha hierarchy child one",
+                     "Ready",
+                     "PRA-SUBTSK-0200",
+                     "First visible hierarchy child."));
+        write_text(
+            products / "product-alpha" / "items" / "subtask" / "0101" / "PRA-SUBTSK-0101.md",
+            item_doc("PRA-SUBTSK-0101",
+                     "019ec100-0000-7000-8000-000000000101",
+                     "SubTask",
+                     "Alpha hierarchy child two",
+                     "Ready",
+                     "PRA-SUBTSK-0200",
+                     "Second visible hierarchy child."));
+        write_text(
+            products / "product-alpha" / "items" / "subtask" / "0102" / "PRA-SUBTSK-0102.md",
+            item_doc("PRA-SUBTSK-0102",
+                     "019ec100-0000-7000-8000-000000000102",
+                     "SubTask",
+                     "Alpha hierarchy capped child",
+                     "Ready",
+                     "PRA-SUBTSK-0200",
+                     "Child used to prove hidden child counts."));
+        write_text(
+            products / "product-alpha" / "items" / "subtask" / "0103" / "PRA-SUBTSK-0103.md",
+            item_doc("PRA-SUBTSK-0103",
+                     "019ec100-0000-7000-8000-000000000103",
+                     "SubTask",
+                     "Alpha hierarchy grandchild",
+                     "Ready",
+                     "PRA-SUBTSK-0100",
+                     "Nested hierarchy child for bounded tree coverage."));
+        write_text(
+            products / "product-alpha" / "items" / "feature" / "0100" / "PRA-FTR-0100.md",
+            item_doc("PRA-FTR-0100",
+                     "019ec100-0000-7000-8000-000000000110",
+                     "Feature",
+                     "Hierarchy topic root",
+                     "Ready",
+                     "",
+                     "Topic-scoped hierarchy root."));
+        write_text(
+            products / "product-alpha" / "items" / "subtask" / "0110" / "PRA-SUBTSK-0110.md",
+            item_doc("PRA-SUBTSK-0110",
+                     "019ec100-0000-7000-8000-000000000111",
+                     "SubTask",
+                     "Hierarchy topic child one",
+                     "Ready",
+                     "PRA-FTR-0100",
+                     "Topic-scoped hierarchy child."));
+        write_text(
+            products / "product-alpha" / "items" / "subtask" / "0111" / "PRA-SUBTSK-0111.md",
+            item_doc("PRA-SUBTSK-0111",
+                     "019ec100-0000-7000-8000-000000000112",
+                     "SubTask",
+                     "Hierarchy topic child two",
+                     "Ready",
+                     "PRA-FTR-0100",
+                     "Second topic-scoped hierarchy child."));
+        write_text(
             products / "product-alpha" / "items" / "task" / "0004" / "PRA-TSK-0004.md",
             item_doc("PRA-TSK-0004",
                      "019ec100-0000-7000-8000-000000000009",
@@ -1324,6 +1396,10 @@ int main() {
                    R"json({"topic":"Native Migration","status":"open","seed_items":["019ec100-0000-7000-8000-000000000002","PRA-TSK-0001"]})json");
         write_text(root / "topics" / "native-migration" / "brief.md",
                    "# Native Migration\n\nTopic brief.");
+        write_text(root / "topics" / "hierarchy-review" / "manifest.json",
+                   R"json({"topic":"Hierarchy Review","status":"open","seed_items":["019ec100-0000-7000-8000-000000000110","PRA-FTR-0100","019ec100-0000-7000-8000-000000000111","PRA-SUBTSK-0110","019ec100-0000-7000-8000-000000000112","PRA-SUBTSK-0111"]})json");
+        write_text(root / "topics" / "hierarchy-review" / "brief.md",
+                   "# Hierarchy Review\n\nTopic hierarchy fixture.");
 
         const auto alphaIndexPath = products / "product-alpha" / ".cache" / "index" / "backlog.db";
         auto alphaIndexBuild = kano::backlog_ops::build_index(products / "product-alpha", alphaIndexPath, true);
@@ -1340,7 +1416,7 @@ int main() {
         auto all = service.QueryItems(allOptions);
         expect(!all.isMember("error"), "all-products query should not fail");
         expect(all["products"].size() == 2, "all-products query should include both products");
-        expect(all["total"].asUInt64() == 46, "all-products query should include items, ADRs, plus unique topic pseudo-items");
+        expect(all["total"].asUInt64() == 55, "all-products query should include items, ADRs, plus unique topic pseudo-items");
         for (const auto& item : all["items"]) {
             expect(item.isMember("gate_status"), "all-products items should include gate_status");
             expect(item["gate_status"].isMember("ready"), "gate_status should include ready gate");
@@ -2378,18 +2454,79 @@ int main() {
         expect(!ambiguousRootGraph.isMember("blocker_chain"),
                "ambiguous unqualified graph root should omit blocker_chain instead of selecting one product");
 
+        webview::GraphQueryCaps structureCaps;
+        structureCaps.maxDepth = 2;
+        structureCaps.maxChildrenPerNode = 2;
+        structureCaps.maxTotalNodes = 20;
+        structureCaps.maxTotalEdges = 20;
         auto structureGraph = service.BuildDependencyGraph(
-            allOptions, "PRA-TSK-0001", "", webview::GraphQueryCaps{}, std::string("structure"));
+            allOptions, "PRA-SUBTSK-0200", "", structureCaps,
+            std::string("structure"), "product-alpha");
         expect(structureGraph["mode"].asString() == "structure",
                "structure graph should keep the requested structure mode");
-        expect(has_edge(structureGraph["edges"], "product-alpha:PRA-EPIC-0001", "product-alpha:PRA-TSK-0001", "parent"),
+        expect(structureGraph.isMember("hierarchy_summary") &&
+                   structureGraph["hierarchy_summary"].isObject(),
+               "explicit structure graph should expose hierarchy_summary");
+        const auto& hierarchy = structureGraph["hierarchy_summary"];
+        expect(hierarchy["semantics"].asString() == "explicit_parent_child" &&
+                   hierarchy["scope"].asString() == "visible_bounded_hierarchy",
+               "hierarchy summary should state recorded parent-child semantics and bounded scope");
+        expect(hierarchy["root_kind"].asString() == "item" &&
+                   hierarchy["root_item"]["item_id"].asString() == "PRA-SUBTSK-0200",
+               "item-rooted structure graph should identify the selected root");
+        expect(hierarchy["parent"]["item_id"].asString() == "PRA-EPIC-0001",
+               "hierarchy summary should expose the direct parent");
+        expect(hierarchy["ancestors"].size() == 2 &&
+                   hierarchy["ancestors"][0]["item_id"].asString() == "PRA-EPIC-0001" &&
+                   hierarchy["ancestors"][0]["distance"].asUInt64() == 1 &&
+                   hierarchy["ancestors"][1]["item_id"].asString() == "PRA-INIT-0001" &&
+                   hierarchy["ancestors"][1]["distance"].asUInt64() == 2,
+               "hierarchy summary should expose bounded ancestors nearest-parent first");
+        expect(hierarchy["roots"].size() == 1 &&
+                   hierarchy["roots"][0]["item_id"].asString() == "PRA-SUBTSK-0200" &&
+                   hierarchy["roots"][0]["child_count"].asUInt64() == 3 &&
+                   hierarchy["roots"][0]["visible_child_count"].asUInt64() == 2 &&
+                   hierarchy["roots"][0]["hidden_child_count"].asUInt64() == 1,
+               "hierarchy tree should expose exact visible and hidden direct child counts");
+        expect(hierarchy["roots"][0]["children"][0]["item_id"].asString() == "PRA-SUBTSK-0100" &&
+                   hierarchy["roots"][0]["children"][0]["children"].size() == 1 &&
+                   hierarchy["roots"][0]["children"][0]["children"][0]["item_id"].asString() == "PRA-SUBTSK-0103",
+               "hierarchy tree should render bounded nested descendants in stable key order");
+        expect(hierarchy["summary"]["hidden_child_count"].asUInt64() == 1 &&
+                   hierarchy["summary"]["truncated"].asBool() &&
+                   hierarchy["summary"]["max_depth"].asUInt64() == 2 &&
+                   hierarchy["summary"]["max_children_per_node"].asUInt64() == 2,
+               "hierarchy summary should echo bounds and truthfully report hidden children");
+        expect(has_edge(structureGraph["edges"], "product-alpha:PRA-EPIC-0001", "product-alpha:PRA-SUBTSK-0200", "parent"),
                "structure graph should keep structural parent edges");
-        expect(!has_edge(structureGraph["edges"], "topic:Native Migration", "product-alpha:PRA-TSK-0001", "topic-membership"),
+        expect(has_edge(structureGraph["edges"], "product-alpha:PRA-SUBTSK-0200", "product-alpha:PRA-SUBTSK-0100", "parent") &&
+                   has_edge(structureGraph["edges"], "product-alpha:PRA-SUBTSK-0100", "product-alpha:PRA-SUBTSK-0103", "parent"),
+               "structure graph should include visible bounded descendant edges");
+        expect(!has_edge(structureGraph["edges"], "topic:Native Migration", "product-alpha:PRA-SUBTSK-0200", "topic-membership"),
                "structure graph should filter grouping topic edges by default");
-        expect(!has_edge(structureGraph["edges"], "product-alpha:PRA-TSK-0001", "product-alpha:PRA-TSK-0002", "blocks"),
+        expect(!has_edge(structureGraph["edges"], "product-alpha:PRA-SUBTSK-0200", "product-alpha:PRA-TSK-0002", "blocks"),
                "structure graph should filter dependency edges by default");
-        expect(!has_edge(structureGraph["edges"], "product-alpha:PRA-TSK-0001", "product-alpha:PRA-TSK-0003", "relates"),
+        expect(!has_edge(structureGraph["edges"], "product-alpha:PRA-SUBTSK-0200", "product-alpha:PRA-TSK-0003", "relates"),
                "structure graph should filter non-blocking relates edges by default");
+        expect(!has_any_edge_kind(structureGraph["edges"],
+                                  {"blocks", "blocked_by", "relates", "topic-membership"}),
+               "explicit structure graph should contain parent edges only");
+
+        auto topicStructureGraph = service.BuildDependencyGraph(
+            allOptions, "", "Hierarchy Review", webview::GraphQueryCaps{},
+            std::string("structure"));
+        const auto& topicHierarchy = topicStructureGraph["hierarchy_summary"];
+        expect(topicHierarchy["root_kind"].asString() == "topic" &&
+                   topicHierarchy["topic"].asString() == "Hierarchy Review" &&
+                   topicHierarchy["summary"]["root_count"].asUInt64() == 1 &&
+                   topicHierarchy["roots"].size() == 1 &&
+                   topicHierarchy["roots"][0]["item_id"].asString() == "PRA-FTR-0100" &&
+                   topicHierarchy["roots"][0]["visible_child_count"].asUInt64() == 2,
+               "topic-rooted structure graph should expose recorded topic hierarchy roots and children: " +
+                   json_to_string(topicHierarchy));
+        expect(!has_any_edge_kind(topicStructureGraph["edges"],
+                                  {"blocks", "blocked_by", "relates", "topic-membership"}),
+               "topic-rooted structure graph should stay hierarchy-only");
 
         auto cyclesGraph = service.BuildDependencyGraph(
             allOptions, "PRA-TSK-0001", "", webview::GraphQueryCaps{}, std::string("cycles"));
@@ -2579,6 +2716,12 @@ int main() {
                    !relatedGraph.isMember("cycle_audit") &&
                    !productMemoryGraph.isMember("cycle_audit"),
                "cycle_audit should exist only for explicit cycles mode");
+        expect(!graph.isMember("hierarchy_summary") &&
+                   !dependencyModeGraph.isMember("hierarchy_summary") &&
+                   !cyclesGraph.isMember("hierarchy_summary") &&
+                   !relatedGraph.isMember("hierarchy_summary") &&
+                   !productMemoryGraph.isMember("hierarchy_summary"),
+               "hierarchy_summary should exist only for explicit structure mode");
         expect(graph.isMember("dependency_cycles") && graph["dependency_cycles"].isArray(),
                "omitted-mode broad graph should retain legacy dependency_cycles compatibility");
 
@@ -3051,6 +3194,20 @@ int main() {
         expect_in_order(assetSource,
                         {"renderCycleAudit(data.cycle_audit)", "graphRender.markup"},
                         "cycle-audit panel should render before the graph canvas");
+        expect(assetSource.find("function renderHierarchySummary") != std::string::npos &&
+                   assetSource.find("function renderHierarchyTreeNode") != std::string::npos &&
+                   assetSource.find("<details class=\"hierarchy-node\"") != std::string::npos &&
+                   assetSource.find("Recorded parent/child organization only") != std::string::npos &&
+                   assetSource.find("recorded child item(s) hidden by the current bounds") != std::string::npos,
+               "embedded webview assets should expose a DOM-readable collapsible hierarchy tree with hidden-child copy");
+        expect(assetSource.find("data.mode === 'structure' ? renderHierarchySummary(data.hierarchy_summary) : ''") != std::string::npos,
+               "hierarchy panel should be gated to explicit structure mode");
+        expect_in_order(assetSource,
+                        {"renderHierarchySummary(data.hierarchy_summary)", "graphRender.markup"},
+                        "hierarchy panel should render before the graph canvas");
+        expect(assetSource.find("Re-root structure view at") != std::string::npos &&
+                   assetSource.find("data-blocker-chain-jump-id") != std::string::npos,
+               "hierarchy entries should expose accessible bounded re-root actions");
         expect(assetSource.find("data.mode === 'cycles' ? [] : (data.dependency_cycles || [])") != std::string::npos,
                "cycles mode should not duplicate legacy flat dependency_cycles rows below the grouped audit");
         expect(assetSource.find("React") == std::string::npos &&
@@ -3180,6 +3337,12 @@ int main() {
                    webviewReadme.find("No dependency cycles found.") != std::string::npos &&
                    webviewReadme.find("no `blocker_chain`") != std::string::npos,
                "webview README should document cycle member actions, empty text, and blocker-chain omission");
+        expect(webviewReadme.find("`hierarchy_summary` object") != std::string::npos &&
+                   webviewReadme.find("ancestors nearest-parent first") != std::string::npos &&
+                   webviewReadme.find("hidden child counts") != std::string::npos &&
+                   webviewReadme.find("native `<details>`") != std::string::npos &&
+                   webviewReadme.find("does not imply execution order") != std::string::npos,
+               "webview README should document bounded hierarchy projection and DOM-readable structure semantics");
         expect(webviewReadme.find("no global graph or saved query support") != std::string::npos &&
                    webviewReadme.find("cycle audit") != std::string::npos,
                "webview README should keep cycle audit out of global and saved query scope");

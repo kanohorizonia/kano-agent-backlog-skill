@@ -7976,7 +7976,9 @@ Json::Value BacklogWebviewService::BuildDependencyGraph(const ItemQueryOptions& 
   if (rootItemKey) {
     activeKeys.insert(*rootItemKey);
     const bool bIncludeDirectChildren =
-        !graphMode.explicitMode || graphMode.preset->id != "dependency";
+        !graphMode.explicitMode ||
+        (graphMode.preset->id != "dependency" &&
+         graphMode.preset->id != "structure");
     if (bIncludeDirectChildren) {
       const auto& rootItem = allByKey.at(*rootItemKey);
       const auto selectedProduct = rootItem["product"].asString();
@@ -8402,6 +8404,304 @@ Json::Value BacklogWebviewService::BuildDependencyGraph(const ItemQueryOptions& 
         }
       }
     }
+  }
+
+  if (graphMode.explicitMode && graphMode.preset->id == "structure") {
+    Json::Value hierarchy(Json::objectValue);
+    hierarchy["semantics"] = "explicit_parent_child";
+    hierarchy["scope"] = "visible_bounded_hierarchy";
+    hierarchy["ordering"] = "stable_item_key";
+    hierarchy["topic"] = topic;
+    hierarchy["ancestors"] = Json::arrayValue;
+    hierarchy["roots"] = Json::arrayValue;
+    hierarchy["gaps"] = Json::arrayValue;
+
+    auto isHierarchyItem = [](const Json::Value& item) {
+      static const std::set<std::string> kHierarchyTypes = {
+          "initiative", "epic", "feature", "userstory", "task",
+          "subtask", "bug", "issue"};
+      const auto type = text::ToLower(item["type"].asString());
+      return !item["id"].asString().empty() &&
+             kHierarchyTypes.count(type) > 0;
+    };
+
+    std::map<std::string, std::string> parentByKey;
+    std::map<std::string, std::vector<std::string>> childrenByParentKey;
+    for (const auto& [key, item] : allByKey) {
+      if (!isHierarchyItem(item)) {
+        continue;
+      }
+      const auto parentRef = item["parent"].asString();
+      if (parentRef.empty()) {
+        continue;
+      }
+      const auto target = resolveRef(parentRef, item["product"].asString());
+      if (!target.valid) {
+        continue;
+      }
+      parentByKey[key] = target.key;
+      childrenByParentKey[target.key].push_back(key);
+    }
+    for (auto& [_, children] : childrenByParentKey) {
+      std::sort(children.begin(), children.end());
+      children.erase(std::unique(children.begin(), children.end()), children.end());
+    }
+
+    auto hierarchyEntry = [&](const std::string& key) {
+      Json::Value entry(Json::objectValue);
+      const auto itemIt = allByKey.find(key);
+      if (itemIt == allByKey.end()) {
+        entry["canonical_node_key"] = key;
+        entry["missing"] = true;
+        return entry;
+      }
+      const auto& item = itemIt->second;
+      entry["canonical_node_key"] = key;
+      entry["product"] = item["product"].asString();
+      entry["item_id"] = item["id"].asString();
+      entry["title"] = item["title"].asString();
+      entry["kind"] = item["type"].asString();
+      entry["state"] = item["state"].asString();
+      entry["missing"] = false;
+      Json::Value jumpTarget(Json::objectValue);
+      jumpTarget["reroot_product"] = item["product"].asString();
+      jumpTarget["reroot_item_id"] = item["id"].asString();
+      jumpTarget["target_mode"] = "structure";
+      entry["jump_target"] = jumpTarget;
+      return entry;
+    };
+
+    auto appendHierarchyGap = [&](const std::string& code,
+                                  const std::string& target,
+                                  const std::string& message) {
+      Json::Value gap(Json::objectValue);
+      gap["code"] = code;
+      gap["target"] = target;
+      gap["message"] = message;
+      hierarchy["gaps"].append(gap);
+      appendDiagnostic(code, target, message);
+    };
+
+    size_t hierarchyVisibleNodeCount = 0;
+    size_t hierarchyHiddenChildCount = 0;
+    size_t hierarchyAncestorCount = 0;
+    std::set<std::string> hierarchyVisibleKeys;
+    auto rememberHierarchyNode = [&](const std::string& key) {
+      if (hierarchyVisibleKeys.insert(key).second) {
+        ++hierarchyVisibleNodeCount;
+      }
+    };
+    auto recordHiddenHierarchyChildren = [&](const std::string& parentKey,
+                                             size_t count,
+                                             const std::string& reason) {
+      if (count == 0) {
+        return;
+      }
+      hierarchyHiddenChildCount += count;
+      hiddenNodeCount += count;
+      hiddenEdgeCount += count;
+      graphTruncated = true;
+      appendDiagnostic("hierarchy_children_truncated", parentKey, reason);
+    };
+
+    std::set<std::string> treePath;
+    std::function<Json::Value(const std::string&, size_t)> buildHierarchyTree =
+        [&](const std::string& key, size_t depth) {
+          Json::Value entry = hierarchyEntry(key);
+          entry["depth"] = static_cast<Json::UInt64>(depth);
+          entry["children"] = Json::arrayValue;
+          entry["child_count"] = Json::UInt64{0};
+          entry["visible_child_count"] = Json::UInt64{0};
+          entry["hidden_child_count"] = Json::UInt64{0};
+          entry["children_truncated"] = false;
+          if (entry["missing"].asBool()) {
+            return entry;
+          }
+
+          appendItemNode(allByKey.at(key));
+          if (nodesByKey.count(key) == 0) {
+            return entry;
+          }
+          rememberHierarchyNode(key);
+          if (!treePath.insert(key).second) {
+            appendHierarchyGap("hierarchy_parent_cycle", key,
+                               "Recorded parent links form a hierarchy cycle; traversal stopped at this item.");
+            entry["children_truncated"] = true;
+            return entry;
+          }
+
+          std::vector<std::string> children;
+          const auto childrenIt = childrenByParentKey.find(key);
+          if (childrenIt != childrenByParentKey.end()) {
+            for (const auto& childKey : childrenIt->second) {
+              const auto childIt = allByKey.find(childKey);
+              if (childIt != allByKey.end() && isHierarchyItem(childIt->second) &&
+                  (topic.empty() || ItemMatchesTopic(childIt->second, topic))) {
+                children.push_back(childKey);
+              }
+            }
+          }
+          entry["child_count"] = static_cast<Json::UInt64>(children.size());
+
+          if (depth >= caps.maxDepth) {
+            entry["hidden_child_count"] =
+                static_cast<Json::UInt64>(children.size());
+            entry["children_truncated"] = !children.empty();
+            recordHiddenHierarchyChildren(
+                key, children.size(),
+                "Hierarchy depth cap hid deeper recorded children from this item.");
+            treePath.erase(key);
+            return entry;
+          }
+
+          const size_t visibleChildLimit =
+              std::min(children.size(), caps.maxChildrenPerNode);
+          for (size_t index = 0; index < visibleChildLimit; ++index) {
+            const auto& childKey = children[index];
+            appendItemNode(allByKey.at(childKey));
+            if (nodesByKey.count(childKey) == 0) {
+              const size_t remaining = visibleChildLimit - index;
+              hierarchyHiddenChildCount += remaining;
+              if (remaining > 1) {
+                hiddenNodeCount += remaining - 1;
+              }
+              hiddenEdgeCount += remaining;
+              graphTruncated = true;
+              appendDiagnostic(
+                  "hierarchy_children_truncated", key,
+                  "Hierarchy node cap hid additional recorded children from this item.");
+              entry["hidden_child_count"] =
+                  entry["hidden_child_count"].asUInt64() + remaining;
+              entry["children_truncated"] = true;
+              break;
+            }
+            appendEdge(key, childKey, "parent", "structural", childKey);
+            entry["children"].append(buildHierarchyTree(childKey, depth + 1));
+          }
+          entry["visible_child_count"] =
+              static_cast<Json::UInt64>(entry["children"].size());
+          const size_t cappedChildren = children.size() - visibleChildLimit;
+          if (cappedChildren > 0) {
+            entry["hidden_child_count"] =
+                entry["hidden_child_count"].asUInt64() + cappedChildren;
+            entry["children_truncated"] = true;
+            recordHiddenHierarchyChildren(
+                key, cappedChildren,
+                "Hierarchy child cap hid additional recorded children from this item.");
+          }
+          treePath.erase(key);
+          return entry;
+        };
+
+    std::vector<std::string> hierarchyRoots;
+    if (rootItemKey) {
+      hierarchy["root_kind"] = "item";
+      hierarchy["root_item"] = hierarchyEntry(*rootItemKey);
+      hierarchyRoots.push_back(*rootItemKey);
+
+      const auto rawParent = allByKey.at(*rootItemKey)["parent"].asString();
+      if (!rawParent.empty()) {
+        const auto parentTarget = resolveRef(
+            rawParent, allByKey.at(*rootItemKey)["product"].asString());
+        if (!parentTarget.valid) {
+          appendHierarchyGap("hierarchy_parent_invalid", rawParent,
+                             "The selected root has an invalid recorded parent ref.");
+        } else if (allByKey.count(parentTarget.key) == 0) {
+          ensureRefNode(*rootItemKey, "parent", parentTarget);
+          appendHierarchyGap("hierarchy_parent_missing", parentTarget.key,
+                             "The selected root's recorded parent is missing from the bounded query corpus.");
+        } else {
+          hierarchy["parent"] = hierarchyEntry(parentTarget.key);
+        }
+      }
+
+      std::set<std::string> ancestorKeys;
+      auto currentKey = *rootItemKey;
+      for (size_t distance = 1; distance <= caps.maxDepth; ++distance) {
+        const auto parentIt = parentByKey.find(currentKey);
+        if (parentIt == parentByKey.end()) {
+          break;
+        }
+        const auto& parentKey = parentIt->second;
+        if (!ancestorKeys.insert(parentKey).second || parentKey == *rootItemKey) {
+          appendHierarchyGap("hierarchy_parent_cycle", parentKey,
+                             "Recorded parent links form a hierarchy cycle; ancestor traversal stopped.");
+          break;
+        }
+        const auto itemIt = allByKey.find(parentKey);
+        if (itemIt == allByKey.end()) {
+          break;
+        }
+        appendItemNode(itemIt->second);
+        appendEdge(parentKey, currentKey, "parent", "structural", currentKey);
+        Json::Value ancestor = hierarchyEntry(parentKey);
+        ancestor["distance"] = static_cast<Json::UInt64>(distance);
+        hierarchy["ancestors"].append(ancestor);
+        rememberHierarchyNode(parentKey);
+        ++hierarchyAncestorCount;
+        currentKey = parentKey;
+      }
+      if (parentByKey.count(currentKey) > 0 &&
+          hierarchyAncestorCount >= caps.maxDepth) {
+        hierarchy["ancestor_chain_truncated"] = true;
+        ++hiddenNodeCount;
+        graphTruncated = true;
+        appendDiagnostic("hierarchy_ancestors_truncated", currentKey,
+                         "Hierarchy depth cap hid additional recorded ancestors.");
+      }
+    } else if (itemId.empty() && !topic.empty()) {
+      hierarchy["root_kind"] = "topic";
+      for (const auto& key : activeKeys) {
+        const auto itemIt = allByKey.find(key);
+        if (itemIt == allByKey.end() || !isHierarchyItem(itemIt->second)) {
+          continue;
+        }
+        const auto parentIt = parentByKey.find(key);
+        if (parentIt == parentByKey.end() || activeKeys.count(parentIt->second) == 0) {
+          hierarchyRoots.push_back(key);
+        }
+      }
+      std::sort(hierarchyRoots.begin(), hierarchyRoots.end());
+      if (hierarchyRoots.empty() && !activeKeys.empty()) {
+        appendHierarchyGap("hierarchy_topic_roots_missing", topic,
+                           "Topic items have no acyclic visible hierarchy root in this bounded query.");
+      }
+    } else {
+      hierarchy["root_kind"] = "none";
+      appendHierarchyGap("hierarchy_root_required", itemId,
+                         "Select an unambiguous item root or topic for hierarchy review.");
+    }
+
+    const size_t visibleRootLimit =
+        std::min(hierarchyRoots.size(), caps.maxChildrenPerNode);
+    for (size_t index = 0; index < visibleRootLimit; ++index) {
+      hierarchy["roots"].append(buildHierarchyTree(hierarchyRoots[index], 0));
+    }
+    if (hierarchyRoots.size() > visibleRootLimit) {
+      const size_t hiddenRoots = hierarchyRoots.size() - visibleRootLimit;
+      recordHiddenHierarchyChildren(
+          topic.empty() ? "hierarchy" : "topic:" + topic, hiddenRoots,
+          "Hierarchy root cap hid additional topic roots.");
+    }
+
+    Json::Value summary(Json::objectValue);
+    summary["root_count"] = static_cast<Json::UInt64>(hierarchyRoots.size());
+    summary["visible_root_count"] =
+        static_cast<Json::UInt64>(hierarchy["roots"].size());
+    summary["ancestor_count"] = static_cast<Json::UInt64>(hierarchyAncestorCount);
+    summary["visible_node_count"] =
+        static_cast<Json::UInt64>(hierarchyVisibleNodeCount);
+    summary["hidden_child_count"] =
+        static_cast<Json::UInt64>(hierarchyHiddenChildCount);
+    summary["gap_count"] = static_cast<Json::UInt64>(hierarchy["gaps"].size());
+    summary["truncated"] = graphTruncated;
+    summary["max_depth"] = static_cast<Json::UInt64>(caps.maxDepth);
+    summary["max_children_per_node"] =
+        static_cast<Json::UInt64>(caps.maxChildrenPerNode);
+    summary["max_total_nodes"] = static_cast<Json::UInt64>(caps.maxTotalNodes);
+    summary["max_total_edges"] = static_cast<Json::UInt64>(caps.maxTotalEdges);
+    hierarchy["summary"] = summary;
+    response["hierarchy_summary"] = hierarchy;
   }
 
   std::map<std::string, size_t> visualLayers;

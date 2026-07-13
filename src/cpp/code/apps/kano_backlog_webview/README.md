@@ -96,6 +96,17 @@ internal Focus Graph summary. If duplicate products share a bare root ID and
 `blocker_chain`; callers provide `root_product=<name>` to disambiguate that
 item-rooted graph request.
 
+In explicit structure mode (`mode=structure`), the response adds a bounded
+`hierarchy_summary` object derived only from recorded parent refs. Item-rooted
+responses expose the direct parent, ancestors nearest-parent first, and a nested
+child tree. Topic-rooted responses expose the acyclic visible roots for matching
+topic items. Every tree node reports total, visible, and hidden child counts;
+the summary echoes depth, child, node, and edge caps plus truncation and gap
+counts. Missing, invalid, or cyclic parent evidence is shown as a gap rather
+than inferred. Backboard renders the tree with native `<details>` elements so
+the structure remains DOM-readable and supports collapse/expand without a
+canvas dependency. Structure mode uses parent edges only and does not imply execution order.
+
 In explicit cycles mode (`mode=cycles`), Backboard shows a cycle audit before
 the SVG. It reports strongly connected dependency groups from the visible bounded dependency graph,
 using only `blocks` and `blocked_by` execution edges. Each group can contain

@@ -202,6 +202,23 @@ inline constexpr std::string_view kBackboardCssPart2 = R"CSS(
     .cycle-audit-member-id, .cycle-audit-edge code { overflow-wrap: anywhere; word-break: break-word; }
     .cycle-audit-jump { justify-self: start; }
     .cycle-audit-jump:focus-visible { outline: 3px solid var(--kob-accent-border); outline-offset: 2px; }
+    .hierarchy-summary { display: grid; gap: 10px; margin-bottom: 12px; min-width: 0; }
+    .hierarchy-header { display: grid; gap: 4px; min-width: 0; }
+    .hierarchy-header h4, .hierarchy-context h5, .hierarchy-tree h5, .hierarchy-gaps h5 { margin: 0; }
+    .hierarchy-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(120px, 100%), 1fr)); gap: 8px; }
+    .hierarchy-context { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 10px; align-items: start; }
+    .hierarchy-context > section, .hierarchy-tree, .hierarchy-gaps { display: grid; gap: 8px; min-width: 0; }
+    .hierarchy-reference, .hierarchy-gap { display: grid; gap: 5px; border-left: 3px solid #6d8a78; padding: 7px 9px; background: #f5f8f6; min-width: 0; overflow-wrap: break-word; }
+    .hierarchy-reference code, .hierarchy-gap .muted { overflow-wrap: anywhere; word-break: break-word; }
+    .hierarchy-node { border: 1px solid var(--kob-border); border-radius: 6px; background: var(--kob-panel); min-width: 0; }
+    .hierarchy-node > summary { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; padding: 8px 10px; cursor: pointer; min-width: 0; overflow-wrap: break-word; }
+    .hierarchy-node > summary:focus-visible { outline: 3px solid var(--kob-accent-border); outline-offset: 2px; }
+    .hierarchy-node-title { font-weight: 650; }
+    .hierarchy-node-body { display: grid; gap: 8px; padding: 0 10px 10px; min-width: 0; }
+    .hierarchy-children { display: grid; gap: 7px; padding-left: 14px; border-left: 2px solid #a9bbb0; min-width: 0; }
+    .hierarchy-hidden, .hierarchy-warning { border: 1px solid #d5b15d; border-left: 4px solid #b57b18; border-radius: 6px; padding: 8px 10px; background: #fff9e8; color: #6a4c0f; overflow-wrap: break-word; }
+    .hierarchy-jump { justify-self: start; }
+    .hierarchy-jump:focus-visible { outline: 3px solid var(--kob-accent-border); outline-offset: 2px; }
     @media (max-width: 720px) {
       body { padding: 12px; }
       .app-shell { grid-template-columns: minmax(0, 1fr); }

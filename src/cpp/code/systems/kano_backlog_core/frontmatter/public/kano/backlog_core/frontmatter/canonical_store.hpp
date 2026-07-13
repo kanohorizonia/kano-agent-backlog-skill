@@ -73,6 +73,7 @@ public:
 
     // Helpers
     int get_next_id_number(ItemType type) const;
+    int get_max_id_number(const std::string& prefix, ItemType type) const;
     static std::string slugify(const std::string& text);
     static std::string generate_uuid_v7();
 

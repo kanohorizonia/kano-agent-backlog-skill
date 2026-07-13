@@ -322,6 +322,41 @@ int BacklogIndex::get_next_number(const std::string& prefix, const std::string& 
     }
 }
 
+bool BacklogIndex::has_sequence(const std::string& prefix, const std::string& type_code) {
+    initialize();
+    const char* sql = "SELECT 1 FROM id_sequences WHERE prefix = ? AND type_code = ? LIMIT 1";
+    Statement stmt(db_, sql, "check id sequence");
+    stmt.bind_text(1, prefix);
+    stmt.bind_text(2, type_code);
+    return stmt.step() == SQLITE_ROW;
+}
+
+void BacklogIndex::ensure_sequence_at_least(
+    const std::string& prefix,
+    const std::string& type_code,
+    int number
+) {
+    initialize();
+    execute("BEGIN IMMEDIATE");
+    try {
+        const char* sql =
+            "INSERT INTO id_sequences (prefix, type_code, next_number) VALUES (?, ?, ?) "
+            "ON CONFLICT(prefix, type_code) DO UPDATE SET next_number = MAX(next_number, excluded.next_number)";
+        Statement stmt(db_, sql, "repair id sequence floor");
+        stmt.bind_text(1, prefix);
+        stmt.bind_text(2, type_code);
+        stmt.bind_int(3, number);
+        stmt.step_done();
+        execute("COMMIT");
+    } catch (...) {
+        try {
+            execute("ROLLBACK");
+        } catch (...) {
+        }
+        throw;
+    }
+}
+
 BacklogIndex::SyncSequencesResult BacklogIndex::sync_sequences(const std::filesystem::path& product_root) {
     SyncSequencesResult result;
     result.max_number_found = 0;
@@ -371,8 +406,8 @@ BacklogIndex::SyncSequencesResult BacklogIndex::sync_sequences(const std::filesy
         const std::string& type_code = key.second;
 
         std::string upsert_sql =
-            "INSERT INTO id_sequences (prefix, type_code, next_number) VALUES ('" + prefix + "', '" + type_code + "', " + std::to_string(max_num + 1) + ") "
-            "ON CONFLICT(prefix, type_code) DO UPDATE SET next_number = MAX(next_number, " + std::to_string(max_num + 1) + ")";
+            "INSERT INTO id_sequences (prefix, type_code, next_number) VALUES ('" + prefix + "', '" + type_code + "', " + std::to_string(max_num) + ") "
+            "ON CONFLICT(prefix, type_code) DO UPDATE SET next_number = MAX(next_number, " + std::to_string(max_num) + ")";
         execute(upsert_sql);
 
         result.synced_pairs.push_back(prefix + "-" + type_code + " -> " + std::to_string(max_num + 1));

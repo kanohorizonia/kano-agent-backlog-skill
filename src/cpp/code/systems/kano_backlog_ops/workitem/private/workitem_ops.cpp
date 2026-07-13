@@ -1028,24 +1028,38 @@ CreateItemResult WorkitemOps::create_item(
         case ItemType::Issue: type_code = "ISS"; break;
     }
     
-    int number = 0;
-    {
-        diagnostics::ScopedMutationSpan span("workitem.create_item.next_number", prefix + "-" + type_code);
-        number = index.get_next_number(prefix, type_code);
+    if (!index.has_sequence(prefix, type_code)) {
+        diagnostics::ScopedMutationSpan span("workitem.create_item.seed_sequence", prefix + "-" + type_code);
+        index.ensure_sequence_at_least(prefix, type_code, store.get_max_id_number(prefix, type));
     }
-    
-    // 2. Prepare item via store
+
     BacklogItem item;
-    {
-        diagnostics::ScopedMutationSpan span("workitem.create_item.prepare");
-        item = store.create(prefix, type, title, number, parent);
-    }
-    if (!item.file_path) {
-        throw std::runtime_error("duplicate_item_id.path_missing: generated item has no target file path");
-    }
-    {
+    for (int attempt = 0; attempt < 2; ++attempt) {
+        int number = 0;
+        {
+            diagnostics::ScopedMutationSpan span("workitem.create_item.next_number", prefix + "-" + type_code);
+            number = index.get_next_number(prefix, type_code);
+        }
+        {
+            diagnostics::ScopedMutationSpan span("workitem.create_item.prepare");
+            item = store.create(prefix, type, title, number, parent);
+        }
+        if (!item.file_path) {
+            throw std::runtime_error("duplicate_item_id.path_missing: generated item has no target file path");
+        }
+
         diagnostics::ScopedMutationSpan span("workitem.create_item.collision_check", item.id);
         const auto existing_paths = store.find_item_paths_by_id(item.id);
+        std::error_code exists_error;
+        const bool path_exists = std::filesystem::exists(*item.file_path, exists_error);
+        if (existing_paths.empty() && !path_exists) {
+            break;
+        }
+        if (attempt == 0) {
+            const int canonical_max = store.get_max_id_number(prefix, type);
+            index.ensure_sequence_at_least(prefix, type_code, canonical_max);
+            continue;
+        }
         if (!existing_paths.empty()) {
             throw std::runtime_error(
                 "duplicate_item_id.allocation_collision: allocated item id " + item.id +
@@ -1053,12 +1067,9 @@ CreateItemResult WorkitemOps::create_item(
                 diagnostic_path_list(existing_paths, backlog_root) +
                 "; repair/remap the existing item by UID before retrying");
         }
-        std::error_code exists_error;
-        if (std::filesystem::exists(*item.file_path, exists_error)) {
-            throw std::runtime_error(
-                "duplicate_item_id.path_collision: generated item path already exists: " +
-                path_for_diagnostic(*item.file_path, backlog_root));
-        }
+        throw std::runtime_error(
+            "duplicate_item_id.path_collision: generated item path already exists: " +
+            path_for_diagnostic(*item.file_path, backlog_root));
     }
     item.state = ItemState::Proposed;
     item.priority = priority;

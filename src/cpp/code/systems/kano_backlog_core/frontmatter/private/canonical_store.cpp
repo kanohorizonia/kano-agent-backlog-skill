@@ -608,6 +608,60 @@ int CanonicalStore::get_next_id_number(ItemType type) const {
     return max_num + 1;
 }
 
+int CanonicalStore::get_max_id_number(const std::string& prefix, ItemType type) const {
+    if (!std::filesystem::exists(items_root_)) {
+        return 0;
+    }
+
+    const std::string type_code = [&]() {
+        switch (type) {
+            case ItemType::Initiative: return std::string("INIT");
+            case ItemType::Epic: return std::string("EPIC");
+            case ItemType::Feature: return std::string("FTR");
+            case ItemType::UserStory: return std::string("USR");
+            case ItemType::Task: return std::string("TSK");
+            case ItemType::SubTask: return std::string("SUBTSK");
+            case ItemType::Bug: return std::string("BUG");
+            case ItemType::Issue: return std::string("ISS");
+        }
+        return std::string();
+    }();
+    const std::string id_prefix = prefix + "-" + type_code + "-";
+    int max_number = 0;
+
+    std::error_code iterator_error;
+    std::filesystem::recursive_directory_iterator iterator(
+        items_root_,
+        std::filesystem::directory_options::skip_permission_denied,
+        iterator_error);
+    const std::filesystem::recursive_directory_iterator end;
+    for (; iterator != end; iterator.increment(iterator_error)) {
+        if (iterator_error) {
+            iterator_error.clear();
+            continue;
+        }
+        const auto& path = iterator->path();
+        if (path.extension() != ".md") {
+            continue;
+        }
+        const std::string filename = path.filename().string();
+        if (filename.rfind(id_prefix, 0) != 0) {
+            continue;
+        }
+        const auto number_begin = id_prefix.size();
+        const auto number_end = filename.find_first_not_of("0123456789", number_begin);
+        if (number_end == number_begin ||
+            (number_end != std::string::npos && filename[number_end] != '_' && filename[number_end] != '.')) {
+            continue;
+        }
+        try {
+            max_number = std::max(max_number, std::stoi(filename.substr(number_begin, number_end - number_begin)));
+        } catch (const std::exception&) {
+        }
+    }
+    return max_number;
+}
+
 std::string CanonicalStore::slugify(const std::string& text) {
     std::string slug;
     bool pending_separator = false;

@@ -305,12 +305,8 @@ int main() {
             expect(store.find_item_paths_by_id("TST-TSK-9999", &missing_lookup).empty(), "missing id lookup should return no paths");
             expect(missing_lookup.item_files_scanned > 0, "missing id lookup should inspect canonical filenames");
             expect(missing_lookup.candidate_files_read == 0, "missing id lookup should not open unrelated item frontmatter");
-            expect_throws_contains(
-                [&]() {
-                    (void)WorkitemOps::create_item(index, root, "TST", ItemType::Task, "Allocator collision should fail", "opencode", std::nullopt, "P2", {}, "general", "backlog", std::nullopt, std::nullopt, "", "", duplicate_admission("Allocator collision should fail"));
-                },
-                "duplicate_item_id.allocation_collision",
-                "create should fail closed before writing when allocator returns an existing item id");
+            auto recovered_collision = WorkitemOps::create_item(index, root, "TST", ItemType::Task, "Allocator collision should recover", "opencode", std::nullopt, "P2", {}, "general", "backlog", std::nullopt, std::nullopt, "", "", duplicate_admission("Allocator collision should recover"));
+            expect(recovered_collision.id == "TST-TSK-0003", "stale allocator should advance past the maximum canonical filename id");
             expect(!std::filesystem::exists(root / "_meta" / "duplicate-admission" / (allocation_collision.id + ".json")),
                 "allocation collision should not write duplicate admission receipt");
             auto duplicate_identity = store.create("TST", ItemType::Task, "Duplicate identity fixture", 2);
@@ -342,6 +338,19 @@ int main() {
             auto override_created = WorkitemOps::create_item(index, root, "TST", ItemType::Task, "Duplicate override with rationale", "opencode", std::nullopt, "P2", {}, "general", "backlog", std::nullopt, std::nullopt, "", "", duplicate_admission("Duplicate override with rationale", {created.id}, {created.id}, true, "urgent minimal follow-up"));
             expect(std::filesystem::exists(root / "_meta" / "duplicate-admission" / (override_created.id + ".json")), "override create should write duplicate admission receipt");
             expect(read_text(override_created.path).find("Duplicate admission:") != std::string::npos, "override create should write duplicate admission worklog");
+
+            const auto fresh_sequence_root = make_temp_root();
+            CanonicalStore fresh_sequence_store(fresh_sequence_root);
+            auto existing_high_id = fresh_sequence_store.create("NEW", ItemType::Bug, "Existing high id", 41);
+            fresh_sequence_store.write(existing_high_id);
+            BacklogIndex fresh_sequence_index(fresh_sequence_root / ".cache" / "index" / "backlog.db");
+            fresh_sequence_index.initialize();
+            auto first_fresh_create = create_item_with_admission(
+                fresh_sequence_index, fresh_sequence_root, "NEW", ItemType::Bug, "Fresh sequence recovery", "opencode");
+            expect(first_fresh_create.id == "NEW-BUG-0042", "fresh index should allocate max canonical id plus one");
+            auto second_fresh_create = create_item_with_admission(
+                fresh_sequence_index, fresh_sequence_root, "NEW", ItemType::Bug, "Warm sequence allocation", "opencode");
+            expect(second_fresh_create.id == "NEW-BUG-0043", "repaired sequence should remain monotonic on the fast path");
 
             const auto symlink_root = make_temp_root();
             const auto symlink_escape = symlink_root.parent_path() / (symlink_root.filename().string() + "-receipt-escape");

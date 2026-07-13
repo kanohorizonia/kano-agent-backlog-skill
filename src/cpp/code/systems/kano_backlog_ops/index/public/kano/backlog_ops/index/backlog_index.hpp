@@ -51,6 +51,13 @@ public:
      */
     int get_next_number(const std::string& prefix, const std::string& type_code);
 
+    bool has_sequence(const std::string& prefix, const std::string& type_code);
+
+    /**
+     * Raise the last allocated sequence value without moving it backwards.
+     */
+    void ensure_sequence_at_least(const std::string& prefix, const std::string& type_code, int number);
+
     /**
      * Scan existing item files and sync sequence counters.
      */

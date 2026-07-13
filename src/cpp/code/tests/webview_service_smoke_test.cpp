@@ -2268,6 +2268,8 @@ int main() {
                "done candidate action should expose single-click Move to Review policy");
         expect(lane_has_policy("Done Candidate", "Reject Completion", "reject_completion", "Review", false),
                "done candidate action should expose single-click Reject Completion policy");
+        expect(lane_has_policy("Needs Review", "Reopen Work", "reopen_work", "InProgress", true),
+               "needs review action should expose Review-to-InProgress reopen policy");
         expect(lane_has_policy("False Done Suspect", "Reopen from Done", "reopen_from_done", "Review", true),
                "false done suspect action should use confirm-gated Reopen from Done policy");
         expect(lane_has_policy("False Done Suspect", "Dismiss", "dismiss", "", false),
@@ -3844,6 +3846,28 @@ int main() {
                "policy-rejected reopen should still persist submitted decision record");
         expect(read_text(products / "product-beta" / "items" / "bug" / "0003" / "PRB-BUG-0003.md").find("state: Done") != std::string::npos,
                "policy-rejected reopen must leave Done item unchanged");
+
+        Json::Value reopenReview(Json::objectValue);
+        reopenReview["product"] = "product-beta";
+        reopenReview["item_id"] = "PRB-BUG-0004";
+        reopenReview["lane"] = "Needs Review";
+        reopenReview["reason_code"] = "review_state";
+        reopenReview["suggested_decision"] = "reopen_work";
+        reopenReview["human_decision"] = "reopen_work";
+        reopenReview["actor_alias"] = "reviewer-alias";
+        reopenReview["target_state"] = "InProgress";
+        auto reopenWithoutRationale = service.SubmitReviewDecision(reopenReview);
+        expect(reopenWithoutRationale["error_code"].asString() == "review_decision.rationale_required",
+               "Backboard reopen should require rationale");
+        reopenReview["rationale"] = "Acceptance criteria remain unmet.";
+        reopenReview["confirmed"] = true;
+        auto reopenReviewSubmitted = service.SubmitReviewDecision(reopenReview);
+        expect(!reopenReviewSubmitted.isMember("error"),
+               "Review-to-InProgress reopen should submit: " + reopenReviewSubmitted.toStyledString());
+        expect(reopenReviewSubmitted["record"]["transition"]["outcome"].asString() == "applied",
+               "Review-to-InProgress reopen should apply through KOB policy");
+        expect(read_text(products / "product-beta" / "items" / "bug" / "0004" / "PRB-BUG-0004.md").find("state: InProgress") != std::string::npos,
+               "Backboard reopen should restore InProgress state");
 
         const auto transitionSubmittedDir = products / "product-beta" / "_meta" /
             "review-decisions" / "submitted" / "PRB-BUG-0001";

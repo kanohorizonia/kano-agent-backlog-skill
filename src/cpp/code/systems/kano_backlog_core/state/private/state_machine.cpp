@@ -19,6 +19,8 @@ const std::map<StateMachine::TransitionKey, ItemState>& StateMachine::get_transi
         {{ItemState::Proposed, StateAction::Start}, ItemState::InProgress},
         {{ItemState::New, StateAction::Start}, ItemState::InProgress},
         {{ItemState::Blocked, StateAction::Start}, ItemState::InProgress},
+
+        {{ItemState::Review, StateAction::Reopen}, ItemState::InProgress},
         
         {{ItemState::InProgress, StateAction::Review}, ItemState::Review},
         
@@ -69,6 +71,22 @@ void StateMachine::transition(
     
     if (it == table.end()) {
         throw ValidationError({ "Invalid transition: " + to_string(item.state) + " --" + to_string(action) + "--> (no target state)" });
+    }
+
+    if (action == StateAction::Reopen) {
+        const auto has_text = [](const std::optional<std::string>& value) {
+            return value && value->find_first_not_of(" \t\r\n") != std::string::npos;
+        };
+        std::vector<std::string> errors;
+        if (!has_text(agent)) {
+            errors.push_back("Reopen requires a non-empty agent");
+        }
+        if (!has_text(message)) {
+            errors.push_back("Reopen requires a non-empty rationale message");
+        }
+        if (!errors.empty()) {
+            throw ValidationError(errors);
+        }
     }
 
     // 2. Check Ready gate

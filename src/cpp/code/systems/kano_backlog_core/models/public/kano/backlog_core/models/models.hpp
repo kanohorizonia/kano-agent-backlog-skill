@@ -37,6 +37,7 @@ enum class StateAction {
     Propose,
     Ready,
     Start,
+    Reopen,
     Review,
     Done,
     Block,

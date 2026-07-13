@@ -82,6 +82,7 @@ possible. The review action policy is:
 | Mark Done | Done Candidate | Done | Required |
 | Move to Review | Done Candidate | Review | Single click |
 | Reject Completion | Done Candidate | Review | Single click |
+| Reopen Work | Needs Review | InProgress | Required; rationale required |
 | Request Evidence | Needs Review, False Done Suspect, Evidence Gap | none | Single click |
 | Reopen from Done | False Done Suspect | Review | Required |
 | Dismiss | False Done Suspect | none | Single click |
@@ -89,7 +90,7 @@ possible. The review action policy is:
 | Drop | Stale/Drift | Dropped | Required |
 
 High-risk actions, including moving to Done, dropping work, accepting evidence
-risk, or reopening Done, require explicit confirmation before any KOB state
+risk, or reopening work, require explicit confirmation before any KOB state
 transition is attempted. The UI must show the resulting state before submit for
 any action with a target state. Confirmed target-state actions call the existing
 KOB transition policy; Backboard must not bypass transition validation and must

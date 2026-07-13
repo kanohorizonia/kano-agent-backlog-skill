@@ -89,6 +89,7 @@ std::string to_string(StateAction action) {
         case StateAction::Propose: return "propose";
         case StateAction::Ready: return "ready";
         case StateAction::Start: return "start";
+        case StateAction::Reopen: return "reopen";
         case StateAction::Review: return "review";
         case StateAction::Done: return "done";
         case StateAction::Block: return "block";
@@ -102,6 +103,7 @@ std::optional<StateAction> parse_state_action(const std::string& str) {
     if (str == "propose") return StateAction::Propose;
     if (str == "ready") return StateAction::Ready;
     if (str == "start") return StateAction::Start;
+    if (str == "reopen") return StateAction::Reopen;
     if (str == "review") return StateAction::Review;
     if (str == "done") return StateAction::Done;
     if (str == "block") return StateAction::Block;

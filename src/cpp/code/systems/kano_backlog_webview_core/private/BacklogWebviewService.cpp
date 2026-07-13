@@ -745,11 +745,15 @@ std::string AppendWorklogLine(std::string text, const std::string& line) {
   return text;
 }
 
-std::optional<kano::backlog_core::StateAction> ReviewActionForTargetState(
-    kano::backlog_core::ItemState state) {
+std::optional<kano::backlog_core::StateAction> ReviewActionForTransition(
+    kano::backlog_core::ItemState currentState,
+    kano::backlog_core::ItemState targetState) {
   using kano::backlog_core::ItemState;
   using kano::backlog_core::StateAction;
-  switch (state) {
+  if (currentState == ItemState::Review && targetState == ItemState::InProgress) {
+    return StateAction::Reopen;
+  }
+  switch (targetState) {
     case ItemState::Proposed:
       return StateAction::Propose;
     case ItemState::Planned:
@@ -3189,13 +3193,15 @@ Json::Value ReviewAction(const std::string& id,
                          const std::string& label,
                          const std::string& humanDecision,
                          const std::string& targetState,
-                         bool requiresConfirmation) {
+                         bool requiresConfirmation,
+                         bool requiresRationale = false) {
   Json::Value action(Json::objectValue);
   action["id"] = id;
   action["label"] = label;
   action["human_decision"] = humanDecision;
   action["target_state"] = targetState;
   action["requires_confirmation"] = requiresConfirmation;
+  action["requires_rationale"] = requiresRationale;
   action["starts_agent"] = false;
   action["dispatches_work"] = false;
   if (requiresConfirmation) {
@@ -3219,6 +3225,8 @@ Json::Value ReviewActionsForLane(const std::string& lane) {
     actions.append(ReviewAction("reject_completion", "Reject Completion",
                                 "reject_completion", "Review", false));
   } else if (lane == "Needs Review") {
+    actions.append(ReviewAction("reopen_work", "Reopen Work",
+                                "reopen_work", "InProgress", true, true));
     actions.append(ReviewAction("request_evidence", "Request Evidence",
                                 "request_evidence", "", false));
     actions.append(ReviewAction("approve_for_review", "Approve For Review",
@@ -7689,6 +7697,10 @@ Json::Value BacklogWebviewService::SubmitReviewDecision(
       return MakeError("review_decision.target_state_mismatch", "target_state does not match the selected review lane action");
     }
     const auto targetState = actionTargetState;
+    const auto rationale = JsonStringField(request, "rationale");
+    if (JsonBoolField(*requestedAction, "requires_rationale") && rationale.empty()) {
+      return MakeError("review_decision.rationale_required", "this review action requires a non-empty rationale");
+    }
     const auto humanDecisionLower = text::ToLower(humanDecision);
     const auto targetStateLower = text::ToLower(targetState);
     const auto currentStateLower = text::ToLower(item.get("state", "").asString());
@@ -7734,16 +7746,16 @@ Json::Value BacklogWebviewService::SubmitReviewDecision(
       if (!parsedState) {
         return MakeError("review_decision.target_state_invalid", "target_state is not a recognized KOB item state: " + targetState);
       }
-      auto action = ReviewActionForTargetState(*parsedState);
+      auto currentState = kano::backlog_core::parse_item_state(item.get("state", "").asString());
+      if (!currentState) {
+        return MakeError("review_decision.current_state_invalid", "current item state is not a recognized KOB item state");
+      }
+      auto action = ReviewActionForTransition(*currentState, *parsedState);
       if (!action) {
         return MakeError("review_decision.target_state_invalid", "target_state cannot be requested by a review decision: " + targetState);
       }
       transition["attempted"] = true;
       transition["outcome"] = "blocked";
-      auto currentState = kano::backlog_core::parse_item_state(item.get("state", "").asString());
-      if (!currentState) {
-        return MakeError("review_decision.current_state_invalid", "current item state is not a recognized KOB item state");
-      }
       transitionItem = kano::backlog_core::BacklogItem{};
       transitionItem->id = itemId;
       transitionItem->state = *currentState;

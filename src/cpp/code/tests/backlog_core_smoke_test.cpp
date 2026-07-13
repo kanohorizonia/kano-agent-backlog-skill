@@ -137,12 +137,32 @@ int main() {
             "ready should transition via Start");
         expect(!StateMachine::can_transition(ItemState::Done, StateAction::Start),
             "done should not transition via Start");
+        expect(StateMachine::can_transition(ItemState::Review, StateAction::Reopen),
+            "review should transition via explicit Reopen");
+        expect(!StateMachine::can_transition(ItemState::Review, StateAction::Start),
+            "review should not transition via Start");
+        expect(!StateMachine::can_transition(ItemState::Done, StateAction::Reopen),
+            "done should not transition via Reopen");
 
         BacklogItem transitioned = item;
         StateMachine::transition(transitioned, StateAction::Start, std::string("opencode"), std::string("Start work"));
         expect(transitioned.state == ItemState::InProgress, "transition should set InProgress");
         expect(transitioned.worklog.back().find("[agent=opencode]") != std::string::npos, "transition should include agent marker");
         expect(transitioned.worklog.back().find("[model=unknown]") == std::string::npos, "transition should omit unknown model marker");
+
+        BacklogItem reopened = item;
+        reopened.state = ItemState::Review;
+        bool reopen_without_rationale_rejected = false;
+        try {
+            StateMachine::transition(reopened, StateAction::Reopen, std::string("opencode"));
+        } catch (const std::exception&) {
+            reopen_without_rationale_rejected = true;
+        }
+        expect(reopen_without_rationale_rejected, "reopen should require rationale");
+        StateMachine::transition(reopened, StateAction::Reopen, std::string("opencode"), std::string("Acceptance criteria remain unmet."));
+        expect(reopened.state == ItemState::InProgress, "reopen should restore InProgress");
+        expect(reopened.worklog.back().find("State: Review -> InProgress") != std::string::npos,
+            "reopen should preserve source and target states in worklog");
 
         BacklogItem modeled = item;
         StateMachine::record_worklog(modeled, "opencode", "Record modeled work", std::string("gpt-test"));

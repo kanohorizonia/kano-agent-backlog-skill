@@ -16757,7 +16757,7 @@ int main(int InArgc, char* InArgv[]) {
                 std::string item_ref, action_str, agent, message, message_file, model;
                 bool transition_consume_input_files = false;
                 transitionCmd->add_option("ref", item_ref, "Item ID, UID, or path")->required();
-                transitionCmd->add_option("action", action_str, "Action (propose|ready|start|review|done|block|drop)")->required();
+                transitionCmd->add_option("action", action_str, "Action (propose|ready|start|reopen|review|done|block|drop)")->required();
                 transitionCmd->add_option("--agent", agent, "Agent ID");
                 transitionCmd->add_option("-m,--message", message, "Optional worklog message");
                 transitionCmd->add_option("--message-file", message_file, "Read optional worklog message from file");
@@ -16772,7 +16772,7 @@ int main(int InArgc, char* InArgv[]) {
                     auto action_opt = parse_state_action(action_str);
                     if (!action_opt) {
                         std::cerr << "Error: Invalid action '" << action_str << "'\n";
-                        std::cerr << "Valid actions: propose, ready, start, review, done, block, drop\n";
+                        std::cerr << "Valid actions: propose, ready, start, reopen, review, done, block, drop\n";
                         throw std::runtime_error("Invalid action");
                     }
 

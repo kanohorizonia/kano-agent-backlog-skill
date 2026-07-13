@@ -241,6 +241,19 @@ int main(int argc, char** argv) {
             "review transition should warn about missing compliance evidence");
 
         expect(run_command(binary, {
+            "-P", "quick-smoke-product", "state", "transition", "QS-TSK-0001", "reopen",
+            "--agent", "reviewer", "--message", "Acceptance criteria remain unmet."
+        }) == 0, "explicit reopen transition failed");
+        const auto reopened_task_text = read_text(task_path);
+        expect(reopened_task_text.find("state: InProgress") != std::string::npos,
+            "reopen should restore InProgress state");
+        expect(reopened_task_text.find("State: Review -> InProgress: Acceptance criteria remain unmet.") != std::string::npos,
+            "reopen should append audited rationale");
+        expect(run_command(binary, {
+            "-P", "quick-smoke-product", "workitem", "update-state", "QS-TSK-0001", "--state", "Review", "--agent", "tester"
+        }) == 0, "review transition after reopen failed");
+
+        expect(run_command(binary, {
             "-P", "quick-smoke-product", "workitem", "intent-amend", "QS-TSK-0001",
             "--correction", "Unresolved violation blocks Done.",
             "--reason", "Drift finding remains unresolved.",

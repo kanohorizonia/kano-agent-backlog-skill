@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <iostream>
 #include <random>
 #include <sstream>
@@ -171,6 +172,11 @@ int main() {
         const auto incoming_result = RelationOps::list(incoming);
         expect(incoming_result.total_matches == 1 && incoming_result.relations.front().source.item_id == alpha_one.id,
             "incoming list should derive a reverse cross-product view");
+        auto concurrent_reader = [&]() { return RelationOps::list(incoming); };
+        auto first_reader = std::async(std::launch::async, concurrent_reader);
+        auto second_reader = std::async(std::launch::async, concurrent_reader);
+        expect(first_reader.get().total_matches == 1 && second_reader.get().total_matches == 1,
+            "concurrent relation readers should return the same bounded projection");
 
         const auto second_relates = RelationOps::add(request(
             root, "alpha-product", alpha_one.id, "beta-product", beta_two.id, RelationType::Relates));

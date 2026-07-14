@@ -9,12 +9,15 @@
 #include "kano/backlog_ops/index/backlog_index.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <functional>
+#include <future>
 #include <map>
 #include <set>
 #include <sstream>
 #include <stdexcept>
+#include <thread>
 #include <tuple>
 #include <variant>
 
@@ -47,6 +50,17 @@ struct ScanResult {
     std::vector<RelationEntry> relations;
     std::size_t items_scanned = 0;
     std::size_t unresolved_links = 0;
+};
+
+struct ItemReadTask {
+    const ProductRuntime* product = nullptr;
+    std::filesystem::path path;
+};
+
+struct ScannedMetadata {
+    const ProductRuntime* product = nullptr;
+    BacklogItem item;
+    bool valid = false;
 };
 
 std::string lower_copy(std::string value) {
@@ -168,43 +182,6 @@ const ProductRuntime& product_by_name(const Catalog& catalog, const std::string&
     return *it;
 }
 
-std::optional<RelationEndpoint> resolve_stored_ref(
-    const Catalog& catalog,
-    const std::string& ref,
-    std::size_t& resolution_budget
-) {
-    const auto parsed = RefParser::parse(ref);
-    if (!parsed) {
-        return std::nullopt;
-    }
-    if (std::holds_alternative<DisplayIdRef>(*parsed)) {
-        const auto& display = std::get<DisplayIdRef>(*parsed);
-        const auto* product = product_for_prefix(catalog, display.product);
-        if (!product) {
-            return std::nullopt;
-        }
-        try {
-            return resolve_endpoint(*product, ref, "stored relation target");
-        } catch (...) {
-            return std::nullopt;
-        }
-    }
-    if (!std::holds_alternative<UuidRef>(*parsed)) {
-        return std::nullopt;
-    }
-    for (const auto& product : catalog.products) {
-        if (resolution_budget == 0) {
-            throw std::runtime_error("Relation item scan limit exceeded while resolving stored UIDs");
-        }
-        --resolution_budget;
-        try {
-            return resolve_endpoint(product, ref, "stored relation target");
-        } catch (...) {
-        }
-    }
-    return std::nullopt;
-}
-
 RelationEntry make_entry(
     const RelationEndpoint& stored_source,
     const RelationEndpoint& stored_target,
@@ -228,36 +205,113 @@ RelationEntry make_entry(
 
 ScanResult scan_catalog(const Catalog& catalog, std::size_t max_items) {
     ScanResult result;
-    std::size_t resolution_budget = max_items * std::max<std::size_t>(catalog.products.size(), 1);
+    std::vector<ItemReadTask> tasks;
     for (const auto& product : catalog.products) {
         CanonicalStore store(product.context.product_root);
         for (const auto& path : store.list_items()) {
-            if (result.items_scanned >= max_items) {
+            if (tasks.size() >= max_items) {
                 throw std::runtime_error("Relation item scan limit exceeded: " + std::to_string(max_items));
             }
-            ++result.items_scanned;
-            BacklogItem item;
-            try {
-                item = store.read_metadata(path);
-            } catch (...) {
-                ++result.unresolved_links;
-                continue;
-            }
-            const RelationEndpoint source{product.name, item.id, item.uid};
-            const auto append = [&](const std::vector<std::string>& refs, RelationType type) {
-                for (const auto& ref : refs) {
-                    auto target = resolve_stored_ref(catalog, ref, resolution_budget);
-                    if (!target) {
-                        ++result.unresolved_links;
-                        continue;
-                    }
-                    result.relations.push_back(make_entry(source, *target, type));
-                }
-            };
-            append(item.links.relates, RelationType::Relates);
-            append(item.links.blocks, RelationType::Blocks);
-            append(item.links.blocked_by, RelationType::BlockedBy);
+            tasks.push_back(ItemReadTask{&product, path});
         }
+    }
+
+    std::vector<ScannedMetadata> metadata(tasks.size());
+    std::atomic<std::size_t> next_task{0};
+    const auto hardware_threads = static_cast<std::size_t>(std::thread::hardware_concurrency());
+    const std::size_t worker_count = std::min<std::size_t>(
+        tasks.size(), std::min<std::size_t>(16, std::max<std::size_t>(4, hardware_threads)));
+    const auto worker = [&]() {
+        while (true) {
+            const std::size_t index = next_task.fetch_add(1, std::memory_order_relaxed);
+            if (index >= tasks.size()) {
+                return;
+            }
+            const auto& task = tasks[index];
+            auto& scanned = metadata[index];
+            scanned.product = task.product;
+            try {
+                CanonicalStore store(task.product->context.product_root);
+                scanned.item = store.read_metadata(task.path);
+                scanned.valid = true;
+            } catch (...) {
+            }
+        }
+    };
+
+    std::vector<std::future<void>> workers;
+    workers.reserve(worker_count);
+    for (std::size_t index = 0; index < worker_count; ++index) {
+        workers.push_back(std::async(std::launch::async, worker));
+    }
+    for (auto& active_worker : workers) {
+        active_worker.get();
+    }
+
+    result.items_scanned = tasks.size();
+    using EndpointMap = std::map<std::string, std::vector<RelationEndpoint>>;
+    std::map<std::string, EndpointMap> endpoints_by_product_and_id;
+    EndpointMap endpoints_by_uid;
+    for (const auto& scanned : metadata) {
+        if (!scanned.valid) {
+            ++result.unresolved_links;
+            continue;
+        }
+        RelationEndpoint endpoint{scanned.product->name, scanned.item.id, scanned.item.uid};
+        endpoints_by_product_and_id[scanned.product->name][scanned.item.id].push_back(endpoint);
+        endpoints_by_uid[scanned.item.uid].push_back(std::move(endpoint));
+    }
+
+    const auto resolve_stored_ref = [&](const std::string& ref) -> std::optional<RelationEndpoint> {
+        const auto parsed = RefParser::parse(ref);
+        if (!parsed) {
+            return std::nullopt;
+        }
+        const std::vector<RelationEndpoint>* matches = nullptr;
+        if (std::holds_alternative<DisplayIdRef>(*parsed)) {
+            const auto& display = std::get<DisplayIdRef>(*parsed);
+            const auto* product = product_for_prefix(catalog, display.product);
+            if (!product) {
+                return std::nullopt;
+            }
+            const auto product_it = endpoints_by_product_and_id.find(product->name);
+            if (product_it == endpoints_by_product_and_id.end()) {
+                return std::nullopt;
+            }
+            const auto item_it = product_it->second.find(ref);
+            if (item_it != product_it->second.end()) {
+                matches = &item_it->second;
+            }
+        } else if (std::holds_alternative<UuidRef>(*parsed)) {
+            const auto item_it = endpoints_by_uid.find(ref);
+            if (item_it != endpoints_by_uid.end()) {
+                matches = &item_it->second;
+            }
+        }
+        if (!matches || matches->size() != 1) {
+            return std::nullopt;
+        }
+        return matches->front();
+    };
+
+    for (const auto& scanned : metadata) {
+        if (!scanned.valid) {
+            continue;
+        }
+        const RelationEndpoint source{scanned.product->name, scanned.item.id, scanned.item.uid};
+        const auto append = [&](const std::vector<std::string>& refs, RelationType type) {
+            for (const auto& ref : refs) {
+                auto target = resolve_stored_ref(ref);
+                if (!target) {
+                    ++result.unresolved_links;
+                    continue;
+                }
+                result.relations.push_back(make_entry(source, *target, type));
+            }
+        };
+        append(scanned.item.links.relates, RelationType::Relates);
+        append(scanned.item.links.blocks, RelationType::Blocks);
+        append(scanned.item.links.blocked_by, RelationType::BlockedBy);
     }
     return result;
 }

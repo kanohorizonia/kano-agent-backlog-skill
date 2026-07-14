@@ -7,6 +7,7 @@
 #include "kano/backlog_ops/config/config_ops.hpp"
 #include "kano/backlog_ops/doctor/doctor_ops.hpp"
 #include "kano/backlog_ops/integrity/integrity_ops.hpp"
+#include "kano/backlog_ops/relation/relation_ops.hpp"
 #include "kano/backlog_ops/topic/topic_ops.hpp"
 #include "kano/backlog_ops/workset/workset_ops.hpp"
 #include "kano/backlog_core/diagnostics/mutation_timing.hpp"
@@ -245,6 +246,63 @@ std::string json_to_string(const Json::Value& value, bool pretty = true) {
     Json::StreamWriterBuilder builder;
     builder["indentation"] = pretty ? "  " : "";
     return Json::writeString(builder, value);
+}
+
+Json::Value relation_endpoint_json(const RelationEndpoint& endpoint) {
+    Json::Value value(Json::objectValue);
+    value["product"] = endpoint.product;
+    value["item_id"] = endpoint.item_id;
+    value["uid"] = endpoint.uid;
+    return value;
+}
+
+Json::Value relation_entry_json(const RelationEntry& entry) {
+    Json::Value value(Json::objectValue);
+    value["source"] = relation_endpoint_json(entry.source);
+    value["target"] = relation_endpoint_json(entry.target);
+    value["relation_type"] = to_string(entry.relation_type);
+    value["stored_relation_type"] = to_string(entry.stored_relation_type);
+    value["stored_source"] = relation_endpoint_json(entry.stored_source);
+    value["stored_target"] = relation_endpoint_json(entry.stored_target);
+    return value;
+}
+
+Json::Value relation_mutation_json(const RelationMutationResult& result) {
+    Json::Value value(Json::objectValue);
+    value["operation"] = result.operation;
+    value["status"] = result.status;
+    value["applied"] = result.applied;
+    value["changed"] = result.changed;
+    value["already_in_desired_state"] = result.already_in_desired_state;
+    value["worklog_appended"] = result.worklog_appended;
+    value["index_refreshed"] = result.index_refreshed;
+    value["read_after_write"] = result.read_after_write;
+    value["safe_retry"] = result.safe_retry;
+    value["relation"] = relation_entry_json(result.relation);
+    value["products_scanned"] = static_cast<Json::UInt64>(result.products_scanned);
+    value["items_scanned"] = static_cast<Json::UInt64>(result.items_scanned);
+    value["unresolved_links"] = static_cast<Json::UInt64>(result.unresolved_links);
+    value["cycle_path"] = Json::Value(Json::arrayValue);
+    for (const auto& endpoint : result.cycle_path) {
+        value["cycle_path"].append(relation_endpoint_json(endpoint));
+    }
+    return value;
+}
+
+Json::Value relation_list_json(const RelationListResult& result) {
+    Json::Value value(Json::objectValue);
+    value["status"] = "ok";
+    value["item"] = relation_endpoint_json(result.item);
+    value["relations"] = Json::Value(Json::arrayValue);
+    for (const auto& relation : result.relations) {
+        value["relations"].append(relation_entry_json(relation));
+    }
+    value["total_matches"] = static_cast<Json::UInt64>(result.total_matches);
+    value["products_scanned"] = static_cast<Json::UInt64>(result.products_scanned);
+    value["items_scanned"] = static_cast<Json::UInt64>(result.items_scanned);
+    value["unresolved_links"] = static_cast<Json::UInt64>(result.unresolved_links);
+    value["next_cursor"] = result.next_cursor ? Json::Value(*result.next_cursor) : Json::Value(Json::nullValue);
+    return value;
 }
 
 bool is_item_id_token_boundary(char ch) {
@@ -10226,6 +10284,146 @@ int main(int InArgc, char* InArgv[]) {
                 std::cout << json_to_string(response, true) << "\n";
                 if (!response["valid"].asBool()) {
                     throw std::runtime_error("Prefix migration plan is invalid or blocked");
+                }
+            });
+        }
+
+        // ============================================================
+        // relation group
+        // ============================================================
+        {
+            auto* relation_cmd = app.add_subcommand("relation", "Bounded cross-product relation operations");
+
+            struct MutationOptions {
+                std::string source_item;
+                std::string target_item;
+                std::string source_product;
+                std::string target_product;
+                std::string type;
+                std::string agent;
+                std::string model;
+                std::string idempotency_key;
+                std::string format = "json";
+                bool apply = false;
+                std::size_t max_products = 64;
+                std::size_t max_items = 20000;
+            };
+
+            const auto add_mutation_command = [&](const std::string& name, bool add) {
+                auto options = std::make_shared<MutationOptions>();
+                auto* command = relation_cmd->add_subcommand(name, add ? "Add a relation" : "Remove a relation");
+                command->add_option("source_item", options->source_item, "Source display ID or UUIDv7 UID")->required();
+                command->add_option("target_item", options->target_item, "Target display ID or UUIDv7 UID")->required();
+                command->add_option("--source-product", options->source_product, "Source product name or configured prefix")->required();
+                command->add_option("--target-product", options->target_product, "Target product name or configured prefix")->required();
+                command->add_option("--type", options->type, "Relation type: relates|blocks|blocked_by")->required();
+                command->add_option("--agent", options->agent, "Agent ID")->required();
+                command->add_option("--model", options->model, "Optional model ID");
+                command->add_option("--idempotency-key", options->idempotency_key, "Optional retry correlation key");
+                command->add_flag("--apply", options->apply, "Write the relation; defaults to dry-run");
+                command->add_option("--max-products", options->max_products, "Maximum configured products to scan");
+                command->add_option("--max-items", options->max_items, "Maximum backlog items to scan");
+                command->add_option("--format", options->format, "Output format: json|markdown");
+                command->callback([&, options, add]() {
+                    const auto relation_type = parse_relation_type(options->type);
+                    if (!relation_type) {
+                        throw std::runtime_error("type must be one of: relates, blocks, blocked_by");
+                    }
+                    RelationMutationRequest request;
+                    request.start_path = path_str;
+                    request.source_product = options->source_product;
+                    request.source_item = options->source_item;
+                    request.target_product = options->target_product;
+                    request.target_item = options->target_item;
+                    request.relation_type = *relation_type;
+                    request.agent = options->agent;
+                    request.model = options->model.empty() ? std::nullopt : std::optional<std::string>(options->model);
+                    request.idempotency_key = options->idempotency_key.empty()
+                        ? std::nullopt
+                        : std::optional<std::string>(options->idempotency_key);
+                    request.apply = options->apply;
+                    request.max_products = options->max_products;
+                    request.max_items = options->max_items;
+                    const auto result = add ? RelationOps::add(request) : RelationOps::remove(request);
+                    const std::string format = lower_copy(options->format);
+                    if (format == "json") {
+                        std::cout << json_to_string(relation_mutation_json(result), true) << "\n";
+                    } else if (format == "markdown") {
+                        std::cout << "# Relation " << result.operation << "\n\n";
+                        std::cout << "- status: " << result.status << "\n";
+                        std::cout << "- relation: " << to_string(result.relation.relation_type) << "\n";
+                        std::cout << "- source: " << result.relation.source.product << ":" << result.relation.source.item_id << "\n";
+                        std::cout << "- target: " << result.relation.target.product << ":" << result.relation.target.item_id << "\n";
+                        std::cout << "- applied: " << (result.applied ? "true" : "false") << "\n";
+                        std::cout << "- read_after_write: " << (result.read_after_write ? "true" : "false") << "\n";
+                    } else {
+                        throw std::runtime_error("format must be json or markdown");
+                    }
+                });
+            };
+            add_mutation_command("add", true);
+            add_mutation_command("remove", false);
+
+            struct ListOptions {
+                std::string item;
+                std::string product;
+                std::string type;
+                std::string direction = "both";
+                std::string cursor;
+                std::string format = "json";
+                std::size_t limit = 100;
+                std::size_t max_products = 64;
+                std::size_t max_items = 20000;
+            };
+            auto list_options = std::make_shared<ListOptions>();
+            auto* list_cmd = relation_cmd->add_subcommand("list", "List bounded incoming and outgoing relations");
+            list_cmd->add_option("item", list_options->item, "Display ID or UUIDv7 UID")->required();
+            list_cmd->add_option("--product", list_options->product, "Product name or configured prefix")->required();
+            list_cmd->add_option("--type", list_options->type, "Optional relation type: relates|blocks|blocked_by");
+            list_cmd->add_option("--direction", list_options->direction, "Direction: outgoing|incoming|both");
+            list_cmd->add_option("--limit", list_options->limit, "Page size, 1..500");
+            list_cmd->add_option("--cursor", list_options->cursor, "Opaque relation-v1 cursor");
+            list_cmd->add_option("--max-products", list_options->max_products, "Maximum configured products to scan");
+            list_cmd->add_option("--max-items", list_options->max_items, "Maximum backlog items to scan");
+            list_cmd->add_option("--format", list_options->format, "Output format: json|markdown");
+            list_cmd->callback([&, list_options]() {
+                RelationListRequest request;
+                request.start_path = path_str;
+                request.product = list_options->product;
+                request.item = list_options->item;
+                if (!list_options->type.empty()) {
+                    request.relation_type = parse_relation_type(list_options->type);
+                    if (!request.relation_type) {
+                        throw std::runtime_error("type must be one of: relates, blocks, blocked_by");
+                    }
+                }
+                const auto direction = parse_relation_direction(list_options->direction);
+                if (!direction) {
+                    throw std::runtime_error("direction must be one of: outgoing, incoming, both");
+                }
+                request.direction = *direction;
+                request.limit = list_options->limit;
+                request.cursor = list_options->cursor.empty()
+                    ? std::nullopt
+                    : std::optional<std::string>(list_options->cursor);
+                request.max_products = list_options->max_products;
+                request.max_items = list_options->max_items;
+                const auto result = RelationOps::list(request);
+                const std::string format = lower_copy(list_options->format);
+                if (format == "json") {
+                    std::cout << json_to_string(relation_list_json(result), true) << "\n";
+                } else if (format == "markdown") {
+                    std::cout << "# Relations for " << result.item.product << ":" << result.item.item_id << "\n\n";
+                    for (const auto& relation : result.relations) {
+                        std::cout << "- " << to_string(relation.relation_type) << ": "
+                                  << relation.source.product << ":" << relation.source.item_id << " -> "
+                                  << relation.target.product << ":" << relation.target.item_id << "\n";
+                    }
+                    if (result.next_cursor) {
+                        std::cout << "- next_cursor: " << *result.next_cursor << "\n";
+                    }
+                } else {
+                    throw std::runtime_error("format must be json or markdown");
                 }
             });
         }

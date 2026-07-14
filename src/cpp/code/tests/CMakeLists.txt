@@ -43,6 +43,18 @@ set_tests_properties("${KB_TEST_INTEGRITY_OPS}" PROPERTIES
     ENVIRONMENT "CI=true;KANO_BACKLOG_NONINTERACTIVE=1;KANO_TEST_NONINTERACTIVE=1;GIT_TERMINAL_PROMPT=0"
 )
 
+add_executable(relation_ops_smoke_test
+    relation_ops_smoke_test.cpp
+)
+target_compile_features(relation_ops_smoke_test PRIVATE cxx_std_23)
+target_link_libraries(relation_ops_smoke_test PRIVATE kano::backlog_ops)
+set(KB_TEST_RELATION_OPS "[bdd][featured][feature:relation-ops][scenario:KOB-BDD-RELATION-001] Relation operations mutate and query bounded cross-product graphs")
+add_test(NAME "${KB_TEST_RELATION_OPS}" COMMAND relation_ops_smoke_test)
+set_tests_properties("${KB_TEST_RELATION_OPS}" PROPERTIES
+    TIMEOUT 60
+    ENVIRONMENT "CI=true;KANO_BACKLOG_NONINTERACTIVE=1;KANO_TEST_NONINTERACTIVE=1;GIT_TERMINAL_PROMPT=0"
+)
+
 add_executable(topic_ops_smoke_test
     topic_ops_smoke_test.cpp
 )

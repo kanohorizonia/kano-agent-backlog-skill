@@ -8,6 +8,7 @@
 #include "kano/backlog_ops/doctor/doctor_ops.hpp"
 #include "kano/backlog_ops/integrity/integrity_ops.hpp"
 #include "kano/backlog_ops/relation/relation_ops.hpp"
+#include "kano/backlog_ops/migration/migration_ops.hpp"
 #include "kano/backlog_ops/topic/topic_ops.hpp"
 #include "kano/backlog_ops/workset/workset_ops.hpp"
 #include "kano/backlog_core/diagnostics/mutation_timing.hpp"
@@ -10285,6 +10286,64 @@ int main(int InArgc, char* InArgv[]) {
                 if (!response["valid"].asBool()) {
                     throw std::runtime_error("Prefix migration plan is invalid or blocked");
                 }
+            });
+        }
+
+        // ============================================================
+        // migration group
+        // ============================================================
+        {
+            auto* migration_cmd = app.add_subcommand(
+                "migration",
+                "Dry-run-first atomic cross-product migration operations");
+
+            struct MigrationPlanCliOptions {
+                std::string source_product;
+                std::string source_ref;
+                std::string target_product;
+                std::string backlog_root;
+                std::string expected_source_revision;
+                std::string expected_target_prefix;
+                std::size_t max_items = 10000;
+                std::size_t max_artifacts = 50000;
+                bool skip_artifacts = false;
+                bool compact = false;
+            };
+
+            auto options = std::make_shared<MigrationPlanCliOptions>();
+            auto* plan_cmd = migration_cmd->add_subcommand(
+                "plan",
+                "Build an immutable migration preflight plan without writes");
+            plan_cmd->add_option("source_ref", options->source_ref, "Source root display ID or UUIDv7 UID")->required();
+            plan_cmd->add_option("--source-product", options->source_product, "Registered source product slug")->required();
+            plan_cmd->add_option("--target-product", options->target_product, "Registered target product slug")->required();
+            plan_cmd->add_option("--backlog-root", options->backlog_root, "Explicit shared backlog root");
+            plan_cmd->add_option("--expected-source-revision", options->expected_source_revision, "Required source snapshot SHA-256 guard when supplied");
+            plan_cmd->add_option("--expected-target-prefix", options->expected_target_prefix, "Required registered target prefix guard when supplied");
+            plan_cmd->add_option("--max-items", options->max_items, "Maximum source subtree items");
+            plan_cmd->add_option("--max-artifacts", options->max_artifacts, "Maximum owned artifact files");
+            plan_cmd->add_flag("--skip-artifacts", options->skip_artifacts, "Exclude owned artifacts from the plan");
+            plan_cmd->add_flag("--compact", options->compact, "Emit compact JSON");
+            plan_cmd->callback([&, options]() {
+                MigrationOps::PlanOptions plan_options;
+                plan_options.start_path = path_str;
+                if (!options->backlog_root.empty()) {
+                    plan_options.backlog_root = std::filesystem::path(options->backlog_root);
+                }
+                plan_options.request.source_product = options->source_product;
+                plan_options.request.source_ref = options->source_ref;
+                plan_options.request.target_product = options->target_product;
+                plan_options.request.include_owned_artifacts = !options->skip_artifacts;
+                plan_options.request.max_items = options->max_items;
+                plan_options.request.max_artifacts = options->max_artifacts;
+                if (!options->expected_source_revision.empty()) {
+                    plan_options.request.expected_source_revision = options->expected_source_revision;
+                }
+                if (!options->expected_target_prefix.empty()) {
+                    plan_options.request.expected_target_prefix = options->expected_target_prefix;
+                }
+                const auto result = MigrationOps::plan(plan_options);
+                std::cout << result.to_json(!options->compact) << "\n";
             });
         }
 

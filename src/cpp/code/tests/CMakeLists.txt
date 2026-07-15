@@ -55,6 +55,18 @@ set_tests_properties("${KB_TEST_RELATION_OPS}" PROPERTIES
     ENVIRONMENT "CI=true;KANO_BACKLOG_NONINTERACTIVE=1;KANO_TEST_NONINTERACTIVE=1;GIT_TERMINAL_PROMPT=0"
 )
 
+add_executable(migration_ops_smoke_test
+    migration_ops_smoke_test.cpp
+)
+target_compile_features(migration_ops_smoke_test PRIVATE cxx_std_23)
+target_link_libraries(migration_ops_smoke_test PRIVATE kano::backlog_ops)
+set(KB_TEST_MIGRATION_OPS "[bdd][featured][feature:migration-ops][scenario:KOB-BDD-MIGRATION-001] Cross-product migration planning is deterministic and mutation-free")
+add_test(NAME "${KB_TEST_MIGRATION_OPS}" COMMAND migration_ops_smoke_test)
+set_tests_properties("${KB_TEST_MIGRATION_OPS}" PROPERTIES
+    TIMEOUT 60
+    ENVIRONMENT "CI=true;KANO_BACKLOG_NONINTERACTIVE=1;KANO_TEST_NONINTERACTIVE=1;GIT_TERMINAL_PROMPT=0"
+)
+
 add_executable(topic_ops_smoke_test
     topic_ops_smoke_test.cpp
 )

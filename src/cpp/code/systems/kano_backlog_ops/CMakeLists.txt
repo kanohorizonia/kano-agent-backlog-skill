@@ -24,6 +24,8 @@ target_sources(kano_backlog_ops
     integrity/private/integrity_ops.cpp
     relation/public/kano/backlog_ops/relation/relation_ops.hpp
     relation/private/relation_ops.cpp
+    migration/public/kano/backlog_ops/migration/migration_ops.hpp
+    migration/private/migration_ops.cpp
 )
 
 add_library(kano::backlog_ops ALIAS kano_backlog_ops)
@@ -44,6 +46,7 @@ target_include_directories(kano_backlog_ops
       doctor/public
       integrity/public
       relation/public
+      migration/public
     PRIVATE
       workitem/private
       view/private
@@ -56,6 +59,7 @@ target_include_directories(kano_backlog_ops
       doctor/private
       integrity/private
       relation/private
+      migration/private
 )
 
 target_link_libraries(kano_backlog_ops 

@@ -1,0 +1,46 @@
+{
+  "schema": "kob.cross_product_migration.scenarios.v1",
+  "cases": [
+    {
+      "name": "kto_parametric_45_item_subtree",
+      "request": {
+        "schema": "kob.cross_product_migration.request.v1",
+        "source_product": "KanoTamaoProject",
+        "source_ref": "KTO-FTR-PARAMETRIC-ROOT",
+        "target_product": "kano-parametric-geometry-skill",
+        "scope": "subtree",
+        "include_owned_artifacts": true,
+        "max_items": 45,
+        "max_artifacts": 50000,
+        "expected_target_prefix": "KPG"
+      },
+      "fixture_shape": { "root_items": 1, "descendants": 44, "total_items": 45 },
+      "expected_status": "ready",
+      "expected_item_count": 45
+    },
+    {
+      "name": "source_revision_drift",
+      "request_overrides": { "expected_source_revision": "0000000000000000000000000000000000000000000000000000000000000000" },
+      "expected_status": "blocked",
+      "expected_blockers": ["source_revision_mismatch"]
+    },
+    {
+      "name": "unresolved_external_reference_class",
+      "fixture_overrides": { "external_reference_extension": ".unsupported" },
+      "expected_status": "blocked",
+      "expected_blockers": ["unsupported_reference_class"]
+    },
+    {
+      "name": "target_prefix_collision",
+      "fixture_overrides": { "duplicate_prefix": "KPG" },
+      "expected_status": "blocked",
+      "expected_blockers": ["target_prefix_collision"]
+    },
+    {
+      "name": "partial_target_registration",
+      "fixture_overrides": { "target_config_registered": true, "target_scaffold_exists": false },
+      "expected_status": "blocked",
+      "expected_blockers": ["target_product_root_not_found"]
+    }
+  ]
+}

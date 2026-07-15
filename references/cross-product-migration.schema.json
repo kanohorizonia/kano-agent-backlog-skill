@@ -1,0 +1,182 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kano.dev/schemas/backlog/cross-product-migration.v1.json",
+  "title": "Kano Backlog cross-product migration contracts",
+  "oneOf": [
+    { "$ref": "#/$defs/request" },
+    { "$ref": "#/$defs/plan" },
+    { "$ref": "#/$defs/result" },
+    { "$ref": "#/$defs/verification" },
+    { "$ref": "#/$defs/status" },
+    { "$ref": "#/$defs/rollback" }
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "boundedStringArray": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "maxItems": 500000
+    },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "source_product",
+        "source_ref",
+        "target_product",
+        "scope",
+        "include_owned_artifacts",
+        "max_items",
+        "max_artifacts"
+      ],
+      "properties": {
+        "schema": { "const": "kob.cross_product_migration.request.v1" },
+        "source_product": { "type": "string", "minLength": 1 },
+        "source_ref": { "type": "string", "minLength": 1 },
+        "target_product": { "type": "string", "minLength": 1 },
+        "scope": { "const": "subtree" },
+        "include_owned_artifacts": { "type": "boolean" },
+        "max_items": { "type": "integer", "minimum": 1, "maximum": 100000 },
+        "max_artifacts": { "type": "integer", "minimum": 0, "maximum": 500000 },
+        "expected_source_revision": { "$ref": "#/$defs/sha256" },
+        "expected_target_prefix": { "type": "string", "pattern": "^[A-Z][A-Z0-9]{1,15}$" }
+      }
+    },
+    "itemMapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_id", "target_id", "uid", "type", "source_path", "target_path"],
+      "properties": {
+        "source_id": { "type": "string", "minLength": 1 },
+        "target_id": { "type": "string", "minLength": 1 },
+        "uid": { "type": "string", "minLength": 1 },
+        "type": { "enum": ["Initiative", "Epic", "Feature", "UserStory", "Task", "SubTask", "Bug", "Issue"] },
+        "source_path": { "type": "string", "minLength": 1 },
+        "target_path": { "type": "string", "minLength": 1 }
+      }
+    },
+    "artifactMapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner_source_id", "owner_target_id", "source_path", "target_path", "sha256", "size_bytes"],
+      "properties": {
+        "owner_source_id": { "type": "string", "minLength": 1 },
+        "owner_target_id": { "type": "string", "minLength": 1 },
+        "source_path": { "type": "string", "minLength": 1 },
+        "target_path": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "size_bytes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "referenceRewrite": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "reference_class", "source_id", "target_id", "occurrence_count", "external_to_subtree"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "reference_class": { "enum": ["canonical_markdown_reference", "bounded_text_reference"] },
+        "source_id": { "type": "string", "minLength": 1 },
+        "target_id": { "type": "string", "minLength": 1 },
+        "occurrence_count": { "type": "integer", "minimum": 1 },
+        "external_to_subtree": { "type": "boolean" }
+      }
+    },
+    "plan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "status",
+        "request",
+        "source_revision",
+        "target_revision",
+        "source_root_id",
+        "source_root_uid",
+        "target_prefix",
+        "items",
+        "artifacts",
+        "references",
+        "affected_paths",
+        "blockers",
+        "warnings",
+        "plan_hash",
+        "dry_run",
+        "mutates_backlog"
+      ],
+      "properties": {
+        "schema": { "const": "kob.cross_product_migration.plan.v1" },
+        "status": { "enum": ["ready", "blocked"] },
+        "request": { "$ref": "#/$defs/request" },
+        "source_revision": { "anyOf": [{ "$ref": "#/$defs/sha256" }, { "const": "" }] },
+        "target_revision": { "anyOf": [{ "$ref": "#/$defs/sha256" }, { "const": "" }] },
+        "source_root_id": { "type": "string" },
+        "source_root_uid": { "type": "string" },
+        "target_prefix": { "type": "string" },
+        "items": { "type": "array", "items": { "$ref": "#/$defs/itemMapping" }, "maxItems": 100000 },
+        "artifacts": { "type": "array", "items": { "$ref": "#/$defs/artifactMapping" }, "maxItems": 500000 },
+        "references": { "type": "array", "items": { "$ref": "#/$defs/referenceRewrite" }, "maxItems": 500000 },
+        "affected_paths": { "$ref": "#/$defs/boundedStringArray" },
+        "blockers": { "$ref": "#/$defs/boundedStringArray" },
+        "warnings": { "$ref": "#/$defs/boundedStringArray" },
+        "plan_hash": { "$ref": "#/$defs/sha256" },
+        "dry_run": { "const": true },
+        "mutates_backlog": { "const": false }
+      }
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "status", "plan_hash", "changed_paths", "operation_receipts", "recovery_status", "idempotent_replay"],
+      "properties": {
+        "schema": { "const": "kob.cross_product_migration.result.v1" },
+        "status": { "enum": ["applied", "already_applied", "blocked", "rolled_back", "recovery_required"] },
+        "plan_hash": { "$ref": "#/$defs/sha256" },
+        "changed_paths": { "$ref": "#/$defs/boundedStringArray" },
+        "operation_receipts": { "$ref": "#/$defs/boundedStringArray" },
+        "recovery_status": { "enum": ["not_needed", "available", "required", "completed", "failed"] },
+        "idempotent_replay": { "type": "boolean" }
+      }
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "status", "plan_hash", "postconditions", "failures"],
+      "properties": {
+        "schema": { "const": "kob.cross_product_migration.verification.v1" },
+        "status": { "enum": ["verified", "failed", "not_applied"] },
+        "plan_hash": { "$ref": "#/$defs/sha256" },
+        "postconditions": { "$ref": "#/$defs/boundedStringArray" },
+        "failures": { "$ref": "#/$defs/boundedStringArray" }
+      }
+    },
+    "status": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "status", "plan_hash", "recovery_status", "resume_supported", "rollback_supported"],
+      "properties": {
+        "schema": { "const": "kob.cross_product_migration.status.v1" },
+        "status": { "enum": ["planned", "applying", "applied", "verified", "rolled_back", "recovery_required", "unknown"] },
+        "plan_hash": { "$ref": "#/$defs/sha256" },
+        "recovery_status": { "enum": ["not_needed", "available", "required", "completed", "failed"] },
+        "resume_supported": { "type": "boolean" },
+        "rollback_supported": { "type": "boolean" }
+      }
+    },
+    "rollback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "status", "plan_hash", "restored_paths", "failures"],
+      "properties": {
+        "schema": { "const": "kob.cross_product_migration.rollback.v1" },
+        "status": { "enum": ["rolled_back", "not_needed", "failed"] },
+        "plan_hash": { "$ref": "#/$defs/sha256" },
+        "restored_paths": { "$ref": "#/$defs/boundedStringArray" },
+        "failures": { "$ref": "#/$defs/boundedStringArray" }
+      }
+    }
+  }
+}

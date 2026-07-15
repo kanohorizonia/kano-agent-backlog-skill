@@ -1,5 +1,6 @@
 #include "kano/backlog_core/frontmatter/canonical_store.hpp"
 #include "kano/backlog_core/process/noninteractive_errors.hpp"
+#include "kano/backlog_ops/index/backlog_index.hpp"
 #include "kano/backlog_ops/migration/migration_ops.hpp"
 
 #include <algorithm>
@@ -235,6 +236,11 @@ int main() {
             "repeated apply should return a verified idempotent replay receipt");
         expect(MigrationOps::status(recovery_options).status == "applied",
             "status should expose the persisted applied transaction");
+        {
+            kano::backlog_ops::BacklogIndex migrated_index(backlog_root / ".cache" / "index" / "backlog.db");
+            expect(migrated_index.get_path_by_id(observer.id).has_value(),
+                "a newly created shared index should retain unrelated registered-product items");
+        }
 
         auto unconfirmed_rollback_options = recovery_options;
         const auto unconfirmed_rollback = MigrationOps::rollback(unconfirmed_rollback_options);

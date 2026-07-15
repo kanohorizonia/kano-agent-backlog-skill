@@ -1185,7 +1185,8 @@ MigrationResult MigrationOps::apply(const ApplyOptions& options) {
         const auto staged_index = transaction / "index-prebuild.db";
         std::error_code index_cleanup_error;
         std::filesystem::remove(staged_index, index_cleanup_error);
-        if (std::filesystem::is_regular_file(index_path)) {
+        const bool index_existed = std::filesystem::is_regular_file(index_path);
+        if (index_existed) {
             std::filesystem::copy_file(index_path, staged_index, std::filesystem::copy_options::overwrite_existing);
         }
         {
@@ -1195,6 +1196,23 @@ MigrationResult MigrationOps::apply(const ApplyOptions& options) {
             std::unordered_map<std::string, std::string> mapped_ids;
             for (const auto& mapping : current_plan.items) {
                 mapped_ids[mapping.source_id] = mapping.target_id;
+            }
+            if (!index_existed) {
+                for (const auto& product_entry : config->products) {
+                    const auto& product_name = product_entry.first;
+                    const auto product_root = config->resolve_backlog_root(product_name, *config_path);
+                    if (!product_root || !std::filesystem::exists(*product_root)) {
+                        throw std::runtime_error("registered_product_root_missing_during_index_build:" + product_name);
+                    }
+                    CanonicalStore product_store(*product_root);
+                    for (const auto& item_path : product_store.list_items()) {
+                        auto item = product_store.read(item_path);
+                        if (product_name == current_plan.request.source_product && mapped_ids.contains(item.id)) {
+                            continue;
+                        }
+                        index.index_item(item);
+                    }
+                }
             }
             for (const auto& mapping : current_plan.items) {
                 auto item = source_store.read(backlog_root / mapping.source_path);

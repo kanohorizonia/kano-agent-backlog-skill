@@ -2,6 +2,7 @@
 
 #include "kano/backlog_core/config/config.hpp"
 #include "kano/backlog_core/frontmatter/canonical_store.hpp"
+#include "kano/backlog_ops/index/backlog_index.hpp"
 
 #include <json/json.h>
 
@@ -277,17 +278,59 @@ std::string type_code(ItemType type) {
     throw std::runtime_error("Unsupported migration item type");
 }
 
-std::size_t count_occurrences(const std::string& content, const std::string& value) {
-    if (value.empty()) {
-        return 0;
-    }
-    std::size_t count = 0;
+std::unordered_map<std::string, std::size_t> mapped_id_occurrences(
+    const std::string& content,
+    const std::unordered_map<std::string, std::string>& id_mapping
+) {
+    const auto is_id_character = [](unsigned char ch) {
+        return std::isalnum(ch) || ch == '-' || ch == '_';
+    };
+    std::unordered_map<std::string, std::size_t> occurrences;
     std::size_t offset = 0;
-    while ((offset = content.find(value, offset)) != std::string::npos) {
-        ++count;
-        offset += value.size();
+    while (offset < content.size()) {
+        if (!is_id_character(static_cast<unsigned char>(content[offset]))) {
+            ++offset;
+            continue;
+        }
+        const auto begin = offset;
+        while (offset < content.size() && is_id_character(static_cast<unsigned char>(content[offset]))) {
+            ++offset;
+        }
+        const auto token = content.substr(begin, offset - begin);
+        if (id_mapping.contains(token)) {
+            ++occurrences[token];
+        }
     }
-    return count;
+    return occurrences;
+}
+
+std::string replace_migration_ids(
+    std::string content,
+    const std::unordered_map<std::string, std::string>& id_mapping
+) {
+    const auto is_id_character = [](unsigned char ch) {
+        return std::isalnum(ch) || ch == '-' || ch == '_';
+    };
+    std::string rewritten;
+    rewritten.reserve(content.size());
+    std::size_t offset = 0;
+    while (offset < content.size()) {
+        if (!is_id_character(static_cast<unsigned char>(content[offset]))) {
+            rewritten.push_back(content[offset++]);
+            continue;
+        }
+        const auto begin = offset;
+        while (offset < content.size() && is_id_character(static_cast<unsigned char>(content[offset]))) {
+            ++offset;
+        }
+        const auto token = content.substr(begin, offset - begin);
+        if (const auto mapping = id_mapping.find(token); mapping != id_mapping.end()) {
+            rewritten += mapping->second;
+        } else {
+            rewritten += token;
+        }
+    }
+    return rewritten;
 }
 
 bool is_supported_text_reference(const std::filesystem::path& path) {
@@ -337,6 +380,196 @@ std::filesystem::path resolve_backlog_root(
 void sort_unique(std::vector<std::string>& values) {
     std::sort(values.begin(), values.end());
     values.erase(std::unique(values.begin(), values.end()), values.end());
+}
+
+bool is_sha256(const std::string& value) {
+    return value.size() == 64 && std::all_of(value.begin(), value.end(), [](unsigned char ch) {
+        return std::isdigit(ch) || (ch >= 'a' && ch <= 'f');
+    });
+}
+
+Json::Value parse_json(const std::string& content) {
+    Json::CharReaderBuilder builder;
+    builder["collectComments"] = false;
+    Json::Value value;
+    std::string errors;
+    std::istringstream input(content);
+    if (!Json::parseFromStream(builder, input, &value, &errors)) {
+        throw std::runtime_error("Invalid migration journal JSON: " + errors);
+    }
+    return value;
+}
+
+void write_file_atomic(const std::filesystem::path& path, const std::string& content) {
+    std::filesystem::create_directories(path.parent_path());
+    auto temporary = path;
+    temporary += ".kob-migration.tmp";
+    {
+        std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
+        if (!output.is_open()) {
+            throw std::runtime_error("Unable to stage migration output: " + temporary.generic_string());
+        }
+        output.write(content.data(), static_cast<std::streamsize>(content.size()));
+        if (!output.good()) {
+            throw std::runtime_error("Unable to write migration output: " + temporary.generic_string());
+        }
+    }
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+    ec.clear();
+    std::filesystem::rename(temporary, path, ec);
+    if (ec) {
+        std::filesystem::remove(temporary);
+        throw std::runtime_error("Unable to publish migration output: " + path.generic_string() + ":" + ec.message());
+    }
+}
+
+struct MigrationFileOperation {
+    std::string path;
+    std::string kind;
+    bool before_exists = false;
+    std::string before_sha256;
+    bool after_exists = false;
+    std::string after_sha256;
+    std::string backup_path;
+    std::string stage_path;
+    std::optional<std::string> after_content;
+};
+
+Json::Value operation_json(const MigrationFileOperation& operation) {
+    Json::Value value(Json::objectValue);
+    value["path"] = operation.path;
+    value["kind"] = operation.kind;
+    value["before_exists"] = operation.before_exists;
+    value["before_sha256"] = operation.before_sha256;
+    value["after_exists"] = operation.after_exists;
+    value["after_sha256"] = operation.after_sha256;
+    value["backup_path"] = operation.backup_path;
+    value["stage_path"] = operation.stage_path;
+    return value;
+}
+
+MigrationFileOperation operation_from_json(const Json::Value& value) {
+    MigrationFileOperation operation;
+    operation.path = value["path"].asString();
+    operation.kind = value["kind"].asString();
+    operation.before_exists = value["before_exists"].asBool();
+    operation.before_sha256 = value["before_sha256"].asString();
+    operation.after_exists = value["after_exists"].asBool();
+    operation.after_sha256 = value["after_sha256"].asString();
+    operation.backup_path = value["backup_path"].asString();
+    operation.stage_path = value["stage_path"].asString();
+    return operation;
+}
+
+std::filesystem::path transaction_root(const std::filesystem::path& backlog_root, const std::string& plan_hash) {
+    if (!is_sha256(plan_hash)) {
+        throw std::runtime_error("invalid_plan_hash");
+    }
+    return backlog_root / ".cache" / "migrations" / plan_hash;
+}
+
+std::filesystem::path resolve_recovery_backlog_root(
+    const kano::backlog_ops::MigrationOps::RecoveryOptions& options
+) {
+    if (options.backlog_root) {
+        return normalized_absolute(*options.backlog_root);
+    }
+    const auto config_path = ConfigLoader::find_project_config(normalized_absolute(options.start_path));
+    if (!config_path) {
+        throw std::runtime_error("project_config_not_found");
+    }
+    const auto project_root = ConfigLoader::resolve_project_root(*config_path);
+    if (!project_root) {
+        throw std::runtime_error("project_root_not_found");
+    }
+    return normalized_absolute(*project_root / "_kano" / "backlog");
+}
+
+Json::Value load_journal(const std::filesystem::path& transaction) {
+    const auto path = transaction / "journal.json";
+    if (!std::filesystem::is_regular_file(path)) {
+        throw std::runtime_error("migration_journal_not_found");
+    }
+    const auto journal = parse_json(read_file(path));
+    if (journal["schema"].asString() != "kob.cross_product_migration.journal.v1") {
+        throw std::runtime_error("unsupported_migration_journal_schema");
+    }
+    return journal;
+}
+
+void write_journal(const std::filesystem::path& transaction, const Json::Value& journal) {
+    write_file_atomic(transaction / "journal.json", json_string(journal, true));
+}
+
+bool file_matches(
+    const std::filesystem::path& path,
+    bool expected_exists,
+    const std::string& expected_sha256
+) {
+    if (!expected_exists) {
+        return !std::filesystem::exists(path);
+    }
+    return std::filesystem::is_regular_file(path) && sha256_hex(read_file(path)) == expected_sha256;
+}
+
+std::vector<MigrationFileOperation> journal_operations(const Json::Value& journal) {
+    std::vector<MigrationFileOperation> operations;
+    for (const auto& value : journal["operations"]) {
+        operations.push_back(operation_from_json(value));
+    }
+    return operations;
+}
+
+std::vector<std::string> restore_before_state(
+    const std::filesystem::path& backlog_root,
+    const std::filesystem::path& transaction,
+    const std::vector<MigrationFileOperation>& operations,
+    std::vector<std::string>& failures
+) {
+    std::vector<std::string> restored;
+    for (const auto& operation : operations) {
+        const auto path = backlog_root / operation.path;
+        const bool before = file_matches(path, operation.before_exists, operation.before_sha256);
+        const bool after = file_matches(path, operation.after_exists, operation.after_sha256);
+        if (!before && !after) {
+            failures.push_back("rollback_drift:" + operation.path);
+        }
+    }
+    if (!failures.empty()) {
+        return restored;
+    }
+    for (auto it = operations.rbegin(); it != operations.rend(); ++it) {
+        const auto path = backlog_root / it->path;
+        try {
+            if (it->before_exists) {
+                const auto backup = transaction / it->backup_path;
+                if (!file_matches(backup, true, it->before_sha256)) {
+                    failures.push_back("backup_hash_mismatch:" + it->path);
+                    continue;
+                }
+                write_file_atomic(path, read_file(backup));
+            } else {
+                std::error_code ec;
+                std::filesystem::remove(path, ec);
+                if (ec) {
+                    failures.push_back("remove_failed:" + it->path + ":" + ec.message());
+                    continue;
+                }
+            }
+            restored.push_back(it->path);
+        } catch (const std::exception& error) {
+            failures.push_back("restore_failed:" + it->path + ":" + error.what());
+        }
+    }
+    for (const auto& operation : operations) {
+        if (!file_matches(backlog_root / operation.path, operation.before_exists, operation.before_sha256)) {
+            failures.push_back("restore_verification_failed:" + operation.path);
+        }
+    }
+    sort_unique(restored);
+    sort_unique(failures);
+    return restored;
 }
 
 } // namespace
@@ -499,10 +732,69 @@ MigrationPlan MigrationOps::plan(const PlanOptions& options) {
         CanonicalStore source_store(source_root);
         CanonicalStore target_store(target_root);
         std::vector<BacklogItem> source_items;
-        std::vector<std::filesystem::path> source_item_paths;
         for (const auto& path : source_store.list_items()) {
             source_items.push_back(source_store.read_metadata(path));
-            source_item_paths.push_back(path);
+        }
+
+        std::unordered_map<std::string, std::size_t> source_id_counts;
+        std::unordered_map<std::string, std::size_t> source_uid_counts;
+        std::unordered_map<std::string, std::string> source_uid_to_id;
+        std::unordered_set<std::string> source_ids;
+        for (const auto& item : source_items) {
+            ++source_id_counts[item.id];
+            ++source_uid_counts[item.uid];
+            source_uid_to_id.emplace(item.uid, item.id);
+            source_ids.insert(item.id);
+        }
+        for (const auto& [id, count] : source_id_counts) {
+            if (count != 1) {
+                plan.blockers.push_back("duplicate_source_id:" + id);
+            }
+        }
+        for (const auto& [uid, count] : source_uid_counts) {
+            if (uid.empty() || count != 1) {
+                plan.blockers.push_back("duplicate_source_uid:" + uid);
+            }
+        }
+
+        std::unordered_map<std::string, std::string> parent_by_id;
+        for (const auto& item : source_items) {
+            if (!item.parent) {
+                continue;
+            }
+            std::string parent_id = *item.parent;
+            if (const auto uid_it = source_uid_to_id.find(parent_id); uid_it != source_uid_to_id.end()) {
+                parent_id = uid_it->second;
+            }
+            if (!source_ids.contains(parent_id)) {
+                plan.blockers.push_back("missing_parent:" + item.id + ":" + *item.parent);
+                continue;
+            }
+            parent_by_id[item.id] = parent_id;
+        }
+        std::unordered_map<std::string, int> visit_state;
+        for (const auto& item : source_items) {
+            if (visit_state[item.id] == 2) {
+                continue;
+            }
+            std::vector<std::string> chain;
+            std::string current = item.id;
+            while (visit_state[current] != 2) {
+                if (visit_state[current] == 1) {
+                    plan.blockers.push_back("hierarchy_cycle:" + current);
+                    break;
+                }
+                visit_state[current] = 1;
+                chain.push_back(current);
+                const auto parent = parent_by_id.find(current);
+                if (parent == parent_by_id.end()) {
+                    break;
+                }
+                current = parent->second;
+            }
+            for (const auto& visited : chain) {
+                visit_state[visited] = 2;
+            }
         }
 
         std::vector<std::size_t> root_matches;
@@ -542,6 +834,16 @@ MigrationPlan MigrationOps::plan(const PlanOptions& options) {
             }
         }
 
+        if (root_item.parent) {
+            std::string parent_id = *root_item.parent;
+            if (const auto uid_it = source_uid_to_id.find(parent_id); uid_it != source_uid_to_id.end()) {
+                parent_id = uid_it->second;
+            }
+            if (!selected_ids.contains(parent_id)) {
+                plan.blockers.push_back("source_root_parent_outside_subtree:" + *root_item.parent);
+            }
+        }
+
         if (selected_ids.size() > options.request.max_items) {
             plan.blockers.push_back("item_limit_exceeded");
         }
@@ -558,12 +860,26 @@ MigrationPlan MigrationOps::plan(const PlanOptions& options) {
 
         std::set<std::string> target_ids;
         std::set<std::string> target_uids;
+        std::unordered_map<std::string, std::size_t> target_id_counts;
+        std::unordered_map<std::string, std::size_t> target_uid_counts;
         std::vector<std::filesystem::path> target_snapshot_paths;
         for (const auto& path : target_store.list_items()) {
             const auto item = target_store.read_metadata(path);
             target_ids.insert(item.id);
             target_uids.insert(item.uid);
+            ++target_id_counts[item.id];
+            ++target_uid_counts[item.uid];
             target_snapshot_paths.push_back(path);
+        }
+        for (const auto& [id, count] : target_id_counts) {
+            if (count != 1) {
+                plan.blockers.push_back("duplicate_target_id:" + id);
+            }
+        }
+        for (const auto& [uid, count] : target_uid_counts) {
+            if (uid.empty() || count != 1) {
+                plan.blockers.push_back("duplicate_target_uid:" + uid);
+            }
         }
 
         std::map<ItemType, int> next_numbers;
@@ -635,6 +951,8 @@ MigrationPlan MigrationOps::plan(const PlanOptions& options) {
         }
 
         const auto products_root = backlog_root / "products";
+        constexpr std::size_t kMaxReferenceRewrites = 500000;
+        bool reference_limit_reached = false;
         for (const auto& path : regular_files_under(products_root)) {
             const auto rel = std::filesystem::relative(path, backlog_root);
             if (is_derived_or_internal_path(rel)) {
@@ -646,26 +964,31 @@ MigrationPlan MigrationOps::plan(const PlanOptions& options) {
                 continue;
             }
             const auto content = read_file(path);
-            for (const auto& mapping : plan.items) {
-                const auto occurrences = count_occurrences(content, mapping.source_id);
-                if (occurrences == 0) {
-                    continue;
-                }
+            const auto occurrences_by_id = mapped_id_occurrences(content, id_mapping);
+            for (const auto& [source_id, occurrences] : occurrences_by_id) {
                 const auto rel_string = relative_path(path, backlog_root);
                 source_snapshot_paths.push_back(path);
                 if (!is_supported_text_reference(path)) {
                     plan.blockers.push_back("unsupported_reference_class:" + rel_string);
                     continue;
                 }
+                if (plan.references.size() >= kMaxReferenceRewrites) {
+                    plan.blockers.push_back("reference_rewrite_limit_exceeded");
+                    reference_limit_reached = true;
+                    break;
+                }
                 plan.references.push_back(MigrationReferenceRewrite{
                     rel_string,
                     path.extension() == ".md" ? "canonical_markdown_reference" : "bounded_text_reference",
-                    mapping.source_id,
-                    mapping.target_id,
+                    source_id,
+                    id_mapping.at(source_id),
                     occurrences,
                     !selected_source_paths.contains(rel_string),
                 });
                 plan.affected_paths.push_back(rel_string);
+            }
+            if (reference_limit_reached) {
+                break;
             }
         }
         std::sort(plan.references.begin(), plan.references.end(), [](const auto& left, const auto& right) {
@@ -683,6 +1006,9 @@ MigrationPlan MigrationOps::plan(const PlanOptions& options) {
         }
 
         sort_unique(plan.affected_paths);
+        if (plan.affected_paths.size() > 500000) {
+            plan.blockers.push_back("affected_path_limit_exceeded");
+        }
         sort_unique(plan.blockers);
         sort_unique(plan.warnings);
         plan.status = plan.blockers.empty() ? "ready" : "blocked";
@@ -694,6 +1020,581 @@ MigrationPlan MigrationOps::plan(const PlanOptions& options) {
         plan.status = "blocked";
         plan.plan_hash = sha256_hex(json_string(plan_json(plan, false), false));
         return plan;
+    }
+}
+
+MigrationResult MigrationOps::apply(const ApplyOptions& options) {
+    MigrationResult result;
+    result.plan_hash = options.expected_plan_hash;
+    result.status = "blocked";
+    result.recovery_status = "not_needed";
+    if (!options.confirm) {
+        result.operation_receipts.push_back("confirm_required");
+        return result;
+    }
+    if (!is_sha256(options.expected_plan_hash)) {
+        result.operation_receipts.push_back("invalid_plan_hash");
+        return result;
+    }
+
+    RecoveryOptions recovery_options{
+        .start_path = options.plan.start_path,
+        .backlog_root = options.plan.backlog_root,
+        .plan_hash = options.expected_plan_hash,
+        .confirm = false,
+    };
+
+    std::filesystem::path backlog_root;
+    std::filesystem::path transaction;
+    try {
+        backlog_root = resolve_recovery_backlog_root(recovery_options);
+        transaction = transaction_root(backlog_root, options.expected_plan_hash);
+        if (std::filesystem::is_regular_file(transaction / "journal.json")) {
+            const auto existing = load_journal(transaction);
+            const auto existing_status = existing["status"].asString();
+            if (existing_status == "applied") {
+                const auto verification = verify(recovery_options);
+                if (verification.status == "verified") {
+                    result.status = "already_applied";
+                    result.recovery_status = "available";
+                    result.idempotent_replay = true;
+                    result.operation_receipts.push_back("verified_existing_transaction");
+                    return result;
+                }
+                result.status = "recovery_required";
+                result.recovery_status = "required";
+                result.operation_receipts.push_back("applied_transaction_failed_verification");
+                return result;
+            }
+            if (existing_status != "rolled_back") {
+                result.status = "recovery_required";
+                result.recovery_status = "required";
+                result.operation_receipts.push_back("incomplete_transaction_requires_rollback");
+                return result;
+            }
+        }
+
+        const auto current_plan = plan(options.plan);
+        if (!current_plan.ready()) {
+            result.operation_receipts.push_back("plan_not_ready");
+            result.operation_receipts.insert(
+                result.operation_receipts.end(), current_plan.blockers.begin(), current_plan.blockers.end());
+            sort_unique(result.operation_receipts);
+            return result;
+        }
+        if (current_plan.plan_hash != options.expected_plan_hash) {
+            result.operation_receipts.push_back("plan_hash_mismatch:" + current_plan.plan_hash);
+            return result;
+        }
+
+        const auto config_path = ConfigLoader::find_project_config(normalized_absolute(options.plan.start_path));
+        if (!config_path) {
+            result.operation_receipts.push_back("project_config_not_found");
+            return result;
+        }
+        const auto config = ProjectConfig::load_from_toml(*config_path);
+        if (!config) {
+            result.operation_receipts.push_back("project_config_invalid");
+            return result;
+        }
+        const auto target_root_opt = config->resolve_backlog_root(current_plan.request.target_product, *config_path);
+        const auto source_root_opt = config->resolve_backlog_root(current_plan.request.source_product, *config_path);
+        if (!target_root_opt || !source_root_opt) {
+            result.operation_receipts.push_back("source_or_target_product_root_not_found");
+            return result;
+        }
+        const auto target_root = normalized_absolute(*target_root_opt);
+        const auto source_root = normalized_absolute(*source_root_opt);
+
+        std::map<std::string, MigrationFileOperation> pending;
+        const auto add_pending = [&](const std::string& path, const std::string& kind, std::optional<std::string> content) {
+            if (path.empty() || path == "." || path.starts_with("../") || std::filesystem::path(path).is_absolute()) {
+                throw std::runtime_error("unsafe_operation_path:" + path);
+            }
+            auto [it, inserted] = pending.emplace(path, MigrationFileOperation{});
+            if (!inserted) {
+                if (it->second.after_content != content) {
+                    throw std::runtime_error("conflicting_operation:" + path);
+                }
+                return;
+            }
+            it->second.path = path;
+            it->second.kind = kind;
+            it->second.after_content = std::move(content);
+        };
+
+        std::unordered_set<std::string> retired_paths;
+        std::unordered_map<std::string, std::string> migration_id_mapping;
+        for (const auto& mapping : current_plan.items) {
+            migration_id_mapping[mapping.source_id] = mapping.target_id;
+        }
+        for (const auto& mapping : current_plan.items) {
+            const auto source_content = read_file(backlog_root / mapping.source_path);
+            add_pending(mapping.target_path, "target_item", replace_migration_ids(source_content, migration_id_mapping));
+            add_pending(mapping.source_path, "retired_source_item", std::nullopt);
+            retired_paths.insert(mapping.source_path);
+        }
+        for (const auto& mapping : current_plan.artifacts) {
+            auto content = read_file(backlog_root / mapping.source_path);
+            if (is_supported_text_reference(mapping.source_path)) {
+                content = replace_migration_ids(std::move(content), migration_id_mapping);
+            }
+            add_pending(mapping.target_path, "target_artifact", std::move(content));
+            add_pending(mapping.source_path, "retired_source_artifact", std::nullopt);
+            retired_paths.insert(mapping.source_path);
+        }
+
+        std::map<std::string, std::string> rewritten_references;
+        for (const auto& rewrite : current_plan.references) {
+            if (retired_paths.contains(rewrite.path)) {
+                continue;
+            }
+            if (!rewritten_references.contains(rewrite.path)) {
+                rewritten_references.emplace(rewrite.path, read_file(backlog_root / rewrite.path));
+            }
+        }
+        for (auto& [path, content] : rewritten_references) {
+            add_pending(path, "external_reference", replace_migration_ids(std::move(content), migration_id_mapping));
+        }
+
+        Json::Value aliases(Json::objectValue);
+        aliases["schema"] = "kob.cross_product_migration.aliases.v1";
+        aliases["plan_hash"] = current_plan.plan_hash;
+        aliases["source_product"] = current_plan.request.source_product;
+        aliases["target_product"] = current_plan.request.target_product;
+        aliases["source_revision"] = current_plan.source_revision;
+        aliases["target_revision"] = current_plan.target_revision;
+        Json::Value alias_mappings(Json::arrayValue);
+        for (const auto& mapping : current_plan.items) {
+            Json::Value value(Json::objectValue);
+            value["source_id"] = mapping.source_id;
+            value["target_id"] = mapping.target_id;
+            value["uid"] = mapping.uid;
+            alias_mappings.append(value);
+        }
+        aliases["mappings"] = alias_mappings;
+        const auto alias_path = target_root / "_meta" / "migrations" / (current_plan.plan_hash + ".json");
+        add_pending(relative_path(alias_path, backlog_root), "alias_metadata", json_string(aliases, true));
+
+        const auto index_path = backlog_root / ".cache" / "index" / "backlog.db";
+        if (std::filesystem::exists(index_path.string() + "-wal") ||
+            std::filesystem::exists(index_path.string() + "-shm")) {
+            throw std::runtime_error("backlog_index_busy");
+        }
+        std::filesystem::create_directories(transaction);
+        const auto staged_index = transaction / "index-prebuild.db";
+        std::error_code index_cleanup_error;
+        std::filesystem::remove(staged_index, index_cleanup_error);
+        if (std::filesystem::is_regular_file(index_path)) {
+            std::filesystem::copy_file(index_path, staged_index, std::filesystem::copy_options::overwrite_existing);
+        }
+        {
+            BacklogIndex index(staged_index);
+            index.initialize();
+            CanonicalStore source_store(source_root);
+            std::unordered_map<std::string, std::string> mapped_ids;
+            for (const auto& mapping : current_plan.items) {
+                mapped_ids[mapping.source_id] = mapping.target_id;
+            }
+            for (const auto& mapping : current_plan.items) {
+                auto item = source_store.read(backlog_root / mapping.source_path);
+                index.remove_item(mapping.source_id);
+                item.id = mapping.target_id;
+                item.file_path = backlog_root / mapping.target_path;
+                if (item.duplicate_of) {
+                    if (const auto mapped = mapped_ids.find(*item.duplicate_of); mapped != mapped_ids.end()) {
+                        item.duplicate_of = mapped->second;
+                    }
+                }
+                index.index_item(item);
+                const auto separator = mapping.target_id.rfind('-');
+                if (separator == std::string::npos) {
+                    throw std::runtime_error("invalid_target_id:" + mapping.target_id);
+                }
+                index.ensure_sequence_at_least(
+                    current_plan.target_prefix,
+                    type_code(mapping.type),
+                    std::stoi(mapping.target_id.substr(separator + 1)));
+            }
+        }
+        add_pending(
+            relative_path(index_path, backlog_root),
+            "derived_index",
+            read_file(staged_index));
+        std::filesystem::remove(staged_index, index_cleanup_error);
+
+        std::error_code cleanup_error;
+        std::filesystem::remove_all(transaction / "backup", cleanup_error);
+        cleanup_error.clear();
+        std::filesystem::remove_all(transaction / "stage", cleanup_error);
+        std::filesystem::create_directories(transaction / "backup");
+        std::filesystem::create_directories(transaction / "stage");
+
+        std::vector<MigrationFileOperation> operations;
+        operations.reserve(pending.size());
+        std::size_t operation_index = 0;
+        for (auto& [path, operation] : pending) {
+            const auto absolute_path = backlog_root / path;
+            if (std::filesystem::exists(absolute_path) && !std::filesystem::is_regular_file(absolute_path)) {
+                throw std::runtime_error("operation_path_not_regular_file:" + path);
+            }
+            operation.before_exists = std::filesystem::is_regular_file(absolute_path);
+            if ((operation.kind == "target_item" ||
+                 operation.kind == "target_artifact" ||
+                 operation.kind == "alias_metadata") && operation.before_exists) {
+                throw std::runtime_error("target_path_collision:" + path);
+            }
+            if ((operation.kind == "retired_source_item" ||
+                 operation.kind == "retired_source_artifact" ||
+                 operation.kind == "external_reference") && !operation.before_exists) {
+                throw std::runtime_error("required_source_path_missing:" + path);
+            }
+            if (operation.before_exists) {
+                const auto content = read_file(absolute_path);
+                operation.before_sha256 = sha256_hex(content);
+                std::ostringstream backup_name;
+                backup_name << "backup/" << std::setw(8) << std::setfill('0') << operation_index << ".bin";
+                operation.backup_path = backup_name.str();
+                write_file_atomic(transaction / operation.backup_path, content);
+            }
+            operation.after_exists = operation.after_content.has_value();
+            if (operation.after_content) {
+                operation.after_sha256 = sha256_hex(*operation.after_content);
+                std::ostringstream stage_name;
+                stage_name << "stage/" << std::setw(8) << std::setfill('0') << operation_index << ".bin";
+                operation.stage_path = stage_name.str();
+                write_file_atomic(transaction / operation.stage_path, *operation.after_content);
+                if (!file_matches(transaction / operation.stage_path, true, operation.after_sha256)) {
+                    throw std::runtime_error("stage_hash_mismatch:" + path);
+                }
+            }
+            operations.push_back(operation);
+            ++operation_index;
+        }
+
+        Json::Value journal(Json::objectValue);
+        journal["schema"] = "kob.cross_product_migration.journal.v1";
+        journal["status"] = "prepared";
+        journal["plan_hash"] = current_plan.plan_hash;
+        journal["plan"] = parse_json(current_plan.to_json(false));
+        Json::Value operation_values(Json::arrayValue);
+        for (const auto& operation : operations) {
+            operation_values.append(operation_json(operation));
+        }
+        journal["operations"] = operation_values;
+        write_journal(transaction, journal);
+
+        const auto inject = [&](const std::string& phase) {
+            if (options.inject_failure_after && *options.inject_failure_after == phase) {
+                throw std::runtime_error("injected_failure:" + phase);
+            }
+        };
+        inject("after_stage");
+
+        for (const auto& operation : operations) {
+            if (!file_matches(backlog_root / operation.path, operation.before_exists, operation.before_sha256)) {
+                throw std::runtime_error("concurrent_drift_before_apply:" + operation.path);
+            }
+        }
+
+        const auto publish_kind = [&](const std::string& kind) {
+            for (const auto& operation : operations) {
+                if (operation.kind != kind || !operation.after_exists) {
+                    continue;
+                }
+                if (!file_matches(backlog_root / operation.path, operation.before_exists, operation.before_sha256)) {
+                    throw std::runtime_error("concurrent_drift_before_publish:" + operation.path);
+                }
+                write_file_atomic(backlog_root / operation.path, read_file(transaction / operation.stage_path));
+            }
+        };
+        publish_kind("target_item");
+        publish_kind("target_artifact");
+        publish_kind("alias_metadata");
+        inject("after_target_publish");
+
+        publish_kind("external_reference");
+        inject("after_reference_rewrite");
+
+        for (const auto& operation : operations) {
+            if (operation.after_exists) {
+                continue;
+            }
+            if (!file_matches(backlog_root / operation.path, operation.before_exists, operation.before_sha256)) {
+                throw std::runtime_error("concurrent_drift_before_retire:" + operation.path);
+            }
+            std::error_code remove_error;
+            std::filesystem::remove(backlog_root / operation.path, remove_error);
+            if (remove_error) {
+                throw std::runtime_error("source_retire_failed:" + operation.path + ":" + remove_error.message());
+            }
+        }
+        publish_kind("derived_index");
+        inject("after_source_retire");
+
+        for (const auto& operation : operations) {
+            if (!file_matches(backlog_root / operation.path, operation.after_exists, operation.after_sha256)) {
+                throw std::runtime_error("post_write_hash_mismatch:" + operation.path);
+            }
+            result.changed_paths.push_back(operation.path);
+        }
+        sort_unique(result.changed_paths);
+        journal["status"] = "applied";
+        write_journal(transaction, journal);
+
+        const auto verification = verify(recovery_options);
+        if (verification.status != "verified") {
+            throw std::runtime_error("postcondition_verification_failed");
+        }
+        result.status = "applied";
+        result.recovery_status = "available";
+        result.operation_receipts = {
+            "staged_outputs_verified",
+            "target_subtree_published",
+            "external_references_rewritten",
+            "source_subtree_retired",
+            "postconditions_verified",
+        };
+        return result;
+    } catch (const std::exception& error) {
+        result.operation_receipts.push_back(error.what());
+        if (!transaction.empty() && std::filesystem::is_regular_file(transaction / "journal.json")) {
+            try {
+                auto journal = load_journal(transaction);
+                auto operations = journal_operations(journal);
+                std::vector<std::string> failures;
+                const auto restored = restore_before_state(backlog_root, transaction, operations, failures);
+                result.changed_paths = restored;
+                if (failures.empty()) {
+                    journal["status"] = "rolled_back";
+                    journal["last_error"] = error.what();
+                    write_journal(transaction, journal);
+                    result.status = "rolled_back";
+                    result.recovery_status = "completed";
+                    result.operation_receipts.push_back("automatic_rollback_completed");
+                } else {
+                    journal["status"] = "recovery_required";
+                    journal["last_error"] = error.what();
+                    write_journal(transaction, journal);
+                    result.status = "recovery_required";
+                    result.recovery_status = "required";
+                    result.operation_receipts.insert(
+                        result.operation_receipts.end(), failures.begin(), failures.end());
+                }
+            } catch (const std::exception& recovery_error) {
+                result.status = "recovery_required";
+                result.recovery_status = "required";
+                result.operation_receipts.push_back("automatic_rollback_failed:" + std::string(recovery_error.what()));
+            }
+        }
+        sort_unique(result.operation_receipts);
+        return result;
+    }
+}
+
+MigrationVerification MigrationOps::verify(const RecoveryOptions& options) {
+    MigrationVerification verification;
+    verification.plan_hash = options.plan_hash;
+    verification.status = "not_applied";
+    try {
+        const auto backlog_root = resolve_recovery_backlog_root(options);
+        const auto transaction = transaction_root(backlog_root, options.plan_hash);
+        const auto journal = load_journal(transaction);
+        if (journal["plan_hash"].asString() != options.plan_hash) {
+            verification.failures.push_back("journal_plan_hash_mismatch");
+            verification.status = "failed";
+            return verification;
+        }
+        if (journal["status"].asString() != "applied") {
+            verification.failures.push_back("migration_not_applied:" + journal["status"].asString());
+            return verification;
+        }
+
+        const auto operations = journal_operations(journal);
+        for (const auto& operation : operations) {
+            if (!file_matches(backlog_root / operation.path, operation.after_exists, operation.after_sha256)) {
+                verification.failures.push_back("operation_postcondition_failed:" + operation.path);
+            }
+        }
+        if (verification.failures.empty()) {
+            verification.postconditions.push_back("journal_file_hashes_match");
+        }
+
+        const auto& plan_value = journal["plan"];
+        const auto config_path = ConfigLoader::find_project_config(normalized_absolute(options.start_path));
+        if (!config_path) {
+            verification.failures.push_back("project_config_not_found");
+        } else if (const auto config = ProjectConfig::load_from_toml(*config_path)) {
+            const auto target_product = plan_value["request"]["target_product"].asString();
+            const auto target_root = config->resolve_backlog_root(target_product, *config_path);
+            if (!target_root) {
+                verification.failures.push_back("target_product_root_not_found");
+            } else {
+                CanonicalStore target_store(*target_root);
+                for (const auto& item_value : plan_value["items"]) {
+                    const auto source_path = backlog_root / item_value["source_path"].asString();
+                    const auto target_path = backlog_root / item_value["target_path"].asString();
+                    if (std::filesystem::exists(source_path)) {
+                        verification.failures.push_back("source_item_still_active:" + item_value["source_id"].asString());
+                    }
+                    try {
+                        const auto item = target_store.read(target_path);
+                        if (item.id != item_value["target_id"].asString()) {
+                            verification.failures.push_back("target_id_mismatch:" + item_value["target_id"].asString());
+                        }
+                        if (item.uid != item_value["uid"].asString()) {
+                            verification.failures.push_back("target_uid_mismatch:" + item_value["target_id"].asString());
+                        }
+                    } catch (const std::exception& error) {
+                        verification.failures.push_back(
+                            "target_item_invalid:" + item_value["target_id"].asString() + ":" + error.what());
+                    }
+                }
+            }
+        } else {
+            verification.failures.push_back("project_config_invalid");
+        }
+
+        std::unordered_set<std::string> alias_paths;
+        for (const auto& operation : operations) {
+            if (operation.kind == "alias_metadata") {
+                alias_paths.insert(operation.path);
+            }
+        }
+        if (alias_paths.size() != 1) {
+            verification.failures.push_back("alias_metadata_missing_or_ambiguous");
+        } else {
+            verification.postconditions.push_back("old_ids_resolve_through_migration_metadata");
+        }
+
+        const auto index_path = backlog_root / ".cache" / "index" / "backlog.db";
+        if (!std::filesystem::is_regular_file(index_path)) {
+            verification.failures.push_back("derived_index_missing");
+        } else {
+            BacklogIndex index(index_path);
+            for (const auto& item_value : plan_value["items"]) {
+                const auto source_id = item_value["source_id"].asString();
+                const auto target_id = item_value["target_id"].asString();
+                const auto uid = item_value["uid"].asString();
+                const auto target_path = normalized_absolute(backlog_root / item_value["target_path"].asString());
+                if (index.get_path_by_id(source_id)) {
+                    verification.failures.push_back("source_id_still_indexed:" + source_id);
+                }
+                const auto indexed_target = index.get_path_by_id(target_id);
+                const auto indexed_uid = index.get_path_by_uid(uid);
+                if (!indexed_target || normalized_absolute(*indexed_target) != target_path) {
+                    verification.failures.push_back("target_id_index_mismatch:" + target_id);
+                }
+                if (!indexed_uid || normalized_absolute(*indexed_uid) != target_path) {
+                    verification.failures.push_back("target_uid_index_mismatch:" + uid);
+                }
+            }
+            if (std::none_of(verification.failures.begin(), verification.failures.end(), [](const auto& failure) {
+                    return failure.find("index") != std::string::npos;
+                })) {
+                verification.postconditions.push_back("derived_index_rewritten");
+            }
+        }
+
+        const auto products_root = backlog_root / "products";
+        std::unordered_map<std::string, std::string> verification_id_mapping;
+        for (const auto& item_value : plan_value["items"]) {
+            verification_id_mapping[item_value["source_id"].asString()] = item_value["target_id"].asString();
+        }
+        for (const auto& path : regular_files_under(products_root)) {
+            const auto rel = relative_path(path, backlog_root);
+            if (is_derived_or_internal_path(rel) || alias_paths.contains(rel)) {
+                continue;
+            }
+            if (!is_supported_text_reference(path)) {
+                continue;
+            }
+            constexpr std::uintmax_t kMaxVerificationScanBytes = 16u * 1024u * 1024u;
+            if (std::filesystem::file_size(path) > kMaxVerificationScanBytes) {
+                verification.failures.push_back("verification_scan_file_too_large:" + rel);
+                continue;
+            }
+            const auto content = read_file(path);
+            for (const auto& occurrence : mapped_id_occurrences(content, verification_id_mapping)) {
+                verification.failures.push_back("unresolved_old_id:" + rel + ":" + occurrence.first);
+            }
+        }
+        if (std::none_of(verification.failures.begin(), verification.failures.end(), [](const auto& failure) {
+                return failure.starts_with("unresolved_old_id:");
+            })) {
+            verification.postconditions.push_back("canonical_references_rewritten");
+        }
+
+        sort_unique(verification.postconditions);
+        sort_unique(verification.failures);
+        verification.status = verification.failures.empty() ? "verified" : "failed";
+        if (verification.status == "verified") {
+            verification.postconditions.push_back("target_uids_and_content_hashes_verified");
+            sort_unique(verification.postconditions);
+        }
+        return verification;
+    } catch (const std::exception& error) {
+        verification.failures.push_back(error.what());
+        verification.status = error.what() == std::string("migration_journal_not_found") ? "not_applied" : "failed";
+        return verification;
+    }
+}
+
+MigrationStatus MigrationOps::status(const RecoveryOptions& options) {
+    MigrationStatus result;
+    result.plan_hash = options.plan_hash;
+    result.status = "unknown";
+    result.recovery_status = "not_needed";
+    try {
+        const auto backlog_root = resolve_recovery_backlog_root(options);
+        const auto journal = load_journal(transaction_root(backlog_root, options.plan_hash));
+        const auto journal_status = journal["status"].asString();
+        if (journal_status == "prepared" || journal_status == "applying" || journal_status == "recovery_required") {
+            result.status = "recovery_required";
+            result.recovery_status = "required";
+            result.rollback_supported = true;
+        } else if (journal_status == "applied") {
+            result.status = "applied";
+            result.recovery_status = "available";
+            result.rollback_supported = true;
+        } else if (journal_status == "rolled_back") {
+            result.status = "rolled_back";
+            result.recovery_status = "completed";
+        }
+        return result;
+    } catch (const std::exception&) {
+        return result;
+    }
+}
+
+MigrationRollback MigrationOps::rollback(const RecoveryOptions& options) {
+    MigrationRollback result;
+    result.plan_hash = options.plan_hash;
+    result.status = "failed";
+    if (!options.confirm) {
+        result.failures.push_back("confirm_required");
+        return result;
+    }
+    try {
+        const auto backlog_root = resolve_recovery_backlog_root(options);
+        const auto transaction = transaction_root(backlog_root, options.plan_hash);
+        auto journal = load_journal(transaction);
+        if (journal["status"].asString() == "rolled_back") {
+            result.status = "not_needed";
+            return result;
+        }
+        const auto operations = journal_operations(journal);
+        result.restored_paths = restore_before_state(
+            backlog_root, transaction, operations, result.failures);
+        if (result.failures.empty()) {
+            journal["status"] = "rolled_back";
+            write_journal(transaction, journal);
+            result.status = "rolled_back";
+        }
+        return result;
+    } catch (const std::exception& error) {
+        result.failures.push_back(error.what());
+        return result;
     }
 }
 

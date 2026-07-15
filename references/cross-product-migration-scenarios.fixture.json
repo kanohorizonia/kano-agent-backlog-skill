@@ -25,6 +25,24 @@
       "expected_blockers": ["source_revision_mismatch"]
     },
     {
+      "name": "duplicate_source_uid",
+      "fixture_overrides": { "duplicate_source_uid": true },
+      "expected_status": "blocked",
+      "expected_blockers": ["duplicate_source_uid"]
+    },
+    {
+      "name": "missing_canonical_parent",
+      "fixture_overrides": { "missing_parent": "KTO-TSK-9999" },
+      "expected_status": "blocked",
+      "expected_blockers": ["missing_parent"]
+    },
+    {
+      "name": "canonical_hierarchy_cycle",
+      "fixture_overrides": { "hierarchy_cycle": true },
+      "expected_status": "blocked",
+      "expected_blockers": ["hierarchy_cycle"]
+    },
+    {
       "name": "unresolved_external_reference_class",
       "fixture_overrides": { "external_reference_extension": ".unsupported" },
       "expected_status": "blocked",
@@ -41,6 +59,28 @@
       "fixture_overrides": { "target_config_registered": true, "target_scaffold_exists": false },
       "expected_status": "blocked",
       "expected_blockers": ["target_product_root_not_found"]
+    },
+    {
+      "name": "atomic_apply_failure_injection",
+      "fixture_overrides": {
+        "failure_phases": [
+          "after_stage",
+          "after_target_publish",
+          "after_reference_rewrite",
+          "after_source_retire"
+        ]
+      },
+      "expected_status": "rolled_back",
+      "expected_source_item_count": 45,
+      "expected_target_item_count": 0
+    },
+    {
+      "name": "verified_idempotent_apply_and_rollback",
+      "expected_apply_status": "applied",
+      "expected_replay_status": "already_applied",
+      "expected_verify_status": "verified",
+      "expected_rollback_status": "rolled_back",
+      "expected_repeated_rollback_status": "not_needed"
     }
   ]
 }

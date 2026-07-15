@@ -8,4 +8,24 @@ Canonical plan serialization uses UTF-8 JSON with lexicographically ordered obje
 
 Unknown schema versions, unknown fields, unsupported scopes, missing registrations, incomplete product scaffolds, ambiguous roots, UID/ID collisions, stale revisions, and out-of-bound scans fail closed. Version 1 makes no compatibility promise for unknown future fields. Additive evolution requires a new schema version when it changes hashing or mutation semantics.
 
+Reference discovery tokenizes each bounded text file once and performs constant-time source-ID lookup, rather than rescanning every file for every migrated item. Files are capped at 16 MiB, reference rewrites and affected paths are capped at 500,000, and item/artifact limits remain part of the hashed request.
+
 Planning is mutation-free: it does not allocate target sequences, create items, write receipts, refresh views, or touch indexes. Result, verification, status, and rollback receipts have separate schemas so an interrupted operation can be resumed or recovered without treating partial state as success.
+
+## Apply and recovery lifecycle
+
+`migration apply` requires `--confirm` and the exact `plan_hash` returned by a fresh ready plan. Apply recomputes the complete preflight, rejects source or target drift, stages every output, verifies staged hashes, publishes the complete target subtree and owned artifacts, rewrites bounded canonical and external references, persists an old-ID alias map, retires source paths, updates the shared derived index and target sequences, and verifies postconditions. The source UID and frontmatter timestamps are preserved while display IDs and mapped references are rewritten.
+
+The transaction journal lives under `.cache/migrations/<plan_hash>/` and contains exact before/after hashes plus private backups. The public alias receipt lives under the target product at `_meta/migrations/<plan_hash>.json`. Old display IDs are not left as active canonical items; they resolve only through this migration metadata. Unsupported reference classes, concurrent SQLite WAL state, changed files, missing backups, and unknown journal schemas fail closed.
+
+An exception after staging, target publication, external-reference rewrite, or source retirement triggers automatic rollback. `migration verify` checks journal hashes, target IDs and preserved UIDs, source retirement, alias presence, reference closure, and index ID/UID paths. Repeating a verified apply returns `already_applied`. `migration rollback --confirm` restores exact pre-migration bytes and is itself idempotent; it refuses to overwrite post-apply drift.
+
+## CLI
+
+```text
+kano-backlog migration plan <source_ref> --source-product <slug> --target-product <slug> [guards and bounds]
+kano-backlog migration apply <source_ref> --source-product <slug> --target-product <slug> --plan-hash <sha256> --confirm [same guards and bounds]
+kano-backlog migration verify <plan_hash> [--backlog-root <path>]
+kano-backlog migration status <plan_hash> [--backlog-root <path>]
+kano-backlog migration rollback <plan_hash> --confirm [--backlog-root <path>]
+```

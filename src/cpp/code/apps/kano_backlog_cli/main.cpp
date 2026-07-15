@@ -10308,23 +10308,23 @@ int main(int InArgc, char* InArgv[]) {
                 std::size_t max_artifacts = 50000;
                 bool skip_artifacts = false;
                 bool compact = false;
+                std::string plan_hash;
+                bool confirm = false;
             };
 
-            auto options = std::make_shared<MigrationPlanCliOptions>();
-            auto* plan_cmd = migration_cmd->add_subcommand(
-                "plan",
-                "Build an immutable migration preflight plan without writes");
-            plan_cmd->add_option("source_ref", options->source_ref, "Source root display ID or UUIDv7 UID")->required();
-            plan_cmd->add_option("--source-product", options->source_product, "Registered source product slug")->required();
-            plan_cmd->add_option("--target-product", options->target_product, "Registered target product slug")->required();
-            plan_cmd->add_option("--backlog-root", options->backlog_root, "Explicit shared backlog root");
-            plan_cmd->add_option("--expected-source-revision", options->expected_source_revision, "Required source snapshot SHA-256 guard when supplied");
-            plan_cmd->add_option("--expected-target-prefix", options->expected_target_prefix, "Required registered target prefix guard when supplied");
-            plan_cmd->add_option("--max-items", options->max_items, "Maximum source subtree items");
-            plan_cmd->add_option("--max-artifacts", options->max_artifacts, "Maximum owned artifact files");
-            plan_cmd->add_flag("--skip-artifacts", options->skip_artifacts, "Exclude owned artifacts from the plan");
-            plan_cmd->add_flag("--compact", options->compact, "Emit compact JSON");
-            plan_cmd->callback([&, options]() {
+            const auto add_plan_options = [](auto* command, const auto& options) {
+                command->add_option("source_ref", options->source_ref, "Source root display ID or UUIDv7 UID")->required();
+                command->add_option("--source-product", options->source_product, "Registered source product slug")->required();
+                command->add_option("--target-product", options->target_product, "Registered target product slug")->required();
+                command->add_option("--backlog-root", options->backlog_root, "Explicit shared backlog root");
+                command->add_option("--expected-source-revision", options->expected_source_revision, "Required source snapshot SHA-256 guard when supplied");
+                command->add_option("--expected-target-prefix", options->expected_target_prefix, "Required registered target prefix guard when supplied");
+                command->add_option("--max-items", options->max_items, "Maximum source subtree items");
+                command->add_option("--max-artifacts", options->max_artifacts, "Maximum owned artifact files");
+                command->add_flag("--skip-artifacts", options->skip_artifacts, "Exclude owned artifacts from the plan");
+                command->add_flag("--compact", options->compact, "Emit compact JSON");
+            };
+            const auto make_plan_options = [&](const auto& options) {
                 MigrationOps::PlanOptions plan_options;
                 plan_options.start_path = path_str;
                 if (!options->backlog_root.empty()) {
@@ -10342,8 +10342,83 @@ int main(int InArgc, char* InArgv[]) {
                 if (!options->expected_target_prefix.empty()) {
                     plan_options.request.expected_target_prefix = options->expected_target_prefix;
                 }
-                const auto result = MigrationOps::plan(plan_options);
+                return plan_options;
+            };
+
+            auto options = std::make_shared<MigrationPlanCliOptions>();
+            auto* plan_cmd = migration_cmd->add_subcommand(
+                "plan",
+                "Build an immutable migration preflight plan without writes");
+            add_plan_options(plan_cmd, options);
+            plan_cmd->callback([&, options]() {
+                const auto result = MigrationOps::plan(make_plan_options(options));
                 std::cout << result.to_json(!options->compact) << "\n";
+            });
+
+            auto apply_options = std::make_shared<MigrationPlanCliOptions>();
+            auto* apply_cmd = migration_cmd->add_subcommand(
+                "apply",
+                "Apply an exact immutable migration plan through an atomic rollback-capable transaction");
+            add_plan_options(apply_cmd, apply_options);
+            apply_cmd->add_option("--plan-hash", apply_options->plan_hash, "Exact immutable plan SHA-256")->required();
+            apply_cmd->add_flag("--confirm", apply_options->confirm, "Confirm the migration mutation");
+            apply_cmd->callback([&, apply_options]() {
+                MigrationOps::ApplyOptions request;
+                request.plan = make_plan_options(apply_options);
+                request.expected_plan_hash = apply_options->plan_hash;
+                request.confirm = apply_options->confirm;
+                const auto result = MigrationOps::apply(request);
+                std::cout << result.to_json(!apply_options->compact) << "\n";
+            });
+
+            struct MigrationRecoveryCliOptions {
+                std::string plan_hash;
+                std::string backlog_root;
+                bool compact = false;
+                bool confirm = false;
+            };
+            const auto add_recovery_options = [](auto* command, const auto& recovery) {
+                command->add_option("plan_hash", recovery->plan_hash, "Persisted migration plan SHA-256")->required();
+                command->add_option("--backlog-root", recovery->backlog_root, "Explicit shared backlog root");
+                command->add_flag("--compact", recovery->compact, "Emit compact JSON");
+            };
+            const auto make_recovery_options = [&](const auto& recovery) {
+                MigrationOps::RecoveryOptions request;
+                request.start_path = path_str;
+                request.plan_hash = recovery->plan_hash;
+                request.confirm = recovery->confirm;
+                if (!recovery->backlog_root.empty()) {
+                    request.backlog_root = std::filesystem::path(recovery->backlog_root);
+                }
+                return request;
+            };
+
+            auto verify_options = std::make_shared<MigrationRecoveryCliOptions>();
+            auto* verify_cmd = migration_cmd->add_subcommand(
+                "verify", "Verify canonical migration postconditions");
+            add_recovery_options(verify_cmd, verify_options);
+            verify_cmd->callback([&, verify_options]() {
+                const auto result = MigrationOps::verify(make_recovery_options(verify_options));
+                std::cout << result.to_json(!verify_options->compact) << "\n";
+            });
+
+            auto status_options = std::make_shared<MigrationRecoveryCliOptions>();
+            auto* status_cmd = migration_cmd->add_subcommand(
+                "status", "Inspect a persisted migration transaction");
+            add_recovery_options(status_cmd, status_options);
+            status_cmd->callback([&, status_options]() {
+                const auto result = MigrationOps::status(make_recovery_options(status_options));
+                std::cout << result.to_json(!status_options->compact) << "\n";
+            });
+
+            auto rollback_options = std::make_shared<MigrationRecoveryCliOptions>();
+            auto* rollback_cmd = migration_cmd->add_subcommand(
+                "rollback", "Restore the exact pre-migration state from the transaction journal");
+            add_recovery_options(rollback_cmd, rollback_options);
+            rollback_cmd->add_flag("--confirm", rollback_options->confirm, "Confirm the rollback mutation");
+            rollback_cmd->callback([&, rollback_options]() {
+                const auto result = MigrationOps::rollback(make_recovery_options(rollback_options));
+                std::cout << result.to_json(!rollback_options->compact) << "\n";
             });
         }
 

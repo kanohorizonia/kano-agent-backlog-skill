@@ -131,11 +131,44 @@ public:
         MigrationRequest request;
     };
 
+    struct ApplyOptions {
+        PlanOptions plan;
+        std::string expected_plan_hash;
+        bool confirm = false;
+
+        // Test-only deterministic failure injection. Supported phase names are
+        // after_stage, after_target_publish, after_reference_rewrite, and
+        // after_source_retire.
+        std::optional<std::string> inject_failure_after;
+    };
+
+    struct RecoveryOptions {
+        std::filesystem::path start_path = ".";
+        std::optional<std::filesystem::path> backlog_root;
+        std::string plan_hash;
+        bool confirm = false;
+    };
+
     /**
      * Build a bounded immutable migration plan without writing backlog files,
      * target sequences, receipts, or caches.
      */
     static MigrationPlan plan(const PlanOptions& options);
+
+    /**
+     * Apply an exact immutable plan through a rollback-capable filesystem
+     * transaction. Mutation requires confirm=true and an exact plan hash.
+     */
+    static MigrationResult apply(const ApplyOptions& options);
+
+    /** Verify the persisted transaction and canonical migration postconditions. */
+    static MigrationVerification verify(const RecoveryOptions& options);
+
+    /** Inspect a persisted migration transaction without mutating it. */
+    static MigrationStatus status(const RecoveryOptions& options);
+
+    /** Restore the exact pre-migration file state. Mutation requires confirm=true. */
+    static MigrationRollback rollback(const RecoveryOptions& options);
 
     /** Return validation diagnostics. An empty vector means the request is valid. */
     static std::vector<std::string> validate_request(const MigrationRequest& request);

@@ -138,7 +138,7 @@ int main() {
         observer.links.relates.push_back(source_initiative.id);
         observer.context = "Keep the unrelated KTO-TSK-00010 boundary sentinel byte-identical.";
         CanonicalStore(observer_root).write(observer);
-        const auto source_artifact = source_root / "artifacts" / source_initiative.id / "fixture.json";
+        const auto source_artifact = source_root / "artifacts" / source_initiative.id / "views" / "fixture.json";
         write_text(source_artifact, "{\"owner\":\"" + source_initiative.id + "\"}\n");
 
         MigrationOps::PlanOptions options;
@@ -148,11 +148,14 @@ int main() {
             .source_product = "kto-source",
             .source_ref = source_initiative.uid,
             .target_product = "parametric-target",
-            .expected_target_prefix = "KPG",
             .scope = "subtree",
             .include_owned_artifacts = true,
             .max_items = 45,
             .max_artifacts = 10,
+            .max_source_inventory_items = 100,
+            .max_target_inventory_items = 100,
+            .max_artifact_bytes = 1024u * 1024u,
+            .max_materialization_bytes = 8u * 1024u * 1024u,
             .max_reference_files = 100,
             .max_reference_bytes = 2u * 1024u * 1024u,
             .max_references = 100,
@@ -175,12 +178,19 @@ int main() {
         }), "planner should classify external references");
         expect(first.plan_hash.size() == 64 && first.plan_hash == second.plan_hash,
             "identical inputs should produce one deterministic SHA-256 plan hash");
+        expect(first.request.expected_source_revision == first.source_revision &&
+               first.request.expected_target_prefix == first.target_prefix,
+            "ready plans should normalize resolved source revision and target prefix guards into the hashed request");
         expect(first.to_json().find("kob.cross_product_migration.plan.v1") != std::string::npos,
             "plan receipt should expose the versioned schema");
         expect(first.to_json().find("\"max_reference_files\":100") != std::string::npos &&
                first.to_json().find("\"max_reference_bytes\":2097152") != std::string::npos &&
-               first.to_json().find("\"max_references\":100") != std::string::npos,
-            "plan receipt should persist deterministic reference scan bounds");
+               first.to_json().find("\"max_references\":100") != std::string::npos &&
+               first.to_json().find("\"max_source_inventory_items\":100") != std::string::npos &&
+               first.to_json().find("\"max_target_inventory_items\":100") != std::string::npos &&
+               first.to_json().find("\"max_artifact_bytes\":1048576") != std::string::npos &&
+               first.to_json().find("\"max_materialization_bytes\":8388608") != std::string::npos,
+            "plan receipt should persist deterministic inventory, artifact, materialization, and reference bounds");
         expect(read_text(*source_initiative.file_path) == source_before,
             "dry-run planning must not rewrite source items");
         expect(CanonicalStore(target_root).list_items().empty(),
@@ -206,8 +216,19 @@ int main() {
             "combined file and derived entry overflow should produce one deterministic blocked receipt");
         std::filesystem::remove_all(entry_bound_root);
 
+        std::uintmax_t source_inventory_bytes = 0;
+        for (const auto& path : CanonicalStore(source_root).list_items()) {
+            source_inventory_bytes += std::filesystem::file_size(path);
+        }
+        auto inventory_byte_bounded_options = options;
+        inventory_byte_bounded_options.request.max_reference_bytes = source_inventory_bytes - 1;
+        const auto inventory_byte_bounded = MigrationOps::plan(inventory_byte_bounded_options);
+        expect(!inventory_byte_bounded.ready() &&
+               contains_prefix(inventory_byte_bounded.blockers, "source_inventory_byte_limit_exceeded"),
+            "planner should apply the aggregate scan byte budget before canonical metadata parsing");
+
         auto byte_bounded_options = options;
-        byte_bounded_options.request.max_reference_bytes = 1;
+        byte_bounded_options.request.max_reference_bytes = source_inventory_bytes;
         const auto byte_bounded = MigrationOps::plan(byte_bounded_options);
         expect(!byte_bounded.ready() && contains_prefix(byte_bounded.blockers, "reference_byte_limit_exceeded"),
             "planner should fail closed when aggregate reference scan bytes exceed the request bound");
@@ -221,12 +242,77 @@ int main() {
         expect(reference_bounded.to_json() == reference_bounded_repeat.to_json(),
             "reference record truncation should remain deterministic at the configured boundary");
 
+        auto source_inventory_options = options;
+        source_inventory_options.request.max_source_inventory_items = 44;
+        const auto source_inventory_bounded = MigrationOps::plan(source_inventory_options);
+        expect(!source_inventory_bounded.ready() &&
+               contains_prefix(source_inventory_bounded.blockers, "source_inventory_limit_exceeded"),
+            "planner should bound complete source canonical inventory enumeration before metadata parsing");
+
+        const auto target_fixture_one = create_ready_item(
+            target_root, "KPG", ItemType::Task, 1, "Target inventory fixture one");
+        const auto target_fixture_two = create_ready_item(
+            target_root, "KPG", ItemType::Task, 2, "Target inventory fixture two");
+        auto target_inventory_options = options;
+        target_inventory_options.request.max_target_inventory_items = 1;
+        const auto target_inventory_bounded = MigrationOps::plan(target_inventory_options);
+        expect(!target_inventory_bounded.ready() &&
+               contains_prefix(target_inventory_bounded.blockers, "target_inventory_limit_exceeded"),
+            "planner should bound complete target canonical inventory enumeration before metadata parsing");
+        auto target_allocation_fixture = read_text(*target_fixture_one.file_path);
+        const auto target_id_offset = target_allocation_fixture.find(target_fixture_one.id);
+        expect(target_id_offset != std::string::npos, "target allocation fixture should expose its canonical ID");
+        target_allocation_fixture.replace(
+            target_id_offset,
+            target_fixture_one.id.size(),
+            "KPG-TSK-2147483647");
+        write_text(*target_fixture_one.file_path, target_allocation_fixture);
+        const auto target_allocation_bounded = MigrationOps::plan(options);
+        expect(!target_allocation_bounded.ready() &&
+               contains_prefix(target_allocation_bounded.blockers, "target_id_allocation_limit_exceeded:TSK"),
+            "planner should reject target display-ID allocation beyond the signed canonical range");
+        std::filesystem::remove(*target_fixture_one.file_path);
+        std::filesystem::remove(*target_fixture_two.file_path);
+
+        auto artifact_inventory_options = options;
+        artifact_inventory_options.request.max_artifacts = 0;
+        const auto artifact_inventory_bounded = MigrationOps::plan(artifact_inventory_options);
+        expect(!artifact_inventory_bounded.ready() &&
+               contains_prefix(artifact_inventory_bounded.blockers, "artifact_enumeration_limit_exceeded"),
+            "planner should stream owned artifact enumeration through the existing file-count bound");
+
+        auto artifact_byte_options = options;
+        artifact_byte_options.request.max_artifact_bytes = 1;
+        const auto artifact_byte_bounded = MigrationOps::plan(artifact_byte_options);
+        expect(!artifact_byte_bounded.ready() &&
+               contains_prefix(artifact_byte_bounded.blockers, "artifact_byte_limit_exceeded"),
+            "planner should fail closed before aggregate owned artifact reads exceed their byte bound");
+
         MigrationOps::ApplyOptions apply_options;
         apply_options.plan = options;
+        apply_options.plan.request.expected_source_revision = first.source_revision;
+        apply_options.plan.request.expected_target_prefix = first.target_prefix;
         apply_options.expected_plan_hash = first.plan_hash;
         const auto unconfirmed = MigrationOps::apply(apply_options);
         expect(unconfirmed.status == "blocked" && contains_prefix(unconfirmed.operation_receipts, "confirm_required"),
             "apply should require an explicit confirmation gate");
+
+        auto materialization_options = options;
+        materialization_options.request.max_materialization_bytes = 1;
+        const auto materialization_plan = MigrationOps::plan(materialization_options);
+        expect(materialization_plan.ready(),
+            "materialization capacity should remain part of the immutable apply contract without mutating planning");
+        MigrationOps::ApplyOptions materialization_apply_options;
+        materialization_apply_options.plan = materialization_options;
+        materialization_apply_options.expected_plan_hash = materialization_plan.plan_hash;
+        materialization_apply_options.confirm = true;
+        const auto materialization_bounded = MigrationOps::apply(materialization_apply_options);
+        expect(materialization_bounded.status == "blocked" &&
+               contains_prefix(materialization_bounded.operation_receipts, "materialization_byte_limit_exceeded"),
+            "confirmed apply should fail closed before retaining mutation output beyond its materialization bound");
+        expect(read_text(*source_initiative.file_path) == source_before &&
+               CanonicalStore(target_root).list_items().empty(),
+            "materialization overflow must not publish or retire canonical files");
 
         auto changed_bound_apply_options = apply_options;
         ++changed_bound_apply_options.plan.request.max_reference_bytes;
@@ -475,6 +561,9 @@ int main() {
         invalid.source_product = "same";
         invalid.target_product = "same";
         invalid.scope = "repository";
+        invalid.max_source_inventory_items = 0;
+        invalid.max_target_inventory_items = 0;
+        invalid.max_materialization_bytes = 0;
         invalid.max_reference_files = 0;
         invalid.max_reference_bytes = 0;
         invalid.max_references = 0;
@@ -482,17 +571,28 @@ int main() {
         expect(contains_prefix(diagnostics, "source_ref_required") &&
                contains_prefix(diagnostics, "source_and_target_product_must_differ") &&
                contains_prefix(diagnostics, "unsupported_scope") &&
+               contains_prefix(diagnostics, "max_source_inventory_items_out_of_range") &&
+               contains_prefix(diagnostics, "max_target_inventory_items_out_of_range") &&
+               contains_prefix(diagnostics, "max_materialization_bytes_out_of_range") &&
                contains_prefix(diagnostics, "max_reference_files_out_of_range") &&
                contains_prefix(diagnostics, "max_reference_bytes_out_of_range") &&
                contains_prefix(diagnostics, "max_references_out_of_range"),
             "incomplete or unsupported requests should fail closed");
 
         auto excessive_options = options;
+        excessive_options.request.max_source_inventory_items = 500001;
+        excessive_options.request.max_target_inventory_items = 500001;
+        excessive_options.request.max_artifact_bytes = 256ull * 1024ull * 1024ull * 1024ull + 1ull;
+        excessive_options.request.max_materialization_bytes = 512ull * 1024ull * 1024ull * 1024ull + 1ull;
         excessive_options.request.max_reference_files = 500001;
         excessive_options.request.max_reference_bytes = 64ull * 1024ull * 1024ull * 1024ull + 1ull;
         excessive_options.request.max_references = 500001;
         const auto excessive = MigrationOps::plan(excessive_options);
         expect(!excessive.ready() &&
+               contains_prefix(excessive.blockers, "max_source_inventory_items_out_of_range") &&
+               contains_prefix(excessive.blockers, "max_target_inventory_items_out_of_range") &&
+               contains_prefix(excessive.blockers, "max_artifact_bytes_out_of_range") &&
+               contains_prefix(excessive.blockers, "max_materialization_bytes_out_of_range") &&
                contains_prefix(excessive.blockers, "max_reference_files_out_of_range") &&
                contains_prefix(excessive.blockers, "max_reference_bytes_out_of_range") &&
                contains_prefix(excessive.blockers, "max_references_out_of_range") &&

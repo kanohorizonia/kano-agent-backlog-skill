@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <fstream>
 #include <iomanip>
+#include <limits>
 #include <map>
 #include <set>
 #include <sstream>
@@ -36,6 +37,9 @@ using kano::backlog_ops::MigrationRequest;
 constexpr std::size_t kMaximumMigrationReferenceFiles = 500000;
 constexpr std::uintmax_t kMaximumMigrationReferenceBytes = 64ull * 1024ull * 1024ull * 1024ull;
 constexpr std::size_t kMaximumMigrationReferences = 500000;
+constexpr std::size_t kMaximumMigrationInventoryItems = 500000;
+constexpr std::uintmax_t kMaximumMigrationArtifactBytes = 256ull * 1024ull * 1024ull * 1024ull;
+constexpr std::uintmax_t kMaximumMigrationMaterializationBytes = 512ull * 1024ull * 1024ull * 1024ull;
 constexpr std::uintmax_t kMaximumReferenceFileBytes = 16ull * 1024ull * 1024ull;
 
 std::string trim(std::string value) {
@@ -86,41 +90,78 @@ uint32_t sha256_rotr(uint32_t value, uint32_t bits) {
     return (value >> bits) | (value << (32u - bits));
 }
 
-std::string sha256_hex(const std::string& value) {
-    static constexpr std::array<uint32_t, 64> kRoundConstants = {
-        0x428a2f98u, 0x71374491u, 0xb5c0fbcfu, 0xe9b5dba5u, 0x3956c25bu, 0x59f111f1u, 0x923f82a4u, 0xab1c5ed5u,
-        0xd807aa98u, 0x12835b01u, 0x243185beu, 0x550c7dc3u, 0x72be5d74u, 0x80deb1feu, 0x9bdc06a7u, 0xc19bf174u,
-        0xe49b69c1u, 0xefbe4786u, 0x0fc19dc6u, 0x240ca1ccu, 0x2de92c6fu, 0x4a7484aau, 0x5cb0a9dcu, 0x76f988dau,
-        0x983e5152u, 0xa831c66du, 0xb00327c8u, 0xbf597fc7u, 0xc6e00bf3u, 0xd5a79147u, 0x06ca6351u, 0x14292967u,
-        0x27b70a85u, 0x2e1b2138u, 0x4d2c6dfcu, 0x53380d13u, 0x650a7354u, 0x766a0abbu, 0x81c2c92eu, 0x92722c85u,
-        0xa2bfe8a1u, 0xa81a664bu, 0xc24b8b70u, 0xc76c51a3u, 0xd192e819u, 0xd6990624u, 0xf40e3585u, 0x106aa070u,
-        0x19a4c116u, 0x1e376c08u, 0x2748774cu, 0x34b0bcb5u, 0x391c0cb3u, 0x4ed8aa4au, 0x5b9cca4fu, 0x682e6ff3u,
-        0x748f82eeu, 0x78a5636fu, 0x84c87814u, 0x8cc70208u, 0x90befffau, 0xa4506cebu, 0xbef9a3f7u, 0xc67178f2u
-    };
-
-    std::vector<uint8_t> data(value.begin(), value.end());
-    const uint64_t bit_len = static_cast<uint64_t>(data.size()) * 8u;
-    data.push_back(0x80u);
-    while ((data.size() % 64u) != 56u) {
-        data.push_back(0u);
+class StreamingSha256 {
+public:
+    void update(const char* data, std::size_t size) {
+        constexpr auto kMaximumBytes = std::numeric_limits<std::uint64_t>::max() / 8u;
+        if (size > kMaximumBytes - total_bytes_) {
+            throw std::runtime_error("sha256_input_too_large");
+        }
+        total_bytes_ += static_cast<std::uint64_t>(size);
+        while (size > 0) {
+            const auto take = std::min(size, buffer_.size() - buffer_size_);
+            std::copy_n(
+                reinterpret_cast<const std::uint8_t*>(data),
+                take,
+                buffer_.begin() + static_cast<std::ptrdiff_t>(buffer_size_));
+            buffer_size_ += take;
+            data += take;
+            size -= take;
+            if (buffer_size_ == buffer_.size()) {
+                transform(buffer_.data());
+                buffer_size_ = 0;
+            }
+        }
     }
-    for (int shift = 56; shift >= 0; shift -= 8) {
-        data.push_back(static_cast<uint8_t>((bit_len >> shift) & 0xffu));
+
+    void update(const std::string& value) {
+        update(value.data(), value.size());
     }
 
-    std::array<uint32_t, 8> hash = {
-        0x6a09e667u, 0xbb67ae85u, 0x3c6ef372u, 0xa54ff53au,
-        0x510e527fu, 0x9b05688cu, 0x1f83d9abu, 0x5be0cd19u
-    };
+    std::string final_hex() {
+        const auto bit_length = total_bytes_ * 8u;
+        buffer_[buffer_size_++] = 0x80u;
+        if (buffer_size_ > 56u) {
+            std::fill(buffer_.begin() + static_cast<std::ptrdiff_t>(buffer_size_), buffer_.end(), 0u);
+            transform(buffer_.data());
+            buffer_size_ = 0;
+        }
+        std::fill(
+            buffer_.begin() + static_cast<std::ptrdiff_t>(buffer_size_),
+            buffer_.begin() + 56,
+            0u);
+        for (std::size_t index = 0; index < 8u; ++index) {
+            buffer_[56u + index] = static_cast<std::uint8_t>(bit_length >> (56u - index * 8u));
+        }
+        transform(buffer_.data());
 
-    for (std::size_t offset = 0; offset < data.size(); offset += 64u) {
+        std::ostringstream output;
+        output << std::hex << std::setfill('0');
+        for (const auto part : hash_) {
+            output << std::setw(8) << part;
+        }
+        return output.str();
+    }
+
+private:
+    void transform(const std::uint8_t* block) {
+        static constexpr std::array<uint32_t, 64> kRoundConstants = {
+            0x428a2f98u, 0x71374491u, 0xb5c0fbcfu, 0xe9b5dba5u, 0x3956c25bu, 0x59f111f1u, 0x923f82a4u, 0xab1c5ed5u,
+            0xd807aa98u, 0x12835b01u, 0x243185beu, 0x550c7dc3u, 0x72be5d74u, 0x80deb1feu, 0x9bdc06a7u, 0xc19bf174u,
+            0xe49b69c1u, 0xefbe4786u, 0x0fc19dc6u, 0x240ca1ccu, 0x2de92c6fu, 0x4a7484aau, 0x5cb0a9dcu, 0x76f988dau,
+            0x983e5152u, 0xa831c66du, 0xb00327c8u, 0xbf597fc7u, 0xc6e00bf3u, 0xd5a79147u, 0x06ca6351u, 0x14292967u,
+            0x27b70a85u, 0x2e1b2138u, 0x4d2c6dfcu, 0x53380d13u, 0x650a7354u, 0x766a0abbu, 0x81c2c92eu, 0x92722c85u,
+            0xa2bfe8a1u, 0xa81a664bu, 0xc24b8b70u, 0xc76c51a3u, 0xd192e819u, 0xd6990624u, 0xf40e3585u, 0x106aa070u,
+            0x19a4c116u, 0x1e376c08u, 0x2748774cu, 0x34b0bcb5u, 0x391c0cb3u, 0x4ed8aa4au, 0x5b9cca4fu, 0x682e6ff3u,
+            0x748f82eeu, 0x78a5636fu, 0x84c87814u, 0x8cc70208u, 0x90befffau, 0xa4506cebu, 0xbef9a3f7u, 0xc67178f2u
+        };
         std::array<uint32_t, 64> words{};
         for (std::size_t index = 0; index < 16u; ++index) {
-            const std::size_t base = offset + index * 4u;
-            words[index] = (static_cast<uint32_t>(data[base]) << 24u) |
-                           (static_cast<uint32_t>(data[base + 1u]) << 16u) |
-                           (static_cast<uint32_t>(data[base + 2u]) << 8u) |
-                           static_cast<uint32_t>(data[base + 3u]);
+            const std::size_t base = index * 4u;
+            words[index] = (static_cast<uint32_t>(block[base]) << 24u) |
+                           (static_cast<uint32_t>(block[base + 1u]) << 16u) |
+                           (static_cast<uint32_t>(block[base + 2u]) << 8u) |
+                           static_cast<uint32_t>(block[base + 3u]);
         }
         for (std::size_t index = 16u; index < 64u; ++index) {
             const uint32_t s0 = sha256_rotr(words[index - 15u], 7u) ^ sha256_rotr(words[index - 15u], 18u) ^ (words[index - 15u] >> 3u);
@@ -128,8 +169,8 @@ std::string sha256_hex(const std::string& value) {
             words[index] = words[index - 16u] + s0 + words[index - 7u] + s1;
         }
 
-        uint32_t a = hash[0], b = hash[1], c = hash[2], d = hash[3];
-        uint32_t e = hash[4], f = hash[5], g = hash[6], h = hash[7];
+        uint32_t a = hash_[0], b = hash_[1], c = hash_[2], d = hash_[3];
+        uint32_t e = hash_[4], f = hash_[5], g = hash_[6], h = hash_[7];
         for (std::size_t index = 0; index < 64u; ++index) {
             const uint32_t s1 = sha256_rotr(e, 6u) ^ sha256_rotr(e, 11u) ^ sha256_rotr(e, 25u);
             const uint32_t choice = (e & f) ^ ((~e) & g);
@@ -146,16 +187,59 @@ std::string sha256_hex(const std::string& value) {
             b = a;
             a = temp1 + temp2;
         }
-        hash[0] += a; hash[1] += b; hash[2] += c; hash[3] += d;
-        hash[4] += e; hash[5] += f; hash[6] += g; hash[7] += h;
+        hash_[0] += a; hash_[1] += b; hash_[2] += c; hash_[3] += d;
+        hash_[4] += e; hash_[5] += f; hash_[6] += g; hash_[7] += h;
     }
 
-    std::ostringstream output;
-    output << std::hex << std::setfill('0');
-    for (const auto part : hash) {
-        output << std::setw(8) << part;
+    std::array<std::uint32_t, 8> hash_ = {
+        0x6a09e667u, 0xbb67ae85u, 0x3c6ef372u, 0xa54ff53au,
+        0x510e527fu, 0x9b05688cu, 0x1f83d9abu, 0x5be0cd19u
+    };
+    std::array<std::uint8_t, 64> buffer_{};
+    std::size_t buffer_size_ = 0;
+    std::uint64_t total_bytes_ = 0;
+};
+
+std::string sha256_hex(const std::string& value) {
+    StreamingSha256 hasher;
+    hasher.update(value);
+    return hasher.final_hex();
+}
+
+struct BoundedFileRead {
+    std::uintmax_t bytes = 0;
+    bool limit_exceeded = false;
+};
+
+BoundedFileRead hash_file_into(
+    const std::filesystem::path& path,
+    std::uintmax_t max_bytes,
+    StreamingSha256& hasher
+) {
+    std::ifstream input(path, std::ios::binary);
+    if (!input.is_open()) {
+        throw std::runtime_error("Unable to read migration input: " + path.generic_string());
     }
-    return output.str();
+    BoundedFileRead result;
+    std::array<char, 64u * 1024u> buffer{};
+    while (input) {
+        input.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+        const auto count = input.gcount();
+        if (count <= 0) {
+            break;
+        }
+        const auto bytes = static_cast<std::uintmax_t>(count);
+        if (bytes > max_bytes - result.bytes) {
+            result.limit_exceeded = true;
+            return result;
+        }
+        hasher.update(buffer.data(), static_cast<std::size_t>(count));
+        result.bytes += bytes;
+    }
+    if (input.bad()) {
+        throw std::runtime_error("Unable to read migration input: " + path.generic_string());
+    }
+    return result;
 }
 
 std::string snapshot_hash(std::vector<std::filesystem::path> paths, const std::filesystem::path& root) {
@@ -163,16 +247,21 @@ std::string snapshot_hash(std::vector<std::filesystem::path> paths, const std::f
         return relative_path(left, root) < relative_path(right, root);
     });
     paths.erase(std::unique(paths.begin(), paths.end()), paths.end());
-    std::ostringstream canonical;
+    StreamingSha256 hasher;
     for (const auto& path : paths) {
         if (!std::filesystem::is_regular_file(path)) {
             continue;
         }
         const auto rel = relative_path(path, root);
-        const auto content = read_file(path);
-        canonical << rel.size() << ':' << rel << ':' << content.size() << ':' << content;
+        const auto file_bytes = std::filesystem::file_size(path);
+        hasher.update(
+            std::to_string(rel.size()) + ':' + rel + ':' + std::to_string(file_bytes) + ':');
+        const auto read = hash_file_into(path, file_bytes, hasher);
+        if (read.limit_exceeded || read.bytes != file_bytes) {
+            throw std::runtime_error("snapshot_input_changed:" + rel);
+        }
     }
-    return sha256_hex(canonical.str());
+    return hasher.final_hex();
 }
 
 std::string json_string(const Json::Value& value, bool pretty) {
@@ -200,6 +289,10 @@ Json::Value request_json(const MigrationRequest& request) {
     value["include_owned_artifacts"] = request.include_owned_artifacts;
     value["max_items"] = static_cast<Json::UInt64>(request.max_items);
     value["max_artifacts"] = static_cast<Json::UInt64>(request.max_artifacts);
+    value["max_source_inventory_items"] = static_cast<Json::UInt64>(request.max_source_inventory_items);
+    value["max_target_inventory_items"] = static_cast<Json::UInt64>(request.max_target_inventory_items);
+    value["max_artifact_bytes"] = static_cast<Json::UInt64>(request.max_artifact_bytes);
+    value["max_materialization_bytes"] = static_cast<Json::UInt64>(request.max_materialization_bytes);
     value["max_reference_files"] = static_cast<Json::UInt64>(request.max_reference_files);
     value["max_reference_bytes"] = static_cast<Json::UInt64>(request.max_reference_bytes);
     value["max_references"] = static_cast<Json::UInt64>(request.max_references);
@@ -286,6 +379,26 @@ std::string type_code(ItemType type) {
     throw std::runtime_error("Unsupported migration item type");
 }
 
+std::optional<int> display_id_number(
+    const std::string& id,
+    const std::string& prefix,
+    ItemType type
+) {
+    const auto expected_prefix = prefix + "-" + type_code(type) + "-";
+    if (!id.starts_with(expected_prefix) || id.size() == expected_prefix.size()) {
+        return std::nullopt;
+    }
+    int number = 0;
+    for (std::size_t index = expected_prefix.size(); index < id.size(); ++index) {
+        const auto ch = static_cast<unsigned char>(id[index]);
+        if (!std::isdigit(ch) || number > (std::numeric_limits<int>::max() - (ch - '0')) / 10) {
+            return std::nullopt;
+        }
+        number = number * 10 + (ch - '0');
+    }
+    return number;
+}
+
 std::map<std::string, std::size_t> mapped_id_occurrences(
     const std::string& content,
     const std::unordered_map<std::string, std::string>& id_mapping
@@ -357,26 +470,37 @@ bool is_derived_or_internal_path(const std::filesystem::path& path) {
     return false;
 }
 
-struct BoundedReferenceFileScan {
+struct BoundedFileScan {
     std::vector<std::filesystem::path> files;
     bool file_limit_exceeded = false;
     bool entry_limit_exceeded = false;
 };
 
-BoundedReferenceFileScan bounded_reference_files_under(
-    const std::filesystem::path& root,
+BoundedFileScan bounded_files_under(
+    const std::vector<std::filesystem::path>& roots,
     const std::filesystem::path& backlog_root,
     std::size_t max_files,
-    const std::unordered_set<std::string>& excluded_paths = {}
+    const std::unordered_set<std::string>& excluded_paths = {},
+    const std::optional<std::string>& required_extension = std::nullopt,
+    bool exclude_derived_or_internal = false
 ) {
-    BoundedReferenceFileScan result;
-    if (!std::filesystem::exists(root)) {
-        return result;
-    }
-
+    BoundedFileScan result;
     const std::size_t max_entries = max_files * 4u + 64u;
     std::size_t visited_entries = 0;
-    std::vector<std::filesystem::path> pending{root};
+    std::vector<std::filesystem::path> pending;
+    const auto normalized_backlog_root = normalized_absolute(backlog_root);
+    for (const auto& root : roots) {
+        if (std::filesystem::is_symlink(root)) {
+            throw std::runtime_error("bounded_scan_symlink_not_supported:" + root.generic_string());
+        }
+        const auto normalized_root = normalized_absolute(root);
+        if (normalized_root != normalized_backlog_root && !is_within(normalized_root, normalized_backlog_root)) {
+            throw std::runtime_error("bounded_scan_path_escape:" + root.generic_string());
+        }
+        if (std::filesystem::is_directory(normalized_root)) {
+            pending.push_back(normalized_root);
+        }
+    }
     while (!pending.empty()) {
         const auto directory = pending.back();
         pending.pop_back();
@@ -388,15 +512,23 @@ BoundedReferenceFileScan bounded_reference_files_under(
             }
             ++visited_entries;
             const auto path = entry.path();
-            const auto rel = relative_path(path, backlog_root);
-            if (is_derived_or_internal_path(rel)) {
+            const auto relative = path.lexically_relative(backlog_root);
+            const auto rel = relative.generic_string();
+            if (relative.empty() || relative.is_absolute() || rel == ".." || rel.starts_with("../")) {
+                throw std::runtime_error("bounded_scan_path_escape:" + path.generic_string());
+            }
+            if (entry.is_symlink()) {
+                throw std::runtime_error("bounded_scan_symlink_not_supported:" + rel);
+            }
+            if (exclude_derived_or_internal && is_derived_or_internal_path(relative)) {
                 continue;
             }
             if (entry.is_directory()) {
                 pending.push_back(path);
                 continue;
             }
-            if (!entry.is_regular_file() || excluded_paths.contains(rel)) {
+            if (!entry.is_regular_file() || excluded_paths.contains(rel) ||
+                (required_extension && path.extension() != *required_extension)) {
                 continue;
             }
             if (result.files.size() >= max_files) {
@@ -409,20 +541,6 @@ BoundedReferenceFileScan bounded_reference_files_under(
     }
     std::sort(result.files.begin(), result.files.end());
     return result;
-}
-
-std::vector<std::filesystem::path> regular_files_under(const std::filesystem::path& root) {
-    std::vector<std::filesystem::path> files;
-    if (!std::filesystem::exists(root)) {
-        return files;
-    }
-    for (const auto& entry : std::filesystem::recursive_directory_iterator(root)) {
-        if (entry.is_regular_file()) {
-            files.push_back(entry.path());
-        }
-    }
-    std::sort(files.begin(), files.end());
-    return files;
 }
 
 std::filesystem::path resolve_backlog_root(
@@ -572,7 +690,13 @@ bool file_matches(
     if (!expected_exists) {
         return !std::filesystem::exists(path);
     }
-    return std::filesystem::is_regular_file(path) && sha256_hex(read_file(path)) == expected_sha256;
+    if (!std::filesystem::is_regular_file(path)) {
+        return false;
+    }
+    const auto file_bytes = std::filesystem::file_size(path);
+    StreamingSha256 hasher;
+    const auto read = hash_file_into(path, file_bytes, hasher);
+    return !read.limit_exceeded && read.bytes == file_bytes && hasher.final_hex() == expected_sha256;
 }
 
 std::vector<MigrationFileOperation> journal_operations(const Json::Value& journal) {
@@ -715,6 +839,21 @@ std::vector<std::string> MigrationOps::validate_request(const MigrationRequest& 
     if (request.max_artifacts > 500000) {
         diagnostics.push_back("max_artifacts_out_of_range");
     }
+    if (request.max_source_inventory_items == 0 ||
+        request.max_source_inventory_items > kMaximumMigrationInventoryItems) {
+        diagnostics.push_back("max_source_inventory_items_out_of_range");
+    }
+    if (request.max_target_inventory_items == 0 ||
+        request.max_target_inventory_items > kMaximumMigrationInventoryItems) {
+        diagnostics.push_back("max_target_inventory_items_out_of_range");
+    }
+    if (request.max_artifact_bytes > kMaximumMigrationArtifactBytes) {
+        diagnostics.push_back("max_artifact_bytes_out_of_range");
+    }
+    if (request.max_materialization_bytes == 0 ||
+        request.max_materialization_bytes > kMaximumMigrationMaterializationBytes) {
+        diagnostics.push_back("max_materialization_bytes_out_of_range");
+    }
     if (request.max_reference_files == 0 || request.max_reference_files > kMaximumMigrationReferenceFiles) {
         diagnostics.push_back("max_reference_files_out_of_range");
     }
@@ -798,6 +937,9 @@ MigrationPlan MigrationOps::plan(const PlanOptions& options) {
         if (options.request.expected_target_prefix && *options.request.expected_target_prefix != plan.target_prefix) {
             plan.blockers.push_back("target_prefix_mismatch");
         }
+        if (!plan.request.expected_target_prefix) {
+            plan.request.expected_target_prefix = plan.target_prefix;
+        }
         const auto prefix_collisions = config.find_prefix_collisions(config_path);
         for (const auto& collision : prefix_collisions) {
             if (collision.left_product == options.request.target_product || collision.right_product == options.request.target_product) {
@@ -807,8 +949,58 @@ MigrationPlan MigrationOps::plan(const PlanOptions& options) {
 
         CanonicalStore source_store(source_root);
         CanonicalStore target_store(target_root);
+        const auto source_inventory = bounded_files_under(
+            {source_root / "items"},
+            backlog_root,
+            options.request.max_source_inventory_items,
+            {},
+            std::optional<std::string>{".md"});
+        const auto target_inventory = bounded_files_under(
+            {target_root / "items"},
+            backlog_root,
+            options.request.max_target_inventory_items,
+            {},
+            std::optional<std::string>{".md"});
+        if (source_inventory.file_limit_exceeded || source_inventory.entry_limit_exceeded) {
+            plan.blockers.push_back("source_inventory_limit_exceeded");
+        }
+        if (target_inventory.file_limit_exceeded || target_inventory.entry_limit_exceeded) {
+            plan.blockers.push_back("target_inventory_limit_exceeded");
+        }
+        if (source_inventory.file_limit_exceeded || source_inventory.entry_limit_exceeded ||
+            target_inventory.file_limit_exceeded || target_inventory.entry_limit_exceeded) {
+            sort_unique(plan.blockers);
+            plan.plan_hash = sha256_hex(json_string(plan_json(plan, false), false));
+            return plan;
+        }
+        std::uintmax_t inventory_bytes = 0;
+        bool inventory_io_blocked = false;
+        const auto validate_inventory_io = [&](const BoundedFileScan& inventory, const std::string& kind) {
+            for (const auto& path : inventory.files) {
+                const auto file_bytes = std::filesystem::file_size(path);
+                if (file_bytes > kMaximumReferenceFileBytes) {
+                    plan.blockers.push_back(
+                        kind + "_inventory_file_too_large:" + relative_path(path, backlog_root));
+                    inventory_io_blocked = true;
+                    continue;
+                }
+                if (file_bytes > options.request.max_reference_bytes - inventory_bytes) {
+                    plan.blockers.push_back(kind + "_inventory_byte_limit_exceeded");
+                    inventory_io_blocked = true;
+                    return;
+                }
+                inventory_bytes += file_bytes;
+            }
+        };
+        validate_inventory_io(source_inventory, "source");
+        validate_inventory_io(target_inventory, "target");
+        if (inventory_io_blocked) {
+            sort_unique(plan.blockers);
+            plan.plan_hash = sha256_hex(json_string(plan_json(plan, false), false));
+            return plan;
+        }
         std::vector<BacklogItem> source_items;
-        for (const auto& path : source_store.list_items()) {
+        for (const auto& path : source_inventory.files) {
             source_items.push_back(source_store.read_metadata(path));
         }
 
@@ -939,8 +1131,10 @@ MigrationPlan MigrationOps::plan(const PlanOptions& options) {
         std::unordered_map<std::string, std::size_t> target_id_counts;
         std::unordered_map<std::string, std::size_t> target_uid_counts;
         std::vector<std::filesystem::path> target_snapshot_paths;
-        for (const auto& path : target_store.list_items()) {
+        std::vector<BacklogItem> target_items;
+        for (const auto& path : target_inventory.files) {
             const auto item = target_store.read_metadata(path);
+            target_items.push_back(item);
             target_ids.insert(item.id);
             target_uids.insert(item.uid);
             ++target_id_counts[item.id];
@@ -958,12 +1152,37 @@ MigrationPlan MigrationOps::plan(const PlanOptions& options) {
             }
         }
 
-        std::map<ItemType, int> next_numbers;
+        std::map<ItemType, int> target_max_numbers;
+        for (const auto& item : target_items) {
+            if (const auto number = display_id_number(item.id, plan.target_prefix, item.type)) {
+                target_max_numbers[item.type] = std::max(target_max_numbers[item.type], *number);
+            }
+        }
+        std::map<ItemType, std::size_t> selected_type_counts;
+        for (const auto& item : selected_items) {
+            ++selected_type_counts[item.type];
+        }
+        bool target_allocation_limit_exceeded = false;
+        for (const auto& [type, count] : selected_type_counts) {
+            const auto available = static_cast<std::size_t>(
+                std::numeric_limits<int>::max() - target_max_numbers[type]);
+            if (count > available) {
+                plan.blockers.push_back("target_id_allocation_limit_exceeded:" + type_code(type));
+                target_allocation_limit_exceeded = true;
+            }
+        }
+        if (target_allocation_limit_exceeded) {
+            sort_unique(plan.blockers);
+            plan.status = "blocked";
+            plan.plan_hash = sha256_hex(json_string(plan_json(plan, false), false));
+            return plan;
+        }
+        std::map<ItemType, std::int64_t> next_numbers;
         std::unordered_map<std::string, std::string> id_mapping;
         std::unordered_set<std::string> selected_source_paths;
         for (const auto& item : selected_items) {
-            auto [number_it, inserted] = next_numbers.emplace(item.type, target_store.get_max_id_number(plan.target_prefix, item.type) + 1);
-            const int number = number_it->second++;
+            auto [number_it, inserted] = next_numbers.emplace(item.type, target_max_numbers[item.type] + 1);
+            const int number = static_cast<int>(number_it->second++);
             std::ostringstream target_id;
             target_id << plan.target_prefix << '-' << type_code(item.type) << '-' << std::setw(4) << std::setfill('0') << number;
             auto target_item = target_store.create(plan.target_prefix, item.type, item.title, number, std::nullopt);
@@ -1000,37 +1219,85 @@ MigrationPlan MigrationOps::plan(const PlanOptions& options) {
             plan.affected_paths.push_back(mapping.target_path);
         }
 
+        bool artifact_bound_exceeded = false;
         if (options.request.include_owned_artifacts) {
+            std::vector<std::filesystem::path> artifact_roots;
+            std::unordered_map<std::string, const MigrationItemMapping*> mapping_by_source_id;
             for (const auto& mapping : plan.items) {
-                const auto artifact_root = source_root / "artifacts" / mapping.source_id;
-                for (const auto& artifact_path : regular_files_under(artifact_root)) {
-                    if (plan.artifacts.size() >= options.request.max_artifacts) {
-                        plan.blockers.push_back("artifact_limit_exceeded");
-                        break;
-                    }
-                    const auto owner_relative = artifact_path.lexically_relative(artifact_root);
-                    const auto target_path = target_root / "artifacts" / mapping.target_id / owner_relative;
-                    const auto content = read_file(artifact_path);
-                    plan.artifacts.push_back(MigrationArtifactMapping{
-                        mapping.source_id,
-                        mapping.target_id,
-                        relative_path(artifact_path, backlog_root),
-                        relative_path(target_path, backlog_root),
-                        sha256_hex(content),
-                        static_cast<std::uintmax_t>(content.size()),
-                    });
-                    source_snapshot_paths.push_back(artifact_path);
-                    plan.affected_paths.push_back(relative_path(artifact_path, backlog_root));
-                    plan.affected_paths.push_back(relative_path(target_path, backlog_root));
-                }
+                artifact_roots.push_back(source_root / "artifacts" / mapping.source_id);
+                mapping_by_source_id.emplace(mapping.source_id, &mapping);
             }
+            const auto artifact_inventory = bounded_files_under(
+                artifact_roots,
+                backlog_root,
+                options.request.max_artifacts);
+            if (artifact_inventory.file_limit_exceeded || artifact_inventory.entry_limit_exceeded) {
+                plan.blockers.push_back("artifact_enumeration_limit_exceeded");
+                artifact_bound_exceeded = true;
+            }
+            std::uintmax_t artifact_bytes = 0;
+            for (const auto& artifact_path : artifact_inventory.files) {
+                const auto artifact_relative = artifact_path.lexically_relative(source_root / "artifacts");
+                if (artifact_relative.empty()) {
+                    plan.blockers.push_back("artifact_owner_resolution_failed");
+                    continue;
+                }
+                const auto owner_source_id = (*artifact_relative.begin()).string();
+                const auto mapping_it = mapping_by_source_id.find(owner_source_id);
+                if (mapping_it == mapping_by_source_id.end()) {
+                    plan.blockers.push_back("artifact_owner_resolution_failed:" + owner_source_id);
+                    continue;
+                }
+                const auto& mapping = *mapping_it->second;
+                const auto artifact_root = source_root / "artifacts" / mapping.source_id;
+                const auto owner_relative = artifact_path.lexically_relative(artifact_root);
+                const auto target_path = target_root / "artifacts" / mapping.target_id / owner_relative;
+                const auto file_bytes = std::filesystem::file_size(artifact_path);
+                if (file_bytes > options.request.max_artifact_bytes - artifact_bytes) {
+                    plan.blockers.push_back("artifact_byte_limit_exceeded");
+                    artifact_bound_exceeded = true;
+                    break;
+                }
+                StreamingSha256 artifact_hasher;
+                const auto read = hash_file_into(
+                    artifact_path,
+                    options.request.max_artifact_bytes - artifact_bytes,
+                    artifact_hasher);
+                if (read.limit_exceeded) {
+                    plan.blockers.push_back("artifact_byte_limit_exceeded");
+                    artifact_bound_exceeded = true;
+                    break;
+                }
+                artifact_bytes += read.bytes;
+                plan.artifacts.push_back(MigrationArtifactMapping{
+                    mapping.source_id,
+                    mapping.target_id,
+                    relative_path(artifact_path, backlog_root),
+                    relative_path(target_path, backlog_root),
+                    artifact_hasher.final_hex(),
+                    read.bytes,
+                });
+                source_snapshot_paths.push_back(artifact_path);
+                plan.affected_paths.push_back(relative_path(artifact_path, backlog_root));
+                plan.affected_paths.push_back(relative_path(target_path, backlog_root));
+            }
+        }
+        if (artifact_bound_exceeded) {
+            sort_unique(plan.affected_paths);
+            sort_unique(plan.blockers);
+            plan.status = "blocked";
+            plan.plan_hash = sha256_hex(json_string(plan_json(plan, false), false));
+            return plan;
         }
 
         const auto products_root = backlog_root / "products";
-        const auto reference_files = bounded_reference_files_under(
-            products_root,
+        const auto reference_files = bounded_files_under(
+            {products_root},
             backlog_root,
-            options.request.max_reference_files);
+            options.request.max_reference_files,
+            {},
+            std::nullopt,
+            true);
         if (reference_files.file_limit_exceeded || reference_files.entry_limit_exceeded) {
             plan.blockers.push_back("reference_enumeration_limit_exceeded");
         }
@@ -1092,6 +1359,9 @@ MigrationPlan MigrationOps::plan(const PlanOptions& options) {
             snapshot_hash(target_snapshot_paths, backlog_root) + ":" + sha256_hex(read_file(config_path)));
         if (options.request.expected_source_revision && *options.request.expected_source_revision != plan.source_revision) {
             plan.blockers.push_back("source_revision_mismatch");
+        }
+        if (!plan.request.expected_source_revision) {
+            plan.request.expected_source_revision = plan.source_revision;
         }
 
         sort_unique(plan.affected_paths);
@@ -1196,20 +1466,29 @@ MigrationResult MigrationOps::apply(const ApplyOptions& options) {
         const auto source_root = normalized_absolute(*source_root_opt);
 
         std::map<std::string, MigrationFileOperation> pending;
+        std::uintmax_t materialization_bytes = 0;
+        const auto ensure_materialization_capacity = [&](std::uintmax_t bytes) {
+            if (bytes > current_plan.request.max_materialization_bytes - materialization_bytes) {
+                throw std::runtime_error("materialization_byte_limit_exceeded");
+            }
+        };
         const auto add_pending = [&](const std::string& path, const std::string& kind, std::optional<std::string> content) {
             if (path.empty() || path == "." || path.starts_with("../") || std::filesystem::path(path).is_absolute()) {
                 throw std::runtime_error("unsafe_operation_path:" + path);
             }
-            auto [it, inserted] = pending.emplace(path, MigrationFileOperation{});
-            if (!inserted) {
-                if (it->second.after_content != content) {
+            if (const auto existing = pending.find(path); existing != pending.end()) {
+                if (existing->second.after_content != content) {
                     throw std::runtime_error("conflicting_operation:" + path);
                 }
                 return;
             }
+            const auto content_bytes = content ? static_cast<std::uintmax_t>(content->size()) : 0;
+            ensure_materialization_capacity(content_bytes);
+            auto [it, inserted] = pending.emplace(path, MigrationFileOperation{});
             it->second.path = path;
             it->second.kind = kind;
             it->second.after_content = std::move(content);
+            materialization_bytes += content_bytes;
         };
 
         std::unordered_set<std::string> retired_paths;
@@ -1218,12 +1497,14 @@ MigrationResult MigrationOps::apply(const ApplyOptions& options) {
             migration_id_mapping[mapping.source_id] = mapping.target_id;
         }
         for (const auto& mapping : current_plan.items) {
+            ensure_materialization_capacity(std::filesystem::file_size(backlog_root / mapping.source_path));
             const auto source_content = read_file(backlog_root / mapping.source_path);
             add_pending(mapping.target_path, "target_item", replace_migration_ids(source_content, migration_id_mapping));
             add_pending(mapping.source_path, "retired_source_item", std::nullopt);
             retired_paths.insert(mapping.source_path);
         }
         for (const auto& mapping : current_plan.artifacts) {
+            ensure_materialization_capacity(mapping.size_bytes);
             auto content = read_file(backlog_root / mapping.source_path);
             if (is_supported_text_reference(mapping.source_path)) {
                 content = replace_migration_ids(std::move(content), migration_id_mapping);
@@ -1233,17 +1514,18 @@ MigrationResult MigrationOps::apply(const ApplyOptions& options) {
             retired_paths.insert(mapping.source_path);
         }
 
-        std::map<std::string, std::string> rewritten_references;
+        std::unordered_set<std::string> rewritten_reference_paths;
         for (const auto& rewrite : current_plan.references) {
             if (retired_paths.contains(rewrite.path)) {
                 continue;
             }
-            if (!rewritten_references.contains(rewrite.path)) {
-                rewritten_references.emplace(rewrite.path, read_file(backlog_root / rewrite.path));
+            if (rewritten_reference_paths.insert(rewrite.path).second) {
+                ensure_materialization_capacity(std::filesystem::file_size(backlog_root / rewrite.path));
+                add_pending(
+                    rewrite.path,
+                    "external_reference",
+                    replace_migration_ids(read_file(backlog_root / rewrite.path), migration_id_mapping));
             }
-        }
-        for (auto& [path, content] : rewritten_references) {
-            add_pending(path, "external_reference", replace_migration_ids(std::move(content), migration_id_mapping));
         }
 
         Json::Value aliases(Json::objectValue);
@@ -1276,6 +1558,7 @@ MigrationResult MigrationOps::apply(const ApplyOptions& options) {
         std::filesystem::remove(staged_index, index_cleanup_error);
         const bool index_existed = std::filesystem::is_regular_file(index_path);
         if (index_existed) {
+            ensure_materialization_capacity(std::filesystem::file_size(index_path));
             std::filesystem::copy_file(index_path, staged_index, std::filesystem::copy_options::overwrite_existing);
         }
         {
@@ -1287,6 +1570,7 @@ MigrationResult MigrationOps::apply(const ApplyOptions& options) {
                 mapped_ids[mapping.source_id] = mapping.target_id;
             }
             if (!index_existed) {
+                std::uintmax_t index_inventory_bytes = 0;
                 for (const auto& product_entry : config->products) {
                     const auto& product_name = product_entry.first;
                     const auto product_root = config->resolve_backlog_root(product_name, *config_path);
@@ -1294,7 +1578,33 @@ MigrationResult MigrationOps::apply(const ApplyOptions& options) {
                         throw std::runtime_error("registered_product_root_missing_during_index_build:" + product_name);
                     }
                     CanonicalStore product_store(*product_root);
-                    for (const auto& item_path : product_store.list_items()) {
+                    const auto inventory_limit = product_name == current_plan.request.source_product
+                        ? current_plan.request.max_source_inventory_items
+                        : (product_name == current_plan.request.target_product
+                            ? current_plan.request.max_target_inventory_items
+                            : std::max(
+                                current_plan.request.max_source_inventory_items,
+                                current_plan.request.max_target_inventory_items));
+                    const auto product_inventory = bounded_files_under(
+                        {*product_root / "items"},
+                        backlog_root,
+                        inventory_limit,
+                        {},
+                        std::optional<std::string>{".md"});
+                    if (product_inventory.file_limit_exceeded || product_inventory.entry_limit_exceeded) {
+                        throw std::runtime_error("index_inventory_limit_exceeded:" + product_name);
+                    }
+                    for (const auto& item_path : product_inventory.files) {
+                        const auto file_bytes = std::filesystem::file_size(item_path);
+                        if (file_bytes > kMaximumReferenceFileBytes) {
+                            throw std::runtime_error(
+                                "index_inventory_file_too_large:" + product_name + ':' +
+                                relative_path(item_path, backlog_root));
+                        }
+                        if (file_bytes > current_plan.request.max_reference_bytes - index_inventory_bytes) {
+                            throw std::runtime_error("index_inventory_byte_limit_exceeded");
+                        }
+                        index_inventory_bytes += file_bytes;
                         auto item = product_store.read(item_path);
                         if (product_name == current_plan.request.source_product && mapped_ids.contains(item.id)) {
                             continue;
@@ -1324,11 +1634,19 @@ MigrationResult MigrationOps::apply(const ApplyOptions& options) {
                     std::stoi(mapping.target_id.substr(separator + 1)));
             }
         }
+        const auto staged_index_bytes = std::filesystem::file_size(staged_index);
+        try {
+            ensure_materialization_capacity(staged_index_bytes);
+        } catch (...) {
+            std::filesystem::remove(staged_index, index_cleanup_error);
+            throw;
+        }
+        auto staged_index_content = read_file(staged_index);
+        std::filesystem::remove(staged_index, index_cleanup_error);
         add_pending(
             relative_path(index_path, backlog_root),
             "derived_index",
-            read_file(staged_index));
-        std::filesystem::remove(staged_index, index_cleanup_error);
+            std::move(staged_index_content));
 
         std::error_code cleanup_error;
         std::filesystem::remove_all(transaction / "backup", cleanup_error);
@@ -1375,7 +1693,7 @@ MigrationResult MigrationOps::apply(const ApplyOptions& options) {
                     throw std::runtime_error("stage_hash_mismatch:" + path);
                 }
             }
-            operations.push_back(operation);
+            operations.push_back(std::move(operation));
             ++operation_index;
         }
 
@@ -1638,11 +1956,13 @@ MigrationVerification MigrationOps::verify(const RecoveryOptions& options) {
             if (plan_value["references"].size() > max_references) {
                 verification.failures.push_back("verification_persisted_reference_limit_exceeded");
             }
-            const auto reference_files = bounded_reference_files_under(
-                products_root,
+            const auto reference_files = bounded_files_under(
+                {products_root},
                 backlog_root,
                 max_reference_files,
-                alias_paths);
+                alias_paths,
+                std::nullopt,
+                true);
             if (reference_files.file_limit_exceeded || reference_files.entry_limit_exceeded) {
                 verification.failures.push_back("verification_reference_enumeration_limit_exceeded");
             }

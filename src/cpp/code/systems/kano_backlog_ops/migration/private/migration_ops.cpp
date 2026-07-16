@@ -33,6 +33,11 @@ using kano::backlog_ops::MigrationPlan;
 using kano::backlog_ops::MigrationReferenceRewrite;
 using kano::backlog_ops::MigrationRequest;
 
+constexpr std::size_t kMaximumMigrationReferenceFiles = 500000;
+constexpr std::uintmax_t kMaximumMigrationReferenceBytes = 64ull * 1024ull * 1024ull * 1024ull;
+constexpr std::size_t kMaximumMigrationReferences = 500000;
+constexpr std::uintmax_t kMaximumReferenceFileBytes = 16ull * 1024ull * 1024ull;
+
 std::string trim(std::string value) {
     const auto not_space = [](unsigned char ch) { return !std::isspace(ch); };
     value.erase(value.begin(), std::find_if(value.begin(), value.end(), not_space));
@@ -195,6 +200,9 @@ Json::Value request_json(const MigrationRequest& request) {
     value["include_owned_artifacts"] = request.include_owned_artifacts;
     value["max_items"] = static_cast<Json::UInt64>(request.max_items);
     value["max_artifacts"] = static_cast<Json::UInt64>(request.max_artifacts);
+    value["max_reference_files"] = static_cast<Json::UInt64>(request.max_reference_files);
+    value["max_reference_bytes"] = static_cast<Json::UInt64>(request.max_reference_bytes);
+    value["max_references"] = static_cast<Json::UInt64>(request.max_references);
     if (request.expected_source_revision) {
         value["expected_source_revision"] = *request.expected_source_revision;
     }
@@ -278,14 +286,14 @@ std::string type_code(ItemType type) {
     throw std::runtime_error("Unsupported migration item type");
 }
 
-std::unordered_map<std::string, std::size_t> mapped_id_occurrences(
+std::map<std::string, std::size_t> mapped_id_occurrences(
     const std::string& content,
     const std::unordered_map<std::string, std::string>& id_mapping
 ) {
     const auto is_id_character = [](unsigned char ch) {
         return std::isalnum(ch) || ch == '-' || ch == '_';
     };
-    std::unordered_map<std::string, std::size_t> occurrences;
+    std::map<std::string, std::size_t> occurrences;
     std::size_t offset = 0;
     while (offset < content.size()) {
         if (!is_id_character(static_cast<unsigned char>(content[offset]))) {
@@ -347,6 +355,60 @@ bool is_derived_or_internal_path(const std::filesystem::path& path) {
         }
     }
     return false;
+}
+
+struct BoundedReferenceFileScan {
+    std::vector<std::filesystem::path> files;
+    bool file_limit_exceeded = false;
+    bool entry_limit_exceeded = false;
+};
+
+BoundedReferenceFileScan bounded_reference_files_under(
+    const std::filesystem::path& root,
+    const std::filesystem::path& backlog_root,
+    std::size_t max_files,
+    const std::unordered_set<std::string>& excluded_paths = {}
+) {
+    BoundedReferenceFileScan result;
+    if (!std::filesystem::exists(root)) {
+        return result;
+    }
+
+    const std::size_t max_entries = max_files * 4u + 64u;
+    std::size_t visited_entries = 0;
+    std::vector<std::filesystem::path> pending{root};
+    while (!pending.empty()) {
+        const auto directory = pending.back();
+        pending.pop_back();
+        for (const auto& entry : std::filesystem::directory_iterator(directory)) {
+            if (visited_entries >= max_entries) {
+                result.files.clear();
+                result.entry_limit_exceeded = true;
+                return result;
+            }
+            ++visited_entries;
+            const auto path = entry.path();
+            const auto rel = relative_path(path, backlog_root);
+            if (is_derived_or_internal_path(rel)) {
+                continue;
+            }
+            if (entry.is_directory()) {
+                pending.push_back(path);
+                continue;
+            }
+            if (!entry.is_regular_file() || excluded_paths.contains(rel)) {
+                continue;
+            }
+            if (result.files.size() >= max_files) {
+                result.files.clear();
+                result.file_limit_exceeded = true;
+                return result;
+            }
+            result.files.push_back(path);
+        }
+    }
+    std::sort(result.files.begin(), result.files.end());
+    return result;
 }
 
 std::vector<std::filesystem::path> regular_files_under(const std::filesystem::path& root) {
@@ -653,6 +715,15 @@ std::vector<std::string> MigrationOps::validate_request(const MigrationRequest& 
     if (request.max_artifacts > 500000) {
         diagnostics.push_back("max_artifacts_out_of_range");
     }
+    if (request.max_reference_files == 0 || request.max_reference_files > kMaximumMigrationReferenceFiles) {
+        diagnostics.push_back("max_reference_files_out_of_range");
+    }
+    if (request.max_reference_bytes == 0 || request.max_reference_bytes > kMaximumMigrationReferenceBytes) {
+        diagnostics.push_back("max_reference_bytes_out_of_range");
+    }
+    if (request.max_references == 0 || request.max_references > kMaximumMigrationReferences) {
+        diagnostics.push_back("max_references_out_of_range");
+    }
     return diagnostics;
 }
 
@@ -660,6 +731,11 @@ MigrationPlan MigrationOps::plan(const PlanOptions& options) {
     MigrationPlan plan;
     plan.request = options.request;
     plan.blockers = validate_request(options.request);
+    if (!plan.blockers.empty()) {
+        sort_unique(plan.blockers);
+        plan.plan_hash = sha256_hex(json_string(plan_json(plan, false), false));
+        return plan;
+    }
 
     try {
         const auto start = normalized_absolute(options.start_path);
@@ -951,18 +1027,28 @@ MigrationPlan MigrationOps::plan(const PlanOptions& options) {
         }
 
         const auto products_root = backlog_root / "products";
-        constexpr std::size_t kMaxReferenceRewrites = 500000;
+        const auto reference_files = bounded_reference_files_under(
+            products_root,
+            backlog_root,
+            options.request.max_reference_files);
+        if (reference_files.file_limit_exceeded || reference_files.entry_limit_exceeded) {
+            plan.blockers.push_back("reference_enumeration_limit_exceeded");
+        }
+        std::uintmax_t reference_bytes_scanned = 0;
+        bool reference_byte_limit_reached = false;
         bool reference_limit_reached = false;
-        for (const auto& path : regular_files_under(products_root)) {
-            const auto rel = std::filesystem::relative(path, backlog_root);
-            if (is_derived_or_internal_path(rel)) {
-                continue;
-            }
-            constexpr std::uintmax_t kMaxReferenceScanBytes = 16u * 1024u * 1024u;
-            if (std::filesystem::file_size(path) > kMaxReferenceScanBytes) {
+        for (const auto& path : reference_files.files) {
+            const auto file_bytes = std::filesystem::file_size(path);
+            if (file_bytes > kMaximumReferenceFileBytes) {
                 plan.blockers.push_back("reference_scan_file_too_large:" + relative_path(path, backlog_root));
                 continue;
             }
+            if (file_bytes > options.request.max_reference_bytes - reference_bytes_scanned) {
+                plan.blockers.push_back("reference_byte_limit_exceeded");
+                reference_byte_limit_reached = true;
+                break;
+            }
+            reference_bytes_scanned += file_bytes;
             const auto content = read_file(path);
             const auto occurrences_by_id = mapped_id_occurrences(content, id_mapping);
             for (const auto& [source_id, occurrences] : occurrences_by_id) {
@@ -972,8 +1058,8 @@ MigrationPlan MigrationOps::plan(const PlanOptions& options) {
                     plan.blockers.push_back("unsupported_reference_class:" + rel_string);
                     continue;
                 }
-                if (plan.references.size() >= kMaxReferenceRewrites) {
-                    plan.blockers.push_back("reference_rewrite_limit_exceeded");
+                if (plan.references.size() >= options.request.max_references) {
+                    plan.blockers.push_back("reference_limit_exceeded");
                     reference_limit_reached = true;
                     break;
                 }
@@ -990,6 +1076,9 @@ MigrationPlan MigrationOps::plan(const PlanOptions& options) {
             if (reference_limit_reached) {
                 break;
             }
+        }
+        if (reference_byte_limit_reached || reference_limit_reached) {
+            plan.warnings.push_back("reference_scan_stopped_at_configured_bound");
         }
         std::sort(plan.references.begin(), plan.references.end(), [](const auto& left, const auto& right) {
             return std::tie(left.path, left.source_id, left.target_id) < std::tie(right.path, right.source_id, right.target_id);
@@ -1439,6 +1528,29 @@ MigrationVerification MigrationOps::verify(const RecoveryOptions& options) {
         }
 
         const auto& plan_value = journal["plan"];
+        auto hashed_plan_value = plan_value;
+        const auto embedded_plan_hash = hashed_plan_value["plan_hash"].asString();
+        hashed_plan_value.removeMember("plan_hash");
+        if (embedded_plan_hash != options.plan_hash ||
+            sha256_hex(json_string(hashed_plan_value, false)) != options.plan_hash) {
+            verification.failures.push_back("journal_embedded_plan_hash_mismatch");
+            verification.status = "failed";
+            return verification;
+        }
+        const auto& request_value = plan_value["request"];
+        const bool reference_bounds_valid =
+            request_value["max_reference_files"].isUInt64() &&
+            request_value["max_reference_bytes"].isUInt64() &&
+            request_value["max_references"].isUInt64() &&
+            request_value["max_reference_files"].asUInt64() > 0 &&
+            request_value["max_reference_files"].asUInt64() <= kMaximumMigrationReferenceFiles &&
+            request_value["max_reference_bytes"].asUInt64() > 0 &&
+            request_value["max_reference_bytes"].asUInt64() <= kMaximumMigrationReferenceBytes &&
+            request_value["max_references"].asUInt64() > 0 &&
+            request_value["max_references"].asUInt64() <= kMaximumMigrationReferences;
+        if (!reference_bounds_valid) {
+            verification.failures.push_back("journal_reference_bounds_invalid");
+        }
         const auto config_path = ConfigLoader::find_project_config(normalized_absolute(options.start_path));
         if (!config_path) {
             verification.failures.push_back("project_config_not_found");
@@ -1519,26 +1631,61 @@ MigrationVerification MigrationOps::verify(const RecoveryOptions& options) {
         for (const auto& item_value : plan_value["items"]) {
             verification_id_mapping[item_value["source_id"].asString()] = item_value["target_id"].asString();
         }
-        for (const auto& path : regular_files_under(products_root)) {
-            const auto rel = relative_path(path, backlog_root);
-            if (is_derived_or_internal_path(rel) || alias_paths.contains(rel)) {
-                continue;
+        if (reference_bounds_valid) {
+            const auto max_reference_files = static_cast<std::size_t>(request_value["max_reference_files"].asUInt64());
+            const auto max_reference_bytes = static_cast<std::uintmax_t>(request_value["max_reference_bytes"].asUInt64());
+            const auto max_references = static_cast<std::size_t>(request_value["max_references"].asUInt64());
+            if (plan_value["references"].size() > max_references) {
+                verification.failures.push_back("verification_persisted_reference_limit_exceeded");
             }
-            if (!is_supported_text_reference(path)) {
-                continue;
+            const auto reference_files = bounded_reference_files_under(
+                products_root,
+                backlog_root,
+                max_reference_files,
+                alias_paths);
+            if (reference_files.file_limit_exceeded || reference_files.entry_limit_exceeded) {
+                verification.failures.push_back("verification_reference_enumeration_limit_exceeded");
             }
-            constexpr std::uintmax_t kMaxVerificationScanBytes = 16u * 1024u * 1024u;
-            if (std::filesystem::file_size(path) > kMaxVerificationScanBytes) {
-                verification.failures.push_back("verification_scan_file_too_large:" + rel);
-                continue;
-            }
-            const auto content = read_file(path);
-            for (const auto& occurrence : mapped_id_occurrences(content, verification_id_mapping)) {
-                verification.failures.push_back("unresolved_old_id:" + rel + ":" + occurrence.first);
+            std::uintmax_t reference_bytes_scanned = 0;
+            std::size_t references_scanned = 0;
+            bool reference_limit_reached = false;
+            for (const auto& path : reference_files.files) {
+                const auto rel = relative_path(path, backlog_root);
+                const auto file_bytes = std::filesystem::file_size(path);
+                if (file_bytes > kMaximumReferenceFileBytes) {
+                    verification.failures.push_back("verification_scan_file_too_large:" + rel);
+                    continue;
+                }
+                if (file_bytes > max_reference_bytes - reference_bytes_scanned) {
+                    verification.failures.push_back("verification_reference_byte_limit_exceeded");
+                    break;
+                }
+                reference_bytes_scanned += file_bytes;
+                const auto content = read_file(path);
+                const auto occurrences = mapped_id_occurrences(content, verification_id_mapping);
+                if (!occurrences.empty() && !is_supported_text_reference(path)) {
+                    verification.failures.push_back("verification_unsupported_reference_class:" + rel);
+                }
+                for (const auto& occurrence : occurrences) {
+                    if (references_scanned >= max_references) {
+                        verification.failures.push_back("verification_reference_limit_exceeded");
+                        reference_limit_reached = true;
+                        break;
+                    }
+                    ++references_scanned;
+                    verification.failures.push_back("unresolved_old_id:" + rel + ":" + occurrence.first);
+                }
+                if (reference_limit_reached) {
+                    break;
+                }
             }
         }
-        if (std::none_of(verification.failures.begin(), verification.failures.end(), [](const auto& failure) {
-                return failure.starts_with("unresolved_old_id:");
+        if (reference_bounds_valid &&
+            std::none_of(verification.failures.begin(), verification.failures.end(), [](const auto& failure) {
+                return failure.starts_with("unresolved_old_id:") ||
+                       failure.starts_with("verification_reference_") ||
+                       failure.starts_with("verification_scan_file_too_large:") ||
+                       failure.starts_with("verification_unsupported_reference_class:");
             })) {
             verification.postconditions.push_back("canonical_references_rewritten");
         }

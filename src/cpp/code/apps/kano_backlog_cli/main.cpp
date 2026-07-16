@@ -10306,6 +10306,9 @@ int main(int InArgc, char* InArgv[]) {
                 std::string expected_target_prefix;
                 std::size_t max_items = 10000;
                 std::size_t max_artifacts = 50000;
+                std::size_t max_reference_files = kDefaultMigrationMaxReferenceFiles;
+                std::uintmax_t max_reference_bytes = kDefaultMigrationMaxReferenceBytes;
+                std::size_t max_references = kDefaultMigrationMaxReferences;
                 bool skip_artifacts = false;
                 bool compact = false;
                 std::string plan_hash;
@@ -10321,6 +10324,9 @@ int main(int InArgc, char* InArgv[]) {
                 command->add_option("--expected-target-prefix", options->expected_target_prefix, "Required registered target prefix guard when supplied");
                 command->add_option("--max-items", options->max_items, "Maximum source subtree items");
                 command->add_option("--max-artifacts", options->max_artifacts, "Maximum owned artifact files");
+                command->add_option("--max-reference-files", options->max_reference_files, "Maximum product files considered by reference scans");
+                command->add_option("--max-reference-bytes", options->max_reference_bytes, "Maximum aggregate bytes read by reference scans");
+                command->add_option("--max-references", options->max_references, "Maximum reference rewrite records");
                 command->add_flag("--skip-artifacts", options->skip_artifacts, "Exclude owned artifacts from the plan");
                 command->add_flag("--compact", options->compact, "Emit compact JSON");
             };
@@ -10336,6 +10342,9 @@ int main(int InArgc, char* InArgv[]) {
                 plan_options.request.include_owned_artifacts = !options->skip_artifacts;
                 plan_options.request.max_items = options->max_items;
                 plan_options.request.max_artifacts = options->max_artifacts;
+                plan_options.request.max_reference_files = options->max_reference_files;
+                plan_options.request.max_reference_bytes = options->max_reference_bytes;
+                plan_options.request.max_references = options->max_references;
                 if (!options->expected_source_revision.empty()) {
                     plan_options.request.expected_source_revision = options->expected_source_revision;
                 }

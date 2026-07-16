@@ -4,6 +4,7 @@
 #include "kano/backlog_ops/migration/migration_ops.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -42,6 +43,24 @@ void write_text(const std::filesystem::path& path, const std::string& content) {
 std::string read_text(const std::filesystem::path& path) {
     std::ifstream input(path, std::ios::binary);
     return std::string(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
+}
+
+std::string replace_json_unsigned(std::string content, const std::string& key, unsigned long long value) {
+    const auto key_offset = content.find("\"" + key + "\"");
+    if (key_offset == std::string::npos) {
+        throw std::runtime_error("missing JSON key " + key);
+    }
+    const auto colon = content.find(':', key_offset);
+    const auto begin = content.find_first_of("0123456789", colon);
+    if (colon == std::string::npos || begin == std::string::npos) {
+        throw std::runtime_error("missing JSON unsigned value " + key);
+    }
+    auto end = begin;
+    while (end < content.size() && std::isdigit(static_cast<unsigned char>(content[end]))) {
+        ++end;
+    }
+    content.replace(begin, end - begin, std::to_string(value));
+    return content;
 }
 
 kano::backlog_core::BacklogItem create_ready_item(
@@ -134,6 +153,9 @@ int main() {
             .include_owned_artifacts = true,
             .max_items = 45,
             .max_artifacts = 10,
+            .max_reference_files = 100,
+            .max_reference_bytes = 2u * 1024u * 1024u,
+            .max_references = 100,
         };
 
         const auto source_before = read_text(*source_initiative.file_path);
@@ -155,10 +177,49 @@ int main() {
             "identical inputs should produce one deterministic SHA-256 plan hash");
         expect(first.to_json().find("kob.cross_product_migration.plan.v1") != std::string::npos,
             "plan receipt should expose the versioned schema");
+        expect(first.to_json().find("\"max_reference_files\":100") != std::string::npos &&
+               first.to_json().find("\"max_reference_bytes\":2097152") != std::string::npos &&
+               first.to_json().find("\"max_references\":100") != std::string::npos,
+            "plan receipt should persist deterministic reference scan bounds");
         expect(read_text(*source_initiative.file_path) == source_before,
             "dry-run planning must not rewrite source items");
         expect(CanonicalStore(target_root).list_items().empty(),
             "dry-run planning must not create target items or mutate target sequences");
+
+        auto file_bounded_options = options;
+        file_bounded_options.request.max_reference_files = 1;
+        const auto file_bounded = MigrationOps::plan(file_bounded_options);
+        expect(!file_bounded.ready() && contains_prefix(file_bounded.blockers, "reference_enumeration_limit_exceeded"),
+            "planner should fail closed when reference file enumeration exceeds its request bound");
+
+        const auto entry_bound_root = observer_root / "entry-bound";
+        for (int index = 0; index < 75; ++index) {
+            std::filesystem::create_directories(entry_bound_root / std::to_string(index));
+        }
+        auto entry_bounded_options = options;
+        entry_bounded_options.request.max_reference_files = 10;
+        const auto entry_bounded = MigrationOps::plan(entry_bounded_options);
+        const auto entry_bounded_repeat = MigrationOps::plan(entry_bounded_options);
+        expect(!entry_bounded.ready() && contains_prefix(entry_bounded.blockers, "reference_enumeration_limit_exceeded"),
+            "planner should bound directory entries even when empty directories do not consume the file limit");
+        expect(entry_bounded.to_json() == entry_bounded_repeat.to_json(),
+            "combined file and derived entry overflow should produce one deterministic blocked receipt");
+        std::filesystem::remove_all(entry_bound_root);
+
+        auto byte_bounded_options = options;
+        byte_bounded_options.request.max_reference_bytes = 1;
+        const auto byte_bounded = MigrationOps::plan(byte_bounded_options);
+        expect(!byte_bounded.ready() && contains_prefix(byte_bounded.blockers, "reference_byte_limit_exceeded"),
+            "planner should fail closed when aggregate reference scan bytes exceed the request bound");
+
+        auto reference_bounded_options = options;
+        reference_bounded_options.request.max_references = 1;
+        const auto reference_bounded = MigrationOps::plan(reference_bounded_options);
+        const auto reference_bounded_repeat = MigrationOps::plan(reference_bounded_options);
+        expect(!reference_bounded.ready() && contains_prefix(reference_bounded.blockers, "reference_limit_exceeded"),
+            "planner should fail closed when reference rewrite records exceed the request bound");
+        expect(reference_bounded.to_json() == reference_bounded_repeat.to_json(),
+            "reference record truncation should remain deterministic at the configured boundary");
 
         MigrationOps::ApplyOptions apply_options;
         apply_options.plan = options;
@@ -166,6 +227,15 @@ int main() {
         const auto unconfirmed = MigrationOps::apply(apply_options);
         expect(unconfirmed.status == "blocked" && contains_prefix(unconfirmed.operation_receipts, "confirm_required"),
             "apply should require an explicit confirmation gate");
+
+        auto changed_bound_apply_options = apply_options;
+        ++changed_bound_apply_options.plan.request.max_reference_bytes;
+        changed_bound_apply_options.confirm = true;
+        const auto changed_bound_apply = MigrationOps::apply(changed_bound_apply_options);
+        expect(changed_bound_apply.status == "blocked" &&
+               contains_prefix(changed_bound_apply.operation_receipts, "plan_hash_mismatch:"),
+            "apply should reject a request bound that differs from the approved immutable plan");
+
         apply_options.confirm = true;
         for (const auto& phase : {
                  "after_stage",
@@ -225,6 +295,65 @@ int main() {
             .plan_hash = first.plan_hash,
             .confirm = false,
         };
+
+        const auto journal_path = backlog_root / ".cache" / "migrations" / first.plan_hash / "journal.json";
+        const auto journal_before_tamper = read_text(journal_path);
+        write_text(
+            journal_path,
+            replace_json_unsigned(
+                journal_before_tamper,
+                "max_reference_bytes",
+                options.request.max_reference_bytes + 1ull));
+        const auto tampered_verification = MigrationOps::verify(recovery_options);
+        expect(tampered_verification.status == "failed" &&
+               contains_prefix(tampered_verification.failures, "journal_embedded_plan_hash_mismatch") &&
+               std::find(
+                   tampered_verification.postconditions.begin(),
+                   tampered_verification.postconditions.end(),
+                   "canonical_references_rewritten") == tampered_verification.postconditions.end(),
+            "verification should reject tampered persisted bounds before scanning or reporting postconditions");
+        write_text(journal_path, journal_before_tamper);
+
+        std::string unresolved_reference_fixture;
+        for (const auto& mapping : first.items) {
+            unresolved_reference_fixture += mapping.source_id + "\n";
+        }
+        const auto reference_overflow_root = observer_root / "verification-reference-bound";
+        for (int index = 0; index < 3; ++index) {
+            write_text(reference_overflow_root / (std::to_string(index) + ".txt"), unresolved_reference_fixture);
+        }
+        const auto reference_overflow_verification = MigrationOps::verify(recovery_options);
+        expect(reference_overflow_verification.status == "failed" &&
+               contains_prefix(reference_overflow_verification.failures, "verification_reference_limit_exceeded"),
+            "verification should reuse the persisted reference record bound");
+        std::filesystem::remove_all(reference_overflow_root);
+
+        const auto unsupported_verification_path = observer_root / "verification-unsupported-reference.bin";
+        write_text(unsupported_verification_path, first.items.front().source_id);
+        const auto unsupported_verification = MigrationOps::verify(recovery_options);
+        expect(unsupported_verification.status == "failed" &&
+               contains_prefix(unsupported_verification.failures, "verification_unsupported_reference_class:"),
+            "verification should account for unsupported files with unresolved migrated IDs exactly as planning does");
+        std::filesystem::remove(unsupported_verification_path);
+
+        const auto byte_overflow_path = observer_root / "verification-byte-bound.bin";
+        write_text(byte_overflow_path, std::string(options.request.max_reference_bytes, 'x'));
+        const auto byte_overflow_verification = MigrationOps::verify(recovery_options);
+        expect(byte_overflow_verification.status == "failed" &&
+               contains_prefix(byte_overflow_verification.failures, "verification_reference_byte_limit_exceeded"),
+            "verification should reuse the persisted aggregate reference byte bound");
+        std::filesystem::remove(byte_overflow_path);
+
+        const auto file_overflow_root = observer_root / "verification-file-bound";
+        for (int index = 0; index < 60; ++index) {
+            write_text(file_overflow_root / (std::to_string(index) + ".txt"), "bounded\n");
+        }
+        const auto file_overflow_verification = MigrationOps::verify(recovery_options);
+        expect(file_overflow_verification.status == "failed" &&
+               contains_prefix(file_overflow_verification.failures, "verification_reference_enumeration_limit_exceeded"),
+            "verification should reuse the persisted reference file enumeration bound");
+        std::filesystem::remove_all(file_overflow_root);
+
         const auto verification = MigrationOps::verify(recovery_options);
         if (verification.status != "verified") {
             std::cerr << verification.to_json(true) << "\n";
@@ -346,11 +475,29 @@ int main() {
         invalid.source_product = "same";
         invalid.target_product = "same";
         invalid.scope = "repository";
+        invalid.max_reference_files = 0;
+        invalid.max_reference_bytes = 0;
+        invalid.max_references = 0;
         const auto diagnostics = MigrationOps::validate_request(invalid);
         expect(contains_prefix(diagnostics, "source_ref_required") &&
                contains_prefix(diagnostics, "source_and_target_product_must_differ") &&
-               contains_prefix(diagnostics, "unsupported_scope"),
+               contains_prefix(diagnostics, "unsupported_scope") &&
+               contains_prefix(diagnostics, "max_reference_files_out_of_range") &&
+               contains_prefix(diagnostics, "max_reference_bytes_out_of_range") &&
+               contains_prefix(diagnostics, "max_references_out_of_range"),
             "incomplete or unsupported requests should fail closed");
+
+        auto excessive_options = options;
+        excessive_options.request.max_reference_files = 500001;
+        excessive_options.request.max_reference_bytes = 64ull * 1024ull * 1024ull * 1024ull + 1ull;
+        excessive_options.request.max_references = 500001;
+        const auto excessive = MigrationOps::plan(excessive_options);
+        expect(!excessive.ready() &&
+               contains_prefix(excessive.blockers, "max_reference_files_out_of_range") &&
+               contains_prefix(excessive.blockers, "max_reference_bytes_out_of_range") &&
+               contains_prefix(excessive.blockers, "max_references_out_of_range") &&
+               !contains_prefix(excessive.blockers, "preflight_failed:"),
+            "planner should reject above-maximum bounds before filesystem enumeration");
 
         std::filesystem::remove_all(root);
         std::cout << "migration_ops_smoke_test: PASS\n";

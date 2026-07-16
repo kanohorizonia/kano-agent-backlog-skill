@@ -3,6 +3,7 @@
 #include "kano/backlog_core/models/models.hpp"
 
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -16,6 +17,9 @@ inline constexpr const char* kMigrationResultSchema = "kob.cross_product_migrati
 inline constexpr const char* kMigrationVerificationSchema = "kob.cross_product_migration.verification.v1";
 inline constexpr const char* kMigrationStatusSchema = "kob.cross_product_migration.status.v1";
 inline constexpr const char* kMigrationRollbackSchema = "kob.cross_product_migration.rollback.v1";
+inline constexpr std::size_t kDefaultMigrationMaxReferenceFiles = 500000;
+inline constexpr std::uintmax_t kDefaultMigrationMaxReferenceBytes = 8ull * 1024ull * 1024ull * 1024ull;
+inline constexpr std::size_t kDefaultMigrationMaxReferences = 500000;
 
 struct MigrationRequest {
     std::string schema = kMigrationRequestSchema;
@@ -28,6 +32,9 @@ struct MigrationRequest {
     bool include_owned_artifacts = true;
     std::size_t max_items = 10000;
     std::size_t max_artifacts = 50000;
+    std::size_t max_reference_files = kDefaultMigrationMaxReferenceFiles;
+    std::uintmax_t max_reference_bytes = kDefaultMigrationMaxReferenceBytes;
+    std::size_t max_references = kDefaultMigrationMaxReferences;
 };
 
 struct MigrationItemMapping {

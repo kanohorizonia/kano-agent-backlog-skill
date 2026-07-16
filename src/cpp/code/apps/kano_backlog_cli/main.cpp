@@ -10338,7 +10338,7 @@ int main(int InArgc, char* InArgv[]) {
                 command->add_flag("--skip-artifacts", options->skip_artifacts, "Exclude owned artifacts from the plan");
                 command->add_flag("--compact", options->compact, "Emit compact JSON");
             };
-            const auto make_plan_options = [&](const auto& options) {
+            const auto make_plan_options = [&path_str](const auto& options) {
                 MigrationOps::PlanOptions plan_options;
                 plan_options.start_path = path_str;
                 if (!options->backlog_root.empty()) {
@@ -10371,7 +10371,7 @@ int main(int InArgc, char* InArgv[]) {
                 "plan",
                 "Build an immutable migration preflight plan without writes");
             add_plan_options(plan_cmd, options);
-            plan_cmd->callback([&, options]() {
+            plan_cmd->callback([options, make_plan_options]() {
                 const auto result = MigrationOps::plan(make_plan_options(options));
                 std::cout << result.to_json(!options->compact) << "\n";
             });
@@ -10383,7 +10383,7 @@ int main(int InArgc, char* InArgv[]) {
             add_plan_options(apply_cmd, apply_options);
             apply_cmd->add_option("--plan-hash", apply_options->plan_hash, "Exact immutable plan SHA-256")->required();
             apply_cmd->add_flag("--confirm", apply_options->confirm, "Confirm the migration mutation");
-            apply_cmd->callback([&, apply_options]() {
+            apply_cmd->callback([apply_options, make_plan_options]() {
                 MigrationOps::ApplyOptions request;
                 request.plan = make_plan_options(apply_options);
                 request.expected_plan_hash = apply_options->plan_hash;
@@ -10403,7 +10403,7 @@ int main(int InArgc, char* InArgv[]) {
                 command->add_option("--backlog-root", recovery->backlog_root, "Explicit shared backlog root");
                 command->add_flag("--compact", recovery->compact, "Emit compact JSON");
             };
-            const auto make_recovery_options = [&](const auto& recovery) {
+            const auto make_recovery_options = [&path_str](const auto& recovery) {
                 MigrationOps::RecoveryOptions request;
                 request.start_path = path_str;
                 request.plan_hash = recovery->plan_hash;
@@ -10418,7 +10418,7 @@ int main(int InArgc, char* InArgv[]) {
             auto* verify_cmd = migration_cmd->add_subcommand(
                 "verify", "Verify canonical migration postconditions");
             add_recovery_options(verify_cmd, verify_options);
-            verify_cmd->callback([&, verify_options]() {
+            verify_cmd->callback([verify_options, make_recovery_options]() {
                 const auto result = MigrationOps::verify(make_recovery_options(verify_options));
                 std::cout << result.to_json(!verify_options->compact) << "\n";
             });
@@ -10427,7 +10427,7 @@ int main(int InArgc, char* InArgv[]) {
             auto* status_cmd = migration_cmd->add_subcommand(
                 "status", "Inspect a persisted migration transaction");
             add_recovery_options(status_cmd, status_options);
-            status_cmd->callback([&, status_options]() {
+            status_cmd->callback([status_options, make_recovery_options]() {
                 const auto result = MigrationOps::status(make_recovery_options(status_options));
                 std::cout << result.to_json(!status_options->compact) << "\n";
             });
@@ -10437,7 +10437,7 @@ int main(int InArgc, char* InArgv[]) {
                 "rollback", "Restore the exact pre-migration state from the transaction journal");
             add_recovery_options(rollback_cmd, rollback_options);
             rollback_cmd->add_flag("--confirm", rollback_options->confirm, "Confirm the rollback mutation");
-            rollback_cmd->callback([&, rollback_options]() {
+            rollback_cmd->callback([rollback_options, make_recovery_options]() {
                 const auto result = MigrationOps::rollback(make_recovery_options(rollback_options));
                 std::cout << result.to_json(!rollback_options->compact) << "\n";
             });

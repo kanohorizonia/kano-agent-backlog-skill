@@ -164,6 +164,39 @@ int main(int argc, char** argv) {
         const auto original_cwd = std::filesystem::current_path();
         std::filesystem::current_path(temp_root);
 
+        const auto migration_plan_output = temp_root / "migration-plan-invalid-request.json";
+        expect_command_capture_success(
+            run_command_capture(binary, {
+                "migration", "plan", "INVALID-INIT-0001",
+                "--source-product", "invalid-source",
+                "--target-product", "invalid-target",
+                "--max-source-inventory-items", "0",
+                "--compact"
+            }, migration_plan_output),
+            migration_plan_output,
+            "migration plan CLI callback failed"
+        );
+        const auto migration_plan_text = read_text(migration_plan_output);
+        expect(migration_plan_text.find("\"schema\":\"kob.cross_product_migration.plan.v1\"") != std::string::npos,
+            "migration plan CLI callback should emit the versioned plan receipt");
+        expect(migration_plan_text.find("\"max_source_inventory_items_out_of_range\"") != std::string::npos,
+            "migration plan CLI callback should preserve parsed request bounds after command registration");
+
+        const auto migration_status_output = temp_root / "migration-status-missing-journal.txt";
+        const auto migration_status_rc = run_command_capture(binary, {
+            "migration", "status", std::string(64, '0'),
+            "--backlog-root", temp_root.string(),
+            "--compact"
+        }, migration_status_output);
+        expect_command_capture_success(
+            migration_status_rc,
+            migration_status_output,
+            "migration status CLI callback failed");
+        const auto migration_status_text = read_text(migration_status_output);
+        expect(migration_status_text.find("\"schema\":\"kob.cross_product_migration.status.v1\"") != std::string::npos &&
+               migration_status_text.find("\"status\":\"unknown\"") != std::string::npos,
+            "migration recovery CLI callback should retain its registered option builder");
+
         expect(run_command(binary, {"admin", "init", "--product", "quick-smoke-product", "--agent", "tester", "--skip-refresh-views"}) == 0,
             "admin init command failed");
         expect(run_command(binary, {"-P", "quick-smoke-product", "admin", "sync-sequences"}) == 0,

@@ -9420,21 +9420,27 @@ int main(int InArgc, char* InArgv[]) {
         // workitem remap-id
         {
             auto* remapIdCmd = workitemCmd->add_subcommand("remap-id", "Rename an item's ID and update references");
-            std::string ri_ref, ri_to, ri_agent, ri_format = "plain";
-            bool ri_apply = false;
-            remapIdCmd->add_option("ref", ri_ref, "Current item ID or UID")->required();
-            remapIdCmd->add_option("--to", ri_to, "New ID")->required();
-            remapIdCmd->add_option("--agent", ri_agent, "Agent ID")->required();
-            remapIdCmd->add_flag("--apply", ri_apply, "Apply the remap; defaults to dry-run");
-            remapIdCmd->add_option("--format", ri_format, "Output format: plain|json");
-            remapIdCmd->callback([&]() {
+            struct RemapIdCommandState {
+                std::string ref;
+                std::string to;
+                std::string agent;
+                std::string format = "plain";
+                bool apply = false;
+            };
+            auto state = std::make_shared<RemapIdCommandState>();
+            remapIdCmd->add_option("ref", state->ref, "Current item ID or UID")->required();
+            remapIdCmd->add_option("--to", state->to, "New ID")->required();
+            remapIdCmd->add_option("--agent", state->agent, "Agent ID")->required();
+            remapIdCmd->add_flag("--apply", state->apply, "Apply the remap; defaults to dry-run");
+            remapIdCmd->add_option("--format", state->format, "Output format: plain|json");
+            remapIdCmd->callback([&, state]() {
                 auto ctx = resolve_ctx();
-                const auto format_norm = lower_copy(trim_copy(ri_format));
+                const auto format_norm = lower_copy(trim_copy(state->format));
                 if (format_norm != "plain" && format_norm != "json") {
                     throw std::runtime_error("format must be plain or json");
                 }
-                if (!ri_apply) {
-                    const auto plan = plan_remap_id_cli(ctx.product_root, ri_ref, ri_to);
+                if (!state->apply) {
+                    const auto plan = plan_remap_id_cli(ctx.product_root, state->ref, state->to);
                     if (format_norm == "json") {
                         std::cout << json_to_string(remap_plan_to_json(plan, "dry-run"), true) << "\n";
                     } else {
@@ -9444,7 +9450,7 @@ int main(int InArgc, char* InArgv[]) {
                 }
 
                 BacklogIndex index(ctx.backlog_root / ".cache" / "index" / "backlog.db");
-                auto result = WorkitemOps::remap_id(index, ctx.product_root, ri_ref, ri_to, ri_agent);
+                auto result = WorkitemOps::remap_id(index, ctx.product_root, state->ref, state->to, state->agent);
                 if (format_norm == "json") {
                     std::cout << json_to_string(remap_result_to_json(result, "applied"), true) << "\n";
                 } else {

@@ -984,6 +984,19 @@ int main(int argc, char** argv) {
         expect(read_text(remap_ref_path).find("KAI-TSK-0044") != std::string::npos, "links remap-id apply did not update references");
         expect(read_text(remap_ref_path).find("KAI-TSK-0004") == std::string::npos, "links remap-id apply left stale old reference");
 
+        const auto remap_default_path = product_root / "items" / "task" / "0000" / "KAI-TSK-0045_remap-smoke.md";
+        const auto remap_default_output = temp_root / "workitem-remap-id-default-format.txt";
+        expect(run_command_capture(binary, {
+            "-P", "kano-ai-3d-asset-skill",
+            "workitem", "remap-id", "KAI-TSK-0044",
+            "--to", "KAI-TSK-0045",
+            "--agent", "tester",
+            "--apply"
+        }, remap_default_output) == 0, "workitem remap-id omitted-format apply failed");
+        expect(read_text(remap_default_output).find("Remapped ID: KAI-TSK-0044 -> KAI-TSK-0045") != std::string::npos,
+               "workitem remap-id omitted-format apply did not use plain output");
+        expect(!std::filesystem::exists(remap_new_path), "workitem remap-id omitted-format apply left old path");
+        expect(std::filesystem::exists(remap_default_path), "workitem remap-id omitted-format apply did not create new path");
         const auto restore_probe_path = product_root / "_meta" / "restore-probe.md";
         write_text(restore_probe_path, "# Restore Probe\n\n[missing](missing-target.md)\n");
         const auto restore_probe_output = temp_root / "links-restore-from-vcs.json";

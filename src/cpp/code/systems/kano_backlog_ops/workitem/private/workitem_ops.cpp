@@ -1129,13 +1129,15 @@ CreateItemResult WorkitemOps::create_item(
     }
 
     BacklogItem item;
+    int reserved_number = 0;
     for (int attempt = 0; attempt < 2; ++attempt) {
         int number = 0;
         {
             diagnostics::ScopedMutationSpan span("workitem.create_item.next_number", prefix + "-" + type_code);
             number = shared_reservations
-                ? shared_reservations->get_next_number(prefix, type_code)
+                ? shared_reservations->reserve_next_number(prefix, type_code, agent)
                 : index.get_next_number(prefix, type_code);
+            reserved_number = number;
             index.ensure_sequence_at_least(prefix, type_code, number);
         }
         {
@@ -1207,6 +1209,9 @@ CreateItemResult WorkitemOps::create_item(
         std::ofstream ofs(item_path);
         ofs << content;
         ofs.close();
+    }
+    if (shared_reservations) {
+        shared_reservations->commit_reservation(prefix, type_code, reserved_number);
     }
     {
         diagnostics::ScopedMutationSpan span("workitem.create_item.duplicate_admission_receipt", item.id);

@@ -2,6 +2,7 @@
 #include "kano/backlog_core/models/errors.hpp"
 #include "kano/backlog_core/frontmatter/canonical_store.hpp"
 #include <map>
+#include <algorithm>
 #include <stdexcept>
 #include <iostream>
 #include <sstream>
@@ -247,6 +248,17 @@ void BacklogIndex::initialize() {
         "  PRIMARY KEY (prefix, type_code)"
         ")"
     );
+    execute(
+        "CREATE TABLE IF NOT EXISTS id_reservations ("
+        "  prefix TEXT NOT NULL,"
+        "  type_code TEXT NOT NULL,"
+        "  number INTEGER NOT NULL,"
+        "  owner TEXT NOT NULL,"
+        "  created_at INTEGER NOT NULL DEFAULT (unixepoch()),"
+        "  committed_at INTEGER,"
+        "  PRIMARY KEY (prefix, type_code, number)"
+        ")"
+    );
 }
 
 void BacklogIndex::index_item(const BacklogItem& item) {
@@ -324,6 +336,86 @@ int BacklogIndex::get_next_number(const std::string& prefix, const std::string& 
         }
         throw;
     }
+}
+
+int BacklogIndex::reserve_next_number(
+    const std::string& prefix,
+    const std::string& type_code,
+    const std::string& owner
+) {
+    initialize();
+    execute("BEGIN IMMEDIATE");
+    try {
+        Statement advance(
+            db_,
+            "INSERT INTO id_sequences (prefix, type_code, next_number) VALUES (?, ?, 1) "
+            "ON CONFLICT(prefix, type_code) DO UPDATE SET next_number = next_number + 1",
+            "advance reserved id sequence");
+        advance.bind_text(1, prefix);
+        advance.bind_text(2, type_code);
+        advance.step_done();
+
+        Statement read(db_, "SELECT next_number FROM id_sequences WHERE prefix = ? AND type_code = ?", "read reserved id sequence");
+        read.bind_text(1, prefix);
+        read.bind_text(2, type_code);
+        if (read.step() != SQLITE_ROW) {
+            throw std::runtime_error("reserved id sequence returned no row for " + prefix + "-" + type_code);
+        }
+        const int number = sqlite3_column_int(read.get(), 0);
+
+        Statement reservation(
+            db_,
+            "INSERT INTO id_reservations (prefix, type_code, number, owner) VALUES (?, ?, ?, ?)",
+            "record id reservation");
+        reservation.bind_text(1, prefix);
+        reservation.bind_text(2, type_code);
+        reservation.bind_int(3, number);
+        reservation.bind_text(4, owner.substr(0, 160));
+        reservation.step_done();
+        execute("COMMIT");
+        return number;
+    } catch (...) {
+        try { execute("ROLLBACK"); } catch (...) {}
+        throw;
+    }
+}
+
+void BacklogIndex::commit_reservation(const std::string& prefix, const std::string& type_code, int number) {
+    initialize();
+    Statement statement(
+        db_,
+        "UPDATE id_reservations SET committed_at = unixepoch() WHERE prefix = ? AND type_code = ? AND number = ?",
+        "commit id reservation");
+    statement.bind_text(1, prefix);
+    statement.bind_text(2, type_code);
+    statement.bind_int(3, number);
+    statement.step_done();
+}
+
+std::vector<std::string> BacklogIndex::stale_reservation_diagnostics(
+    const std::string& prefix,
+    const std::string& type_code,
+    int minimum_age_seconds
+) {
+    initialize();
+    Statement statement(
+        db_,
+        "SELECT number, owner, unixepoch() - created_at FROM id_reservations "
+        "WHERE prefix = ? AND type_code = ? AND committed_at IS NULL "
+        "AND unixepoch() - created_at >= ? ORDER BY number LIMIT 20",
+        "inspect stale id reservations");
+    statement.bind_text(1, prefix);
+    statement.bind_text(2, type_code);
+    statement.bind_int(3, std::max(0, minimum_age_seconds));
+    std::vector<std::string> diagnostics;
+    while (statement.step() == SQLITE_ROW) {
+        diagnostics.push_back(
+            prefix + "-" + type_code + "-" + std::to_string(sqlite3_column_int(statement.get(), 0)) +
+            " owner=" + column_text(statement.get(), 1) +
+            " age_seconds=" + std::to_string(sqlite3_column_int(statement.get(), 2)) +
+            " recovery=allocate-next-id-without-reusing-reservation");
+    }
+    return diagnostics;
 }
 
 bool BacklogIndex::has_sequence(const std::string& prefix, const std::string& type_code) {

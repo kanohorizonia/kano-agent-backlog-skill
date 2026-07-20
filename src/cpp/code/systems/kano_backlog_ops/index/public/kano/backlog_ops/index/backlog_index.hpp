@@ -51,6 +51,18 @@ public:
      */
     int get_next_number(const std::string& prefix, const std::string& type_code);
 
+    int reserve_next_number(
+        const std::string& prefix,
+        const std::string& type_code,
+        const std::string& owner
+    );
+    void commit_reservation(const std::string& prefix, const std::string& type_code, int number);
+    std::vector<std::string> stale_reservation_diagnostics(
+        const std::string& prefix,
+        const std::string& type_code,
+        int minimum_age_seconds
+    );
+
     bool has_sequence(const std::string& prefix, const std::string& type_code);
 
     /**

@@ -402,6 +402,15 @@ int main() {
                 (concurrent_main_id == "SHR-BUG-0001" && concurrent_other_id == "SHR-BUG-0002") ||
                 (concurrent_main_id == "SHR-BUG-0002" && concurrent_other_id == "SHR-BUG-0001"),
                 "concurrent shared reservations should remain a gap-free monotonic pair");
+            BacklogIndex reservation_inspection(common_git_dir / "kano" / "backlog-id-reservations.db");
+            const int abandoned_number = reservation_inspection.reserve_next_number("SHR", "ISS", "crashed-test-owner");
+            const auto stale_diagnostics = reservation_inspection.stale_reservation_diagnostics("SHR", "ISS", 0);
+            expect(abandoned_number == 1, "abandoned reservation fixture should reserve the first issue id");
+            expect(stale_diagnostics.size() == 1, "uncommitted reservation should have bounded stale diagnostics");
+            expect(stale_diagnostics.front().find("owner=crashed-test-owner") != std::string::npos,
+                "stale reservation diagnostics should identify the bounded owner");
+            expect(stale_diagnostics.front().find("recovery=allocate-next-id-without-reusing-reservation") != std::string::npos,
+                "stale reservation diagnostics should prescribe non-reuse recovery");
             std::filesystem::remove_all(shared_git_fixture.parent_path());
 
             const auto symlink_root = make_temp_root();

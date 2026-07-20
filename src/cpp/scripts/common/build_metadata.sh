@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+KABLD_BUILD_METADATA_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Source infra's build_metadata if available via submodule
-KOG_SHARED_BUILD_METADATA_SH="${KOG_CPP_ROOT:-$SCRIPT_DIR/../../../cpp/shared/infra}/shared/infra/scripts/common/build_metadata.sh"
+KOG_SHARED_BUILD_METADATA_SH="${KOG_CPP_ROOT:-$KABLD_BUILD_METADATA_SCRIPT_DIR/../../../cpp/shared/infra}/shared/infra/scripts/common/build_metadata.sh"
 if [[ ! -f "$KOG_SHARED_BUILD_METADATA_SH" ]]; then
-  KOG_SHARED_BUILD_METADATA_SH="$SCRIPT_DIR/../../../cpp/shared/infra/scripts/common/build_metadata.sh"
+  KOG_SHARED_BUILD_METADATA_SH="$KABLD_BUILD_METADATA_SCRIPT_DIR/../../../cpp/shared/infra/scripts/common/build_metadata.sh"
 fi
 if [[ -f "$KOG_SHARED_BUILD_METADATA_SH" ]]; then
   # shellcheck disable=SC1090

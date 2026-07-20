@@ -91,10 +91,24 @@ find_native_bin() {
       )
       ;;
     Darwin)
-      local -a search_paths=(
-        "$SKILL_ROOT/src/cpp/out/bin/macos-ninja-clang/release/kano-backlog"
-        "$SKILL_ROOT/src/cpp/out/bin/macos-ninja-clang/debug/kano-backlog"
-      )
+      case "$(uname -m 2>/dev/null || printf 'unknown')" in
+        arm64|aarch64)
+          local -a search_paths=(
+            "$SKILL_ROOT/src/cpp/out/bin/macos-ninja-clang-arm64/release/kano-backlog"
+            "$SKILL_ROOT/src/cpp/out/bin/macos-ninja-clang-arm64/debug/kano-backlog"
+            "$SKILL_ROOT/src/cpp/out/bin/macos-ninja-clang/release/kano-backlog"
+            "$SKILL_ROOT/src/cpp/out/bin/macos-ninja-clang/debug/kano-backlog"
+          )
+          ;;
+        *)
+          local -a search_paths=(
+            "$SKILL_ROOT/src/cpp/out/bin/macos-ninja-clang-x64/release/kano-backlog"
+            "$SKILL_ROOT/src/cpp/out/bin/macos-ninja-clang-x64/debug/kano-backlog"
+            "$SKILL_ROOT/src/cpp/out/bin/macos-ninja-clang/release/kano-backlog"
+            "$SKILL_ROOT/src/cpp/out/bin/macos-ninja-clang/debug/kano-backlog"
+          )
+          ;;
+      esac
       ;;
     *)
       local -a search_paths=()

@@ -5856,12 +5856,16 @@ std::optional<int> try_run_workitem_set_ready_fast_path(int argc, char** argv) {
     std::string ref;
     std::string context;
     std::string goal;
+    std::string non_goals;
     std::string approach;
+    std::string intent_amendments;
     std::string acceptance_criteria;
     std::string risks;
     std::string context_file;
     std::string goal_file;
+    std::string non_goals_file;
     std::string approach_file;
+    std::string intent_amendments_file;
     std::string acceptance_criteria_file;
     std::string risks_file;
     std::string agent;
@@ -5934,8 +5938,20 @@ std::optional<int> try_run_workitem_set_ready_fast_path(int argc, char** argv) {
             goal = *value;
             continue;
         }
+        if (auto value = option_value(i, "--non-goals")) {
+            non_goals = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--do-not")) {
+            non_goals = *value;
+            continue;
+        }
         if (auto value = option_value(i, "--approach")) {
             approach = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--intent-amendments")) {
+            intent_amendments = *value;
             continue;
         }
         if (auto value = option_value(i, "--acceptance-criteria")) {
@@ -5954,8 +5970,20 @@ std::optional<int> try_run_workitem_set_ready_fast_path(int argc, char** argv) {
             goal_file = *value;
             continue;
         }
+        if (auto value = option_value(i, "--non-goals-file")) {
+            non_goals_file = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--do-not-file")) {
+            non_goals_file = *value;
+            continue;
+        }
         if (auto value = option_value(i, "--approach-file")) {
             approach_file = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--intent-amendments-file")) {
+            intent_amendments_file = *value;
             continue;
         }
         if (auto value = option_value(i, "--acceptance-criteria-file")) {
@@ -5994,7 +6022,9 @@ std::optional<int> try_run_workitem_set_ready_fast_path(int argc, char** argv) {
 
     apply_text_file_option(context, context_file, "--context", "--context-file");
     apply_text_file_option(goal, goal_file, "--goal", "--goal-file");
+    apply_text_file_option(non_goals, non_goals_file, "--non-goals/--do-not", "--non-goals-file/--do-not-file");
     apply_text_file_option(approach, approach_file, "--approach", "--approach-file");
+    apply_text_file_option(intent_amendments, intent_amendments_file, "--intent-amendments", "--intent-amendments-file");
     apply_text_file_option(acceptance_criteria, acceptance_criteria_file, "--acceptance-criteria", "--acceptance-criteria-file");
     apply_text_file_option(risks, risks_file, "--risks", "--risks-file");
 
@@ -6007,9 +6037,17 @@ std::optional<int> try_run_workitem_set_ready_fast_path(int argc, char** argv) {
         item.goal = goal;
         updated_fields.push_back("Goal");
     }
+    if (!non_goals.empty()) {
+        item.non_goals = non_goals;
+        updated_fields.push_back("Non-Goals / Do Not");
+    }
     if (!approach.empty()) {
         item.approach = approach;
         updated_fields.push_back("Approach");
+    }
+    if (!intent_amendments.empty()) {
+        item.intent_amendments = intent_amendments;
+        updated_fields.push_back("Intent Amendments");
     }
     if (!acceptance_criteria.empty()) {
         item.acceptance_criteria = acceptance_criteria;
@@ -6021,7 +6059,7 @@ std::optional<int> try_run_workitem_set_ready_fast_path(int argc, char** argv) {
     }
 
     if (updated_fields.empty()) {
-        throw std::runtime_error("No Ready fields supplied. Pass at least one of --context, --goal, --approach, --acceptance-criteria, --risks");
+        throw std::runtime_error("No Ready fields supplied. Pass at least one of --context, --goal, --non-goals, --do-not, --approach, --intent-amendments, --acceptance-criteria, --risks");
     }
 
     StateMachine::record_worklog(item, agent, "Updated Ready fields: " + join_strings(updated_fields));
@@ -6033,7 +6071,9 @@ std::optional<int> try_run_workitem_set_ready_fast_path(int argc, char** argv) {
     if (consume_input_files) {
         consume_backlog_text_file(context_file, "--context-file");
         consume_backlog_text_file(goal_file, "--goal-file");
+        consume_backlog_text_file(non_goals_file, "--non-goals-file/--do-not-file");
         consume_backlog_text_file(approach_file, "--approach-file");
+        consume_backlog_text_file(intent_amendments_file, "--intent-amendments-file");
         consume_backlog_text_file(acceptance_criteria_file, "--acceptance-criteria-file");
         consume_backlog_text_file(risks_file, "--risks-file");
     }
@@ -6225,6 +6265,113 @@ std::optional<int> try_run_workitem_update_state_fast_path(int argc, char** argv
     } else {
         std::cout << "Item " << result.id << " is already in state " << to_string(result.new_state) << "\n";
     }
+
+    if (consume_input_files) {
+        consume_backlog_text_file(message_file, "--message-file");
+    }
+    return 0;
+}
+
+std::optional<int> try_run_state_transition_fast_path(int argc, char** argv) {
+    if (argc < 5 || argv == nullptr) {
+        return std::nullopt;
+    }
+
+    int state_index = -1;
+    for (int i = 1; i + 1 < argc; ++i) {
+        if (std::string(argv[i]) == "state" && std::string(argv[i + 1]) == "transition") {
+            state_index = i;
+            break;
+        }
+    }
+    if (state_index < 0) {
+        return std::nullopt;
+    }
+
+    std::string path_str = ".";
+    std::string product;
+    std::string sandbox;
+    std::string ref;
+    std::string action_str;
+    std::string agent;
+    std::string message;
+    std::string message_file;
+    std::string model;
+    bool consume_input_files = false;
+
+    const auto option_value = [&](int& index, const std::string& option) -> std::optional<std::string> {
+        const std::string arg = argv[index];
+        const std::string prefix = option + "=";
+        if (arg.rfind(prefix, 0) == 0) {
+            return arg.substr(prefix.size());
+        }
+        if (arg == option && index + 1 < argc) {
+            ++index;
+            return std::string(argv[index]);
+        }
+        return std::nullopt;
+    };
+
+    const auto parse_context_option = [&](int& index) -> bool {
+        if (auto value = option_value(index, "-p")) { path_str = *value; return true; }
+        if (auto value = option_value(index, "--path")) { path_str = *value; return true; }
+        if (auto value = option_value(index, "-P")) { product = *value; return true; }
+        if (auto value = option_value(index, "--product")) { product = *value; return true; }
+        if (auto value = option_value(index, "-s")) { sandbox = *value; return true; }
+        if (auto value = option_value(index, "--sandbox")) { sandbox = *value; return true; }
+        return false;
+    };
+
+    for (int i = 1; i < state_index; ++i) {
+        if (!parse_context_option(i)) {
+            return std::nullopt;
+        }
+    }
+
+    for (int i = state_index + 2; i < argc; ++i) {
+        const std::string arg = argv[i];
+        if (arg == "-h" || arg == "--help") { return std::nullopt; }
+        if (parse_context_option(i)) { continue; }
+        if (auto value = option_value(i, "--agent")) { agent = *value; continue; }
+        if (auto value = option_value(i, "-m")) { message = *value; continue; }
+        if (auto value = option_value(i, "--message")) { message = *value; continue; }
+        if (auto value = option_value(i, "--message-file")) { message_file = *value; continue; }
+        if (auto value = option_value(i, "--model")) { model = *value; continue; }
+        if (arg == "--consume-input-files") { consume_input_files = true; continue; }
+        if (arg.rfind("-", 0) != 0) {
+            if (ref.empty()) { ref = arg; continue; }
+            if (action_str.empty()) { action_str = arg; continue; }
+        }
+        return std::nullopt;
+    }
+
+    if (ref.empty() || action_str.empty()) {
+        return std::nullopt;
+    }
+    const auto action = parse_state_action(action_str);
+    if (!action) {
+        throw std::runtime_error("Invalid action: " + action_str);
+    }
+
+    apply_text_file_option(message, message_file, "-m/--message", "--message-file");
+
+    auto ctx = BacklogContext::resolve(
+        path_str,
+        product.empty() ? std::nullopt : std::optional<std::string>(product),
+        sandbox.empty() ? std::nullopt : std::optional<std::string>(sandbox)
+    );
+    CanonicalStore store(ctx.product_root);
+    RefResolver resolver(store);
+    auto item = resolver.resolve(ref);
+    StateMachine::transition(
+        item,
+        *action,
+        agent.empty() ? std::nullopt : std::optional<std::string>(agent),
+        message.empty() ? std::nullopt : std::optional<std::string>(message),
+        model.empty() ? std::nullopt : std::optional<std::string>(model)
+    );
+    store.write(item);
+    std::cout << "OK: " << item.id << " transitioned to " << to_string(item.state) << "\n";
 
     if (consume_input_files) {
         consume_backlog_text_file(message_file, "--message-file");
@@ -8407,6 +8554,9 @@ int main(int InArgc, char* InArgv[]) {
         if (auto rc = try_run_workitem_create_fast_path(parse_argc, parse_argv)) {
             return *rc;
         }
+        if (auto rc = try_run_state_transition_fast_path(parse_argc, parse_argv)) {
+            return *rc;
+        }
         if (auto rc = try_run_workitem_update_state_fast_path(parse_argc, parse_argv)) {
             return *rc;
         }
@@ -8799,36 +8949,39 @@ int main(int InArgc, char* InArgv[]) {
         // workitem intent-stack
         {
             auto* intentStackCmd = workitemCmd->add_subcommand("intent-stack", "Resolve a bounded parent-chain intent stack for an item");
-            std::string intent_ref;
-            std::string intent_format = "text";
-            int intent_max_depth = 8;
-            int intent_max_section_chars = 600;
-            intentStackCmd->add_option("ref", intent_ref, "Item ID or UID")->required();
-            intentStackCmd->add_option("--format", intent_format, "Output format: text or json");
-            intentStackCmd->add_option("--max-depth", intent_max_depth, "Maximum parent-chain depth to resolve");
-            intentStackCmd->add_option("--max-section-chars", intent_max_section_chars, "Maximum characters per emitted body section");
+            struct IntentStackCommandState {
+                std::string ref;
+                std::string format = "text";
+                int max_depth = 8;
+                int max_section_chars = 600;
+            };
+            const auto state = std::make_shared<IntentStackCommandState>();
+            intentStackCmd->add_option("ref", state->ref, "Item ID or UID")->required();
+            intentStackCmd->add_option("--format", state->format, "Output format: text or json");
+            intentStackCmd->add_option("--max-depth", state->max_depth, "Maximum parent-chain depth to resolve");
+            intentStackCmd->add_option("--max-section-chars", state->max_section_chars, "Maximum characters per emitted body section");
 
-            intentStackCmd->callback([&]() {
+            intentStackCmd->callback([&, state]() {
                 auto ctx = resolve_ctx();
-                reject_outside_product_path_ref(intent_ref, ctx.product_root);
+                reject_outside_product_path_ref(state->ref, ctx.product_root);
                 CanonicalStore store(ctx.product_root);
                 RefResolver resolver(store);
-                const auto source = resolver.resolve(intent_ref);
+                const auto source = resolver.resolve(state->ref);
                 require_item_file_inside_product(source, ctx.product_root);
-                if (intent_max_depth < 1) {
+                if (state->max_depth < 1) {
                     throw std::runtime_error("--max-depth must be at least 1");
                 }
-                if (intent_max_section_chars < 0) {
+                if (state->max_section_chars < 0) {
                     throw std::runtime_error("--max-section-chars must be non-negative");
                 }
-                const auto stack = WorkitemOps::resolve_intent_stack(ctx.product_root, source.id, intent_max_depth);
-                const auto max_section_chars = static_cast<std::size_t>(intent_max_section_chars);
-                if (intent_format == "json") {
+                const auto stack = WorkitemOps::resolve_intent_stack(ctx.product_root, source.id, state->max_depth);
+                const auto max_section_chars = static_cast<std::size_t>(state->max_section_chars);
+                if (state->format == "json") {
                     std::cout << json_to_string(intent_stack_json(stack, max_section_chars), true) << "\n";
-                } else if (intent_format == "text") {
+                } else if (state->format == "text") {
                     print_intent_stack_text(stack, max_section_chars);
                 } else {
-                    throw std::runtime_error("Unsupported intent-stack format: " + intent_format + " (expected text or json)");
+                    throw std::runtime_error("Unsupported intent-stack format: " + state->format + " (expected text or json)");
                 }
             });
         }
@@ -8836,39 +8989,42 @@ int main(int InArgc, char* InArgv[]) {
         // workitem work-order-admission
         {
             auto* admissionCmd = workitemCmd->add_subcommand("work-order-admission", "Evaluate read-only work-order admission for an item");
-            std::string admission_ref;
-            std::string admission_intent;
-            std::string admission_format = "text";
-            bool admission_source_changing = false;
-            admissionCmd->add_option("ref", admission_ref, "Item ID or UID")->required();
-            auto* admissionIntentOption = admissionCmd->add_option("--intent", admission_intent, "Requested work intent for admission");
-            admissionCmd->add_option("--format", admission_format, "Output format: text or json");
-            admissionCmd->add_flag("--source-changing", admission_source_changing, "Mark the requested work as source-changing for parent-item admission diagnostics");
+            struct WorkOrderAdmissionCommandState {
+                std::string ref;
+                std::string intent;
+                std::string format = "text";
+                bool source_changing = false;
+            };
+            const auto state = std::make_shared<WorkOrderAdmissionCommandState>();
+            admissionCmd->add_option("ref", state->ref, "Item ID or UID")->required();
+            auto* admissionIntentOption = admissionCmd->add_option("--intent", state->intent, "Requested work intent for admission");
+            admissionCmd->add_option("--format", state->format, "Output format: text or json");
+            admissionCmd->add_flag("--source-changing", state->source_changing, "Mark the requested work as source-changing for parent-item admission diagnostics");
 
-            admissionCmd->callback([&, admissionIntentOption]() {
+            admissionCmd->callback([&, state, admissionIntentOption]() {
                 auto ctx = resolve_ctx();
-                reject_outside_product_path_ref(admission_ref, ctx.product_root);
+                reject_outside_product_path_ref(state->ref, ctx.product_root);
                 CanonicalStore store(ctx.product_root);
                 RefResolver resolver(store);
-                const auto source = resolver.resolve(admission_ref);
+                const auto source = resolver.resolve(state->ref);
                 require_item_file_inside_product(source, ctx.product_root);
-                admission_format = lower_copy(trim_copy(admission_format));
-                if (admission_format.empty()) {
-                    admission_format = "text";
+                state->format = lower_copy(trim_copy(state->format));
+                if (state->format.empty()) {
+                    state->format = "text";
                 }
-                if (admission_format != "text" && admission_format != "json") {
-                    throw std::runtime_error("Unsupported work-order-admission format: " + admission_format + " (expected text or json)");
+                if (state->format != "text" && state->format != "json") {
+                    throw std::runtime_error("Unsupported work-order-admission format: " + state->format + " (expected text or json)");
                 }
                 std::optional<std::string> requested_intent = std::nullopt;
                 if (admissionIntentOption->count() > 0) {
-                    requested_intent = admission_intent;
+                    requested_intent = state->intent;
                 }
                 const auto admission = WorkitemOps::evaluate_work_order_admission(
                     ctx.product_root,
                     source.id,
                     requested_intent,
-                    admission_source_changing);
-                if (admission_format == "json") {
+                    state->source_changing);
+                if (state->format == "json") {
                     std::cout << json_to_string(work_order_admission_json(admission), true) << "\n";
                 } else {
                     print_work_order_admission_text(admission);
@@ -8879,43 +9035,46 @@ int main(int InArgc, char* InArgv[]) {
         // workitem intent-template
         {
             auto* intentTemplateCmd = workitemCmd->add_subcommand("intent-template", "Generate Intent Preflight, Do Not Compliance, and Coding Agent Intent Prompt templates for an item");
-            std::string template_ref;
-            std::string template_kind = "both";
-            std::string template_format = "text";
-            int template_max_depth = 8;
-            int template_max_section_chars = 600;
-            intentTemplateCmd->add_option("ref", template_ref, "Item ID or UID")->required();
-            intentTemplateCmd->add_option("--kind", template_kind, "Template kind: preflight, compliance, handoff, both, or all");
-            intentTemplateCmd->add_option("--format", template_format, "Output format: text or json");
-            intentTemplateCmd->add_option("--max-depth", template_max_depth, "Maximum parent-chain depth to resolve");
-            intentTemplateCmd->add_option("--max-section-chars", template_max_section_chars, "Maximum characters per emitted body section");
+            struct IntentTemplateCommandState {
+                std::string ref;
+                std::string kind = "both";
+                std::string format = "text";
+                int max_depth = 8;
+                int max_section_chars = 600;
+            };
+            const auto state = std::make_shared<IntentTemplateCommandState>();
+            intentTemplateCmd->add_option("ref", state->ref, "Item ID or UID")->required();
+            intentTemplateCmd->add_option("--kind", state->kind, "Template kind: preflight, compliance, handoff, both, or all");
+            intentTemplateCmd->add_option("--format", state->format, "Output format: text or json");
+            intentTemplateCmd->add_option("--max-depth", state->max_depth, "Maximum parent-chain depth to resolve");
+            intentTemplateCmd->add_option("--max-section-chars", state->max_section_chars, "Maximum characters per emitted body section");
 
-            intentTemplateCmd->callback([&]() {
+            intentTemplateCmd->callback([&, state]() {
                 auto ctx = resolve_ctx();
-                reject_outside_product_path_ref(template_ref, ctx.product_root);
+                reject_outside_product_path_ref(state->ref, ctx.product_root);
                 CanonicalStore store(ctx.product_root);
                 RefResolver resolver(store);
-                const auto source = resolver.resolve(template_ref);
+                const auto source = resolver.resolve(state->ref);
                 require_item_file_inside_product(source, ctx.product_root);
-                template_kind = lower_copy(trim_copy(template_kind));
-                template_format = lower_copy(trim_copy(template_format));
-                if (template_kind != "preflight" && template_kind != "compliance" && template_kind != "handoff" && template_kind != "both" && template_kind != "all") {
-                    throw std::runtime_error("Unsupported intent-template kind: " + template_kind + " (expected preflight, compliance, handoff, both, or all)");
+                state->kind = lower_copy(trim_copy(state->kind));
+                state->format = lower_copy(trim_copy(state->format));
+                if (state->kind != "preflight" && state->kind != "compliance" && state->kind != "handoff" && state->kind != "both" && state->kind != "all") {
+                    throw std::runtime_error("Unsupported intent-template kind: " + state->kind + " (expected preflight, compliance, handoff, both, or all)");
                 }
-                if (template_max_depth < 1) {
+                if (state->max_depth < 1) {
                     throw std::runtime_error("--max-depth must be at least 1");
                 }
-                if (template_max_section_chars < 0) {
+                if (state->max_section_chars < 0) {
                     throw std::runtime_error("--max-section-chars must be non-negative");
                 }
-                const auto stack = WorkitemOps::resolve_intent_stack(ctx.product_root, source.id, template_max_depth);
-                const auto max_section_chars = static_cast<std::size_t>(template_max_section_chars);
-                if (template_format == "json") {
-                    std::cout << json_to_string(intent_template_json(stack, template_kind, max_section_chars), true) << "\n";
-                } else if (template_format == "text") {
-                    print_intent_template_text(stack, template_kind, max_section_chars);
+                const auto stack = WorkitemOps::resolve_intent_stack(ctx.product_root, source.id, state->max_depth);
+                const auto max_section_chars = static_cast<std::size_t>(state->max_section_chars);
+                if (state->format == "json") {
+                    std::cout << json_to_string(intent_template_json(stack, state->kind, max_section_chars), true) << "\n";
+                } else if (state->format == "text") {
+                    print_intent_template_text(stack, state->kind, max_section_chars);
                 } else {
-                    throw std::runtime_error("Unsupported intent-template format: " + template_format + " (expected text or json)");
+                    throw std::runtime_error("Unsupported intent-template format: " + state->format + " (expected text or json)");
                 }
             });
         }
@@ -8923,65 +9082,68 @@ int main(int InArgc, char* InArgv[]) {
         // workitem intent-amend
         {
             auto* intentAmendCmd = workitemCmd->add_subcommand("intent-amend", "Append an Intent Amendment for drift correction");
-            std::string amend_ref;
-            std::string amend_correction;
-            std::string amend_correction_file;
-            std::string amend_reason;
-            std::string amend_reason_file;
-            std::vector<std::string> amend_applies_to;
-            std::string amend_agent;
-            std::string amend_format = "text";
-            bool amend_consume_input_files = false;
-            intentAmendCmd->add_option("ref", amend_ref, "Item ID or UID")->required();
-            intentAmendCmd->add_option("--correction", amend_correction, "Human/reviewer correction text");
-            intentAmendCmd->add_option("--correction-file", amend_correction_file, "Read correction text from file");
-            intentAmendCmd->add_option("--reason", amend_reason, "Reason for the amendment");
-            intentAmendCmd->add_option("--reason-file", amend_reason_file, "Read amendment reason from file");
-            intentAmendCmd->add_option("--applies-to", amend_applies_to, "Affected section or scope; repeatable");
-            intentAmendCmd->add_option("--agent", amend_agent, "Author/agent recording the amendment")->required();
-            intentAmendCmd->add_option("--format", amend_format, "Output format: text or json");
-            intentAmendCmd->add_flag("--consume-input-files", amend_consume_input_files, "Delete input files after a successful update; files must be under ~/.kano/tmp/backlog or KANO_BACKLOG_TEXT_TMP");
+            struct IntentAmendCommandState {
+                std::string ref;
+                std::string correction;
+                std::string correction_file;
+                std::string reason;
+                std::string reason_file;
+                std::vector<std::string> applies_to;
+                std::string agent;
+                std::string format = "text";
+                bool consume_input_files = false;
+            };
+            const auto state = std::make_shared<IntentAmendCommandState>();
+            intentAmendCmd->add_option("ref", state->ref, "Item ID or UID")->required();
+            intentAmendCmd->add_option("--correction", state->correction, "Human/reviewer correction text");
+            intentAmendCmd->add_option("--correction-file", state->correction_file, "Read correction text from file");
+            intentAmendCmd->add_option("--reason", state->reason, "Reason for the amendment");
+            intentAmendCmd->add_option("--reason-file", state->reason_file, "Read amendment reason from file");
+            intentAmendCmd->add_option("--applies-to", state->applies_to, "Affected section or scope; repeatable");
+            intentAmendCmd->add_option("--agent", state->agent, "Author/agent recording the amendment")->required();
+            intentAmendCmd->add_option("--format", state->format, "Output format: text or json");
+            intentAmendCmd->add_flag("--consume-input-files", state->consume_input_files, "Delete input files after a successful update; files must be under ~/.kano/tmp/backlog or KANO_BACKLOG_TEXT_TMP");
 
-            intentAmendCmd->callback([&]() {
+            intentAmendCmd->callback([&, state]() {
                 auto ctx = resolve_ctx();
                 CanonicalStore store(ctx.product_root);
                 RefResolver resolver(store);
-                auto item = resolver.resolve(amend_ref);
+                auto item = resolver.resolve(state->ref);
 
-                apply_text_file_option(amend_correction, amend_correction_file, "--correction", "--correction-file");
-                apply_text_file_option(amend_reason, amend_reason_file, "--reason", "--reason-file");
-                amend_correction = trim_copy(amend_correction);
-                amend_reason = trim_copy(amend_reason);
-                amend_format = lower_copy(trim_copy(amend_format));
-                if (amend_format.empty()) {
-                    amend_format = "text";
+                apply_text_file_option(state->correction, state->correction_file, "--correction", "--correction-file");
+                apply_text_file_option(state->reason, state->reason_file, "--reason", "--reason-file");
+                state->correction = trim_copy(state->correction);
+                state->reason = trim_copy(state->reason);
+                state->format = lower_copy(trim_copy(state->format));
+                if (state->format.empty()) {
+                    state->format = "text";
                 }
-                if (amend_correction.empty()) {
+                if (state->correction.empty()) {
                     throw std::runtime_error("Missing amendment correction. Use --correction or --correction-file");
                 }
-                if (amend_reason.empty()) {
+                if (state->reason.empty()) {
                     throw std::runtime_error("Missing amendment reason. Use --reason or --reason-file");
                 }
-                if (amend_format != "text" && amend_format != "json") {
-                    throw std::runtime_error("Unsupported intent-amend format: " + amend_format + " (expected text or json)");
+                if (state->format != "text" && state->format != "json") {
+                    throw std::runtime_error("Unsupported intent-amend format: " + state->format + " (expected text or json)");
                 }
 
-                const auto entry = format_intent_amendment_entry(item, amend_agent, amend_correction, amend_reason, amend_applies_to);
+                const auto entry = format_intent_amendment_entry(item, state->agent, state->correction, state->reason, state->applies_to);
                 if (item.intent_amendments && !trim_copy(*item.intent_amendments).empty()) {
                     item.intent_amendments = trim_copy(*item.intent_amendments) + "\n\n" + entry;
                 } else {
                     item.intent_amendments = entry;
                 }
                 const auto guidance = intent_amendment_guidance(item.state);
-                StateMachine::record_worklog(item, amend_agent, "Intent Amendment appended: " + amend_reason + " | " + guidance);
+                StateMachine::record_worklog(item, state->agent, "Intent Amendment appended: " + state->reason + " | " + guidance);
                 store.write(item);
 
-                if (amend_consume_input_files) {
-                    consume_backlog_text_file(amend_correction_file, "--correction-file");
-                    consume_backlog_text_file(amend_reason_file, "--reason-file");
+                if (state->consume_input_files) {
+                    consume_backlog_text_file(state->correction_file, "--correction-file");
+                    consume_backlog_text_file(state->reason_file, "--reason-file");
                 }
 
-                if (amend_format == "json") {
+                if (state->format == "json") {
                     Json::Value payload(Json::objectValue);
                     payload["id"] = item.id;
                     payload["state"] = to_string(item.state);
@@ -9001,56 +9163,59 @@ int main(int InArgc, char* InArgv[]) {
         // workitem drift-resolution-template
         {
             auto* driftTemplateCmd = workitemCmd->add_subcommand("drift-resolution-template", "Generate an Intent Drift Resolution ticket template for a source item");
-            std::string drift_ref;
-            std::string drift_type = "unknown / needs human confirmation";
-            std::string detection_stage = "pre-handoff";
-            std::string detected_by = "ChatGPT/operator";
-            std::string drift_format = "text";
-            int drift_max_depth = 8;
-            int drift_max_section_chars = 600;
-            driftTemplateCmd->add_option("ref", drift_ref, "Source item ID or UID")->required();
-            driftTemplateCmd->add_option("--drift-type", drift_type, "Drift type label");
-            driftTemplateCmd->add_option("--detection-stage", detection_stage, "Detection stage");
-            driftTemplateCmd->add_option("--detected-by", detected_by, "Detector label");
-            driftTemplateCmd->add_option("--format", drift_format, "Output format: text or json");
-            driftTemplateCmd->add_option("--max-depth", drift_max_depth, "Maximum parent-chain depth to resolve");
-            driftTemplateCmd->add_option("--max-section-chars", drift_max_section_chars, "Maximum characters per emitted body section");
+            struct DriftResolutionTemplateCommandState {
+                std::string ref;
+                std::string drift_type = "unknown / needs human confirmation";
+                std::string detection_stage = "pre-handoff";
+                std::string detected_by = "ChatGPT/operator";
+                std::string format = "text";
+                int max_depth = 8;
+                int max_section_chars = 600;
+            };
+            const auto state = std::make_shared<DriftResolutionTemplateCommandState>();
+            driftTemplateCmd->add_option("ref", state->ref, "Source item ID or UID")->required();
+            driftTemplateCmd->add_option("--drift-type", state->drift_type, "Drift type label");
+            driftTemplateCmd->add_option("--detection-stage", state->detection_stage, "Detection stage");
+            driftTemplateCmd->add_option("--detected-by", state->detected_by, "Detector label");
+            driftTemplateCmd->add_option("--format", state->format, "Output format: text or json");
+            driftTemplateCmd->add_option("--max-depth", state->max_depth, "Maximum parent-chain depth to resolve");
+            driftTemplateCmd->add_option("--max-section-chars", state->max_section_chars, "Maximum characters per emitted body section");
 
-            driftTemplateCmd->callback([&]() {
+            driftTemplateCmd->callback([&, state]() {
                 auto ctx = resolve_ctx();
-                reject_outside_product_path_ref(drift_ref, ctx.product_root);
+                reject_outside_product_path_ref(state->ref, ctx.product_root);
                 CanonicalStore store(ctx.product_root);
                 RefResolver resolver(store);
-                const auto source = resolver.resolve(drift_ref);
+                const auto source = resolver.resolve(state->ref);
                 require_item_file_inside_product(source, ctx.product_root);
                 const auto children = collect_child_item_ids(store, source.id);
-                drift_format = lower_copy(trim_copy(drift_format));
-                if (drift_format.empty()) {
-                    drift_format = "text";
+                state->format = lower_copy(trim_copy(state->format));
+                if (state->format.empty()) {
+                    state->format = "text";
                 }
-                if (trim_copy(detection_stage).empty()) {
-                    detection_stage = "pre-handoff";
+                if (trim_copy(state->detection_stage).empty()) {
+                    state->detection_stage = "pre-handoff";
                 }
-                if (trim_copy(detected_by).empty()) {
-                    detected_by = "ChatGPT/operator";
+                if (trim_copy(state->detected_by).empty()) {
+                    state->detected_by = "ChatGPT/operator";
                 }
-                if (trim_copy(drift_type).empty()) {
-                    drift_type = "unknown / needs human confirmation";
+                if (trim_copy(state->drift_type).empty()) {
+                    state->drift_type = "unknown / needs human confirmation";
                 }
-                if (drift_max_depth < 1) {
+                if (state->max_depth < 1) {
                     throw std::runtime_error("--max-depth must be at least 1");
                 }
-                if (drift_max_section_chars < 0) {
+                if (state->max_section_chars < 0) {
                     throw std::runtime_error("--max-section-chars must be non-negative");
                 }
-                const auto stack = WorkitemOps::resolve_intent_stack(ctx.product_root, source.id, drift_max_depth);
-                const auto max_section_chars = static_cast<std::size_t>(drift_max_section_chars);
-                if (drift_format == "json") {
-                    std::cout << json_to_string(drift_resolution_template_json(source, stack, children, detection_stage, detected_by, drift_type, max_section_chars), true) << "\n";
-                } else if (drift_format == "text") {
-                    print_drift_resolution_template_text(source, stack, children, detection_stage, detected_by, drift_type, max_section_chars);
+                const auto stack = WorkitemOps::resolve_intent_stack(ctx.product_root, source.id, state->max_depth);
+                const auto max_section_chars = static_cast<std::size_t>(state->max_section_chars);
+                if (state->format == "json") {
+                    std::cout << json_to_string(drift_resolution_template_json(source, stack, children, state->detection_stage, state->detected_by, state->drift_type, max_section_chars), true) << "\n";
+                } else if (state->format == "text") {
+                    print_drift_resolution_template_text(source, stack, children, state->detection_stage, state->detected_by, state->drift_type, max_section_chars);
                 } else {
-                    throw std::runtime_error("Unsupported drift-resolution-template format: " + drift_format + " (expected text or json)");
+                    throw std::runtime_error("Unsupported drift-resolution-template format: " + state->format + " (expected text or json)");
                 }
             });
         }
@@ -9058,56 +9223,59 @@ int main(int InArgc, char* InArgv[]) {
         // workitem create-drift-resolution
         {
             auto* createDriftCmd = workitemCmd->add_subcommand("create-drift-resolution", "Dry-run or create an Intent Drift Resolution ticket from a source item");
-            std::string drift_ref;
-            std::string drift_type = "unknown / needs human confirmation";
-            std::string detection_stage = "pre-handoff";
-            std::string detected_by = "ChatGPT/operator";
-            std::string drift_agent;
-            std::string human_decision;
-            bool drift_apply = false;
-            int drift_max_depth = 8;
-            int drift_max_section_chars = 600;
-            createDriftCmd->add_option("ref", drift_ref, "Source item ID or UID")->required();
-            createDriftCmd->add_option("--drift-type", drift_type, "Drift type label");
-            createDriftCmd->add_option("--detection-stage", detection_stage, "Detection stage");
-            createDriftCmd->add_option("--detected-by", detected_by, "Detector label");
-            createDriftCmd->add_option("--human-decision", human_decision, "Human confirmation note to seed the new ticket");
-            createDriftCmd->add_option("--agent", drift_agent, "Agent ID for apply mode");
-            createDriftCmd->add_flag("--apply", drift_apply, "Create the resolution ticket and append drift evidence to the source item");
-            createDriftCmd->add_option("--max-depth", drift_max_depth, "Maximum parent-chain depth to resolve");
-            createDriftCmd->add_option("--max-section-chars", drift_max_section_chars, "Maximum characters per emitted body section");
+            struct CreateDriftResolutionCommandState {
+                std::string ref;
+                std::string drift_type = "unknown / needs human confirmation";
+                std::string detection_stage = "pre-handoff";
+                std::string detected_by = "ChatGPT/operator";
+                std::string agent;
+                std::string human_decision;
+                bool apply = false;
+                int max_depth = 8;
+                int max_section_chars = 600;
+            };
+            const auto state = std::make_shared<CreateDriftResolutionCommandState>();
+            createDriftCmd->add_option("ref", state->ref, "Source item ID or UID")->required();
+            createDriftCmd->add_option("--drift-type", state->drift_type, "Drift type label");
+            createDriftCmd->add_option("--detection-stage", state->detection_stage, "Detection stage");
+            createDriftCmd->add_option("--detected-by", state->detected_by, "Detector label");
+            createDriftCmd->add_option("--human-decision", state->human_decision, "Human confirmation note to seed the new ticket");
+            createDriftCmd->add_option("--agent", state->agent, "Agent ID for apply mode");
+            createDriftCmd->add_flag("--apply", state->apply, "Create the resolution ticket and append drift evidence to the source item");
+            createDriftCmd->add_option("--max-depth", state->max_depth, "Maximum parent-chain depth to resolve");
+            createDriftCmd->add_option("--max-section-chars", state->max_section_chars, "Maximum characters per emitted body section");
 
-            createDriftCmd->callback([&]() {
+            createDriftCmd->callback([&, state]() {
                 auto ctx = resolve_ctx();
-                reject_outside_product_path_ref(drift_ref, ctx.product_root);
+                reject_outside_product_path_ref(state->ref, ctx.product_root);
                 CanonicalStore store(ctx.product_root);
                 RefResolver resolver(store);
-                auto source = resolver.resolve(drift_ref);
+                auto source = resolver.resolve(state->ref);
                 require_item_file_inside_product(source, ctx.product_root);
                 const auto children = collect_child_item_ids(store, source.id);
-                if (drift_max_depth < 1) {
+                if (state->max_depth < 1) {
                     throw std::runtime_error("--max-depth must be at least 1");
                 }
-                if (drift_max_section_chars < 0) {
+                if (state->max_section_chars < 0) {
                     throw std::runtime_error("--max-section-chars must be non-negative");
                 }
-                if (trim_copy(detection_stage).empty()) {
-                    detection_stage = "pre-handoff";
+                if (trim_copy(state->detection_stage).empty()) {
+                    state->detection_stage = "pre-handoff";
                 }
-                if (trim_copy(detected_by).empty()) {
-                    detected_by = "ChatGPT/operator";
+                if (trim_copy(state->detected_by).empty()) {
+                    state->detected_by = "ChatGPT/operator";
                 }
-                if (trim_copy(drift_type).empty()) {
-                    drift_type = "unknown / needs human confirmation";
+                if (trim_copy(state->drift_type).empty()) {
+                    state->drift_type = "unknown / needs human confirmation";
                 }
-                const auto stack = WorkitemOps::resolve_intent_stack(ctx.product_root, source.id, drift_max_depth);
-                const auto max_section_chars = static_cast<std::size_t>(drift_max_section_chars);
-                if (!drift_apply) {
+                const auto stack = WorkitemOps::resolve_intent_stack(ctx.product_root, source.id, state->max_depth);
+                const auto max_section_chars = static_cast<std::size_t>(state->max_section_chars);
+                if (!state->apply) {
                     std::cout << "DRY RUN: would create an Intent Drift Resolution ticket for " << source.id << "\n\n";
-                    print_drift_resolution_template_text(source, stack, children, detection_stage, detected_by, drift_type, max_section_chars);
+                    print_drift_resolution_template_text(source, stack, children, state->detection_stage, state->detected_by, state->drift_type, max_section_chars);
                     return;
                 }
-                if (trim_copy(drift_agent).empty()) {
+                if (trim_copy(state->agent).empty()) {
                     throw std::runtime_error("--agent is required with --apply");
                 }
 
@@ -9128,7 +9296,7 @@ int main(int InArgc, char* InArgv[]) {
                     ctx.product_def.prefix,
                     ItemType::Task,
                     "Resolve intent drift from " + source.id,
-                    drift_agent,
+                    state->agent,
                     source.parent,
                     "P2",
                     {},
@@ -9146,9 +9314,9 @@ int main(int InArgc, char* InArgv[]) {
                 resolution.non_goals = "Do not execute from the original item. Do not use stale proposed fixes unless revalidated. Do not ask the coding agent to infer final intent from raw backlog evidence.";
                 std::ostringstream approach;
                 approach << "Detection:\n"
-                         << "- detection stage: " << detection_stage << "\n"
-                         << "- detected by: " << detected_by << "\n"
-                         << "- drift type: " << drift_type << "\n\n"
+                         << "- detection stage: " << state->detection_stage << "\n"
+                         << "- detected by: " << state->detected_by << "\n"
+                         << "- drift type: " << state->drift_type << "\n\n"
                          << "Evidence Pack:\n"
                          << "- current authoritative evidence: deterministic parent chain plus explicitly labeled human/ChatGPT evidence\n"
                          << "- stale / legacy evidence: preserve as evidence only until revalidated\n"
@@ -9164,24 +9332,24 @@ int main(int InArgc, char* InArgv[]) {
                          << "- explicit relates: " << join_or_none(source.links.relates) << "\n"
                          << "- semantic candidates: provider supplied, not generated by KOB core\n\n"
                          << "Human Confirmation:\n"
-                         << "- decision: " << (human_decision.empty() ? "required before execution" : human_decision) << "\n"
+                         << "- decision: " << (state->human_decision.empty() ? "required before execution" : state->human_decision) << "\n"
                          << "- confirmed current intent:\n"
                          << "- rejected stale assumptions:\n"
                          << "- unresolved questions:\n";
                 resolution.approach = approach.str();
                 resolution.acceptance_criteria = "- Evidence is labeled current/stale/candidate/conflicting.\n- Human confirmation is recorded.\n- Source item links back through relates.\n- Validation plan passes and limitations are reported.";
                 resolution.risks = "Creating a resolution ticket is not permission to execute unresolved drift. Stop if evidence conflicts, human confirmation is missing, or execution would violate Do Not boundaries.";
-                StateMachine::record_worklog(resolution, drift_agent, "Intent Drift Resolution ticket created from source item " + source.id + ".");
+                StateMachine::record_worklog(resolution, state->agent, "Intent Drift Resolution ticket created from source item " + source.id + ".");
                 store.write(resolution);
                 index.index_item(resolution);
 
-                const std::string finding = "Intent Drift Finding:\n- drift detected: yes\n- resolution ticket created: " + resolution.id + "\n- correction must execute from resolution ticket\n- drift type: " + drift_type;
+                const std::string finding = "Intent Drift Finding:\n- drift detected: yes\n- resolution ticket created: " + resolution.id + "\n- correction must execute from resolution ticket\n- drift type: " + state->drift_type;
                 if (source.intent_amendments && !trim_copy(*source.intent_amendments).empty()) {
                     source.intent_amendments = trim_copy(*source.intent_amendments) + "\n\n" + finding;
                 } else {
                     source.intent_amendments = finding;
                 }
-                StateMachine::record_worklog(source, drift_agent, "Intent Drift Finding recorded; resolution ticket created: " + resolution.id + ".");
+                StateMachine::record_worklog(source, state->agent, "Intent Drift Finding recorded; resolution ticket created: " + resolution.id + ".");
                 store.write(source);
                 index.index_item(source);
 
@@ -9196,40 +9364,43 @@ int main(int InArgc, char* InArgv[]) {
             auto* driftPreflightCmd = workitemCmd->add_subcommand("intent-drift-preflight", "Generate proactive pre-handoff Intent Drift Preflight evidence for an item");
             driftPreflightCmd->alias("handoff-preflight");
             driftPreflightCmd->alias("codex-handoff-preflight");
-            std::string drift_ref;
-            std::string drift_result = "uncertain";
-            std::string drift_format = "text";
-            int drift_max_depth = 8;
-            driftPreflightCmd->add_option("ref", drift_ref, "Item ID or UID")->required();
-            driftPreflightCmd->add_option("--result", drift_result, "Operator classification: no-drift, drift, or uncertain");
-            driftPreflightCmd->add_option("--format", drift_format, "Output format: text or json");
-            driftPreflightCmd->add_option("--max-depth", drift_max_depth, "Maximum parent-chain depth to resolve");
-            driftPreflightCmd->callback([&]() {
+            struct IntentDriftPreflightCommandState {
+                std::string ref;
+                std::string result = "uncertain";
+                std::string format = "text";
+                int max_depth = 8;
+            };
+            const auto state = std::make_shared<IntentDriftPreflightCommandState>();
+            driftPreflightCmd->add_option("ref", state->ref, "Item ID or UID")->required();
+            driftPreflightCmd->add_option("--result", state->result, "Operator classification: no-drift, drift, or uncertain");
+            driftPreflightCmd->add_option("--format", state->format, "Output format: text or json");
+            driftPreflightCmd->add_option("--max-depth", state->max_depth, "Maximum parent-chain depth to resolve");
+            driftPreflightCmd->callback([&, state]() {
                 auto ctx = resolve_ctx();
-                reject_outside_product_path_ref(drift_ref, ctx.product_root);
+                reject_outside_product_path_ref(state->ref, ctx.product_root);
                 CanonicalStore store(ctx.product_root);
                 RefResolver resolver(store);
-                const auto source = resolver.resolve(drift_ref);
+                const auto source = resolver.resolve(state->ref);
                 require_item_file_inside_product(source, ctx.product_root);
                 const auto children = collect_child_item_ids(store, source.id);
                 const auto siblings = collect_sibling_item_ids(store, source);
-                if (drift_max_depth < 1) {
+                if (state->max_depth < 1) {
                     throw std::runtime_error("--max-depth must be at least 1");
                 }
-                const auto stack = WorkitemOps::resolve_intent_stack(ctx.product_root, source.id, drift_max_depth);
+                const auto stack = WorkitemOps::resolve_intent_stack(ctx.product_root, source.id, state->max_depth);
                 const auto parent_relates = parent_related_ids(stack);
                 const auto validation_evidence = matching_worklog_lines(source, {"validation", "passed", "test", "build"}, 4);
                 const auto recent_worklog = recent_worklog_lines(source, 4);
                 const auto stale_terms = stale_intent_terms(source);
-                drift_result = normalize_drift_result(drift_result);
-                drift_format = lower_copy(trim_copy(drift_format));
-                if (drift_format.empty()) {
-                    drift_format = "text";
+                state->result = normalize_drift_result(state->result);
+                state->format = lower_copy(trim_copy(state->format));
+                if (state->format.empty()) {
+                    state->format = "text";
                 }
-                if (drift_format == "json") {
+                if (state->format == "json") {
                     Json::Value payload(Json::objectValue);
-                    payload["result"] = drift_result;
-                    payload["handoff_allowed"] = drift_result == "no-drift";
+                    payload["result"] = state->result;
+                    payload["handoff_allowed"] = state->result == "no-drift";
                     payload["source_item"]["id"] = source.id;
                     payload["source_item"]["title"] = source.title;
                     payload["source_item"]["state"] = to_string(source.state);
@@ -9251,10 +9422,10 @@ int main(int InArgc, char* InArgv[]) {
                     payload["if_drift"] = "create an Intent Drift Resolution ticket and hand that ticket to the coding agent";
                     payload["if_uncertain"] = "produce an evidence pack and require human confirmation";
                     std::cout << json_to_string(payload, true) << "\n";
-                } else if (drift_format == "text") {
-                    print_intent_drift_preflight_text(source, stack, children, siblings, parent_relates, validation_evidence, recent_worklog, stale_terms, drift_result);
+                } else if (state->format == "text") {
+                    print_intent_drift_preflight_text(source, stack, children, siblings, parent_relates, validation_evidence, recent_worklog, stale_terms, state->result);
                 } else {
-                    throw std::runtime_error("Unsupported intent-drift-preflight format: " + drift_format + " (expected text or json)");
+                    throw std::runtime_error("Unsupported intent-drift-preflight format: " + state->format + " (expected text or json)");
                 }
             });
         }
@@ -9953,17 +10124,25 @@ int main(int InArgc, char* InArgv[]) {
 
             // migrate-prefix subcommand (dry-run planner)
             auto* migratePrefixCmd = configCmd->add_subcommand("migrate-prefix", "Plan product prefix migration");
-            std::string migpf_path = ".";
-            std::string migpf_product;
-            std::string migpf_to;
-            std::string migpf_from;
-            bool migpf_write = false;
+            struct MigratePrefixCommandState {
+                std::string path = ".";
+                std::string product;
+                std::string to;
+                std::string from;
+                bool write = false;
+            };
+            const auto migratePrefixState = std::make_shared<MigratePrefixCommandState>();
+            auto& migpf_path = migratePrefixState->path;
+            auto& migpf_product = migratePrefixState->product;
+            auto& migpf_to = migratePrefixState->to;
+            auto& migpf_from = migratePrefixState->from;
+            auto& migpf_write = migratePrefixState->write;
             migratePrefixCmd->add_option("--path", migpf_path, "Resource path to resolve config from");
             migratePrefixCmd->add_option("--product", migpf_product, "Product name/slug");
             migratePrefixCmd->add_option("--to", migpf_to, "Target new product prefix");
             migratePrefixCmd->add_option("--from", migpf_from, "Expected current prefix");
             migratePrefixCmd->add_flag("--write", migpf_write, "Apply migration");
-            migratePrefixCmd->callback([&]() {
+            migratePrefixCmd->callback([&, migratePrefixState]() {
 
                 Json::Value response(Json::objectValue);
                 response["command"] = "config migrate-prefix";
@@ -16085,20 +16264,6 @@ int main(int InArgc, char* InArgv[]) {
                 "Operate on this backlog root (e.g. _kano/backlog_sandbox/<name>)"
             );
 
-            auto resolve_topic_ctx = [&]() {
-                auto ctx = resolve_ctx();
-                if (!topic_backlog_root_override.empty()) {
-                    ctx.backlog_root = normalized_absolute_path(expand_user_path(topic_backlog_root_override));
-                    ctx.project_root = normalized_absolute_path(ctx.backlog_root.parent_path().parent_path());
-                    ctx.product_root = ctx.backlog_root / "products" / ctx.product_name;
-                }
-                return ctx;
-            };
-
-            auto topic_path_for = [](const std::filesystem::path& backlog_root, const std::string& topic_name) {
-                return backlog_root / "topics" / topic_name;
-            };
-
             auto load_topic_manifest_json = [&](const std::filesystem::path& backlog_root, const std::string& topic_name) {
                 const auto topic_path = topic_path_for(backlog_root, topic_name);
                 const auto manifest_path = topic_path / "manifest.json";
@@ -16785,24 +16950,27 @@ int main(int InArgc, char* InArgv[]) {
             // topic audit
             {
                 auto* auditCmd = topicCmd->add_subcommand("audit", "Audit topic lifecycle hygiene without mutating files");
-                int ttl_days = 14;
-                int stale_days = 30;
-                std::string as_of;
-                std::string output_format = "plain";
-                auditCmd->add_option("--ttl-days", ttl_days, "Closed-topic TTL in days for cleanup/delete recommendations");
-                auditCmd->add_option("--stale-days", stale_days, "Open-topic inactivity days for stale recommendations");
-                auditCmd->add_option("--as-of", as_of, "Audit date or timestamp for deterministic testing");
-                auditCmd->add_option("--format", output_format, "Output format: plain|json|markdown");
-                auditCmd->callback([&]() {
+                struct TopicAuditCommandState {
+                    int ttl_days = 14;
+                    int stale_days = 30;
+                    std::string as_of;
+                    std::string output_format = "plain";
+                };
+                const auto state = std::make_shared<TopicAuditCommandState>();
+                auditCmd->add_option("--ttl-days", state->ttl_days, "Closed-topic TTL in days for cleanup/delete recommendations");
+                auditCmd->add_option("--stale-days", state->stale_days, "Open-topic inactivity days for stale recommendations");
+                auditCmd->add_option("--as-of", state->as_of, "Audit date or timestamp for deterministic testing");
+                auditCmd->add_option("--format", state->output_format, "Output format: plain|json|markdown");
+                auditCmd->callback([&, state]() {
                     auto ctx = resolve_topic_ctx();
                     TopicOps::TopicAuditOptions options;
-                    options.ttl_days = ttl_days;
-                    options.stale_days = stale_days;
-                    if (!trim_copy(as_of).empty()) {
-                        options.as_of = trim_copy(as_of);
+                    options.ttl_days = state->ttl_days;
+                    options.stale_days = state->stale_days;
+                    if (!trim_copy(state->as_of).empty()) {
+                        options.as_of = trim_copy(state->as_of);
                     }
                     const auto report = TopicOps::audit_topics(ctx.backlog_root, options);
-                    std::cout << TopicOps::render_audit_report(report, output_format);
+                    std::cout << TopicOps::render_audit_report(report, state->output_format);
                 });
             }
 
@@ -19000,15 +19168,18 @@ int main(int InArgc, char* InArgv[]) {
             // view refresh
             {
                 auto* refreshCmd = viewCmd->add_subcommand("refresh", "Refresh dashboards");
-                std::string view_product;
-                std::string view_agent;
-                std::string view_backlog_root_str;
-                refreshCmd->add_option("--product", view_product, "Product name");
-                refreshCmd->add_option("--backlog-root", view_backlog_root_str, "Backlog root path");
-                refreshCmd->add_option("--agent", view_agent, "Agent ID")->required();
-                refreshCmd->callback([&]() {
-                    const auto ctx = resolve_ctx_for_product_and_backlog(view_product, view_backlog_root_str);
-                    auto result = ViewOps::refresh_dashboards(ctx.product_root, view_agent);
+                struct ViewRefreshCommandState {
+                    std::string product;
+                    std::string agent;
+                    std::string backlog_root;
+                };
+                const auto state = std::make_shared<ViewRefreshCommandState>();
+                refreshCmd->add_option("--product", state->product, "Product name");
+                refreshCmd->add_option("--backlog-root", state->backlog_root, "Backlog root path");
+                refreshCmd->add_option("--agent", state->agent, "Agent ID")->required();
+                refreshCmd->callback([&, state]() {
+                    const auto ctx = resolve_ctx_for_product_and_backlog(state->product, state->backlog_root);
+                    auto result = ViewOps::refresh_dashboards(ctx.product_root, state->agent);
                     std::cout << "Refreshed " << result.views_refreshed.size() << " dashboards\n";
                     for (const auto& path : result.views_refreshed) {
                         std::cout << "- " << path.string() << "\n";

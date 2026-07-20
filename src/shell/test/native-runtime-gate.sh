@@ -65,13 +65,14 @@ fi
 remaining_py="$(
   find "$SKILL_ROOT" -type f \( -name '*.py' -o -name '*.pyi' \) \
     ! -path "$SKILL_ROOT/src/cpp/out/*" \
+    ! -path "$SKILL_ROOT/src/shell/release/post_release_verify.py" \
     ! -path "$SKILL_ROOT/.git/*" \
     ! -path "$SKILL_ROOT/.kano/*" \
     ! -path "$SKILL_ROOT/.pixi/*" \
     2>/dev/null || true
 )"
 if [[ -n "$remaining_py" ]]; then
-  echo "Python source or typing stub files remain in the repo:" >&2
+  echo "Python source or typing stub files remain outside the bounded release-only verifier:" >&2
   printf '%s\n' "$remaining_py" >&2
   exit 1
 fi

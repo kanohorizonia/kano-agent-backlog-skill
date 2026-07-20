@@ -896,6 +896,66 @@ int main() {
                 "InProgress->Review work intent contract",
                 "complete non-implementation result contract should not warn");
 
+            auto inline_compliance_created = create_item_with_admission(
+                index,
+                root,
+                "TST",
+                ItemType::Task,
+                "Inline compliance transition evidence smoke",
+                "opencode");
+            auto inline_compliance_item = store.read(inline_compliance_created.path);
+            set_ready_fields(inline_compliance_item);
+            inline_compliance_item.state = ItemState::InProgress;
+            const auto inline_compliance_worklog_size = inline_compliance_item.worklog.size();
+            store.write(inline_compliance_item);
+            index.index_item(inline_compliance_item);
+            auto inline_compliance_review = WorkitemOps::update_state(
+                index,
+                root,
+                inline_compliance_created.id,
+                ItemState::Review,
+                "opencode",
+                std::string("# Do Not Compliance Report\n- Task completion: OK"));
+            expect_no_diagnostic_contains(
+                inline_compliance_review,
+                "no Do Not Compliance Report evidence detected",
+                "inline transition compliance evidence should satisfy the Review diagnostic");
+            const auto inline_compliance_stored = store.read(inline_compliance_created.path);
+            std::size_t inline_compliance_heading_count = 0;
+            for (const auto& entry : inline_compliance_stored.worklog) {
+                if (entry.find("# Do Not Compliance Report") != std::string::npos) {
+                    ++inline_compliance_heading_count;
+                }
+            }
+            expect(
+                inline_compliance_stored.worklog.size() > inline_compliance_worklog_size &&
+                    inline_compliance_heading_count == 1,
+                "inline transition compliance evidence should be appended exactly once");
+
+            auto missing_compliance_created = create_item_with_admission(
+                index,
+                root,
+                "TST",
+                ItemType::Task,
+                "Missing transition report evidence smoke",
+                "opencode");
+            auto missing_compliance_item = store.read(missing_compliance_created.path);
+            set_ready_fields(missing_compliance_item);
+            missing_compliance_item.state = ItemState::InProgress;
+            store.write(missing_compliance_item);
+            index.index_item(missing_compliance_item);
+            auto missing_compliance_review = WorkitemOps::update_state(
+                index,
+                root,
+                missing_compliance_created.id,
+                ItemState::Review,
+                "opencode",
+                std::string("Implementation finished without the required report"));
+            expect_diagnostic_contains(
+                missing_compliance_review,
+                "no Do Not Compliance Report evidence detected",
+                "Review transition without compliance evidence should retain the warning");
+
             kano::backlog_ops::ViewOps::refresh_dashboards(root, "opencode");
             const auto active_dashboard = read_text(root / "views" / "Dashboard_PlainMarkdown_Active.md");
             expect(active_dashboard.find("Intent: investigation") != std::string::npos, "plain Markdown dashboard should show Work Intent indicator");

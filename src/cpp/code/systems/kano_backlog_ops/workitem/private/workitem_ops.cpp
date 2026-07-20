@@ -1272,7 +1272,11 @@ UpdateStateResult WorkitemOps::update_state(
     std::vector<std::string> intent_diagnostics;
     {
         diagnostics::ScopedMutationSpan span("workitem.update_state.intent_diagnostics", item.id);
-        intent_diagnostics = intent_transition_diagnostics(backlog_root, item, old_state, new_state);
+        BacklogItem diagnostic_item = item;
+        if (message && !trim_text(*message).empty()) {
+            diagnostic_item.worklog.push_back(*message);
+        }
+        intent_diagnostics = intent_transition_diagnostics(backlog_root, diagnostic_item, old_state, new_state);
     }
 
     // 3. Ready Gate Validation

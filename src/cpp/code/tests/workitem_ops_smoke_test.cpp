@@ -1,5 +1,6 @@
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <iostream>
 #include <optional>
 #include <random>
@@ -351,6 +352,57 @@ int main() {
             auto second_fresh_create = create_item_with_admission(
                 fresh_sequence_index, fresh_sequence_root, "NEW", ItemType::Bug, "Warm sequence allocation", "opencode");
             expect(second_fresh_create.id == "NEW-BUG-0043", "repaired sequence should remain monotonic on the fast path");
+
+            const auto shared_git_fixture = make_temp_root() / "shared-git";
+            const auto main_repo = shared_git_fixture / "main";
+            const auto other_repo = shared_git_fixture / "other";
+            const auto common_git_dir = main_repo / ".git";
+            const auto linked_git_dir = common_git_dir / "worktrees" / "other";
+            const auto main_product = main_repo / "products" / "shared-product";
+            const auto other_product = other_repo / "products" / "shared-product";
+            std::filesystem::create_directories(main_product / "items");
+            std::filesystem::create_directories(other_product / "items");
+            std::filesystem::create_directories(linked_git_dir);
+            std::filesystem::create_directories(other_repo);
+            {
+                std::ofstream git_file(other_repo / ".git");
+                git_file << "gitdir: " << linked_git_dir.string() << "\n";
+            }
+            {
+                std::ofstream common_dir_file(linked_git_dir / "commondir");
+                common_dir_file << "../..\n";
+                std::ofstream gitdir_file(linked_git_dir / "gitdir");
+                gitdir_file << (other_repo / ".git").string() << "\n";
+            }
+            BacklogIndex main_worktree_index(main_product / ".cache" / "index" / "backlog.db");
+            BacklogIndex other_worktree_index(other_product / ".cache" / "index" / "backlog.db");
+            auto main_reserved = create_item_with_admission(
+                main_worktree_index, main_product, "SHR", ItemType::Task, "Main worktree reservation", "opencode");
+            auto other_reserved = create_item_with_admission(
+                other_worktree_index, other_product, "SHR", ItemType::Task, "Linked worktree reservation", "opencode");
+            expect(main_reserved.id == "SHR-TSK-0001", "first worktree should reserve the initial shared id");
+            expect(other_reserved.id == "SHR-TSK-0002", "linked worktree must observe the Git-common-dir reservation");
+            expect(
+                std::filesystem::exists(common_git_dir / "kano" / "backlog-id-reservations.db"),
+                "shared reservations should live under the Git common directory");
+            auto concurrent_main = std::async(std::launch::async, [&]() {
+                BacklogIndex concurrent_index(main_product / ".cache" / "index" / "concurrent-main.db");
+                return create_item_with_admission(
+                    concurrent_index, main_product, "SHR", ItemType::Bug, "Concurrent main reservation", "opencode");
+            });
+            auto concurrent_other = std::async(std::launch::async, [&]() {
+                BacklogIndex concurrent_index(other_product / ".cache" / "index" / "concurrent-other.db");
+                return create_item_with_admission(
+                    concurrent_index, other_product, "SHR", ItemType::Bug, "Concurrent linked reservation", "opencode");
+            });
+            const auto concurrent_main_id = concurrent_main.get().id;
+            const auto concurrent_other_id = concurrent_other.get().id;
+            expect(concurrent_main_id != concurrent_other_id, "concurrent worktree creators must receive distinct shared ids");
+            expect(
+                (concurrent_main_id == "SHR-BUG-0001" && concurrent_other_id == "SHR-BUG-0002") ||
+                (concurrent_main_id == "SHR-BUG-0002" && concurrent_other_id == "SHR-BUG-0001"),
+                "concurrent shared reservations should remain a gap-free monotonic pair");
+            std::filesystem::remove_all(shared_git_fixture.parent_path());
 
             const auto symlink_root = make_temp_root();
             const auto symlink_escape = symlink_root.parent_path() / (symlink_root.filename().string() + "-receipt-escape");

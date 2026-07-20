@@ -16,12 +16,15 @@
 #include <set>
 #include <array>
 #include <regex>
+#include <string_view>
 
 namespace kano::backlog_ops {
 
 using namespace kano::backlog_core;
 
 namespace {
+
+std::string trim_text(std::string value);
 
 BacklogItem resolve_item_or_throw(const CanonicalStore& store, const std::string& item_ref) {
     RefResolver resolver(store);
@@ -41,6 +44,83 @@ std::filesystem::path normalize_path(const std::filesystem::path& path) {
     }
 
     return path.lexically_normal();
+}
+
+std::optional<std::string> read_first_line(const std::filesystem::path& path) {
+    std::ifstream input(path);
+    std::string line;
+    if (!input.is_open() || !std::getline(input, line)) {
+        return std::nullopt;
+    }
+    return trim_text(line);
+}
+
+struct SharedIdReservationContext {
+    std::filesystem::path git_common_dir;
+    std::filesystem::path repository_root;
+    std::filesystem::path product_relative_path;
+};
+
+std::optional<SharedIdReservationContext> find_shared_id_reservation_context(
+    const std::filesystem::path& backlog_root
+) {
+    auto cursor = normalize_path(backlog_root);
+    while (!cursor.empty()) {
+        const auto dot_git = cursor / ".git";
+        std::error_code ec;
+        std::filesystem::path git_dir;
+        if (std::filesystem::is_directory(dot_git, ec)) {
+            git_dir = dot_git;
+        } else if (std::filesystem::is_regular_file(dot_git, ec)) {
+            const auto line = read_first_line(dot_git);
+            constexpr std::string_view prefix = "gitdir:";
+            if (!line || !line->starts_with(prefix)) {
+                return std::nullopt;
+            }
+            git_dir = normalize_path(cursor / trim_text(line->substr(prefix.size())));
+        }
+
+        if (!git_dir.empty()) {
+            auto common_dir = git_dir;
+            if (const auto common = read_first_line(git_dir / "commondir")) {
+                common_dir = normalize_path(git_dir / *common);
+            }
+            std::error_code relative_error;
+            auto product_relative = std::filesystem::relative(normalize_path(backlog_root), cursor, relative_error);
+            if (relative_error || product_relative.empty() || product_relative.is_absolute()) {
+                return std::nullopt;
+            }
+            return SharedIdReservationContext{normalize_path(common_dir), cursor, product_relative};
+        }
+
+        const auto parent = cursor.parent_path();
+        if (parent == cursor) {
+            break;
+        }
+        cursor = parent;
+    }
+    return std::nullopt;
+}
+
+std::vector<std::filesystem::path> registered_product_roots(const SharedIdReservationContext& context) {
+    std::set<std::filesystem::path> roots{normalize_path(context.repository_root / context.product_relative_path)};
+    const auto worktrees_dir = context.git_common_dir / "worktrees";
+    std::error_code ec;
+    if (!std::filesystem::is_directory(worktrees_dir, ec)) {
+        return {roots.begin(), roots.end()};
+    }
+    for (const auto& entry : std::filesystem::directory_iterator(worktrees_dir, ec)) {
+        if (ec) break;
+        const auto gitdir = read_first_line(entry.path() / "gitdir");
+        if (!gitdir) continue;
+        auto worktree_root = normalize_path(std::filesystem::path(*gitdir)).parent_path();
+        auto product_root = normalize_path(worktree_root / context.product_relative_path);
+        if (std::filesystem::is_directory(product_root, ec)) {
+            roots.insert(product_root);
+        }
+        ec.clear();
+    }
+    return {roots.begin(), roots.end()};
 }
 
 bool is_inside_root(const std::filesystem::path& path, const std::filesystem::path& root) {
@@ -1033,12 +1113,30 @@ CreateItemResult WorkitemOps::create_item(
         index.ensure_sequence_at_least(prefix, type_code, store.get_max_id_number(prefix, type));
     }
 
+    std::optional<BacklogIndex> shared_reservations;
+    if (const auto reservation_context = find_shared_id_reservation_context(backlog_root)) {
+        diagnostics::ScopedMutationSpan span("workitem.create_item.seed_shared_reservation", prefix + "-" + type_code);
+        const auto reservation_db = reservation_context->git_common_dir / "kano" / "backlog-id-reservations.db";
+        shared_reservations.emplace(reservation_db);
+        shared_reservations->initialize();
+        int registered_max = 0;
+        for (const auto& product_root : registered_product_roots(*reservation_context)) {
+            registered_max = std::max(
+                registered_max,
+                CanonicalStore(product_root).get_max_id_number(prefix, type));
+        }
+        shared_reservations->ensure_sequence_at_least(prefix, type_code, registered_max);
+    }
+
     BacklogItem item;
     for (int attempt = 0; attempt < 2; ++attempt) {
         int number = 0;
         {
             diagnostics::ScopedMutationSpan span("workitem.create_item.next_number", prefix + "-" + type_code);
-            number = index.get_next_number(prefix, type_code);
+            number = shared_reservations
+                ? shared_reservations->get_next_number(prefix, type_code)
+                : index.get_next_number(prefix, type_code);
+            index.ensure_sequence_at_least(prefix, type_code, number);
         }
         {
             diagnostics::ScopedMutationSpan span("workitem.create_item.prepare");
@@ -1058,6 +1156,9 @@ CreateItemResult WorkitemOps::create_item(
         if (attempt == 0) {
             const int canonical_max = store.get_max_id_number(prefix, type);
             index.ensure_sequence_at_least(prefix, type_code, canonical_max);
+            if (shared_reservations) {
+                shared_reservations->ensure_sequence_at_least(prefix, type_code, canonical_max);
+            }
             continue;
         }
         if (!existing_paths.empty()) {

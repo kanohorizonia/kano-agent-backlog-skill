@@ -201,6 +201,10 @@ BacklogIndex::BacklogIndex(const std::filesystem::path& db_path) : db_path_(db_p
     if (rc != SQLITE_OK) {
         throw std::runtime_error("Failed to open index DB: " + std::string(sqlite3_errmsg(db_)));
     }
+    rc = sqlite3_busy_timeout(db_, 5000);
+    if (rc != SQLITE_OK) {
+        throw std::runtime_error("Failed to configure bounded index DB lock wait: " + std::string(sqlite3_errmsg(db_)));
+    }
 }
 
 BacklogIndex::~BacklogIndex() {

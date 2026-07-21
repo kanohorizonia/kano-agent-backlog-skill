@@ -13,7 +13,6 @@
 #include "kano/backlog_ops/workset/workset_ops.hpp"
 #include "kano/backlog_core/diagnostics/mutation_timing.hpp"
 #include "kano/backlog_core/frontmatter/canonical_store.hpp"
-#include "kano/backlog_core/models/errors.hpp"
 #include "kano/backlog_core/state/state_machine.hpp"
 #include "kano/backlog_core/refs/ref_resolver.hpp"
 #include "kano/backlog_core/validation/validator.hpp"
@@ -20976,6 +20975,8 @@ int main(int InArgc, char* InArgv[]) {
                     int total_checked = 0;
                     int total_violations = 0;
                     int total_repaired = 0;
+                    int total_repairable = 0;
+                    int total_repair_failures = 0;
                     std::map<std::string, std::string> seen_uids;
 
                     auto products_dir = backlog_root / "products";
@@ -20984,12 +20985,16 @@ int main(int InArgc, char* InArgv[]) {
                         return;
                     }
 
+                    std::vector<std::filesystem::path> product_roots;
                     for (const auto& entry : std::filesystem::directory_iterator(products_dir)) {
-                        if (!entry.is_directory()) continue;
-                        std::string product_name = entry.path().filename().string();
+                        if (entry.is_directory()) product_roots.push_back(entry.path());
+                    }
+                    std::sort(product_roots.begin(), product_roots.end());
+
+                    for (const auto& product_root : product_roots) {
+                        std::string product_name = product_root.filename().string();
                         if (!state->product.empty() && state->product != product_name) continue;
 
-                        auto product_root = entry.path();
                         auto items_root = product_root / "items";
                         std::vector<std::filesystem::path> item_paths;
                         if (std::filesystem::exists(items_root)) {
@@ -21004,10 +21009,13 @@ int main(int InArgc, char* InArgv[]) {
                                 item_paths.push_back(item_entry.path());
                             }
                         }
+                        std::sort(item_paths.begin(), item_paths.end());
                         int product_checked = 0;
                         int product_violations = 0;
 
                         for (const auto& item_path : item_paths) {
+                            bool item_counted = false;
+                            bool violation_counted = false;
                             try {
                                 std::ifstream input(item_path);
                                 if (!input.is_open()) {
@@ -21031,6 +21039,7 @@ int main(int InArgc, char* InArgv[]) {
                                     uid = uid_node.as<std::string>();
                                 }
                                 ++product_checked;
+                                item_counted = true;
                                 static const std::regex uuidv7_pattern(
                                     "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
                                     std::regex_constants::icase | std::regex_constants::ECMAScript
@@ -21044,6 +21053,7 @@ int main(int InArgc, char* InArgv[]) {
                                 }
 
                                 ++product_violations;
+                                violation_counted = true;
                                 const std::string reason = !format_valid
                                     ? (uid.size() == 36 ? "malformed UID" : "invalid UID length")
                                     : "duplicate UID first used by " + duplicate->second;
@@ -21057,6 +21067,7 @@ int main(int InArgc, char* InArgv[]) {
                                     new_uid = CanonicalStore::generate_uuid_v7();
                                 } while (seen_uids.find(lower_copy(new_uid)) != seen_uids.end());
                                 seen_uids.emplace(lower_copy(new_uid), item_id);
+                                ++total_repairable;
                                 std::cout << (state->apply ? "FIXED " : "DRY-RUN ") << item_id << ": "
                                           << (uid.empty() ? "<missing>" : uid) << " -> " << new_uid
                                           << " (" << reason << ")\n";
@@ -21089,8 +21100,9 @@ int main(int InArgc, char* InArgv[]) {
                                     ++total_repaired;
                                 }
                             } catch (const std::exception& e) {
-                                ++product_checked;
-                                ++product_violations;
+                                if (!item_counted) ++product_checked;
+                                if (!violation_counted) ++product_violations;
+                                if (state->fix) ++total_repair_failures;
                                 std::cout << "FAIL " << item_path.filename().string() << ": " << e.what() << "\n";
                             }
                         }
@@ -21109,7 +21121,10 @@ int main(int InArgc, char* InArgv[]) {
                         std::cout << "\nTotal: " << total_checked << " checked, " << total_violations << " violations\n";
                         if (state->fix) {
                             std::cout << (state->apply ? "Repaired: " : "Planned repairs: ")
-                                      << (state->apply ? total_repaired : total_violations) << "\n";
+                                      << (state->apply ? total_repaired : total_repairable) << "\n";
+                            if (total_repair_failures > 0) {
+                                throw std::runtime_error("UID repair failed for " + std::to_string(total_repair_failures) + " item(s)");
+                            }
                             return;
                         }
                         throw std::runtime_error("UID validation failed");
@@ -21192,6 +21207,8 @@ int main(int InArgc, char* InArgv[]) {
                     const auto all_product_roots = list_product_roots(backlog_root);
                     std::map<std::string, int> global_id_counts;
                     std::map<std::string, int> global_uid_counts;
+                    std::map<std::string, int> global_adr_counts;
+                    std::map<std::string, std::map<std::string, int>> product_adr_counts;
                     for (const auto& candidate_root : all_product_roots) {
                         CanonicalStore candidate_store(candidate_root);
                         for (const auto& candidate_path : candidate_store.list_items()) {
@@ -21203,6 +21220,19 @@ int main(int InArgc, char* InArgv[]) {
                                 // The selected-product scan below reports unreadable source
                                 // items. Other products cannot satisfy a reference with an
                                 // unreadable canonical item.
+                            }
+                        }
+                        const auto decisions_root = candidate_root / "decisions";
+                        if (std::filesystem::exists(decisions_root)) {
+                            static const std::regex adr_filename_pattern(R"(^(ADR-[0-9]{4})(?:$|[-_].*))");
+                            for (const auto& decision_entry : std::filesystem::recursive_directory_iterator(decisions_root)) {
+                                if (!decision_entry.is_regular_file() || decision_entry.path().extension() != ".md") continue;
+                                std::smatch match;
+                                const auto stem = decision_entry.path().stem().string();
+                                if (!std::regex_match(stem, match, adr_filename_pattern)) continue;
+                                const auto adr_id = match[1].str();
+                                ++global_adr_counts[adr_id];
+                                ++product_adr_counts[candidate_root.string()][adr_id];
                             }
                         }
                     }
@@ -21243,24 +21273,20 @@ int main(int InArgc, char* InArgv[]) {
                                         const auto count = global_uid_counts.find(lower_copy(ref));
                                         resolved_once = count != global_uid_counts.end() && count->second == 1;
                                         ambiguous_or_invalid = !resolved_once;
-                                    } else if (parsed) {
-                                        for (const auto& candidate_root : all_product_roots) {
-                                            try {
-                                                CanonicalStore candidate_store(candidate_root);
-                                                RefResolver candidate_resolver(candidate_store);
-                                                candidate_resolver.resolve(ref);
-                                                if (resolved_once) {
-                                                    ambiguous_or_invalid = true;
-                                                    break;
-                                                }
-                                                resolved_once = true;
-                                            } catch (const RefNotFoundError&) {
-                                                continue;
-                                            } catch (const std::exception&) {
-                                                ambiguous_or_invalid = true;
-                                                break;
-                                            }
+                                    } else if (parsed && std::holds_alternative<AdrRef>(*parsed)) {
+                                        const auto adr_id = ref.substr(0, 8);
+                                        const auto product_counts = product_adr_counts.find(product_root.string());
+                                        int current_count = 0;
+                                        if (product_counts != product_adr_counts.end()) {
+                                            const auto current = product_counts->second.find(adr_id);
+                                            if (current != product_counts->second.end()) current_count = current->second;
                                         }
+                                        const auto global_count = global_adr_counts.find(adr_id);
+                                        const auto effective_count = current_count > 0
+                                            ? current_count
+                                            : (global_count == global_adr_counts.end() ? 0 : global_count->second);
+                                        resolved_once = effective_count == 1;
+                                        ambiguous_or_invalid = !resolved_once;
                                     }
 
                                     if (!resolved_once || ambiguous_or_invalid) {

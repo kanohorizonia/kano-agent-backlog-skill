@@ -243,6 +243,15 @@ int main(int argc, char** argv) {
 
         const auto task_path = temp_root / "_kano" / "backlog" / "products" / "quick-smoke-product" / "items" / "task" / "0000" / "QS-TSK-0001_quick-smoke-task.md";
         const auto second_task_path = temp_root / "_kano" / "backlog" / "products" / "second-product" / "items" / "task" / "0000" / "SP-TSK-0001_cross-product-target.md";
+        const auto unrepairable_uid_path = temp_root / "_kano" / "backlog" / "products" / "quick-smoke-product" / "items" / "task" / "0000" / "QS-TSK-0999_unrepairable.md";
+        write_text(unrepairable_uid_path, "not frontmatter\n");
+        const auto uid_unrepairable_output = temp_root / "validate-uids-unrepairable.txt";
+        expect(run_command_capture(binary, {"validate", "uids", "--product", "quick-smoke-product", "--fix"}, uid_unrepairable_output) != 0,
+            "UID fix should fail closed when an item cannot be parsed or repaired");
+        expect(read_text(uid_unrepairable_output).find("UID repair failed for 1 item(s)") != std::string::npos,
+            "UID fix should report its unrepaired item count");
+        std::filesystem::remove(unrepairable_uid_path);
+
         const auto valid_task_text = read_text(task_path);
         const auto invalid_task_text = replace_frontmatter_uid(valid_task_text, "55aeac65-d3d5-4805-894b-b8adcb73a69e");
         write_text(task_path, invalid_task_text);
@@ -330,6 +339,10 @@ int main(int argc, char** argv) {
             "product schema fix dry-run should inspect the requested product without applying changes");
 
         const auto validate_links_output = temp_root / "validate-links-product.txt";
+        write_text(
+            temp_root / "_kano" / "backlog" / "products" / "quick-smoke-product" / "decisions" / "ADR-0001.md",
+            "---\nuid: 019cdf6a-0000-7000-8000-000000000101\ntype: adr\nstatus: Accepted\n---\n\n# ADR-0001\n"
+        );
         const auto link_fixture_path = temp_root / "_kano" / "backlog" / "products" / "quick-smoke-product" / "items" / "task" / "9000" / "QS-TSK-9000_link-validator-fixture.md";
         const std::string valid_link_fixture =
             "---\n"
@@ -355,7 +368,7 @@ int main(int argc, char** argv) {
             "  - \"Cross-product target SP-TSK-0001 remains canonical in prose.\"\n"
             "tags: []\n"
             "---\n\n"
-            "# Context\n\nValidate a canonical cross-product reference.\n\n"
+            "# Context\n\nValidate a canonical cross-product reference and ADR-0001.\n\n"
             "# Goal\n\nKeep prose from becoming a whole reference.\n";
         write_text(link_fixture_path, valid_link_fixture);
         expect_command_capture_success(

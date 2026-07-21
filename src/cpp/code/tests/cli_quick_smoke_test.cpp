@@ -278,6 +278,36 @@ int main(int argc, char** argv) {
         const auto task_path = temp_root / "_kano" / "backlog" / "products" / "quick-smoke-product" / "items" / "task" / "0000" / "QS-TSK-0001_quick-smoke-task.md";
         const auto second_task_path = temp_root / "_kano" / "backlog" / "products" / "second-product" / "items" / "task" / "0000" / "SP-TSK-0001_cross-product-target.md";
         const auto unrepairable_uid_path = temp_root / "_kano" / "backlog" / "products" / "quick-smoke-product" / "items" / "task" / "0000" / "QS-TSK-0999_unrepairable.md";
+        auto stale_second_task_text = read_text(second_task_path);
+        const auto stale_state_position = stale_second_task_text.find("state: Proposed");
+        const auto stale_title_position = stale_second_task_text.find("Cross product target");
+        expect(stale_state_position != std::string::npos && stale_title_position != std::string::npos,
+            "second product fixture should contain indexed state and title markers");
+        stale_second_task_text.replace(stale_state_position, std::string("state: Proposed").size(), "state: Review");
+        stale_second_task_text.replace(stale_title_position, std::string("Cross product target").size(), "Canonical cross product target");
+        write_text(second_task_path, stale_second_task_text);
+
+        const auto canonical_list_output = temp_root / "canonical-product-list.txt";
+        expect_command_capture_success(
+            run_command_capture(binary, {
+                "-P", "second-product", "workitem", "list", "--type", "task", "--state", "Review"
+            }, canonical_list_output),
+            canonical_list_output,
+            "canonical product item list failed");
+        const auto canonical_list_text = read_text(canonical_list_output);
+        expect(canonical_list_text.find("SP-TSK-0001") != std::string::npos &&
+               canonical_list_text.find("Canonical cross product target") != std::string::npos,
+            "product item list should use canonical state and title when the index row is stale");
+
+        const auto stale_state_list_output = temp_root / "stale-state-product-list.txt";
+        expect_command_capture_success(
+            run_command_capture(binary, {
+                "-P", "second-product", "workitem", "list", "--state", "Proposed"
+            }, stale_state_list_output),
+            stale_state_list_output,
+            "stale-state product item list failed");
+        expect(read_text(stale_state_list_output).find("No items found.") != std::string::npos,
+            "product item list should not retain a stale indexed state after canonical change");
         write_text(unrepairable_uid_path, "not frontmatter\n");
         const auto uid_unrepairable_output = temp_root / "validate-uids-unrepairable.txt";
         expect(run_command_capture(binary, {"validate", "uids", "--product", "quick-smoke-product", "--fix"}, uid_unrepairable_output) != 0,

@@ -81,30 +81,6 @@ std::string trim_text(std::string value) {
     return value;
 }
 
-bool is_descendant_path(
-    const std::filesystem::path& candidate,
-    const std::filesystem::path& root
-) {
-    std::error_code error;
-    const auto canonical_root = std::filesystem::weakly_canonical(root, error);
-    if (error) {
-        return false;
-    }
-    const auto canonical_candidate = std::filesystem::weakly_canonical(candidate, error);
-    if (error) {
-        return false;
-    }
-
-    auto root_it = canonical_root.begin();
-    auto candidate_it = canonical_candidate.begin();
-    for (; root_it != canonical_root.end(); ++root_it, ++candidate_it) {
-        if (candidate_it == canonical_candidate.end() || *candidate_it != *root_it) {
-            return false;
-        }
-    }
-    return candidate_it != canonical_candidate.end();
-}
-
 void add_metadata_indicator(
     std::vector<std::string>& indicators,
     const std::optional<std::string>& value,
@@ -193,15 +169,36 @@ std::string render_dashboard(
 } // namespace
 
 std::vector<IndexItem> ViewOps::list_items(BacklogIndex& index, const ViewFilter& filter) {
-    auto items = index.query_items(filter.type, filter.state);
     if (!filter.product_root) {
-        return items;
+        return index.query_items(filter.type, filter.state);
     }
-    items.erase(
-        std::remove_if(items.begin(), items.end(), [&](const auto& item) {
-            return !is_descendant_path(item.path, *filter.product_root);
-        }),
-        items.end());
+
+    CanonicalStore store(*filter.product_root);
+    std::vector<IndexItem> items;
+    for (const auto& path : store.list_items()) {
+        const auto item = store.read_metadata(path);
+        if ((filter.type && item.type != *filter.type) ||
+            (filter.state && item.state != *filter.state)) {
+            continue;
+        }
+
+        IndexItem indexed;
+        indexed.id = item.id;
+        indexed.uid = item.uid;
+        indexed.type = item.type;
+        indexed.title = item.title;
+        indexed.state = item.state;
+        indexed.duplicate_of = item.duplicate_of;
+        indexed.path = path.string();
+        indexed.updated = item.updated;
+        items.push_back(indexed);
+    }
+    std::sort(items.begin(), items.end(), [](const auto& left, const auto& right) {
+        if (left.updated != right.updated) {
+            return left.updated > right.updated;
+        }
+        return left.id < right.id;
+    });
     return items;
 }
 

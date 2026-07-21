@@ -241,6 +241,40 @@ int main(int argc, char** argv) {
         expect(run_command(binary, with_duplicate_admission({"-P", "second-product", "workitem", "create", "-t", "task", "--title", "Cross product target", "--agent", "tester"}, "Cross product target")) == 0,
             "second product target creation failed");
 
+        const auto quick_product_list_output = temp_root / "quick-product-list.txt";
+        expect_command_capture_success(
+            run_command_capture(binary, {
+                "-P", "quick-smoke-product", "workitem", "list", "--type", "task"
+            }, quick_product_list_output),
+            quick_product_list_output,
+            "quick product item list failed");
+        const auto quick_product_list_text = read_text(quick_product_list_output);
+        expect(quick_product_list_text.find("QS-TSK-0001") != std::string::npos &&
+               quick_product_list_text.find("SP-TSK-0001") == std::string::npos,
+            "quick product item list should exclude second-product rows from the shared index");
+
+        const auto second_product_list_output = temp_root / "second-product-list.txt";
+        expect_command_capture_success(
+            run_command_capture(binary, {
+                "-P", "second-product", "workitem", "list", "--type", "task"
+            }, second_product_list_output),
+            second_product_list_output,
+            "second product item list failed");
+        const auto second_product_list_text = read_text(second_product_list_output);
+        expect(second_product_list_text.find("SP-TSK-0001") != std::string::npos &&
+               second_product_list_text.find("QS-TSK-0001") == std::string::npos,
+            "second product item list should exclude quick-product rows from the shared index");
+
+        const auto empty_product_list_output = temp_root / "empty-product-list.txt";
+        expect_command_capture_success(
+            run_command_capture(binary, {
+                "-P", "second-product", "workitem", "list", "--state", "Ready"
+            }, empty_product_list_output),
+            empty_product_list_output,
+            "empty product-scoped item list failed");
+        expect(read_text(empty_product_list_output).find("No items found.") != std::string::npos,
+            "empty product-scoped item list should render an explicit empty result");
+
         const auto task_path = temp_root / "_kano" / "backlog" / "products" / "quick-smoke-product" / "items" / "task" / "0000" / "QS-TSK-0001_quick-smoke-task.md";
         const auto second_task_path = temp_root / "_kano" / "backlog" / "products" / "second-product" / "items" / "task" / "0000" / "SP-TSK-0001_cross-product-target.md";
         const auto unrepairable_uid_path = temp_root / "_kano" / "backlog" / "products" / "quick-smoke-product" / "items" / "task" / "0000" / "QS-TSK-0999_unrepairable.md";

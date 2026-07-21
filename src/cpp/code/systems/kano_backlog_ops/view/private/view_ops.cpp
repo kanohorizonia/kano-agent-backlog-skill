@@ -81,6 +81,30 @@ std::string trim_text(std::string value) {
     return value;
 }
 
+bool is_descendant_path(
+    const std::filesystem::path& candidate,
+    const std::filesystem::path& root
+) {
+    std::error_code error;
+    const auto canonical_root = std::filesystem::weakly_canonical(root, error);
+    if (error) {
+        return false;
+    }
+    const auto canonical_candidate = std::filesystem::weakly_canonical(candidate, error);
+    if (error) {
+        return false;
+    }
+
+    auto root_it = canonical_root.begin();
+    auto candidate_it = canonical_candidate.begin();
+    for (; root_it != canonical_root.end(); ++root_it, ++candidate_it) {
+        if (candidate_it == canonical_candidate.end() || *candidate_it != *root_it) {
+            return false;
+        }
+    }
+    return candidate_it != canonical_candidate.end();
+}
+
 void add_metadata_indicator(
     std::vector<std::string>& indicators,
     const std::optional<std::string>& value,
@@ -169,9 +193,16 @@ std::string render_dashboard(
 } // namespace
 
 std::vector<IndexItem> ViewOps::list_items(BacklogIndex& index, const ViewFilter& filter) {
-    // For now, we delegate simple type/state filtering to the index's query method.
-    // In a more advanced implementation, we'd add complex filtering here.
-    return index.query_items(filter.type, filter.state);
+    auto items = index.query_items(filter.type, filter.state);
+    if (!filter.product_root) {
+        return items;
+    }
+    items.erase(
+        std::remove_if(items.begin(), items.end(), [&](const auto& item) {
+            return !is_descendant_path(item.path, *filter.product_root);
+        }),
+        items.end());
+    return items;
 }
 
 std::string ViewOps::render_table(const std::vector<IndexItem>& items) {

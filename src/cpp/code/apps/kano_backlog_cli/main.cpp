@@ -9688,6 +9688,7 @@ int main(int InArgc, char* InArgv[]) {
                 BacklogIndex index(ctx.backlog_root / ".cache" / "index" / "backlog.db");
 
                 ViewFilter filter;
+                filter.product_root = ctx.product_root;
                 if (!state->filter_type_str.empty()) {
                     auto t = parse_item_type(state->filter_type_str);
                     if (t) filter.type = *t;

@@ -16,6 +16,7 @@ struct RefreshDashboardsResult {
 struct ViewFilter {
     std::optional<kano::backlog_core::ItemType> type;
     std::optional<kano::backlog_core::ItemState> state;
+    std::optional<std::filesystem::path> product_root;
     std::optional<std::string> parent_id;
     std::optional<std::string> owner;
     std::vector<std::string> tags;

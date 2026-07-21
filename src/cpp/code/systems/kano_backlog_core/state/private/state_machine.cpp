@@ -16,6 +16,7 @@ const std::map<StateMachine::TransitionKey, ItemState>& StateMachine::get_transi
         {{ItemState::New, StateAction::Ready}, ItemState::Ready},
         
         {{ItemState::Ready, StateAction::Start}, ItemState::InProgress},
+        {{ItemState::Planned, StateAction::Start}, ItemState::InProgress},
         {{ItemState::Proposed, StateAction::Start}, ItemState::InProgress},
         {{ItemState::New, StateAction::Start}, ItemState::InProgress},
         {{ItemState::Blocked, StateAction::Start}, ItemState::InProgress},

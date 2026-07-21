@@ -144,6 +144,8 @@ int main() {
 
         expect(StateMachine::can_transition(ItemState::Ready, StateAction::Start),
             "ready should transition via Start");
+        expect(StateMachine::can_transition(ItemState::Planned, StateAction::Start),
+            "legacy planned should transition via Start");
         expect(!StateMachine::can_transition(ItemState::Done, StateAction::Start),
             "done should not transition via Start");
         expect(StateMachine::can_transition(ItemState::Review, StateAction::Reopen),
@@ -158,6 +160,11 @@ int main() {
         expect(transitioned.state == ItemState::InProgress, "transition should set InProgress");
         expect(transitioned.worklog.back().find("[agent=opencode]") != std::string::npos, "transition should include agent marker");
         expect(transitioned.worklog.back().find("[model=unknown]") == std::string::npos, "transition should omit unknown model marker");
+
+        BacklogItem planned = item;
+        planned.state = ItemState::Planned;
+        StateMachine::transition(planned, StateAction::Start, std::string("opencode"), std::string("Start legacy planned work"));
+        expect(planned.state == ItemState::InProgress, "legacy planned should transition to InProgress");
 
         BacklogItem reopened = item;
         reopened.state = ItemState::Review;

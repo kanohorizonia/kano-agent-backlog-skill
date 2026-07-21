@@ -1472,6 +1472,40 @@ int main() {
             expect(
                 unchanged_missing_parent_child.state == ItemState::Proposed,
                 "child with truly missing parent should not be updated");
+
+            auto planned_fixture = store.create("TST", ItemType::Task, "Legacy planned start fixture", 950);
+            set_ready_fields(planned_fixture);
+            planned_fixture.state = ItemState::Planned;
+            store.write(planned_fixture);
+            index.index_item(planned_fixture);
+
+            const auto planned_update = WorkitemOps::update_state(
+                index,
+                root,
+                planned_fixture.id,
+                ItemState::InProgress,
+                "opencode",
+                std::string("Start legacy planned work"));
+            expect(planned_update.old_state == ItemState::Planned, "planned update should preserve the source state");
+            expect(planned_update.new_state == ItemState::InProgress, "planned update should target InProgress");
+            expect(store.read(*planned_fixture.file_path).state == ItemState::InProgress,
+                "workitem update-state should persist Planned -> InProgress");
+
+            auto incomplete_planned_fixture = store.create("TST", ItemType::Task, "Incomplete planned start fixture", 951);
+            incomplete_planned_fixture.state = ItemState::Planned;
+            store.write(incomplete_planned_fixture);
+            index.index_item(incomplete_planned_fixture);
+            expect_throws_contains(
+                [&]() {
+                    (void)WorkitemOps::update_state(
+                        index,
+                        root,
+                        incomplete_planned_fixture.id,
+                        ItemState::InProgress,
+                        "opencode");
+                },
+                "is not Ready",
+                "planned update-state should preserve the Ready gate");
         }
 
         std::filesystem::remove_all(external_root);

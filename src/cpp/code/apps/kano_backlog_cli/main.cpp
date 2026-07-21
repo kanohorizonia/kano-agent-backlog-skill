@@ -370,6 +370,8 @@ struct RemapIdCliPlan {
     std::string new_id;
     std::filesystem::path old_path;
     std::filesystem::path new_path;
+    std::optional<std::filesystem::path> old_index_path;
+    std::optional<std::filesystem::path> new_index_path;
     std::vector<std::filesystem::path> planned_paths;
     int planned_occurrences = 0;
     bool duplicate_source_id = false;
@@ -399,6 +401,14 @@ RemapIdCliPlan plan_remap_id_cli(
     plan.old_path = old_path;
     plan.new_path = old_path.parent_path() / (new_id + tail);
     plan.planned_paths.push_back(old_path);
+    const auto adjacent_index = old_path.parent_path() / (old_path.stem().string() + ".index.md");
+    if (std::filesystem::exists(adjacent_index)) {
+        plan.old_index_path = adjacent_index;
+        plan.new_index_path = plan.new_path.parent_path() / (plan.new_path.stem().string() + ".index.md");
+        if (*plan.old_index_path != *plan.new_index_path && std::filesystem::exists(*plan.new_index_path)) {
+            throw std::runtime_error("Adjacent index remap path already exists: " + plan.new_index_path->string());
+        }
+    }
     plan.duplicate_source_id = store.find_item_paths_by_id(item.id).size() > 1;
 
     if (plan.duplicate_source_id) {
@@ -429,6 +439,10 @@ Json::Value remap_plan_to_json(const RemapIdCliPlan& plan, const std::string& st
     payload["new_id"] = plan.new_id;
     payload["old_path"] = plan.old_path.string();
     payload["new_path"] = plan.new_path.string();
+    if (plan.old_index_path && plan.new_index_path) {
+        payload["old_index_path"] = plan.old_index_path->string();
+        payload["new_index_path"] = plan.new_index_path->string();
+    }
     payload["planned_path"] = plan.new_path.string();
     payload["planned_updated_files"] = static_cast<int>(plan.planned_paths.size());
     payload["planned_occurrences"] = plan.planned_occurrences;

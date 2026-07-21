@@ -919,7 +919,10 @@ int main(int argc, char** argv) {
         expect(run_command(binary, with_duplicate_admission({"-P", "kano-ai-3d-asset-skill", "workitem", "create", "-t", "task", "--title", "Remap smoke", "--agent", "tester"}, "Remap smoke")) == 0, "workitem create remap target failed");
         const auto remap_old_path = product_root / "items" / "task" / "0000" / "KAI-TSK-0004_remap-smoke.md";
         const auto remap_new_path = product_root / "items" / "task" / "0000" / "KAI-TSK-0044_remap-smoke.md";
+        const auto remap_old_index_path = product_root / "items" / "task" / "0000" / "KAI-TSK-0004_remap-smoke.index.md";
+        const auto remap_new_index_path = product_root / "items" / "task" / "0000" / "KAI-TSK-0044_remap-smoke.index.md";
         expect(std::filesystem::exists(remap_old_path), "workitem create did not create expected remap source file");
+        write_text(remap_old_index_path, "# Remap index\n\nID: KAI-TSK-0004\n");
         expect(run_command(binary, {
             "-P", "kano-ai-3d-asset-skill",
             "workitem", "update-state", "KAI-TSK-0004",
@@ -948,8 +951,13 @@ int main(int argc, char** argv) {
         expect(remap_dry_run_text.find("\"status\" : \"dry-run\"") != std::string::npos, "workitem remap-id dry-run did not emit dry-run status");
         expect(remap_dry_run_text.find("\"new_id\" : \"KAI-TSK-0044\"") != std::string::npos, "workitem remap-id dry-run did not emit new id");
         expect(remap_dry_run_text.find("planned_updated_files") != std::string::npos, "workitem remap-id dry-run did not emit planned files");
+        expect(remap_dry_run_text.find("old_index_path") != std::string::npos &&
+               remap_dry_run_text.find("new_index_path") != std::string::npos,
+            "workitem remap-id dry-run did not expose adjacent index rename");
         expect(std::filesystem::exists(remap_old_path), "workitem remap-id dry-run removed old path");
         expect(!std::filesystem::exists(remap_new_path), "workitem remap-id dry-run created new path");
+        expect(std::filesystem::exists(remap_old_index_path) && !std::filesystem::exists(remap_new_index_path),
+            "workitem remap-id dry-run mutated adjacent index path");
         expect(read_text(remap_ref_path).find("KAI-TSK-0004") != std::string::npos, "workitem remap-id dry-run updated references");
 
         const auto links_remap_dry_run_output = temp_root / "links-remap-id-dry-run.json";
@@ -976,6 +984,10 @@ int main(int argc, char** argv) {
         expect(links_remap_apply_text.find("\"status\" : \"applied\"") != std::string::npos, "links remap-id apply did not emit applied status");
         expect(!std::filesystem::exists(remap_old_path), "links remap-id apply left old path");
         expect(std::filesystem::exists(remap_new_path), "links remap-id apply did not create new path");
+        expect(!std::filesystem::exists(remap_old_index_path) && std::filesystem::exists(remap_new_index_path),
+            "links remap-id apply did not rename adjacent index path");
+        expect(read_text(remap_new_index_path).find("KAI-TSK-0044") != std::string::npos,
+            "links remap-id apply did not update adjacent index content");
         const auto remap_after_text = read_text(remap_new_path);
         expect(remap_after_text.find("id: KAI-TSK-0044") != std::string::npos, "links remap-id apply did not update frontmatter id");
         expect(remap_after_text.find(remap_uid_line) != std::string::npos, "links remap-id apply did not preserve uid");

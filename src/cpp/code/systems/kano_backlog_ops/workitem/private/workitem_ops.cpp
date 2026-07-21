@@ -1536,11 +1536,20 @@ RemapIdResult WorkitemOps::remap_id(
     size_t underscore_pos = filename.find('_');
     std::string tail = (underscore_pos != std::string::npos) ? filename.substr(underscore_pos) : ".md";
     std::filesystem::path new_path = old_path.parent_path() / (new_id + tail);
+    const auto old_index_path = old_path.parent_path() / (old_path.stem().string() + ".index.md");
+    const auto new_index_path = new_path.parent_path() / (new_path.stem().string() + ".index.md");
+    const bool has_adjacent_index = std::filesystem::exists(old_index_path);
     std::error_code exists_error;
     if (old_path != new_path && std::filesystem::exists(new_path, exists_error)) {
         throw std::runtime_error(
             "duplicate_item_id.remap_path_collision: target item path already exists: " +
             path_for_diagnostic(new_path, backlog_root));
+    }
+    if (has_adjacent_index && old_index_path != new_index_path &&
+        std::filesystem::exists(new_index_path, exists_error)) {
+        throw std::runtime_error(
+            "duplicate_item_id.remap_index_path_collision: target adjacent index path already exists: " +
+            path_for_diagnostic(new_index_path, backlog_root));
     }
     
     // 3. Update ID in item and add worklog
@@ -1551,6 +1560,9 @@ RemapIdResult WorkitemOps::remap_id(
     if (old_path != new_path) {
         std::filesystem::create_directories(new_path.parent_path());
         std::filesystem::rename(old_path, new_path);
+    }
+    if (has_adjacent_index && old_index_path != new_index_path) {
+        std::filesystem::rename(old_index_path, new_index_path);
     }
     
     // 5. Write back with new ID

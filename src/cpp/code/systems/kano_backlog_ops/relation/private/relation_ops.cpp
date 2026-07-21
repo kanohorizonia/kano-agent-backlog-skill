@@ -172,6 +172,33 @@ RelationEndpoint resolve_endpoint(
     return RelationEndpoint{product.name, item.id, item.uid};
 }
 
+struct MutationTargetResolution {
+    RelationEndpoint endpoint;
+    bool exists = true;
+};
+
+MutationTargetResolution resolve_mutation_target(
+    const ProductRuntime& product,
+    const std::string& item_ref,
+    bool add
+) {
+    require_safe_item_ref(item_ref, "target_item");
+    const auto parsed = RefParser::parse(item_ref);
+    if (!add && parsed && std::holds_alternative<DisplayIdRef>(*parsed)) {
+        const auto& display = std::get<DisplayIdRef>(*parsed);
+        if (lower_copy(display.product) != lower_copy(product.prefix)) {
+            throw std::runtime_error(
+                "Missing target display ID prefix does not match target product: " + item_ref +
+                " vs " + product.prefix);
+        }
+        CanonicalStore store(product.context.product_root);
+        if (store.find_item_paths_by_id(item_ref).empty()) {
+            return MutationTargetResolution{RelationEndpoint{product.name, item_ref, ""}, false};
+        }
+    }
+    return MutationTargetResolution{resolve_endpoint(product, item_ref, "target_item"), true};
+}
+
 const ProductRuntime& product_by_name(const Catalog& catalog, const std::string& name) {
     const auto it = std::find_if(catalog.products.begin(), catalog.products.end(), [&](const auto& product) {
         return product.name == name;
@@ -430,13 +457,93 @@ void validate_mutation_request(const RelationMutationRequest& request) {
     }
 }
 
+RelationMutationResult remove_unresolved_target_relation(
+    const RelationMutationRequest& request,
+    const Catalog& catalog,
+    const ProductRuntime& source_product,
+    const ProductRuntime& target_product,
+    const RelationEndpoint& source,
+    const RelationEndpoint& target
+) {
+    RelationMutationResult result;
+    result.operation = "remove";
+    result.relation = requested_entry(source, target, request.relation_type);
+    result.products_scanned = catalog.products.size();
+    result.items_scanned = 1;
+    result.unresolved_links = 1;
+
+    CanonicalStore source_store(source_product.context.product_root);
+    RefResolver source_resolver(source_store);
+    auto source_item = source_resolver.resolve(source.item_id);
+    const auto& current_values = relation_values(source_item, request.relation_type);
+    const auto current_matches = std::count(current_values.begin(), current_values.end(), target.item_id);
+    if (current_matches == 0) {
+        result.status = "already_absent";
+        result.already_in_desired_state = true;
+        return result;
+    }
+    if (current_matches > 1) {
+        throw std::runtime_error("Duplicate unresolved relation storage detected; refusing multi-value removal");
+    }
+    if (!request.apply) {
+        result.status = "dry_run";
+        result.changed = true;
+        return result;
+    }
+
+    CanonicalStore target_store(target_product.context.product_root);
+    if (!target_store.find_item_paths_by_id(target.item_id).empty()) {
+        throw std::runtime_error("Missing relation target appeared before apply; retry through canonical removal: " + target.item_id);
+    }
+
+    source_item = source_resolver.resolve(source.item_id);
+    auto& values = relation_values(source_item, request.relation_type);
+    if (std::count(values.begin(), values.end(), target.item_id) > 1) {
+        throw std::runtime_error("Duplicate unresolved relation storage detected before apply; refusing multi-value removal");
+    }
+    const auto before_size = values.size();
+    values.erase(std::remove(values.begin(), values.end(), target.item_id), values.end());
+    if (values.size() == before_size) {
+        result.status = "already_absent";
+        result.already_in_desired_state = true;
+        return result;
+    }
+    StateMachine::record_worklog(
+        source_item,
+        request.agent,
+        relation_worklog_message("removed unresolved target", request.relation_type, target, request.idempotency_key),
+        request.model);
+    source_store.write(source_item);
+    result.applied = true;
+    result.changed = true;
+    result.worklog_appended = true;
+
+    BacklogIndex index(source_product.context.backlog_root / ".cache" / "index" / "backlog.db");
+    index.initialize();
+    index.index_item(source_item);
+    result.index_refreshed = true;
+
+    auto readback = source_resolver.resolve(source.item_id);
+    const auto& readback_values = relation_values(readback, request.relation_type);
+    result.read_after_write =
+        std::find(readback_values.begin(), readback_values.end(), target.item_id) == readback_values.end();
+    result.status = result.read_after_write ? "removed" : "read_after_write_failed";
+    result.safe_retry = result.read_after_write;
+    return result;
+}
+
 RelationMutationResult mutate(const RelationMutationRequest& request, bool add) {
     validate_mutation_request(request);
     auto catalog = load_catalog(request.start_path, request.max_products);
     const auto& source_product = resolve_product(catalog, request.source_product, "source_product");
     const auto& target_product = resolve_product(catalog, request.target_product, "target_product");
     const auto source = resolve_endpoint(source_product, request.source_item, "source_item");
-    const auto target = resolve_endpoint(target_product, request.target_item, "target_item");
+    const auto target_resolution = resolve_mutation_target(target_product, request.target_item, add);
+    const auto target = target_resolution.endpoint;
+    if (!add && !target_resolution.exists) {
+        return remove_unresolved_target_relation(
+            request, catalog, source_product, target_product, source, target);
+    }
     if (same_endpoint(source, target)) {
         throw std::runtime_error("Self relations are not allowed");
     }

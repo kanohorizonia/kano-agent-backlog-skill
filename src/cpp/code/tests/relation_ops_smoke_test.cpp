@@ -239,6 +239,35 @@ int main() {
         expect(absent.status == "already_absent" && absent.already_in_desired_state,
             "duplicate remove should be idempotent");
 
+        auto unresolved_owner = alpha_resolver.resolve(alpha_two.id);
+        unresolved_owner.links.relates.push_back("BET-TSK-9999");
+        alpha_store.write(unresolved_owner);
+        const auto unresolved_dry_run = RelationOps::remove(request(
+            root, "alpha-product", alpha_two.id, "beta-product", "BET-TSK-9999", RelationType::Relates, false));
+        expect(unresolved_dry_run.status == "dry_run" && unresolved_dry_run.changed && !unresolved_dry_run.applied,
+            "missing-target relation cleanup should remain dry-run first");
+        expect(contains(alpha_resolver.resolve(alpha_two.id).links.relates, "BET-TSK-9999"),
+            "missing-target relation cleanup dry-run must not mutate the source");
+        const auto unresolved_removed = RelationOps::remove(request(
+            root, "alpha-product", alpha_two.id, "beta-product", "BET-TSK-9999", RelationType::Relates));
+        expect(unresolved_removed.status == "removed" && unresolved_removed.applied &&
+               unresolved_removed.read_after_write && unresolved_removed.worklog_appended,
+            "confirmed missing-target relation cleanup should remove the exact source token");
+        expect(!contains(alpha_resolver.resolve(alpha_two.id).links.relates, "BET-TSK-9999"),
+            "confirmed missing-target relation cleanup should clear the stale edge");
+        const auto unresolved_absent = RelationOps::remove(request(
+            root, "alpha-product", alpha_two.id, "beta-product", "BET-TSK-9999", RelationType::Relates));
+        expect(unresolved_absent.status == "already_absent" && unresolved_absent.already_in_desired_state,
+            "missing-target relation cleanup retry should be idempotent");
+        expect_throws_contains([&]() {
+            (void)RelationOps::add(request(
+                root, "alpha-product", alpha_two.id, "beta-product", "BET-TSK-9999", RelationType::Relates));
+        }, "not found", "add must continue to reject a missing relation target");
+        expect_throws_contains([&]() {
+            (void)RelationOps::remove(request(
+                root, "alpha-product", alpha_two.id, "beta-product", "ALP-TSK-9999", RelationType::Relates));
+        }, "prefix does not match", "missing-target cleanup must match the registered target prefix");
+
         expect_throws_contains([&]() {
             auto invalid = request(root, "../alpha-product", alpha_one.id, "beta-product", beta_one.id, RelationType::Relates);
             (void)RelationOps::add(invalid);

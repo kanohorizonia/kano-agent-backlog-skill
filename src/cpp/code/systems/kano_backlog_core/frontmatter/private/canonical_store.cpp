@@ -484,7 +484,8 @@ std::vector<std::filesystem::path> CanonicalStore::list_items(std::optional<Item
     auto scan_dir = [&](const std::filesystem::path& dir) {
         if (!std::filesystem::exists(dir)) return;
         for (const auto& entry : std::filesystem::recursive_directory_iterator(dir)) {
-            if (entry.is_regular_file() && entry.path().extension() == ".md") {
+            if (entry.is_regular_file() && entry.path().extension() == ".md" &&
+                !entry.path().filename().string().ends_with(".index.md")) {
                 results.push_back(entry.path());
             }
         }

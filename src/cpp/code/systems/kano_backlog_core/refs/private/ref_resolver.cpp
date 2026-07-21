@@ -4,6 +4,7 @@
 #include <regex>
 #include <set>
 #include <algorithm>
+#include <cctype>
 #include <iomanip>
 #include <sstream>
 
@@ -51,15 +52,41 @@ std::optional<BacklogItem> RefResolver::resolve_or_none(const std::string& ref) 
 std::vector<std::string> RefResolver::get_references(const BacklogItem& item) {
     std::set<std::string> refs;
 
-    static const std::regex canonical_pattern(
-        R"(\b(?:[A-Z][A-Z0-9]{1,15}-(?:INIT|EPIC|FTR|USR|TSK|SUBTSK|BUG|ISS)-\d{4}|ADR-\d{4}|[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\b)"
+    static const std::regex canonical_prose_pattern(
+        R"(\b(?:[A-Z][A-Z0-9]{1,15}-(?:INIT|EPIC|FTR|USR|TSK|SUBTSK|BUG|ISS)-\d{4}|ADR-\d{4})\b)"
     );
 
-    const auto extract_canonical_tokens = [&](const std::string& text) {
+    const auto is_explicit_historical_source = [](const std::string& text, std::size_t token_start) {
+        auto lower = text;
+        std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char ch) {
+            return static_cast<char>(std::tolower(ch));
+        });
+        const auto remap_start = lower.rfind("canonical remap:", token_start);
+        if (remap_start != std::string::npos) {
+            const auto represented_by = lower.find("represented by", remap_start);
+            const auto clause_end = lower.find_first_of(".\r\n", remap_start);
+            if (represented_by != std::string::npos &&
+                (clause_end == std::string::npos || represented_by < clause_end) &&
+                token_start < represented_by) {
+                return true;
+            }
+        }
+
+        const auto context_start = token_start > 32 ? token_start - 32 : 0;
+        const auto prefix = lower.substr(context_start, token_start - context_start);
+        return prefix.ends_with("legacy ") || prefix.ends_with("mislabeled ");
+    };
+
+    const auto extract_canonical_prose_tokens = [&](const std::string& text) {
         std::smatch match;
         std::string remaining = text;
-        while (std::regex_search(remaining, match, canonical_pattern)) {
-            refs.insert(match.str());
+        std::size_t consumed = 0;
+        while (std::regex_search(remaining, match, canonical_prose_pattern)) {
+            const auto token_start = consumed + static_cast<std::size_t>(match.position());
+            if (!is_explicit_historical_source(text, token_start)) {
+                refs.insert(match.str());
+            }
+            consumed = token_start + static_cast<std::size_t>(match.length());
             remaining = match.suffix().str();
         }
     };
@@ -71,15 +98,17 @@ std::vector<std::string> RefResolver::get_references(const BacklogItem& item) {
 
     // Decisions are frequently provenance prose rather than a structured ref.
     // Validate canonical tokens inside that prose without treating the entire
-    // sentence (which may contain slashes) as a path reference.
+    // sentence (which may contain slashes) as a path reference. UUIDv7 values
+    // in prose are external evidence identifiers unless explicitly stored in a
+    // structured link field.
     for (const auto& decision : item.decisions) {
-        extract_canonical_tokens(decision);
+        extract_canonical_prose_tokens(decision);
     }
 
     // From body sections
     auto extract = [&](const std::optional<std::string>& section) {
         if (!section) return;
-        extract_canonical_tokens(*section);
+        extract_canonical_prose_tokens(*section);
     };
 
     extract(item.context);

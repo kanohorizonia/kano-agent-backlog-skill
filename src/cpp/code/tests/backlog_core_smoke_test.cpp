@@ -134,6 +134,12 @@ int main() {
         const auto reloaded = store.read(*persisted.file_path);
         expect(reloaded.non_goals == persisted.non_goals, "canonical store should round-trip non_goals");
         expect(reloaded.intent_amendments == persisted.intent_amendments, "canonical store should round-trip intent_amendments");
+        const auto adjacent_index = persisted.file_path->parent_path() /
+            (persisted.file_path->stem().string() + ".index.md");
+        write_text(adjacent_index, "# Derived Epic index\n");
+        const auto listed_items = store.list_items();
+        expect(listed_items.size() == 1 && listed_items.front() == *persisted.file_path,
+            "canonical item enumeration should exclude adjacent .index.md navigation artifacts");
         std::filesystem::remove_all(temp_root);
 
         expect(StateMachine::can_transition(ItemState::Ready, StateAction::Start),
@@ -231,7 +237,14 @@ int main() {
             "Evidence sentence with a source/path marker (source: implementation/preflight).",
             "Canonical dependency GT-BUG-0003 remains reviewable in prose."
         };
-        reference_source.context = "Context also names ADR-0013 for explicit validation.";
+        reference_source.links.blocks = {"019cdf6a-0000-7000-8000-000000000099"};
+        reference_source.context =
+            "Context also names ADR-0013 for explicit validation. External thread "
+            "019cdf6a-0000-7000-8000-000000000098 is provenance, not a backlog link. "
+            "Canonical remap: GT-TSK-9998 from isolated GT-FTR-9998 is represented by "
+            "GT-TSK-0002 under GT-FTR-0002. Follow-up GT-BUG-0004 remains active. "
+            "The legacy GT-BUG-9998 label and mislabeled "
+            "GT-BUG-9997 commit remain historical evidence.";
         const auto extracted_refs = RefResolver::get_references(reference_source);
         expect(std::find(extracted_refs.begin(), extracted_refs.end(), "GT-TSK-0002") != extracted_refs.end(),
             "structured item links should remain references");
@@ -239,6 +252,21 @@ int main() {
             "canonical tokens embedded in decision prose should remain references");
         expect(std::find(extracted_refs.begin(), extracted_refs.end(), "ADR-0013") != extracted_refs.end(),
             "canonical tokens embedded in body prose should remain references");
+        expect(std::find(extracted_refs.begin(), extracted_refs.end(), "019cdf6a-0000-7000-8000-000000000099") != extracted_refs.end(),
+            "structured UUID links should remain references");
+        expect(std::find(extracted_refs.begin(), extracted_refs.end(), "019cdf6a-0000-7000-8000-000000000098") == extracted_refs.end(),
+            "free-form UUIDv7 provenance should not become a backlog reference");
+        expect(std::find(extracted_refs.begin(), extracted_refs.end(), "GT-TSK-9998") == extracted_refs.end() &&
+               std::find(extracted_refs.begin(), extracted_refs.end(), "GT-FTR-9998") == extracted_refs.end(),
+            "explicit canonical-remap source IDs should remain historical prose");
+        expect(std::find(extracted_refs.begin(), extracted_refs.end(), "GT-BUG-9998") == extracted_refs.end() &&
+               std::find(extracted_refs.begin(), extracted_refs.end(), "GT-BUG-9997") == extracted_refs.end(),
+            "legacy and mislabeled IDs should remain historical prose");
+        expect(std::find(extracted_refs.begin(), extracted_refs.end(), "GT-TSK-0002") != extracted_refs.end() &&
+               std::find(extracted_refs.begin(), extracted_refs.end(), "GT-FTR-0002") != extracted_refs.end(),
+            "canonical-remap target IDs should remain active references");
+        expect(std::find(extracted_refs.begin(), extracted_refs.end(), "GT-BUG-0004") != extracted_refs.end(),
+            "canonical-remap suppression should not cross into the next sentence");
         expect(std::none_of(extracted_refs.begin(), extracted_refs.end(), [](const std::string& ref) {
             return ref.find("Evidence sentence") != std::string::npos;
         }), "decision prose should not become a whole path reference");

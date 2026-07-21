@@ -368,7 +368,9 @@ int main(int argc, char** argv) {
             "  - \"Cross-product target SP-TSK-0001 remains canonical in prose.\"\n"
             "tags: []\n"
             "---\n\n"
-            "# Context\n\nValidate a canonical cross-product reference and ADR-0001.\n\n"
+            "# Context\n\nValidate a canonical cross-product reference and ADR-0001. External thread "
+            "019cdf6a-0000-7000-8000-000000009099 is provenance only. Canonical remap: "
+            "QS-TSK-9998 is represented by QS-TSK-9000.\n\n"
             "# Goal\n\nKeep prose from becoming a whole reference.\n";
         write_text(link_fixture_path, valid_link_fixture);
         expect_command_capture_success(

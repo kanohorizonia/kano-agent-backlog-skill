@@ -208,6 +208,52 @@ int main(int argc, char** argv) {
         const auto task_receipt_path = temp_root / "_kano" / "backlog" / "products" / "quick-smoke-product" / "_meta" / "duplicate-admission" / "QS-TSK-0001.json";
         expect(std::filesystem::exists(task_receipt_path), "workitem create should write duplicate admission receipt");
 
+        expect(run_command(binary, {"admin", "init", "--product", "second-product", "--agent", "tester", "--skip-refresh-views"}) == 0,
+            "second product admin init failed");
+        const auto uid_product_output = temp_root / "validate-uids-product.txt";
+        expect_command_capture_success(
+            run_command_capture(binary, {"validate", "uids", "--product", "quick-smoke-product"}, uid_product_output),
+            uid_product_output,
+            "product UID validation should discover the shared backlog root");
+        const auto uid_product_text = read_text(uid_product_output);
+        expect(uid_product_text.find("OK quick-smoke-product: all 1 items have UUIDv7 UIDs") != std::string::npos &&
+               uid_product_text.find("Items checked: 1") != std::string::npos,
+            "product UID validation should inspect the requested product without an explicit backlog root");
+
+        const auto uid_all_output = temp_root / "validate-uids-all.txt";
+        expect_command_capture_success(
+            run_command_capture(binary, {"validate", "uids"}, uid_all_output),
+            uid_all_output,
+            "all-product UID validation should discover the shared backlog root");
+        const auto uid_all_text = read_text(uid_all_output);
+        expect(uid_all_text.find("OK quick-smoke-product: all 1 items have UUIDv7 UIDs") != std::string::npos &&
+               uid_all_text.find("Items checked: 1") != std::string::npos,
+            "all-product UID validation should inspect a nonzero total across configured products");
+
+        const auto schema_check_output = temp_root / "schema-check-product.txt";
+        expect_command_capture_success(
+            run_command_capture(binary, {"schema", "check", "--product", "quick-smoke-product"}, schema_check_output),
+            schema_check_output,
+            "product schema check should discover the shared backlog root");
+        expect(read_text(schema_check_output).find("Total: 1 items checked, 0 with issues") != std::string::npos,
+            "product schema check should inspect the requested product without an explicit backlog root");
+
+        const auto schema_fix_output = temp_root / "schema-fix-product.txt";
+        expect_command_capture_success(
+            run_command_capture(binary, {"schema", "fix", "--product", "quick-smoke-product", "--agent", "tester"}, schema_fix_output),
+            schema_fix_output,
+            "product schema fix dry-run should discover the shared backlog root");
+        expect(read_text(schema_fix_output).find("Total: 1 checked, 1 issues, 0 fixed") != std::string::npos,
+            "product schema fix dry-run should inspect the requested product without applying changes");
+
+        const auto validate_links_output = temp_root / "validate-links-product.txt";
+        expect_command_capture_success(
+            run_command_capture(binary, {"validate", "links", "--product", "quick-smoke-product"}, validate_links_output),
+            validate_links_output,
+            "product link validation should discover the shared backlog root");
+        expect(read_text(validate_links_output).find("OK quick-smoke-product: 1 files, no broken links") != std::string::npos,
+            "product link validation should inspect the requested product without an explicit backlog root");
+
         const auto text_root = temp_root / "ready-fields";
         write_text(text_root / "context.md", "Quick smoke context.\n");
         write_text(text_root / "goal.md", "Quick smoke goal.\n");

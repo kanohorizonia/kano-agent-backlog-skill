@@ -20769,25 +20769,15 @@ int main(int InArgc, char* InArgv[]) {
             // schema check
             {
                 auto* checkCmd = schemaCmd->add_subcommand("check", "Check for missing required fields");
-                std::string schema_product;
-                std::string schema_backlog_root_str;
-                checkCmd->add_option("--product", schema_product, "Product name (check all if omitted)");
-                checkCmd->add_option("--backlog-root", schema_backlog_root_str, "Backlog root path");
-                checkCmd->callback([&]() {
-                    std::filesystem::path backlog_root;
-                    if (!schema_backlog_root_str.empty()) {
-                        backlog_root = std::filesystem::path(schema_backlog_root_str);
-                    } else if (!schema_product.empty()) {
-                        auto ctx = BacklogContext::resolve(
-                            path_str,
-                            std::optional<std::string>(schema_product),
-                            sandbox_name_opt.empty() ? std::nullopt : std::optional<std::string>(sandbox_name_opt)
-                        );
-                        backlog_root = ctx.backlog_root;
-                    } else {
-                        auto ctx = resolve_ctx();
-                        backlog_root = ctx.backlog_root;
-                    }
+                struct SchemaCheckCommandState {
+                    std::string product;
+                    std::string backlog_root;
+                };
+                const auto state = std::make_shared<SchemaCheckCommandState>();
+                checkCmd->add_option("--product", state->product, "Product name (check all if omitted)");
+                checkCmd->add_option("--backlog-root", state->backlog_root, "Backlog root path");
+                checkCmd->callback([&, state]() {
+                    const auto backlog_root = resolve_backlog_root_arg(state->backlog_root);
 
                     int total_checked = 0;
                     int total_issues = 0;
@@ -20802,7 +20792,7 @@ int main(int InArgc, char* InArgv[]) {
                     for (const auto& entry : std::filesystem::directory_iterator(products_dir)) {
                         if (!entry.is_directory()) continue;
                         std::string product_name = entry.path().filename().string();
-                        if (!schema_product.empty() && schema_product != product_name) continue;
+                        if (!state->product.empty() && state->product != product_name) continue;
 
                         auto product_root = entry.path();
                         CanonicalStore store(product_root);
@@ -20849,24 +20839,21 @@ int main(int InArgc, char* InArgv[]) {
             // schema fix
             {
                 auto* fixCmd = schemaCmd->add_subcommand("fix", "Fix missing required fields");
-                std::string fix_product;
-                std::string fix_backlog_root_str;
-                std::string fix_agent;
-                std::string fix_model;
-                bool fix_apply = false;
-                fixCmd->add_option("--product", fix_product, "Product name (fix all if omitted)");
-                fixCmd->add_option("--backlog-root", fix_backlog_root_str, "Backlog root path");
-                fixCmd->add_option("--agent", fix_agent, "Agent name for worklog")->required();
-                fixCmd->add_option("--model", fix_model, "Model name for worklog");
-                fixCmd->add_flag("--apply", fix_apply, "Apply fixes (dry-run by default)");
-                fixCmd->callback([&]() {
-                    std::filesystem::path backlog_root;
-                    if (!fix_backlog_root_str.empty()) {
-                        backlog_root = std::filesystem::path(fix_backlog_root_str);
-                    } else {
-                        auto ctx = resolve_ctx();
-                        backlog_root = ctx.backlog_root;
-                    }
+                struct SchemaFixCommandState {
+                    std::string product;
+                    std::string backlog_root;
+                    std::string agent;
+                    std::string model;
+                    bool apply = false;
+                };
+                const auto state = std::make_shared<SchemaFixCommandState>();
+                fixCmd->add_option("--product", state->product, "Product name (fix all if omitted)");
+                fixCmd->add_option("--backlog-root", state->backlog_root, "Backlog root path");
+                fixCmd->add_option("--agent", state->agent, "Agent name for worklog")->required();
+                fixCmd->add_option("--model", state->model, "Model name for worklog");
+                fixCmd->add_flag("--apply", state->apply, "Apply fixes (dry-run by default)");
+                fixCmd->callback([&, state]() {
+                    const auto backlog_root = resolve_backlog_root_arg(state->backlog_root);
 
                     int total_checked = 0;
                     int total_issues = 0;
@@ -20881,7 +20868,7 @@ int main(int InArgc, char* InArgv[]) {
                     for (const auto& entry : std::filesystem::directory_iterator(products_dir)) {
                         if (!entry.is_directory()) continue;
                         std::string product_name = entry.path().filename().string();
-                        if (!fix_product.empty() && fix_product != product_name) continue;
+                        if (!state->product.empty() && state->product != product_name) continue;
 
                         auto product_root = entry.path();
                         CanonicalStore store(product_root);
@@ -20897,8 +20884,8 @@ int main(int InArgc, char* InArgv[]) {
                                 ++product_checked;
                                 if (!is_ready) {
                                     ++product_issues;
-                                    std::cout << (fix_apply ? "Fixing" : "Dry-run") << " " << item.id << ": missing " << missing_fields.size() << " fields\n";
-                                    if (fix_apply) {
+                                    std::cout << (state->apply ? "Fixing" : "Dry-run") << " " << item.id << ": missing " << missing_fields.size() << " fields\n";
+                                    if (state->apply) {
                                         for (const auto& field : missing_fields) {
                                             if (field == "context") {
                                                 item.context = "TBD: Provide context for this item.";
@@ -20914,9 +20901,9 @@ int main(int InArgc, char* InArgv[]) {
                                         }
                                         StateMachine::record_worklog(
                                             item,
-                                            fix_agent,
+                                            state->agent,
                                             "Auto-filled missing Ready-gate fields via schema fix",
-                                            fix_model.empty() ? std::nullopt : std::optional<std::string>(fix_model)
+                                            state->model.empty() ? std::nullopt : std::optional<std::string>(state->model)
                                         );
                                         store.write(item);
                                         ++product_fixed;
@@ -20936,7 +20923,7 @@ int main(int InArgc, char* InArgv[]) {
                     }
 
                     std::cout << "\nTotal: " << total_checked << " checked, " << total_issues << " issues, " << total_fixed << " fixed\n";
-                    if (!fix_apply && total_issues > 0) {
+                    if (!state->apply && total_issues > 0) {
                         std::cout << "\nDry-run mode. Use --apply to write changes.\n";
                     }
                 });
@@ -20952,18 +20939,15 @@ int main(int InArgc, char* InArgv[]) {
             // validate uids
             {
                 auto* uidsCmd = validateCmd->add_subcommand("uids", "Validate UUIDv7 UIDs");
-                std::string uid_product;
-                std::string uid_backlog_root_str;
-                uidsCmd->add_option("--product", uid_product, "Product name (validate all if omitted)");
-                uidsCmd->add_option("--backlog-root", uid_backlog_root_str, "Backlog root path");
-                uidsCmd->callback([&]() {
-                    std::filesystem::path backlog_root;
-                    if (!uid_backlog_root_str.empty()) {
-                        backlog_root = std::filesystem::path(uid_backlog_root_str);
-                    } else {
-                        auto ctx = resolve_ctx();
-                        backlog_root = ctx.backlog_root;
-                    }
+                struct ValidateUidsCommandState {
+                    std::string product;
+                    std::string backlog_root;
+                };
+                const auto state = std::make_shared<ValidateUidsCommandState>();
+                uidsCmd->add_option("--product", state->product, "Product name (validate all if omitted)");
+                uidsCmd->add_option("--backlog-root", state->backlog_root, "Backlog root path");
+                uidsCmd->callback([&, state]() {
+                    const auto backlog_root = resolve_backlog_root_arg(state->backlog_root);
 
                     int total_checked = 0;
                     int total_violations = 0;
@@ -20977,7 +20961,7 @@ int main(int InArgc, char* InArgv[]) {
                     for (const auto& entry : std::filesystem::directory_iterator(products_dir)) {
                         if (!entry.is_directory()) continue;
                         std::string product_name = entry.path().filename().string();
-                        if (!uid_product.empty() && uid_product != product_name) continue;
+                        if (!state->product.empty() && state->product != product_name) continue;
 
                         auto product_root = entry.path();
                         auto items_root = product_root / "items";
@@ -21117,20 +21101,17 @@ int main(int InArgc, char* InArgv[]) {
             // validate links
             {
                 auto* linksCmd = validateCmd->add_subcommand("links", "Validate markdown links and wikilinks");
-                std::string links_product;
-                std::string links_backlog_root_str;
-                bool include_views = false;
-                linksCmd->add_option("--product", links_product, "Product name (validate all if omitted)");
-                linksCmd->add_option("--backlog-root", links_backlog_root_str, "Backlog root path");
-                linksCmd->add_flag("--include-views", include_views, "Scan views/ markdown (derived output)");
-                linksCmd->callback([&]() {
-                    std::filesystem::path backlog_root;
-                    if (!links_backlog_root_str.empty()) {
-                        backlog_root = std::filesystem::path(links_backlog_root_str);
-                    } else {
-                        auto ctx = resolve_ctx();
-                        backlog_root = ctx.backlog_root;
-                    }
+                struct ValidateLinksCommandState {
+                    std::string product;
+                    std::string backlog_root;
+                    bool include_views = false;
+                };
+                const auto state = std::make_shared<ValidateLinksCommandState>();
+                linksCmd->add_option("--product", state->product, "Product name (validate all if omitted)");
+                linksCmd->add_option("--backlog-root", state->backlog_root, "Backlog root path");
+                linksCmd->add_flag("--include-views", state->include_views, "Scan views/ markdown (derived output)");
+                linksCmd->callback([&, state]() {
+                    const auto backlog_root = resolve_backlog_root_arg(state->backlog_root);
 
                     int total_checked = 0;
                     int total_issues = 0;
@@ -21144,7 +21125,7 @@ int main(int InArgc, char* InArgv[]) {
                     for (const auto& entry : std::filesystem::directory_iterator(products_dir)) {
                         if (!entry.is_directory()) continue;
                         std::string product_name = entry.path().filename().string();
-                        if (!links_product.empty() && links_product != product_name) continue;
+                        if (!state->product.empty() && state->product != product_name) continue;
 
                         auto product_root = entry.path();
                         CanonicalStore store(product_root);

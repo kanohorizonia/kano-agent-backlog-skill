@@ -49,5 +49,6 @@ echo "  Skill root: $SKILL_ROOT"
 
 "$SCRIPT_DIR/native-test.sh" "${args[@]}" "${ctest_args[@]}"
 "$SCRIPT_DIR/native-runtime-gate.sh"
+"$SCRIPT_DIR/acceptance-relative-backlog-root.sh"
 
 echo "Native full test suite passed."

@@ -4,6 +4,39 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 EXPECTED_VERSION="$(tr -d '\r\n' < "$SKILL_ROOT/VERSION")"
+INVOCATION_DIR="$PWD"
+
+resolve_invocation_path() {
+  local value="$1"
+  if [[ "$value" == /* ]]; then
+    printf '%s\n' "$value"
+    return 0
+  fi
+  local parent
+  parent="$(cd "$INVOCATION_DIR/$(dirname "$value")" && pwd)"
+  printf '%s/%s\n' "$parent" "$(basename "$value")"
+}
+
+normalize_explicit_backlog_root_args() {
+  NORMALIZED_ARGS=()
+  while (($#)); do
+    case "$1" in
+      --backlog-root)
+        [[ $# -ge 2 ]] || { echo "Missing value for --backlog-root" >&2; exit 2; }
+        NORMALIZED_ARGS+=("$1" "$(resolve_invocation_path "$2")")
+        shift 2
+        ;;
+      --backlog-root=*)
+        NORMALIZED_ARGS+=("--backlog-root=$(resolve_invocation_path "${1#*=}")")
+        shift
+        ;;
+      *)
+        NORMALIZED_ARGS+=("$1")
+        shift
+        ;;
+    esac
+  done
+}
 
 resolve_workspace_root() {
   local start_dir="${PWD}"
@@ -146,8 +179,9 @@ WORKSPACE_ROOT="$(resolve_workspace_root)"
 NATIVE_BIN="$(find_native_bin || true)"
 
 if [[ -n "$NATIVE_BIN" ]] && native_bin_matches_version "$NATIVE_BIN"; then
+  normalize_explicit_backlog_root_args "$@"
   cd "$WORKSPACE_ROOT"
-  exec "$NATIVE_BIN" "$@"
+  exec "$NATIVE_BIN" "${NORMALIZED_ARGS[@]}"
 fi
 
 if [[ -n "$NATIVE_BIN" ]]; then

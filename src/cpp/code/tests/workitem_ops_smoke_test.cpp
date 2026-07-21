@@ -50,6 +50,15 @@ std::string read_text(const std::filesystem::path& path) {
     return buffer.str();
 }
 
+void write_text(const std::filesystem::path& path, const std::string& text) {
+    std::filesystem::create_directories(path.parent_path());
+    std::ofstream output(path, std::ios::binary);
+    if (!output.is_open()) {
+        throw std::runtime_error("failed to write " + path.string());
+    }
+    output << text;
+}
+
 void set_ready_fields(kano::backlog_core::BacklogItem& item) {
     item.context = "Need deterministic parent sync coverage.";
     item.goal = "Update a child item without trusting stale indexed host paths.";
@@ -335,6 +344,33 @@ int main() {
                 },
                 "duplicate_item_id.remap_target_exists",
                 "remap should fail closed when target bare id already exists");
+
+            const auto ambiguous_reference_path = root / "artifacts" / "duplicate-remap-reference.md";
+            write_text(ambiguous_reference_path, "Ambiguous reference: " + allocation_collision.id + "\n");
+            const auto duplicate_peer_before = read_text(allocation_collision.file_path.value());
+            const auto duplicate_remap = WorkitemOps::remap_id(
+                index, root, duplicate_identity.uid, "TST-TSK-0900", "opencode");
+            expect(duplicate_remap.updated_files == 1,
+                "UID-selected duplicate remap should update only the selected canonical item");
+            expect(store.read(duplicate_remap.new_path).id == "TST-TSK-0900",
+                "UID-selected duplicate remap should assign the requested ID");
+            expect(read_text(allocation_collision.file_path.value()) == duplicate_peer_before,
+                "UID-selected duplicate remap should preserve the collision peer byte-for-byte");
+            expect(read_text(ambiguous_reference_path).find(allocation_collision.id) != std::string::npos,
+                "UID-selected duplicate remap should preserve ambiguous references for review");
+            expect(store.find_item_paths_by_id(allocation_collision.id).size() == 1,
+                "UID-selected duplicate remap should leave one canonical owner of the old ID");
+
+            auto unique_remap_item = store.create("TST", ItemType::Task, "Unique remap fixture", 901);
+            store.write(unique_remap_item);
+            const auto unique_reference_path = root / "artifacts" / "unique-remap-reference.md";
+            write_text(unique_reference_path, "Unique reference: " + unique_remap_item.id + "\n");
+            const auto unique_remap = WorkitemOps::remap_id(
+                index, root, unique_remap_item.uid, "TST-TSK-0902", "opencode");
+            expect(unique_remap.updated_files == 2,
+                "unique-ID remap should keep updating unambiguous references");
+            expect(read_text(unique_reference_path).find("TST-TSK-0902") != std::string::npos,
+                "unique-ID remap should rewrite its references");
 
             auto override_created = WorkitemOps::create_item(index, root, "TST", ItemType::Task, "Duplicate override with rationale", "opencode", std::nullopt, "P2", {}, "general", "backlog", std::nullopt, std::nullopt, "", "", duplicate_admission("Duplicate override with rationale", {created.id}, {created.id}, true, "urgent minimal follow-up"));
             expect(std::filesystem::exists(root / "_meta" / "duplicate-admission" / (override_created.id + ".json")), "override create should write duplicate admission receipt");

@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -11,6 +12,7 @@
 #include "kano/backlog_core/models/models.hpp"
 #include "kano/backlog_core/process/noninteractive_errors.hpp"
 #include "kano/backlog_core/refs/ref_parser.hpp"
+#include "kano/backlog_core/refs/ref_resolver.hpp"
 #include "kano/backlog_core/state/state_machine.hpp"
 #include "kano/backlog_core/validation/validator.hpp"
 
@@ -45,6 +47,7 @@ int main() {
     using kano::backlog_core::ItemType;
     using kano::backlog_core::ProjectConfig;
     using kano::backlog_core::RefParser;
+    using kano::backlog_core::RefResolver;
     using kano::backlog_core::StateAction;
     using kano::backlog_core::StateMachine;
     using kano::backlog_core::Validator;
@@ -221,6 +224,24 @@ int main() {
         auto subtask_ref = RefParser::parse_display_id("GT-SUBTSK-0001");
         expect(subtask_ref.has_value(), "SUBTSK display id should parse");
         expect(subtask_ref->type_abbrev == "SUBTSK", "SUBTSK display id should preserve type abbreviation");
+
+        BacklogItem reference_source = item;
+        reference_source.links.relates = {"GT-TSK-0002"};
+        reference_source.decisions = {
+            "Evidence sentence with a source/path marker (source: implementation/preflight).",
+            "Canonical dependency GT-BUG-0003 remains reviewable in prose."
+        };
+        reference_source.context = "Context also names ADR-0013 for explicit validation.";
+        const auto extracted_refs = RefResolver::get_references(reference_source);
+        expect(std::find(extracted_refs.begin(), extracted_refs.end(), "GT-TSK-0002") != extracted_refs.end(),
+            "structured item links should remain references");
+        expect(std::find(extracted_refs.begin(), extracted_refs.end(), "GT-BUG-0003") != extracted_refs.end(),
+            "canonical tokens embedded in decision prose should remain references");
+        expect(std::find(extracted_refs.begin(), extracted_refs.end(), "ADR-0013") != extracted_refs.end(),
+            "canonical tokens embedded in body prose should remain references");
+        expect(std::none_of(extracted_refs.begin(), extracted_refs.end(), [](const std::string& ref) {
+            return ref.find("Evidence sentence") != std::string::npos;
+        }), "decision prose should not become a whole path reference");
 
         BacklogItem incomplete_subtask = subtask;
         incomplete_subtask.approach.reset();

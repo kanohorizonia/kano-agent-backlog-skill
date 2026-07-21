@@ -51,25 +51,35 @@ std::optional<BacklogItem> RefResolver::resolve_or_none(const std::string& ref) 
 std::vector<std::string> RefResolver::get_references(const BacklogItem& item) {
     std::set<std::string> refs;
 
+    static const std::regex canonical_pattern(
+        R"(\b(?:[A-Z][A-Z0-9]{1,15}-(?:INIT|EPIC|FTR|USR|TSK|SUBTSK|BUG|ISS)-\d{4}|ADR-\d{4}|[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\b)"
+    );
+
+    const auto extract_canonical_tokens = [&](const std::string& text) {
+        std::smatch match;
+        std::string remaining = text;
+        while (std::regex_search(remaining, match, canonical_pattern)) {
+            refs.insert(match.str());
+            remaining = match.suffix().str();
+        }
+    };
+
     // From links
     for (const auto& r : item.links.relates) refs.insert(r);
     for (const auto& b : item.links.blocks) refs.insert(b);
     for (const auto& nb : item.links.blocked_by) refs.insert(nb);
 
-    // From decisions
-    for (const auto& d : item.decisions) refs.insert(d);
+    // Decisions are frequently provenance prose rather than a structured ref.
+    // Validate canonical tokens inside that prose without treating the entire
+    // sentence (which may contain slashes) as a path reference.
+    for (const auto& decision : item.decisions) {
+        extract_canonical_tokens(decision);
+    }
 
     // From body sections
-    static const std::regex pattern(R"(\b(?:[A-Z][A-Z0-9]{1,15}-(?:INIT|EPIC|FTR|USR|TSK|SUBTSK|BUG|ISS)-\d{4}|ADR-\d{4}|[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\b)");
-    
     auto extract = [&](const std::optional<std::string>& section) {
         if (!section) return;
-        std::smatch match;
-        std::string s = *section;
-        while (std::regex_search(s, match, pattern)) {
-            refs.insert(match.str());
-            s = match.suffix().str();
-        }
+        extract_canonical_tokens(*section);
     };
 
     extract(item.context);

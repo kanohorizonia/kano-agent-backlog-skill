@@ -1528,6 +1528,8 @@ RemapIdResult WorkitemOps::remap_id(
 
     std::filesystem::path old_path = *item.file_path;
     std::string old_id = item.id;
+    const auto old_id_paths = store.find_item_paths_by_id(old_id);
+    const bool duplicate_source_id = old_id_paths.size() > 1;
     
     // 2. Calculate new path
     std::string filename = old_path.filename().string();
@@ -1558,40 +1560,54 @@ RemapIdResult WorkitemOps::remap_id(
     // 6. Global search and replace in the product root
     int updated_files = 1;
     
-    for (const auto& entry : std::filesystem::recursive_directory_iterator(backlog_root)) {
-        if (entry.is_regular_file() && entry.path().extension() == ".md") {
-            if (entry.path() == new_path) continue;
+    if (!duplicate_source_id) {
+        for (const auto& entry : std::filesystem::recursive_directory_iterator(backlog_root)) {
+            if (entry.is_regular_file() && entry.path().extension() == ".md") {
+                if (entry.path() == new_path) continue;
             
-            std::ifstream ifs(entry.path());
-            std::string content((std::istreambuf_iterator<char>(ifs)), (std::istreambuf_iterator<char>()));
-            ifs.close();
+                std::ifstream ifs(entry.path());
+                std::string content((std::istreambuf_iterator<char>(ifs)), (std::istreambuf_iterator<char>()));
+                ifs.close();
             
-            size_t pos = 0;
-            bool changed = false;
-            while ((pos = content.find(old_id, pos)) != std::string::npos) {
-                bool boundary_before = (pos == 0 || (!std::isalnum(content[pos - 1]) && content[pos - 1] != '-'));
-                bool boundary_after = (pos + old_id.length() == content.length() || (!std::isalnum(content[pos + old_id.length()]) && content[pos + old_id.length()] != '-'));
+                size_t pos = 0;
+                bool changed = false;
+                while ((pos = content.find(old_id, pos)) != std::string::npos) {
+                    bool boundary_before = (pos == 0 || (!std::isalnum(content[pos - 1]) && content[pos - 1] != '-'));
+                    bool boundary_after = (pos + old_id.length() == content.length() || (!std::isalnum(content[pos + old_id.length()]) && content[pos + old_id.length()] != '-'));
                 
-                if (boundary_before && boundary_after) {
-                    content.replace(pos, old_id.length(), new_id);
-                    pos += new_id.length();
-                    changed = true;
-                } else {
-                    pos += old_id.length();
+                    if (boundary_before && boundary_after) {
+                        content.replace(pos, old_id.length(), new_id);
+                        pos += new_id.length();
+                        changed = true;
+                    } else {
+                        pos += old_id.length();
+                    }
                 }
-            }
             
-            if (changed) {
-                std::ofstream ofs(entry.path());
-                ofs << content;
-                ofs.close();
-                updated_files++;
+                if (changed) {
+                    std::ofstream ofs(entry.path());
+                    ofs << content;
+                    ofs.close();
+                    updated_files++;
+                }
             }
         }
     }
     
     // 7. Update index
-    index.remove_item(old_id);
+    if (!duplicate_source_id) {
+        index.remove_item(old_id);
+    } else {
+        for (const auto& peer_path : old_id_paths) {
+            if (peer_path == old_path) continue;
+            try {
+                index.index_item(store.read(peer_path));
+            } catch (...) {
+                // Canonical files remain authoritative; a later index refresh
+                // can repair a peer that became unreadable independently.
+            }
+        }
+    }
     index.index_item(item);
     
     return {old_id, new_id, old_path, new_path, updated_files};

@@ -74,6 +74,32 @@ std::string read_text(const std::filesystem::path& path) {
     return buffer.str();
 }
 
+std::string replace_frontmatter_uid(std::string content, const std::string& uid) {
+    const auto frontmatter_end = content.find("\n---", 3);
+    auto line_start = content.find("\nuid:");
+    if (line_start == std::string::npos || frontmatter_end == std::string::npos || ++line_start >= frontmatter_end) {
+        throw std::runtime_error("failed to locate frontmatter uid line");
+    }
+    const auto line_end = content.find('\n', line_start);
+    content.replace(line_start, line_end - line_start, "uid: " + uid);
+    return content;
+}
+
+std::string frontmatter_uid(const std::string& content) {
+    auto line_start = content.find("\nuid:");
+    if (line_start == std::string::npos) {
+        throw std::runtime_error("failed to locate frontmatter uid line");
+    }
+    line_start += 5;
+    const auto value_start = content.find_first_not_of(" \t", line_start);
+    const auto line_end = content.find_first_of("\r\n", value_start);
+    return content.substr(value_start, line_end - value_start);
+}
+
+std::string mask_frontmatter_uid(const std::string& content) {
+    return replace_frontmatter_uid(content, "<UID>");
+}
+
 void expect_command_capture_success(
     int rc,
     const std::filesystem::path& output_path,
@@ -210,6 +236,63 @@ int main(int argc, char** argv) {
 
         expect(run_command(binary, {"admin", "init", "--product", "second-product", "--agent", "tester", "--skip-refresh-views"}) == 0,
             "second product admin init failed");
+        expect(run_command(binary, {"-P", "second-product", "admin", "sync-sequences"}) == 0,
+            "second product sync-sequences failed");
+        expect(run_command(binary, with_duplicate_admission({"-P", "second-product", "workitem", "create", "-t", "task", "--title", "Cross product target", "--agent", "tester"}, "Cross product target")) == 0,
+            "second product target creation failed");
+
+        const auto task_path = temp_root / "_kano" / "backlog" / "products" / "quick-smoke-product" / "items" / "task" / "0000" / "QS-TSK-0001_quick-smoke-task.md";
+        const auto second_task_path = temp_root / "_kano" / "backlog" / "products" / "second-product" / "items" / "task" / "0000" / "SP-TSK-0001_cross-product-target.md";
+        const auto valid_task_text = read_text(task_path);
+        const auto invalid_task_text = replace_frontmatter_uid(valid_task_text, "55aeac65-d3d5-4805-894b-b8adcb73a69e");
+        write_text(task_path, invalid_task_text);
+
+        const auto uid_invalid_output = temp_root / "validate-uids-invalid.txt";
+        expect(run_command_capture(binary, {"validate", "uids", "--product", "quick-smoke-product"}, uid_invalid_output) != 0,
+            "malformed item UID should fail validation");
+        expect(read_text(uid_invalid_output).find("FAIL QS-TSK-0001: malformed UID") != std::string::npos,
+            "malformed item UID should produce a bounded diagnostic");
+
+        const auto uid_fix_dry_run_output = temp_root / "validate-uids-fix-dry-run.txt";
+        expect_command_capture_success(
+            run_command_capture(binary, {"validate", "uids", "--product", "quick-smoke-product", "--fix"}, uid_fix_dry_run_output),
+            uid_fix_dry_run_output,
+            "UID fix dry-run failed");
+        expect(read_text(uid_fix_dry_run_output).find("DRY-RUN QS-TSK-0001") != std::string::npos,
+            "UID fix should default to dry-run");
+        expect(read_text(task_path) == invalid_task_text, "UID fix dry-run must not mutate the item");
+
+        const auto uid_fix_no_agent_output = temp_root / "validate-uids-fix-no-agent.txt";
+        expect(run_command_capture(binary, {"validate", "uids", "--product", "quick-smoke-product", "--fix", "--apply"}, uid_fix_no_agent_output) != 0,
+            "UID fix apply without agent should fail");
+        expect(read_text(uid_fix_no_agent_output).find("--agent is required") != std::string::npos,
+            "UID fix apply should explain its agent requirement");
+
+        const auto uid_fix_apply_output = temp_root / "validate-uids-fix-apply.txt";
+        expect_command_capture_success(
+            run_command_capture(binary, {"validate", "uids", "--product", "quick-smoke-product", "--fix", "--apply", "--agent", "tester"}, uid_fix_apply_output),
+            uid_fix_apply_output,
+            "UID fix apply failed");
+        const auto repaired_task_text = read_text(task_path);
+        expect(frontmatter_uid(repaired_task_text).size() == 36 && frontmatter_uid(repaired_task_text)[14] == '7',
+            "UID fix should write UUIDv7");
+        expect(mask_frontmatter_uid(repaired_task_text) == mask_frontmatter_uid(invalid_task_text),
+            "UID fix should change only the uid frontmatter line");
+
+        write_text(second_task_path, replace_frontmatter_uid(read_text(second_task_path), frontmatter_uid(repaired_task_text)));
+        const auto uid_duplicate_output = temp_root / "validate-uids-duplicate.txt";
+        expect(run_command_capture(binary, {"validate", "uids"}, uid_duplicate_output) != 0,
+            "duplicate item UIDs across products should fail validation");
+        expect(read_text(uid_duplicate_output).find("duplicate UID first used by") != std::string::npos,
+            "duplicate item UID should identify its first owner");
+        const auto uid_duplicate_fix_output = temp_root / "validate-uids-duplicate-fix.txt";
+        expect_command_capture_success(
+            run_command_capture(binary, {"validate", "uids", "--fix", "--apply", "--agent", "tester"}, uid_duplicate_fix_output),
+            uid_duplicate_fix_output,
+            "duplicate UID repair failed");
+        expect(frontmatter_uid(read_text(task_path)) != frontmatter_uid(read_text(second_task_path)),
+            "duplicate UID repair should restore global uniqueness");
+
         const auto uid_product_output = temp_root / "validate-uids-product.txt";
         expect_command_capture_success(
             run_command_capture(binary, {"validate", "uids", "--product", "quick-smoke-product"}, uid_product_output),
@@ -227,7 +310,7 @@ int main(int argc, char** argv) {
             "all-product UID validation should discover the shared backlog root");
         const auto uid_all_text = read_text(uid_all_output);
         expect(uid_all_text.find("OK quick-smoke-product: all 1 items have UUIDv7 UIDs") != std::string::npos &&
-               uid_all_text.find("Items checked: 1") != std::string::npos,
+               uid_all_text.find("Items checked: 2") != std::string::npos,
             "all-product UID validation should inspect a nonzero total across configured products");
 
         const auto schema_check_output = temp_root / "schema-check-product.txt";
@@ -247,12 +330,51 @@ int main(int argc, char** argv) {
             "product schema fix dry-run should inspect the requested product without applying changes");
 
         const auto validate_links_output = temp_root / "validate-links-product.txt";
+        const auto link_fixture_path = temp_root / "_kano" / "backlog" / "products" / "quick-smoke-product" / "items" / "task" / "9000" / "QS-TSK-9000_link-validator-fixture.md";
+        const std::string valid_link_fixture =
+            "---\n"
+            "id: QS-TSK-9000\n"
+            "uid: 019cdf6a-0000-7000-8000-000000009000\n"
+            "type: Task\n"
+            "title: Link validator fixture\n"
+            "state: Proposed\n"
+            "priority: P2\n"
+            "parent: ~\n"
+            "created: 2026-07-21\n"
+            "updated: 2026-07-21\n"
+            "area: general\n"
+            "iteration: backlog\n"
+            "external: {}\n"
+            "links:\n"
+            "  relates:\n"
+            "    - SP-TSK-0001\n"
+            "  blocks: []\n"
+            "  blocked_by: []\n"
+            "decisions:\n"
+            "  - \"Evidence sentence with source/path prose (source: implementation/preflight).\"\n"
+            "  - \"Cross-product target SP-TSK-0001 remains canonical in prose.\"\n"
+            "tags: []\n"
+            "---\n\n"
+            "# Context\n\nValidate a canonical cross-product reference.\n\n"
+            "# Goal\n\nKeep prose from becoming a whole reference.\n";
+        write_text(link_fixture_path, valid_link_fixture);
         expect_command_capture_success(
             run_command_capture(binary, {"validate", "links", "--product", "quick-smoke-product"}, validate_links_output),
             validate_links_output,
             "product link validation should discover the shared backlog root");
-        expect(read_text(validate_links_output).find("OK quick-smoke-product: 1 files, no broken links") != std::string::npos,
-            "product link validation should inspect the requested product without an explicit backlog root");
+        const auto validate_links_text = read_text(validate_links_output);
+        expect(validate_links_text.find("OK quick-smoke-product: 2 files, no broken links") != std::string::npos,
+            "product link validation should resolve cross-product refs without an explicit backlog root");
+        expect(validate_links_text.find("Evidence sentence") == std::string::npos,
+            "product link validation should not treat decision prose as a whole reference");
+
+        write_text(link_fixture_path, valid_link_fixture + "\n# Risks / Dependencies\n\nMissing canonical dependency QS-BUG-9999.\n");
+        const auto validate_missing_link_output = temp_root / "validate-links-missing.txt";
+        expect(run_command_capture(binary, {"validate", "links", "--product", "quick-smoke-product"}, validate_missing_link_output) != 0,
+            "missing canonical cross-product ref should fail validation");
+        expect(read_text(validate_missing_link_output).find("unresolvable ref: QS-BUG-9999") != std::string::npos,
+            "missing canonical ref should remain fail-closed");
+        write_text(link_fixture_path, valid_link_fixture);
 
         const auto text_root = temp_root / "ready-fields";
         write_text(text_root / "context.md", "Quick smoke context.\n");
@@ -273,7 +395,6 @@ int main(int argc, char** argv) {
             "--risks-file", (text_root / "risks.md").string(),
             "--agent", "tester"
         }) == 0, "set-ready failed");
-        const auto task_path = temp_root / "_kano" / "backlog" / "products" / "quick-smoke-product" / "items" / "task" / "0000" / "QS-TSK-0001_quick-smoke-task.md";
         const auto task_text = read_text(task_path);
         expect(task_text.find("# Non-Goals / Do Not") != std::string::npos, "set-ready task should render Non-Goals / Do Not heading");
         expect(task_text.find("Quick smoke non-goal.") != std::string::npos, "set-ready task should persist non-goals text");

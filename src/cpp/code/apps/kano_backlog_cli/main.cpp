@@ -13,6 +13,7 @@
 #include "kano/backlog_ops/workset/workset_ops.hpp"
 #include "kano/backlog_core/diagnostics/mutation_timing.hpp"
 #include "kano/backlog_core/frontmatter/canonical_store.hpp"
+#include "kano/backlog_core/models/errors.hpp"
 #include "kano/backlog_core/state/state_machine.hpp"
 #include "kano/backlog_core/refs/ref_resolver.hpp"
 #include "kano/backlog_core/validation/validator.hpp"
@@ -372,6 +373,7 @@ struct RemapIdCliPlan {
     std::filesystem::path new_path;
     std::vector<std::filesystem::path> planned_paths;
     int planned_occurrences = 0;
+    bool duplicate_source_id = false;
 };
 
 RemapIdCliPlan plan_remap_id_cli(
@@ -398,6 +400,11 @@ RemapIdCliPlan plan_remap_id_cli(
     plan.old_path = old_path;
     plan.new_path = old_path.parent_path() / (new_id + tail);
     plan.planned_paths.push_back(old_path);
+    plan.duplicate_source_id = store.find_item_paths_by_id(item.id).size() > 1;
+
+    if (plan.duplicate_source_id) {
+        return plan;
+    }
 
     for (const auto& entry : std::filesystem::recursive_directory_iterator(product_root)) {
         if (!entry.is_regular_file() || entry.path().extension() != ".md") {
@@ -426,6 +433,8 @@ Json::Value remap_plan_to_json(const RemapIdCliPlan& plan, const std::string& st
     payload["planned_path"] = plan.new_path.string();
     payload["planned_updated_files"] = static_cast<int>(plan.planned_paths.size());
     payload["planned_occurrences"] = plan.planned_occurrences;
+    payload["duplicate_source_id"] = plan.duplicate_source_id;
+    payload["ambiguous_references_preserved"] = plan.duplicate_source_id;
     payload["planned_paths"] = remap_path_vector_to_json(plan.planned_paths);
     return payload;
 }
@@ -447,6 +456,9 @@ void print_remap_plan_markdown(const RemapIdCliPlan& plan) {
     std::cout << "- new_path: " << plan.new_path.string() << "\n";
     std::cout << "- planned_updated_files: " << plan.planned_paths.size() << "\n";
     std::cout << "- planned_occurrences: " << plan.planned_occurrences << "\n";
+    if (plan.duplicate_source_id) {
+        std::cout << "- ambiguous_references_preserved: true\n";
+    }
     std::cout << "Run with --apply to rename and update references.\n";
 }
 
@@ -20942,15 +20954,29 @@ int main(int InArgc, char* InArgv[]) {
                 struct ValidateUidsCommandState {
                     std::string product;
                     std::string backlog_root;
+                    std::string agent;
+                    bool fix = false;
+                    bool apply = false;
                 };
                 const auto state = std::make_shared<ValidateUidsCommandState>();
                 uidsCmd->add_option("--product", state->product, "Product name (validate all if omitted)");
                 uidsCmd->add_option("--backlog-root", state->backlog_root, "Backlog root path");
+                uidsCmd->add_option("--agent", state->agent, "Agent identifier required when applying repairs");
+                uidsCmd->add_flag("--fix", state->fix, "Plan repairs for invalid or duplicate item UIDs");
+                uidsCmd->add_flag("--apply", state->apply, "Apply planned UID repairs (requires --fix and --agent)");
                 uidsCmd->callback([&, state]() {
+                    if (state->apply && !state->fix) {
+                        throw std::runtime_error("--apply requires --fix");
+                    }
+                    if (state->apply && trim_copy(state->agent).empty()) {
+                        throw std::runtime_error("--agent is required with --fix --apply");
+                    }
                     const auto backlog_root = resolve_backlog_root_arg(state->backlog_root);
 
                     int total_checked = 0;
                     int total_violations = 0;
+                    int total_repaired = 0;
+                    std::map<std::string, std::string> seen_uids;
 
                     auto products_dir = backlog_root / "products";
                     if (!std::filesystem::exists(products_dir)) {
@@ -20989,7 +21015,8 @@ int main(int InArgc, char* InArgv[]) {
                                 }
                                 std::stringstream buffer;
                                 buffer << input.rdbuf();
-                                auto fm_ctx = Frontmatter::parse(buffer.str());
+                                std::string content = buffer.str();
+                                auto fm_ctx = Frontmatter::parse(content);
                                 if (fm_ctx.metadata.IsNull()) {
                                     throw std::runtime_error("Invalid or missing frontmatter");
                                 }
@@ -21004,27 +21031,62 @@ int main(int InArgc, char* InArgv[]) {
                                     uid = uid_node.as<std::string>();
                                 }
                                 ++product_checked;
-                                // Check UID format: should be UUIDv7
-                                if (uid.size() != 36) {
-                                    ++product_violations;
-                                    std::cout << "FAIL " << item_id << ": invalid UID length\n";
-                                } else {
-                                    // Basic UUIDv7 format check: xxxxxxxx-xxxx-7xxx-xxxx-xxxxxxxxxxxx
-                                    bool valid = true;
-                                    for (size_t i = 0; i < uid.size(); ++i) {
-                                        char c = uid[i];
-                                        if (i == 8 || i == 13 || i == 18 || i == 23) {
-                                            if (c != '-') valid = false;
-                                        } else if (i == 14) {
-                                            if (c != '7') valid = false;
-                                        } else {
-                                            if (!std::isxdigit(static_cast<unsigned char>(c))) valid = false;
-                                        }
+                                static const std::regex uuidv7_pattern(
+                                    "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                    std::regex_constants::icase | std::regex_constants::ECMAScript
+                                );
+                                const bool format_valid = std::regex_match(uid, uuidv7_pattern);
+                                const auto duplicate = format_valid ? seen_uids.find(lower_copy(uid)) : seen_uids.end();
+                                const bool duplicate_uid = duplicate != seen_uids.end();
+                                if (format_valid && !duplicate_uid) {
+                                    seen_uids.emplace(lower_copy(uid), item_id);
+                                    continue;
+                                }
+
+                                ++product_violations;
+                                const std::string reason = !format_valid
+                                    ? (uid.size() == 36 ? "malformed UID" : "invalid UID length")
+                                    : "duplicate UID first used by " + duplicate->second;
+                                if (!state->fix) {
+                                    std::cout << "FAIL " << item_id << ": " << reason << "\n";
+                                    continue;
+                                }
+
+                                std::string new_uid;
+                                do {
+                                    new_uid = CanonicalStore::generate_uuid_v7();
+                                } while (seen_uids.find(lower_copy(new_uid)) != seen_uids.end());
+                                seen_uids.emplace(lower_copy(new_uid), item_id);
+                                std::cout << (state->apply ? "FIXED " : "DRY-RUN ") << item_id << ": "
+                                          << (uid.empty() ? "<missing>" : uid) << " -> " << new_uid
+                                          << " (" << reason << ")\n";
+
+                                if (state->apply) {
+                                    const auto frontmatter_end = content.find("\n---", 3);
+                                    auto uid_line_start = content.rfind("uid:", 0) == 0
+                                        ? size_t{0}
+                                        : content.find("\nuid:");
+                                    if (uid_line_start != std::string::npos && uid_line_start != 0) {
+                                        ++uid_line_start;
                                     }
-                                    if (!valid) {
-                                        ++product_violations;
-                                        std::cout << "FAIL " << item_id << ": malformed UID\n";
+                                    if (frontmatter_end == std::string::npos || uid_line_start == std::string::npos ||
+                                        uid_line_start >= frontmatter_end) {
+                                        throw std::runtime_error("Cannot locate top-level uid frontmatter line");
                                     }
+                                    const auto line_end = content.find('\n', uid_line_start);
+                                    const auto replace_end = line_end == std::string::npos ? content.size() : line_end;
+                                    const bool had_cr = replace_end > uid_line_start && content[replace_end - 1] == '\r';
+                                    content.replace(
+                                        uid_line_start,
+                                        replace_end - uid_line_start,
+                                        "uid: " + new_uid + (had_cr ? "\r" : "")
+                                    );
+                                    std::ofstream output(item_path, std::ios::binary | std::ios::trunc);
+                                    if (!output.is_open()) {
+                                        throw std::runtime_error("Failed to write repaired UID");
+                                    }
+                                    output << content;
+                                    ++total_repaired;
                                 }
                             } catch (const std::exception& e) {
                                 ++product_checked;
@@ -21045,6 +21107,11 @@ int main(int InArgc, char* InArgv[]) {
 
                     if (total_violations > 0) {
                         std::cout << "\nTotal: " << total_checked << " checked, " << total_violations << " violations\n";
+                        if (state->fix) {
+                            std::cout << (state->apply ? "Repaired: " : "Planned repairs: ")
+                                      << (state->apply ? total_repaired : total_violations) << "\n";
+                            return;
+                        }
                         throw std::runtime_error("UID validation failed");
                     }
                     std::cout << "All products clean. Items checked: " << total_checked << "\n";
@@ -21122,6 +21189,24 @@ int main(int InArgc, char* InArgv[]) {
                         return;
                     }
 
+                    const auto all_product_roots = list_product_roots(backlog_root);
+                    std::map<std::string, int> global_id_counts;
+                    std::map<std::string, int> global_uid_counts;
+                    for (const auto& candidate_root : all_product_roots) {
+                        CanonicalStore candidate_store(candidate_root);
+                        for (const auto& candidate_path : candidate_store.list_items()) {
+                            try {
+                                const auto candidate = candidate_store.read(candidate_path);
+                                ++global_id_counts[candidate.id];
+                                ++global_uid_counts[lower_copy(candidate.uid)];
+                            } catch (...) {
+                                // The selected-product scan below reports unreadable source
+                                // items. Other products cannot satisfy a reference with an
+                                // unreadable canonical item.
+                            }
+                        }
+                    }
+
                     for (const auto& entry : std::filesystem::directory_iterator(products_dir)) {
                         if (!entry.is_directory()) continue;
                         std::string product_name = entry.path().filename().string();
@@ -21129,7 +21214,6 @@ int main(int InArgc, char* InArgv[]) {
 
                         auto product_root = entry.path();
                         CanonicalStore store(product_root);
-                        RefResolver resolver(store);
                         auto item_paths = store.list_items();
                         int product_issues = 0;
                         int product_checked = 0;
@@ -21140,9 +21224,46 @@ int main(int InArgc, char* InArgv[]) {
                                 ++product_checked;
                                 auto refs = RefResolver::get_references(item);
                                 for (const auto& ref : refs) {
-                                    try {
-                                        resolver.resolve(ref);
-                                    } catch (const std::exception&) {
+                                    const auto parsed = RefParser::parse(ref);
+                                    bool resolved_once = false;
+                                    bool ambiguous_or_invalid = !parsed.has_value();
+
+                                    if (parsed && std::holds_alternative<PathRef>(*parsed)) {
+                                        auto target = std::filesystem::path(std::get<PathRef>(*parsed).path);
+                                        if (!target.is_absolute()) {
+                                            target = item_path.parent_path() / target;
+                                        }
+                                        resolved_once = std::filesystem::exists(target.lexically_normal());
+                                        ambiguous_or_invalid = !resolved_once;
+                                    } else if (parsed && std::holds_alternative<DisplayIdRef>(*parsed)) {
+                                        const auto count = global_id_counts.find(ref);
+                                        resolved_once = count != global_id_counts.end() && count->second == 1;
+                                        ambiguous_or_invalid = !resolved_once;
+                                    } else if (parsed && std::holds_alternative<UuidRef>(*parsed)) {
+                                        const auto count = global_uid_counts.find(lower_copy(ref));
+                                        resolved_once = count != global_uid_counts.end() && count->second == 1;
+                                        ambiguous_or_invalid = !resolved_once;
+                                    } else if (parsed) {
+                                        for (const auto& candidate_root : all_product_roots) {
+                                            try {
+                                                CanonicalStore candidate_store(candidate_root);
+                                                RefResolver candidate_resolver(candidate_store);
+                                                candidate_resolver.resolve(ref);
+                                                if (resolved_once) {
+                                                    ambiguous_or_invalid = true;
+                                                    break;
+                                                }
+                                                resolved_once = true;
+                                            } catch (const RefNotFoundError&) {
+                                                continue;
+                                            } catch (const std::exception&) {
+                                                ambiguous_or_invalid = true;
+                                                break;
+                                            }
+                                        }
+                                    }
+
+                                    if (!resolved_once || ambiguous_or_invalid) {
                                         ++product_issues;
                                         std::cout << "FAIL " << item.id << ": unresolvable ref: " << ref << "\n";
                                     }

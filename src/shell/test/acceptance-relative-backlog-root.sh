@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 CASE_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/kob-relative-root.XXXXXX")"
+CASE_ROOT="$(cd "$CASE_ROOT" && pwd -P)"
 
 cleanup() {
   rm -rf "$CASE_ROOT"

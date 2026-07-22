@@ -1666,6 +1666,52 @@ int main(int argc, char** argv) {
         expect(read_text(topic_audit_output).find("\"decisions_found\" : 1") != std::string::npos, "topic decision-audit did not find synthesis decision");
         expect(std::filesystem::exists(topic_path / "publish" / "decision-audit.md"), "topic decision-audit did not write report");
 
+        expect(run_command(binary, {
+            "-P", "kano-ai-3d-asset-skill",
+            "topic", "create", "native-topic-close-default",
+            "--agent", "tester"
+        }) == 0, "topic create for default close format failed");
+        const auto topic_close_default_output = temp_root / "topic-close-default.txt";
+        expect(run_command_capture(binary, {
+            "-P", "kano-ai-3d-asset-skill",
+            "topic", "close", "native-topic-close-default",
+            "--agent", "tester"
+        }, topic_close_default_output) == 0, "topic close without format failed");
+        expect(read_text(topic_close_default_output).find("Closed topic 'native-topic-close-default'") != std::string::npos,
+            "topic close without format did not default to plain output");
+        expect(read_text(backlog_root / "topics" / "native-topic-close-default" / "manifest.json").find("\"status\" : \"closed\"") != std::string::npos,
+            "topic close without format did not update manifest status");
+
+        expect(run_command(binary, {
+            "-P", "kano-ai-3d-asset-skill",
+            "topic", "create", "native-topic-close-explicit-plain",
+            "--agent", "tester"
+        }) == 0, "topic create for explicit plain close format failed");
+        const auto topic_close_plain_output = temp_root / "topic-close-plain.txt";
+        expect(run_command_capture(binary, {
+            "-P", "kano-ai-3d-asset-skill",
+            "topic", "close", "native-topic-close-explicit-plain",
+            "--agent", "tester",
+            "--format", "plain"
+        }, topic_close_plain_output) == 0, "topic close with explicit plain format failed");
+        expect(read_text(topic_close_plain_output).find("Closed topic 'native-topic-close-explicit-plain'") != std::string::npos,
+            "topic close with explicit plain format did not emit plain output");
+
+        expect(run_command(binary, {
+            "-P", "kano-ai-3d-asset-skill",
+            "topic", "create", "native-topic-close-invalid",
+            "--agent", "tester"
+        }) == 0, "topic create for invalid close format failed");
+        const auto topic_close_invalid_output = temp_root / "topic-close-invalid.txt";
+        expect(run_command_capture(binary, {
+            "-P", "kano-ai-3d-asset-skill",
+            "topic", "close", "native-topic-close-invalid",
+            "--agent", "tester",
+            "--format", "yaml"
+        }, topic_close_invalid_output) != 0, "topic close accepted an invalid format");
+        expect(read_text(backlog_root / "topics" / "native-topic-close-invalid" / "manifest.json").find("\"status\" : \"open\"") != std::string::npos,
+            "topic close mutated the manifest after invalid format rejection");
+
         const auto topic_close_output = temp_root / "topic-close.json";
         expect(run_command_capture(binary, {
             "-P", "kano-ai-3d-asset-skill",

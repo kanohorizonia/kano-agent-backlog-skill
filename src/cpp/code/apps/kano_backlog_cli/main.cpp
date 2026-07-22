@@ -17611,37 +17611,42 @@ int main(int InArgc, char* InArgv[]) {
             // topic close
             {
                 auto* closeCmd = topicCmd->add_subcommand("close", "Mark topic as closed");
-                std::string topic_name, agent, output_format = "plain";
-                closeCmd->add_option("topic-name", topic_name, "Topic name")->required();
-                closeCmd->add_option("--agent", agent, "Agent identity");
-                closeCmd->add_option("--format", output_format, "Output format: plain|json");
-                closeCmd->callback([&]() {
+                struct TopicCloseCommandState {
+                    std::string mTopicName;
+                    std::string mAgent;
+                    std::string mOutputFormat = "plain";
+                };
+                const auto state = std::make_shared<TopicCloseCommandState>();
+                closeCmd->add_option("topic-name", state->mTopicName, "Topic name")->required();
+                closeCmd->add_option("--agent", state->mAgent, "Agent identity");
+                closeCmd->add_option("--format", state->mOutputFormat, "Output format: plain|json");
+                closeCmd->callback([&, state]() {
                     auto ctx = resolve_topic_ctx();
-                    const auto format_norm = lower_copy(output_format.empty() ? std::string("plain") : output_format);
+                    const auto format_norm = lower_copy(state->mOutputFormat.empty() ? std::string("plain") : state->mOutputFormat);
                     if (format_norm != "plain" && format_norm != "json") {
                         throw std::runtime_error("format must be one of: plain, json");
                     }
-                    auto manifest = load_topic_manifest_json(ctx.backlog_root, topic_name);
+                    auto manifest = load_topic_manifest_json(ctx.backlog_root, state->mTopicName);
                     const bool already_closed = manifest.get("status", "open").asString() == "closed";
                     if (!already_closed) {
                         manifest["status"] = "closed";
                         manifest["closed_at"] = current_utc_timestamp();
-                        if (!trim_copy(agent).empty()) {
-                            manifest["closed_by"] = trim_copy(agent);
+                        if (!trim_copy(state->mAgent).empty()) {
+                            manifest["closed_by"] = trim_copy(state->mAgent);
                         }
-                        save_topic_manifest_json(ctx.backlog_root, topic_name, manifest);
+                        save_topic_manifest_json(ctx.backlog_root, state->mTopicName, manifest);
                     }
                     const auto closed_at = manifest.get("closed_at", "").asString();
                     if (format_norm == "json") {
                         Json::Value payload(Json::objectValue);
-                        payload["topic"] = topic_name;
+                        payload["topic"] = state->mTopicName;
                         payload["closed"] = !already_closed;
                         payload["closed_at"] = closed_at;
                         std::cout << json_to_string(payload, true) << "\n";
                     } else if (already_closed) {
-                        std::cout << "Topic '" << topic_name << "' already closed at " << closed_at << "\n";
+                        std::cout << "Topic '" << state->mTopicName << "' already closed at " << closed_at << "\n";
                     } else {
-                        std::cout << "Closed topic '" << topic_name << "' at " << closed_at << "\n";
+                        std::cout << "Closed topic '" << state->mTopicName << "' at " << closed_at << "\n";
                     }
                 });
             }

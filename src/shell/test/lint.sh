@@ -66,6 +66,7 @@ fi
 remaining_py="$(
   find "$SKILL_ROOT" -type f \( -name '*.py' -o -name '*.pyi' \) \
     ! -path "$SKILL_ROOT/src/cpp/out/*" \
+    ! -path "$SKILL_ROOT/src/shell/release/post_release_verify.py" \
     ! -path "$SKILL_ROOT/_ws/*" \
     ! -path "$SKILL_ROOT/.git/*" \
     ! -path "$SKILL_ROOT/.kano/*" \
@@ -74,11 +75,11 @@ remaining_py="$(
     2>/dev/null || true
 )"
 if [[ -n "$remaining_py" ]]; then
-  echo "[FAIL] no Python source or typing stub files remain in the repo" >&2
+  echo "[FAIL] no Python source or typing stub files remain outside the bounded release-only verifier" >&2
   printf '%s\n' "$remaining_py" >&2
   failed=1
 else
-  echo "[PASS] no Python source or typing stub files remain in the repo"
+  echo "[PASS] no Python source or typing stub files remain outside the bounded release-only verifier"
 fi
 check_absent "^[[:space:]]*\\(python\\|pip\\)[[:space:]]*=" "$SKILL_ROOT/pixi.toml" "pixi default env has no Python runtime dependency"
 check_absent "^\\[pypi-dependencies\\]\\|kano-agent-backlog-skill[[:space:]]*=[[:space:]]*{[[:space:]]*path[[:space:]]*=" "$SKILL_ROOT/pixi.toml" "pixi default env has no editable Python package"

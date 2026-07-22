@@ -1055,6 +1055,32 @@ int main(int argc, char** argv) {
         expect(amended_task_text.find("InProgress correction requires replanning.") < amended_task_text.find("Review correction blocks Done."), "review amendment should append after in-progress amendment");
         expect(amended_task_text.find("Review correction blocks Done.") < amended_task_text.find("Done correction needs follow-up."), "done amendment should append last");
 
+        expect(run_command(binary, with_duplicate_admission({
+            "-P", "quick-smoke-product", "item", "create", "-t", "task",
+            "--title", "Duplicate intent amendment fixture", "--agent", "tester"
+        }, "Duplicate intent amendment fixture")) == 0, "duplicate intent amendment fixture creation failed");
+        expect(run_command(binary, {
+            "-P", "quick-smoke-product", "workitem", "update-state", "QS-TSK-0003",
+            "--state", "Duplicate", "--duplicate-of", "QS-TSK-0001", "--agent", "tester"
+        }) == 0, "duplicate intent amendment fixture transition failed");
+        const auto duplicate_amend_output = temp_root / "intent-amend-duplicate.txt";
+        expect_command_capture_success(
+            run_command_capture(binary, {
+                "-P", "quick-smoke-product", "workitem", "intent-amend", "QS-TSK-0003",
+                "--correction", "Duplicate evidence correction.",
+                "--reason", "Historical audit clarification.",
+                "--applies-to", "Evidence",
+                "--agent", "tester"
+            }, duplicate_amend_output),
+            duplicate_amend_output,
+            "intent-amend duplicate failed"
+        );
+        const auto duplicate_amend_text = read_text(duplicate_amend_output);
+        expect(duplicate_amend_text.find("Duplicate item amended for audit only") != std::string::npos,
+            "duplicate amendment should emit audit-only guidance");
+        expect(duplicate_amend_text.find("canonical item") != std::string::npos,
+            "duplicate amendment should direct execution to the canonical item");
+
         const auto topic_output = temp_root / "topic-list-templates.json";
         expect_command_capture_success(
             run_command_capture(binary, {

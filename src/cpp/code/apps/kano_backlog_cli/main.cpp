@@ -3884,6 +3884,8 @@ std::string intent_amendment_guidance(ItemState state) {
             return "Keep blocker visible and re-evaluate before unblocking work.";
         case ItemState::Dropped:
             return "Dropped item amended for audit only; create a new item before execution.";
+        case ItemState::Duplicate:
+            return "Duplicate item amended for audit only; continue on its canonical item or create a new work item before execution.";
     }
     return "Review amendment before continuing work.";
 }

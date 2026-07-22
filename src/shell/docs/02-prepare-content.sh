@@ -66,11 +66,28 @@ copy_glob_docs() {
   shopt -u nullglob
 }
 
+rewrite_file_with_sed() {
+  local target_path="$1"
+  shift
+
+  local temp_path
+  temp_path="$(mktemp "${target_path}.rewrite.XXXXXX")"
+  if ! sed "$@" "$target_path" > "$temp_path"; then
+    rm -f "$temp_path"
+    return 1
+  fi
+  if ! cp "$temp_path" "$target_path"; then
+    rm -f "$temp_path"
+    return 1
+  fi
+  rm -f "$temp_path"
+}
+
 rewrite_public_readme_links() {
   local target_path="$1"
   [ -f "$target_path" ] || return 0
 
-  sed -i \
+  rewrite_file_with_sed "$target_path" \
     -e 's#](LICENSE)#](https://github.com/kanohorizonia/kano-agent-backlog-skill/blob/main/LICENSE)#g' \
     -e 's#](CONTRIBUTING.md)#](https://github.com/kanohorizonia/kano-agent-backlog-skill/blob/main/CONTRIBUTING.md)#g' \
     -e 's#](docs/assets/#](../assets/#g' \
@@ -90,17 +107,15 @@ rewrite_public_readme_links() {
     -e 's#](references/)#](../references/)#g' \
     -e 's#](REFERENCE.md)#](../REFERENCE.md)#g' \
     -e 's#](SKILL.md)#](guide.md)#g' \
-    -e 's#](CHANGELOG.md)#](../CHANGELOG.md)#g' \
-    "$target_path"
+    -e 's#](CHANGELOG.md)#](../CHANGELOG.md)#g'
 }
 
 rewrite_public_skill_guide_links() {
   local target_path="$1"
   [ -f "$target_path" ] || return 0
 
-  sed -i \
-    -e 's#](docs/agent-quick-start.md)#](../guides/agent-quick-start.md)#g' \
-    "$target_path"
+  rewrite_file_with_sed "$target_path" \
+    -e 's#](docs/agent-quick-start.md)#](../guides/agent-quick-start.md)#g'
 }
 
 write_kob_help() {

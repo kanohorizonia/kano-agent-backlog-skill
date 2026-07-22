@@ -164,7 +164,7 @@ not a current UI screenshot.
 | Development line | `0.0.5` Intent Engineering feature wave |
 | Release line | `0.0.4` native C++ release target |
 | Public release source | [GitHub Releases](https://github.com/kanohorizonia/kano-agent-backlog-skill/releases) |
-| Public reports | [Latest test report](reports/latest/test-report/) and [latest coverage report](reports/latest/coverage-report/) |
+| Public reports | [Latest test report](reports/latest/test-report/), [BDD capability evidence](reports/latest/test-report/), and [latest coverage report](reports/latest/coverage-report/) |
 | Backboard | Local read-mostly review surface through the KOB Webview runtime, with limited local review-decision draft/submission mutations; review-console image above is conceptual |
 | Package channels | Manual artifacts are release-gated; winget, Homebrew, and apt are not live unless release metadata says so |
 | Retired runtime | Python runtime and Python package publishing are retired for this milestone |
@@ -179,7 +179,7 @@ not a current UI screenshot.
 | CLI and API | [CLI reference](cli/commands.md), [API overview](api/overview.md), [Native executable API](api/native.md) |
 | Release channels | [Installation](guides/installation.md), [Release channels](guides/release-channels.md), [Release notes](releases/0.0.4.md), [Changelog](releases/changelog.md) |
 | Release model | [Release Record](design/release-record-schema.md), [Releases workspace](design/releases-directory-contract.md), [release notes evidence bundle](../references/release-notes-evidence-bundle.schema.json) |
-| Testing | [Latest public test report](reports/latest/test-report/), [Latest public coverage report](reports/latest/coverage-report/), [GitHub Actions](https://github.com/kanohorizonia/kano-agent-backlog-skill/actions) |
+| Testing | [Latest public test report](reports/latest/test-report/), [BDD capability evidence](reports/latest/test-report/), [Latest public coverage report](reports/latest/coverage-report/), [GitHub Actions](https://github.com/kanohorizonia/kano-agent-backlog-skill/actions) |
 | Tokenizer adapters | [Quick start](guides/tokenizer-quickstart.md), [Overview](guides/tokenizer-adapters.md), [Configuration](guides/tokenizer-configuration.md), [CLI](guides/tokenizer-cli-reference.md), [Troubleshooting](guides/tokenizer-troubleshooting.md), [Performance](guides/tokenizer-performance.md) |
 | Maintainers | [Maintainer automation](automation/maintainer-automation.md), [Docs pipeline](automation/docs-pipeline.md), [Native CLI direction](guides/native-cli-direction.md), [Backboard IA](design/backboard-information-architecture.md), [Actor aliases](design/actor-alias-and-assignment-policy.md) |
 | Taxonomy | [Canonical backlog taxonomy](design/canonical-backlog-taxonomy.md), [Project model decision](design/project-model-decision.md), [Hierarchy validation matrix](design/hierarchy-validation-matrix.md), [Vision-layer management model](design/vision-layer-management-model.md) |
@@ -197,12 +197,97 @@ first.
 | Evidence | Public entry point | What to verify |
 | --- | --- | --- |
 | Feature-first test report | [Latest public test report](reports/latest/test-report/) | Overall result, platform lanes, feature suites, and BDD scenario pages. |
+| BDD capability tour | [BDD scenarios inside the latest test report](reports/latest/test-report/) | User-facing behavior coverage and the exact scenarios exercised by CI. |
 | Source-level coverage report | [Latest public coverage report](reports/latest/coverage-report/) | Native coverage by file and function. Source is publishable because this project is open source. |
 | Cloud build evidence | [GitHub Actions runs](https://github.com/kanohorizonia/kano-agent-backlog-skill/actions) | Cloud platform build, test, report, and Pages artifact history. |
 
 The test and coverage links must not be placeholder-only pages for an accepted
 release. If either public slot says that no publishable report HTML is available,
 treat it as a release evidence blocker.
+
+## BDD as capability documentation
+
+The public test report doubles as a product tour. Its feature suites group
+behavior by user goal, while each BDD scenario records the preconditions,
+action, and observable result that CI exercised. This makes the report useful
+to a reviewer who needs to understand both what KOB supports and how that claim
+was tested.
+
+| Capability area | What the BDD evidence should explain |
+| --- | --- |
+| Backlog discovery | How `kob` locates and validates the repository-backed backlog. |
+| Work item lifecycle | How Ready admission, audited review reopen, review, and completion behave. |
+| Topics and worksets | How agents assemble bounded context without sweeping unrelated workspace state. |
+| Reports and releases | How test, coverage, and publication evidence reach stable public slots. |
+
+## Evidence architecture
+
+The public site is the review entry point; generated reports remain the evidence
+source behind it.
+
+```mermaid
+flowchart LR
+  reviewer["Human reviewer or agent"] --> site["Public documentation site"]
+  site --> slots["Stable public report slots"]
+  slots --> tests["Feature-first test report"]
+  tests --> bdd["BDD capability scenarios"]
+  slots --> coverage["Source-level coverage report"]
+  actions["GitHub Actions"] --> tests
+  actions --> coverage
+  source["Repository source and docs"] --> actions
+```
+
+The work item lifecycle keeps intent, implementation, and review evidence
+auditable. A review finding reopens the item instead of rewriting its state.
+
+```mermaid
+stateDiagram-v2
+  [*] --> Proposed
+  Proposed --> Ready: Ready fields completed
+  Ready --> InProgress: work starts
+  InProgress --> Review: implementation and evidence ready
+  Review --> Done: evidence accepted
+  Review --> InProgress: audited reopen with rationale
+  Proposed --> Blocked: missing prerequisite
+  Ready --> Blocked: dependency unavailable
+  InProgress --> Blocked: dependency unavailable
+  Blocked --> InProgress: blocker resolved
+  Proposed --> Dropped: no longer needed
+  Review --> Dropped: intentionally discontinued
+```
+
+CI converts executable behavior into reports a reviewer can inspect without
+access to an internal build system.
+
+```mermaid
+sequenceDiagram
+  actor Reviewer
+  participant CI as GitHub Actions
+  participant Tests as Native test lanes
+  participant Report as Report generator
+  participant Pages as Public documentation site
+  CI->>Tests: Build and execute platform tests
+  Tests-->>Report: JUnit results and coverage inputs
+  Report->>Report: Group results into features and BDD scenarios
+  Report-->>Pages: Stage test and coverage report slots
+  Reviewer->>Pages: Open stable evidence links
+  Pages-->>Reviewer: Show capabilities, scenarios, and source coverage
+```
+
+Publication is a gated copy from generated evidence into stable paths. Missing
+HTML leaves the release blocked instead of replacing a report with a success
+claim.
+
+```mermaid
+flowchart TB
+  build["Validated CI build"] --> generated["Generated test and coverage HTML"]
+  generated --> gate{"Both public report payloads present?"}
+  gate -- Yes --> artifact["Pages artifact"]
+  artifact --> publish["GitHub Pages deployment"]
+  publish --> stable["reports/latest stable slots"]
+  gate -- No --> blocker["Release evidence blocker"]
+  stable --> review["Human release review"]
+```
 
 ## Maintainer details
 

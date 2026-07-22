@@ -45,6 +45,21 @@ check_present() {
   fi
 }
 
+check_universal_pixi_task() {
+  local task_name="$1"
+  local label="$2"
+  if awk '
+      /^\[tasks\]$/ { in_tasks = 1; next }
+      /^\[/ { if (in_tasks) exit }
+      in_tasks { print }
+    ' "$SKILL_ROOT/pixi.toml" | grep -Eq "^[[:space:]]*${task_name}[[:space:]]*="; then
+    echo "[PASS] $label"
+  else
+    echo "[FAIL] $label" >&2
+    failed=1
+  fi
+}
+
 if [[ -f "$SKILL_ROOT/pyproject.toml" ]]; then
   check_absent "\\[build-system\\]\\|\\[project\\]\\|kano_backlog_cli.cli:main" "$SKILL_ROOT/pyproject.toml" "pyproject is not a Python package contract"
 else
@@ -85,6 +100,9 @@ check_absent "^[[:space:]]*\\(python\\|pip\\)[[:space:]]*=" "$SKILL_ROOT/pixi.to
 check_absent "^\\[pypi-dependencies\\]\\|kano-agent-backlog-skill[[:space:]]*=[[:space:]]*{[[:space:]]*path[[:space:]]*=" "$SKILL_ROOT/pixi.toml" "pixi default env has no editable Python package"
 check_absent "^[[:space:]]+- pypi:\\|conda: .*/\\(python\\|pip\\|setuptools\\|wheel\\)-" "$SKILL_ROOT/pixi.lock" "pixi lock has no Python runtime/package records"
 check_present "native-runtime-gate" "$SKILL_ROOT/pixi.toml" "pixi exposes native runtime gate"
+check_universal_pixi_task "build" "pixi exposes universal Release build task"
+check_universal_pixi_task "build-release" "pixi exposes universal explicit Release build task"
+check_universal_pixi_task "build-debug" "pixi exposes universal explicit Debug build task"
 
 windows_error_refs="$(
   grep -RInE "Set(ErrorMode|ThreadErrorMode)|_CrtSetReportMode|_set_abort_behavior|_set_invalid_parameter_handler" \

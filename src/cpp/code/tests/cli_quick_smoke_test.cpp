@@ -588,6 +588,34 @@ int main(int argc, char** argv) {
         expect(issue_text.find("state: InProgress") != std::string::npos, "issue file did not record InProgress state");
         expect(issue_text.find("Issue worklog smoke") != std::string::npos, "issue file did not record worklog");
 
+        expect(run_command(binary, with_duplicate_admission({"-P", "quick-smoke-product", "workitem", "create", "-t", "bug", "--title", "Raw start Ready gate fixture", "--agent", "tester"}, "Raw start Ready gate fixture")) == 0,
+            "workitem create raw start bug failed");
+        const auto raw_start_bug_path = temp_root / "_kano" / "backlog" / "products" / "quick-smoke-product" / "items" / "bug" / "0000" / "QS-BUG-0001_raw-start-ready-gate-fixture.md";
+        const auto raw_start_rejected_output = temp_root / "raw-start-rejected.txt";
+        expect(run_command_capture(binary, {
+            "-P", "quick-smoke-product", "state", "transition", "QS-BUG-0001", "start", "--agent", "tester"
+        }, raw_start_rejected_output) != 0, "raw start should reject an incomplete item");
+        expect(read_text(raw_start_rejected_output).find("is not Ready") != std::string::npos,
+            "raw start rejection should explain the Ready gate failure");
+        expect(read_text(raw_start_bug_path).find("state: Proposed") != std::string::npos,
+            "rejected raw start should leave the item Proposed");
+        expect(run_command(binary, {
+            "-P", "quick-smoke-product", "workitem", "set-ready", "QS-BUG-0001",
+            "--context", "Raw start gate context.",
+            "--goal", "Raw start gate goal.",
+            "--non-goals", "Raw start gate non-goal.",
+            "--approach", "Raw start gate approach.",
+            "--acceptance-criteria", "Raw start gate acceptance.",
+            "--risks", "Raw start gate risks.",
+            "--agent", "tester"
+        }) == 0, "raw start bug set-ready failed");
+        expect(run_command(binary, {
+            "-P", "quick-smoke-product", "state", "transition", "QS-BUG-0001", "start",
+            "--agent", "tester", "--message", "Start after Ready validation."
+        }) == 0, "raw start should accept a Ready item");
+        expect(read_text(raw_start_bug_path).find("state: InProgress") != std::string::npos,
+            "accepted raw start should persist InProgress state");
+
         expect(run_command(binary, with_duplicate_admission({"-P", "quick-smoke-product", "workitem", "create", "-t", "feature", "--title", "Quick smoke parent feature", "--agent", "tester"}, "Quick smoke parent feature")) == 0,
             "workitem create parent feature failed");
         expect(run_command(binary, {"-P", "quick-smoke-product", "workitem", "set-ready", "QS-FTR-0001",

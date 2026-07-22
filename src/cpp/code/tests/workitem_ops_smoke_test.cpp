@@ -1506,6 +1506,57 @@ int main() {
                 },
                 "is not Ready",
                 "planned update-state should preserve the Ready gate");
+
+            auto raw_incomplete_fixture = store.create("TST", ItemType::Task, "Raw incomplete start fixture", 952);
+            raw_incomplete_fixture.state = ItemState::Planned;
+            store.write(raw_incomplete_fixture);
+            index.index_item(raw_incomplete_fixture);
+            expect_throws_contains(
+                [&]() {
+                    (void)WorkitemOps::transition_state_action(
+                        root,
+                        raw_incomplete_fixture.id,
+                        kano::backlog_core::StateAction::Start,
+                        std::string("opencode"));
+                },
+                "is not Ready",
+                "raw start operation should reject an incomplete item");
+            expect(
+                store.read(*raw_incomplete_fixture.file_path).state == ItemState::Planned,
+                "rejected raw start should not mutate the item");
+
+            const auto forced_raw_fixture_update = WorkitemOps::update_state(
+                index,
+                root,
+                raw_incomplete_fixture.id,
+                ItemState::InProgress,
+                "opencode",
+                std::string("Explicitly bypass the Ready gate"),
+                std::nullopt,
+                true);
+            expect(
+                forced_raw_fixture_update.old_state == ItemState::Planned &&
+                    forced_raw_fixture_update.new_state == ItemState::InProgress &&
+                    forced_raw_fixture_update.worklog_appended,
+                "forced update-state should still bypass the Ready gate");
+            expect(
+                store.read(*raw_incomplete_fixture.file_path).state == ItemState::InProgress,
+                "forced update-state should persist an incomplete item start");
+
+            auto raw_ready_fixture = store.create("TST", ItemType::Task, "Raw Ready start fixture", 953);
+            set_ready_fields(raw_ready_fixture);
+            raw_ready_fixture.state = ItemState::Ready;
+            store.write(raw_ready_fixture);
+            const auto raw_started = WorkitemOps::transition_state_action(
+                root,
+                raw_ready_fixture.id,
+                kano::backlog_core::StateAction::Start,
+                std::string("opencode"),
+                std::string("Start through raw state operation"));
+            expect(raw_started.state == ItemState::InProgress, "raw start operation should accept a Ready item");
+            expect(
+                store.read(*raw_ready_fixture.file_path).state == ItemState::InProgress,
+                "accepted raw start should persist InProgress state");
         }
 
         std::filesystem::remove_all(external_root);

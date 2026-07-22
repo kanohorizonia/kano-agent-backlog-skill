@@ -96,6 +96,18 @@ public:
     );
 
     /**
+     * Apply a raw state action while enforcing operation-level admission rules.
+     */
+    static kano::backlog_core::BacklogItem transition_state_action(
+        const std::filesystem::path& backlog_root,
+        const std::string& item_ref,
+        kano::backlog_core::StateAction action,
+        std::optional<std::string> agent = std::nullopt,
+        std::optional<std::string> message = std::nullopt,
+        std::optional<std::string> model = std::nullopt
+    );
+
+    /**
      * Change parent of an item.
      */
     static void remap_parent(

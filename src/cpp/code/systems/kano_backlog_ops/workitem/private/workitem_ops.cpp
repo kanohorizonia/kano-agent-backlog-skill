@@ -166,6 +166,19 @@ std::string trim_text(std::string value) {
     return value;
 }
 
+void validate_ready_or_throw(const BacklogItem& item) {
+    const auto [ready, gaps] = Validator::is_ready(item);
+    if (ready) {
+        return;
+    }
+
+    std::string gap_message;
+    for (const auto& gap : gaps) {
+        gap_message += (gap_message.empty() ? "" : ", ") + gap;
+    }
+    throw std::runtime_error("Item " + item.id + " is not Ready. Missing fields: " + gap_message);
+}
+
 bool text_contains_any(const std::optional<std::string>& text, const std::vector<std::string>& needles) {
     if (!text) {
         return false;
@@ -1228,6 +1241,38 @@ CreateItemResult WorkitemOps::create_item(
     return {item.id, item.uid, item_path, type};
 }
 
+BacklogItem WorkitemOps::transition_state_action(
+    const std::filesystem::path& backlog_root,
+    const std::string& item_ref,
+    StateAction action,
+    std::optional<std::string> agent,
+    std::optional<std::string> message,
+    std::optional<std::string> model
+) {
+    diagnostics::ScopedMutationSpan total_span("workitem.transition_state_action.total", item_ref);
+    CanonicalStore store(backlog_root);
+    BacklogItem item;
+    {
+        diagnostics::ScopedMutationSpan span("workitem.transition_state_action.resolve_item", item_ref);
+        item = resolve_item_or_throw(store, item_ref);
+    }
+
+    if (action == StateAction::Start) {
+        diagnostics::ScopedMutationSpan span("workitem.transition_state_action.ready_validation", item.id);
+        validate_ready_or_throw(item);
+    }
+
+    {
+        diagnostics::ScopedMutationSpan span("workitem.transition_state_action.transition", item.id);
+        StateMachine::transition(item, action, agent, message, model);
+    }
+    {
+        diagnostics::ScopedMutationSpan span("workitem.transition_state_action.write_item", item.id);
+        store.write(item);
+    }
+    return item;
+}
+
 UpdateStateResult WorkitemOps::update_state(
     BacklogIndex& index,
     const std::filesystem::path& backlog_root,
@@ -1282,12 +1327,7 @@ UpdateStateResult WorkitemOps::update_state(
     // 3. Ready Gate Validation
     if (new_state == ItemState::InProgress && !force) {
         diagnostics::ScopedMutationSpan span("workitem.update_state.ready_validation", item.id);
-        auto [ready, gaps] = Validator::is_ready(item);
-        if (!ready) {
-            std::string gap_msg;
-            for (const auto& g : gaps) gap_msg += (gap_msg.empty() ? "" : ", ") + g;
-            throw std::runtime_error("Item " + item.id + " is not Ready. Missing fields: " + gap_msg);
-        }
+        validate_ready_or_throw(item);
 
         // Check parent
         if (item.parent) {

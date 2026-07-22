@@ -6385,17 +6385,14 @@ std::optional<int> try_run_state_transition_fast_path(int argc, char** argv) {
         product.empty() ? std::nullopt : std::optional<std::string>(product),
         sandbox.empty() ? std::nullopt : std::optional<std::string>(sandbox)
     );
-    CanonicalStore store(ctx.product_root);
-    RefResolver resolver(store);
-    auto item = resolver.resolve(ref);
-    StateMachine::transition(
-        item,
+    const auto item = WorkitemOps::transition_state_action(
+        ctx.product_root,
+        ref,
         *action,
         agent.empty() ? std::nullopt : std::optional<std::string>(agent),
         message.empty() ? std::nullopt : std::optional<std::string>(message),
         model.empty() ? std::nullopt : std::optional<std::string>(model)
     );
-    store.write(item);
     std::cout << "OK: " << item.id << " transitioned to " << to_string(item.state) << "\n";
 
     if (consume_input_files) {
@@ -17318,10 +17315,6 @@ int main(int InArgc, char* InArgv[]) {
                 transitionCmd->add_flag("--consume-input-files", transition_consume_input_files, "Delete input files after a successful transition; files must be under ~/.kano/tmp/backlog or KANO_BACKLOG_TEXT_TMP");
                 transitionCmd->callback([&]() {
                     auto ctx = resolve_ctx();
-                    CanonicalStore store(ctx.product_root);
-                    RefResolver resolver(store);
-
-                    auto item = resolver.resolve(item_ref);
                     auto action_opt = parse_state_action(action_str);
                     if (!action_opt) {
                         std::cerr << "Error: Invalid action '" << action_str << "'\n";
@@ -17335,8 +17328,13 @@ int main(int InArgc, char* InArgv[]) {
                     std::optional<std::string> msg_opt = message.empty() ? std::nullopt : std::optional<std::string>(message);
                     std::optional<std::string> model_opt = model.empty() ? std::nullopt : std::optional<std::string>(model);
 
-                    StateMachine::transition(item, *action_opt, agent_opt, msg_opt, model_opt);
-                    store.write(item);
+                    const auto item = WorkitemOps::transition_state_action(
+                        ctx.product_root,
+                        item_ref,
+                        *action_opt,
+                        agent_opt,
+                        msg_opt,
+                        model_opt);
 
                     std::cout << "OK: " << item.id << " transitioned to " << to_string(item.state) << "\n";
                     if (transition_consume_input_files) {

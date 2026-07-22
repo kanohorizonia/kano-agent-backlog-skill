@@ -8774,7 +8774,9 @@ int main(int InArgc, char* InArgv[]) {
 
         // workitem update-state
         {
-            auto* updateStateCmd = workitemCmd->add_subcommand("update-state", "Update item state");
+            auto* updateStateCmd = workitemCmd->add_subcommand(
+                "update-state",
+                "Update item state; Review to InProgress uses audited reopen and requires a rationale");
             std::string ref, state_str, state_opt_str, update_agent, update_msg, update_msg_file, update_duplicate_of;
             bool update_consume_input_files = false;
             bool update_refresh_views = false;
@@ -8782,12 +8784,18 @@ int main(int InArgc, char* InArgv[]) {
             updateStateCmd->add_option("state_arg", state_str, "New state (positional)");
             updateStateCmd->add_option("--state", state_opt_str, "New state (option form)");
             updateStateCmd->add_option("--agent", update_agent, "Agent ID")->required();
-            updateStateCmd->add_option("-m,--message", update_msg, "Optional log message");
+            updateStateCmd->add_option(
+                "-m,--message",
+                update_msg,
+                "Optional log message; required as rationale for Review to InProgress");
             updateStateCmd->add_option("--message-file", update_msg_file, "Read optional log message from file");
             updateStateCmd->add_option("--duplicate-of", update_duplicate_of, "Canonical item ID or UID required when transitioning to Duplicate");
             updateStateCmd->add_flag("--consume-input-files", update_consume_input_files, "Delete input files after a successful update; files must be under ~/.kano/tmp/backlog or KANO_BACKLOG_TEXT_TMP");
             bool update_force = false;
-            updateStateCmd->add_flag("-f,--force", update_force, "Bypass Ready gate validation");
+            updateStateCmd->add_flag(
+                "-f,--force",
+                update_force,
+                "Bypass Ready gate validation for InProgress; never bypasses reopen audit requirements");
             updateStateCmd->add_flag("--refresh-views", update_refresh_views, "Synchronously refresh dashboards after the state update");
 
             updateStateCmd->callback([&]() {
@@ -17307,7 +17315,11 @@ int main(int InArgc, char* InArgv[]) {
                 std::string item_ref, action_str, agent, message, message_file, model;
                 bool transition_consume_input_files = false;
                 transitionCmd->add_option("ref", item_ref, "Item ID, UID, or path")->required();
-                transitionCmd->add_option("action", action_str, "Action (propose|ready|start|reopen|review|done|block|drop)")->required();
+                transitionCmd->add_option(
+                    "action",
+                    action_str,
+                    "Action (propose|ready|start|reopen|review|done|block|drop); use reopen, not start, from Review")
+                    ->required();
                 transitionCmd->add_option("--agent", agent, "Agent ID");
                 transitionCmd->add_option("-m,--message", message, "Optional worklog message");
                 transitionCmd->add_option("--message-file", message_file, "Read optional worklog message from file");

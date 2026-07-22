@@ -1557,6 +1557,144 @@ int main() {
             expect(
                 store.read(*raw_ready_fixture.file_path).state == ItemState::InProgress,
                 "accepted raw start should persist InProgress state");
+
+            auto review_fixture = store.create("TST", ItemType::Task, "Audited target-state reopen fixture", 954);
+            set_ready_fields(review_fixture);
+            review_fixture.state = ItemState::Review;
+            review_fixture.worklog.push_back("2026-07-22 10:00 [agent=reviewer] Existing review evidence.");
+            store.write(review_fixture);
+            index.index_item(review_fixture);
+
+            expect_throws_contains(
+                [&]() {
+                    (void)WorkitemOps::update_state(
+                        index,
+                        root,
+                        review_fixture.id,
+                        ItemState::InProgress,
+                        "opencode");
+                },
+                "rationale",
+                "target-state reopen should require an explicit rationale");
+            expect_throws_contains(
+                [&]() {
+                    (void)WorkitemOps::update_state(
+                        index,
+                        root,
+                        review_fixture.id,
+                        ItemState::InProgress,
+                        "opencode",
+                        std::nullopt,
+                        std::nullopt,
+                        true);
+                },
+                "rationale",
+                "force should not bypass target-state reopen rationale validation");
+            expect_throws_contains(
+                [&]() {
+                    (void)WorkitemOps::update_state(
+                        index,
+                        root,
+                        review_fixture.id,
+                        ItemState::InProgress,
+                        "   ",
+                        std::string("Acceptance criteria remain unmet."));
+                },
+                "agent",
+                "target-state reopen should require a non-empty agent");
+
+            const auto review_reopened = WorkitemOps::update_state(
+                index,
+                root,
+                review_fixture.id,
+                ItemState::InProgress,
+                "opencode",
+                std::string("Acceptance criteria remain unmet."));
+            expect(
+                review_reopened.old_state == ItemState::Review &&
+                    review_reopened.new_state == ItemState::InProgress &&
+                    review_reopened.worklog_appended,
+                "target-state Review to InProgress should use audited reopen semantics");
+            const auto persisted_review_reopen = store.read(*review_fixture.file_path);
+            expect(persisted_review_reopen.state == ItemState::InProgress,
+                "target-state reopen should persist InProgress");
+            expect(persisted_review_reopen.worklog.size() >= 2 &&
+                    persisted_review_reopen.worklog[persisted_review_reopen.worklog.size() - 2].find("Existing review evidence") != std::string::npos,
+                "target-state reopen should preserve prior review evidence");
+            expect(persisted_review_reopen.worklog.back().find("[agent=opencode]") != std::string::npos &&
+                    persisted_review_reopen.worklog.back().find("State: Review -> InProgress: Acceptance criteria remain unmet.") != std::string::npos,
+                "target-state reopen should append actor and rationale evidence");
+            expect(persisted_review_reopen.worklog.back().find("[Ready gate validated]") != std::string::npos,
+                "target-state reopen should record Ready validation evidence");
+
+            auto incomplete_review_fixture = store.create(
+                "TST", ItemType::Task, "Incomplete audited target-state reopen fixture", 955);
+            incomplete_review_fixture.state = ItemState::Review;
+            store.write(incomplete_review_fixture);
+            index.index_item(incomplete_review_fixture);
+            expect_throws_contains(
+                [&]() {
+                    (void)WorkitemOps::update_state(
+                        index,
+                        root,
+                        incomplete_review_fixture.id,
+                        ItemState::InProgress,
+                        "opencode",
+                        std::string("Acceptance criteria remain unmet."));
+                },
+                "is not Ready",
+                "target-state reopen should preserve update-state Ready validation");
+            expect_throws_contains(
+                [&]() {
+                    (void)WorkitemOps::update_state(
+                        index,
+                        root,
+                        incomplete_review_fixture.id,
+                        ItemState::InProgress,
+                        "opencode",
+                        std::nullopt,
+                        std::nullopt,
+                        true);
+                },
+                "rationale",
+                "force may bypass Ready validation but must not bypass reopen rationale validation");
+            const auto forced_incomplete_reopen = WorkitemOps::update_state(
+                index,
+                root,
+                incomplete_review_fixture.id,
+                ItemState::InProgress,
+                "opencode",
+                std::string("Explicit audited reopen despite incomplete Ready fields."),
+                std::nullopt,
+                true);
+            expect(forced_incomplete_reopen.worklog_appended &&
+                    store.read(*incomplete_review_fixture.file_path).state == ItemState::InProgress,
+                "force with complete reopen audit evidence should retain the existing Ready bypass contract");
+            expect(store.read(*incomplete_review_fixture.file_path).worklog.back().find(
+                    "[Ready gate bypassed via --force]") != std::string::npos,
+                "forced target-state reopen should record Ready bypass evidence");
+
+            auto done_fixture = store.create("TST", ItemType::Task, "Done target-state reopen rejection fixture", 956);
+            set_ready_fields(done_fixture);
+            done_fixture.state = ItemState::Done;
+            store.write(done_fixture);
+            index.index_item(done_fixture);
+            expect_throws_contains(
+                [&]() {
+                    (void)WorkitemOps::update_state(
+                        index,
+                        root,
+                        done_fixture.id,
+                        ItemState::InProgress,
+                        "opencode",
+                        std::string("Do not reopen Done."),
+                        std::nullopt,
+                        true);
+                },
+                "Invalid transition",
+                "Done to InProgress should remain blocked even with force");
+            expect(store.read(*done_fixture.file_path).state == ItemState::Done,
+                "rejected Done to InProgress should not mutate state");
         }
 
         std::filesystem::remove_all(external_root);

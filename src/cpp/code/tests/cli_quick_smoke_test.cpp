@@ -519,6 +519,43 @@ int main(int argc, char** argv) {
         expect(read_text(review_transition_output).find("Intent warning: InProgress->Review intent compliance") != std::string::npos,
             "review transition should warn about missing compliance evidence");
 
+        const auto invalid_review_start_output = temp_root / "invalid-review-start.txt";
+        expect(run_command_capture(binary, {
+            "-P", "quick-smoke-product", "state", "transition", "QS-TSK-0001", "start",
+            "--agent", "reviewer", "--message", "Resume review work."
+        }, invalid_review_start_output) != 0, "explicit Review plus start should remain invalid");
+        expect(read_text(invalid_review_start_output).find("reopen") != std::string::npos,
+            "invalid Review plus start should recommend reopen");
+
+        const auto missing_reopen_rationale_output = temp_root / "missing-reopen-rationale.txt";
+        expect(run_command_capture(binary, {
+            "-P", "quick-smoke-product", "workitem", "update-state", "QS-TSK-0001",
+            "--state", "InProgress", "--agent", "reviewer"
+        }, missing_reopen_rationale_output) != 0, "generic Review to InProgress should require rationale");
+        expect(read_text(missing_reopen_rationale_output).find("rationale") != std::string::npos,
+            "missing target-state reopen rationale should be actionable");
+
+        const auto forced_missing_reopen_rationale_output = temp_root / "forced-missing-reopen-rationale.txt";
+        expect(run_command_capture(binary, {
+            "-P", "quick-smoke-product", "workitem", "update-state", "QS-TSK-0001",
+            "--state", "InProgress", "--agent", "reviewer", "--force"
+        }, forced_missing_reopen_rationale_output) != 0, "force should not bypass generic reopen rationale");
+        expect(read_text(forced_missing_reopen_rationale_output).find("rationale") != std::string::npos,
+            "forced missing reopen rationale should fail with the same audit guidance");
+
+        expect(run_command(binary, {
+            "-P", "quick-smoke-product", "workitem", "update-state", "QS-TSK-0001",
+            "--state", "InProgress", "--agent", "reviewer", "--message", "Acceptance criteria remain unmet through generic update."
+        }) == 0, "generic audited reopen transition failed");
+        const auto generically_reopened_task_text = read_text(task_path);
+        expect(generically_reopened_task_text.find("state: InProgress") != std::string::npos,
+            "generic audited reopen should restore InProgress state");
+        expect(generically_reopened_task_text.find("State: Review -> InProgress: Acceptance criteria remain unmet through generic update.") != std::string::npos,
+            "generic audited reopen should append actor and rationale evidence");
+        expect(run_command(binary, {
+            "-P", "quick-smoke-product", "workitem", "update-state", "QS-TSK-0001", "--state", "Review", "--agent", "tester"
+        }) == 0, "review transition after generic reopen failed");
+
         expect(run_command(binary, {
             "-P", "quick-smoke-product", "state", "transition", "QS-TSK-0001", "reopen",
             "--agent", "reviewer", "--message", "Acceptance criteria remain unmet."

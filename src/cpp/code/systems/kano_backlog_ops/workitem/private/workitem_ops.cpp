@@ -1300,6 +1300,23 @@ UpdateStateResult WorkitemOps::update_state(
         return {item.id, old_state, new_state, false, false, false, {}};
     }
 
+    StateAction action;
+    switch (new_state) {
+        case ItemState::Proposed: action = StateAction::Propose; break;
+        case ItemState::Planned: // Fallthrough
+        case ItemState::Ready: action = StateAction::Ready; break;
+        case ItemState::InProgress:
+            action = old_state == ItemState::Review ? StateAction::Reopen : StateAction::Start;
+            break;
+        case ItemState::Review: action = StateAction::Review; break;
+        case ItemState::Done: action = StateAction::Done; break;
+        case ItemState::Blocked: action = StateAction::Block; break;
+        case ItemState::Dropped: action = StateAction::Drop; break;
+        case ItemState::Duplicate: action = StateAction::Duplicate; break;
+        case ItemState::New:
+            throw std::runtime_error("Cannot update item state to New");
+    }
+
     if (new_state == ItemState::Duplicate) {
         if (!duplicate_of || trim_text(*duplicate_of).empty()) {
             throw std::runtime_error("Transition to Duplicate requires --duplicate-of <canonical-item-ref>");
@@ -1348,24 +1365,8 @@ UpdateStateResult WorkitemOps::update_state(
         }
     }
     
-    // 5. Determine Action for StateMachine
-    StateAction action;
-    switch (new_state) {
-        case ItemState::Proposed: action = StateAction::Propose; break;
-        case ItemState::Planned: // Fallthrough
-        case ItemState::Ready: action = StateAction::Ready; break;
-        case ItemState::InProgress: action = StateAction::Start; break;
-        case ItemState::Review: action = StateAction::Review; break;
-        case ItemState::Done: action = StateAction::Done; break;
-        case ItemState::Blocked: action = StateAction::Block; break;
-        case ItemState::Dropped: action = StateAction::Drop; break;
-        case ItemState::Duplicate: action = StateAction::Duplicate; break;
-        case ItemState::New:
-            throw std::runtime_error("Cannot update item state to New");
-    }
-
     std::string final_msg = message.value_or("State update: " + to_string(old_state) + " -> " + to_string(new_state));
-    if (new_state == ItemState::InProgress) {
+    if (action == StateAction::Start) {
         final_msg += force ? " [Ready gate bypassed via --force]" : " [Ready gate validated]";
     }
     if (new_state == ItemState::Duplicate && item.duplicate_of) {
@@ -1375,7 +1376,16 @@ UpdateStateResult WorkitemOps::update_state(
     // 6. Transition via StateMachine
     {
         diagnostics::ScopedMutationSpan span("workitem.update_state.transition", item.id);
-        StateMachine::transition(item, action, agent, final_msg);
+        if (action == StateAction::Reopen) {
+            std::optional<std::string> reopen_message = message;
+            if (message && !trim_text(*message).empty()) {
+                reopen_message = *message +
+                    (force ? " [Ready gate bypassed via --force]" : " [Ready gate validated]");
+            }
+            StateMachine::transition(item, action, agent, reopen_message);
+        } else {
+            StateMachine::transition(item, action, agent, final_msg);
+        }
     }
     
     // 7. Parent sync logic

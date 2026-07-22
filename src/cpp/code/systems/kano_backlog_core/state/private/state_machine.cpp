@@ -71,6 +71,14 @@ void StateMachine::transition(
     auto it = table.find(key);
     
     if (it == table.end()) {
+        if (item.state == ItemState::Review && action == StateAction::Start) {
+            throw ValidationError({
+                "Invalid transition: Review --start--> (no target state). "
+                "Review items must return to InProgress through audited reopen semantics; "
+                "use state transition <item> reopen --agent <agent> -m <rationale>, or "
+                "workitem update-state <item> --state InProgress --agent <agent> -m <rationale>."
+            });
+        }
         throw ValidationError({ "Invalid transition: " + to_string(item.state) + " --" + to_string(action) + "--> (no target state)" });
     }
 

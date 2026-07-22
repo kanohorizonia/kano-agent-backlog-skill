@@ -155,6 +155,25 @@ int main() {
         expect(!StateMachine::can_transition(ItemState::Done, StateAction::Reopen),
             "done should not transition via Reopen");
 
+        BacklogItem review_started = item;
+        review_started.state = ItemState::Review;
+        std::string review_start_diagnostic;
+        try {
+            StateMachine::transition(
+                review_started,
+                StateAction::Start,
+                std::string("opencode"),
+                std::string("Resume review work"));
+        } catch (const std::exception& ex) {
+            review_start_diagnostic = ex.what();
+        }
+        expect(review_start_diagnostic.find("reopen") != std::string::npos,
+            "invalid Review plus Start should recommend audited reopen");
+        expect(review_start_diagnostic.find("workitem update-state") != std::string::npos,
+            "invalid Review plus Start should recommend the generic target-state command");
+        expect(review_started.state == ItemState::Review,
+            "invalid Review plus Start should not mutate state");
+
         BacklogItem transitioned = item;
         StateMachine::transition(transitioned, StateAction::Start, std::string("opencode"), std::string("Start work"));
         expect(transitioned.state == ItemState::InProgress, "transition should set InProgress");

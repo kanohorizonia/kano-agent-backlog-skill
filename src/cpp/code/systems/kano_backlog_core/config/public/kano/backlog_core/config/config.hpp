@@ -99,6 +99,7 @@ public:
 
     static std::optional<ProjectConfig> load_from_toml(const std::filesystem::path& file_path);
     std::optional<ProductDefinition> get_product(const std::string& name) const;
+    std::optional<std::string> resolve_product_name(const std::string& name_or_prefix) const;
     std::optional<std::filesystem::path> resolve_backlog_root(const std::string& product_name, const std::filesystem::path& config_file_path) const;
     std::vector<ProductPrefixCollision> find_prefix_collisions(const std::filesystem::path& config_file_path) const;
     static std::string describe_prefix_collision(const ProductPrefixCollision& collision);

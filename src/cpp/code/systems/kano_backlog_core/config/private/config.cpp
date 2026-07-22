@@ -278,8 +278,36 @@ std::optional<ProductDefinition> ProjectConfig::get_product(const std::string& n
     return std::nullopt;
 }
 
+std::optional<std::string> ProjectConfig::resolve_product_name(const std::string& name_or_prefix) const {
+    if (products.contains(name_or_prefix)) {
+        return name_or_prefix;
+    }
+
+    const auto normalized_prefix = normalize_product_prefix(name_or_prefix);
+    if (normalized_prefix.empty()) {
+        return std::nullopt;
+    }
+
+    std::optional<std::string> resolved_name;
+    for (const auto& [product_name, definition] : products) {
+        if (normalize_product_prefix(definition.prefix) != normalized_prefix) {
+            continue;
+        }
+        if (resolved_name) {
+            return std::nullopt;
+        }
+        resolved_name = product_name;
+    }
+    return resolved_name;
+}
+
 std::optional<std::filesystem::path> ProjectConfig::resolve_backlog_root(const std::string& product_name, const std::filesystem::path& config_file_path) const {
-    auto product = get_product(product_name);
+    const auto resolved_product_name = resolve_product_name(product_name);
+    if (!resolved_product_name) {
+        return std::nullopt;
+    }
+
+    auto product = get_product(*resolved_product_name);
     if (!product) {
         return std::nullopt;
     }
@@ -471,7 +499,11 @@ BacklogContext BacklogContext::resolve(
             throw ConfigError("No products defined in project config");
         }
     } else {
-        product_name = *product_name_opt;
+        const auto resolved_product_name = project_config->resolve_product_name(*product_name_opt);
+        if (!resolved_product_name) {
+            throw ConfigError("Product '" + *product_name_opt + "' not found in project config");
+        }
+        product_name = *resolved_product_name;
     }
 
     auto product_root = project_config->resolve_backlog_root(product_name, *config_path);

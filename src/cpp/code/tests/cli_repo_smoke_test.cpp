@@ -321,6 +321,14 @@ int main(int argc, char** argv) {
         const auto kfg_product_root = temp_root / "_kano" / "backlog" / "products" / "kano-forge-skill";
         expect(std::filesystem::exists(kfg_product_root / "decisions"), "admin init KFG did not create decisions directory");
         expect(read_text(temp_root / ".kano" / "backlog_config.toml").find("prefix = \"KFG\"") != std::string::npos, "admin init KFG did not register normalized prefix");
+        expect(run_command(binary, {
+            "-P", "KFG",
+            "workitem", "list"
+        }) == 0, "registered KFG prefix did not resolve through the global product option");
+        expect(run_command(binary, {
+            "-P", " kfg ",
+            "workitem", "list"
+        }) == 0, "registered KFG prefix did not resolve case-insensitively after trimming");
 
         const auto kfg_collision_output = temp_root / "admin-init-kfg-collision.txt";
         expect_command_capture_failure(

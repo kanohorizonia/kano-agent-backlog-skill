@@ -333,12 +333,23 @@ int main() {
                "project config should parse default_assignee");
         expect(project_config->products.at("demo").default_bug_reviewer.value_or("") == "review-default",
                "project config should parse default_bug_reviewer");
+        expect(project_config->resolve_product_name("demo").value_or("") == "demo",
+               "project config should resolve the canonical product name");
+        expect(project_config->resolve_product_name(" dem ").value_or("") == "demo",
+               "project config should resolve a normalized product prefix");
 
         auto resolved_context = BacklogContext::resolve(config_root, std::optional<std::string>("demo"), std::nullopt);
         expect(resolved_context.product_def.default_assignee.value_or("") == "koa",
                "product-local config should override default_assignee");
         expect(resolved_context.product_def.default_bug_reviewer.value_or("") == "reviewer-koa",
                "product-local config should override default_bug_reviewer");
+        auto prefix_context = BacklogContext::resolve(config_root, std::optional<std::string>("dem"), std::nullopt);
+        expect(prefix_context.product_name == "demo",
+               "product prefix should resolve to the canonical product name");
+        expect(prefix_context.product_root == resolved_context.product_root,
+               "product prefix should resolve to the canonical product root");
+        expect(prefix_context.product_def.prefix == "DEM",
+               "product prefix context should load the canonical product definition");
         std::filesystem::remove_all(config_root);
 
         std::cout << "backlog_core_smoke_test: PASS\n";

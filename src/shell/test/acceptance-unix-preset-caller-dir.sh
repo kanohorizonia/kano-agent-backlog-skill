@@ -48,7 +48,7 @@ chmod +x "$CASE_ROOT/bin/cmake"
   kabld_run_unix_preset macos-ninja-clang-x64 macos-ninja-clang-x64-release
 )
 
-grep -q '^--preset macos-ninja-clang-x64 -DKB_PRESET_NAME=macos-ninja-clang-x64 -DKB_BUILD_TESTS=ON$' "$CASE_ROOT/cmake.args"
+[[ "$(grep -c '^--preset macos-ninja-clang-x64 -DKB_PRESET_NAME=macos-ninja-clang-x64 -DKB_BUILD_TESTS=ON$' "$CASE_ROOT/cmake.args")" -eq 2 ]]
 grep -q '^--build --preset macos-ninja-clang-x64-release$' "$CASE_ROOT/cmake.args"
 
-echo "PASS: Unix preset helper preserves caller directories and preset artifact identity"
+echo "PASS: Unix preset helper preserves caller directories, preset identity, and explicit cache overrides"

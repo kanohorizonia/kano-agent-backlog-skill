@@ -35,6 +35,14 @@ kabld_run_unix_preset() {
     cmake --preset "$in_configure_preset" \
       "-DKB_PRESET_NAME=$in_configure_preset" \
       "${cache_override_args[@]}"
+    if [[ "${#cache_override_args[@]}" -gt 0 ]]; then
+      # CMake can discard non-toolchain cache overrides when a compiler change
+      # triggers its automatic cache reset. Reassert caller-owned overrides on
+      # the now-stable toolchain configuration before building.
+      cmake --preset "$in_configure_preset" \
+        "-DKB_PRESET_NAME=$in_configure_preset" \
+        "${cache_override_args[@]}"
+    fi
     cmake --build --preset "$in_build_preset"
   )
 }

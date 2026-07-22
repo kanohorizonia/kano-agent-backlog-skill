@@ -86,16 +86,19 @@ fi
 _py_files="$(
   find "$SKILL_ROOT" -type f \( -name '*.py' -o -name '*.pyi' \) \
     ! -path "$SKILL_ROOT/src/cpp/out/*" \
+    ! -path "$SKILL_ROOT/src/shell/release/post_release_verify.py" \
+    ! -path "$SKILL_ROOT/_ws/*" \
     ! -path "$SKILL_ROOT/.git/*" \
     ! -path "$SKILL_ROOT/.kano/*" \
     ! -path "$SKILL_ROOT/.pixi/*" \
+    ! -path "$SKILL_ROOT/node_modules/*" \
     2>/dev/null || true
 )"
 if [[ -n "$_py_files" ]]; then
-  _fail "Python files found in repo:"
+  _fail "Python source or typing stub files remain outside the bounded release-only verifier:"
   printf '%s\n' "$_py_files" | while read -r _l; do printf '       %s\n' "$_l"; done
 else
-  _ok "no runtime .py / .pyi files"
+  _ok "no Python source or typing stub files remain outside the bounded release-only verifier"
 fi
 
 # ---------------------------------------------------------------------------
@@ -160,10 +163,24 @@ case "$(uname -s 2>/dev/null || printf 'unknown')" in
     )
     ;;
   Darwin)
-    _search_paths=(
-      "$SKILL_ROOT/src/cpp/out/bin/macos-ninja-clang/release/kano-backlog"
-      "$SKILL_ROOT/src/cpp/out/bin/macos-ninja-clang/debug/kano-backlog"
-    )
+    case "$(uname -m 2>/dev/null || printf 'unknown')" in
+      arm64|aarch64)
+        _search_paths=(
+          "$SKILL_ROOT/src/cpp/out/bin/macos-ninja-clang-arm64/release/kano-backlog"
+          "$SKILL_ROOT/src/cpp/out/bin/macos-ninja-clang-arm64/debug/kano-backlog"
+          "$SKILL_ROOT/src/cpp/out/bin/macos-ninja-clang/release/kano-backlog"
+          "$SKILL_ROOT/src/cpp/out/bin/macos-ninja-clang/debug/kano-backlog"
+        )
+        ;;
+      *)
+        _search_paths=(
+          "$SKILL_ROOT/src/cpp/out/bin/macos-ninja-clang-x64/release/kano-backlog"
+          "$SKILL_ROOT/src/cpp/out/bin/macos-ninja-clang-x64/debug/kano-backlog"
+          "$SKILL_ROOT/src/cpp/out/bin/macos-ninja-clang/release/kano-backlog"
+          "$SKILL_ROOT/src/cpp/out/bin/macos-ninja-clang/debug/kano-backlog"
+        )
+        ;;
+    esac
     ;;
   *)
     _search_paths=()

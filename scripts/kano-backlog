@@ -1,6 +1,40 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+resolve_script_path() {
+  local source_path="$1"
+  while [[ -L "$source_path" ]]; do
+    local source_dir
+    local link_target
+    source_dir="$(cd -P -- "$(dirname -- "$source_path")" && pwd)"
+    link_target="$(readlink "$source_path")"
+    if [[ "$link_target" = /* ]]; then
+      source_path="$link_target"
+    else
+      source_path="$source_dir/$link_target"
+    fi
+  done
+  printf '%s\n' "$source_path"
+}
 
-exec bash "$SCRIPT_DIR/../src/shell/core/kano-backlog" "$@"
+SCRIPT_PATH="$(resolve_script_path "${BASH_SOURCE[0]}")"
+SCRIPT_DIR="$(cd -P -- "$(dirname -- "$SCRIPT_PATH")" && pwd)"
+SOURCE_LAUNCHER="$SCRIPT_DIR/../src/shell/core/kano-backlog"
+
+if [[ -f "$SOURCE_LAUNCHER" ]]; then
+  exec bash "$SOURCE_LAUNCHER" "$@"
+fi
+
+for packaged_binary in \
+  "$SCRIPT_DIR/../out/bin/kano-backlog" \
+  "$SCRIPT_DIR/../out/bin/kano-backlog.exe"; do
+  if [[ -f "$packaged_binary" ]]; then
+    exec "$packaged_binary" "$@"
+  fi
+done
+
+echo "Error: neither the source launcher nor a packaged kano-backlog binary was found." >&2
+echo "Expected one of:" >&2
+echo "  $SOURCE_LAUNCHER" >&2
+echo "  $SCRIPT_DIR/../out/bin/kano-backlog[.exe]" >&2
+exit 1

@@ -19320,16 +19320,19 @@ int main(int InArgc, char* InArgv[]) {
             auto* inspectCmd = app.add_subcommand("inspect", "Inspector operations");
 
             auto* healthCmd = inspectCmd->add_subcommand("health", "Run the health review inspector");
-            std::string inspect_item;
-            std::string inspect_backlog_root;
-            std::string inspect_output;
-            std::string inspect_format = "markdown";
-            healthCmd->add_option("--item", inspect_item, "Specific item reference to scan");
-            healthCmd->add_option("--backlog-root", inspect_backlog_root, "Path to _kano/backlog");
-            healthCmd->add_option("-o,--output", inspect_output, "Output file path");
-            healthCmd->add_option("--format", inspect_format, "Output format: markdown|json");
-            healthCmd->callback([&]() {
-                const auto backlog_root = resolve_backlog_root_arg(inspect_backlog_root);
+            struct InspectHealthCommandState {
+                std::string item;
+                std::string backlog_root;
+                std::string output;
+                std::string format = "markdown";
+            };
+            const auto healthState = std::make_shared<InspectHealthCommandState>();
+            healthCmd->add_option("--item", healthState->item, "Specific item reference to scan");
+            healthCmd->add_option("--backlog-root", healthState->backlog_root, "Path to _kano/backlog");
+            healthCmd->add_option("-o,--output", healthState->output, "Output file path");
+            healthCmd->add_option("--format", healthState->format, "Output format: markdown|json");
+            healthCmd->callback([&, healthState]() {
+                const auto backlog_root = resolve_backlog_root_arg(healthState->backlog_root);
                 std::vector<ResolvedBacklogItem> items;
                 std::vector<ResolvedBacklogItem> all_items;
                 for (const auto& product_root : list_product_roots(backlog_root)) {
@@ -19342,19 +19345,21 @@ int main(int InArgc, char* InArgv[]) {
                         }
                     }
                 }
-                if (inspect_item.empty()) {
+                if (healthState->item.empty()) {
                     items = all_items;
                 } else {
                     bool matched = false;
                     for (const auto& resolved : all_items) {
                         const auto path_text = resolved.item.file_path ? resolved.item.file_path->string() : std::string();
-                        if (inspect_item == resolved.item.id || inspect_item == resolved.item.uid || inspect_item == path_text) {
+                        if (healthState->item == resolved.item.id ||
+                            healthState->item == resolved.item.uid ||
+                            healthState->item == path_text) {
                             items.push_back(resolved);
                             matched = true;
                         }
                     }
                     if (!matched) {
-                        throw std::runtime_error("Item not found for inspect health: " + inspect_item);
+                        throw std::runtime_error("Item not found for inspect health: " + healthState->item);
                     }
                 }
 
@@ -19368,9 +19373,10 @@ int main(int InArgc, char* InArgv[]) {
                     findings.insert(findings.end(), item_findings.begin(), item_findings.end());
                 }
                 auto report = health_report_json(findings, static_cast<int>(items.size()), static_cast<int>(items_with_issues.size()));
-                const auto rendered = inspect_format == "json" ? json_to_string(report, true) : render_health_markdown(report);
-                if (!inspect_output.empty()) {
-                    std::filesystem::path out_path(inspect_output);
+                const auto rendered =
+                    healthState->format == "json" ? json_to_string(report, true) : render_health_markdown(report);
+                if (!healthState->output.empty()) {
+                    std::filesystem::path out_path(healthState->output);
                     if (!out_path.parent_path().empty()) {
                         std::filesystem::create_directories(out_path.parent_path());
                     }
@@ -19392,26 +19398,31 @@ int main(int InArgc, char* InArgv[]) {
             });
 
             auto* integrityCmd = inspectCmd->add_subcommand("integrity", "Detect stale, drifted, and duplicate backlog metadata");
-            std::vector<std::string> integrity_products;
-            std::string integrity_backlog_root;
-            std::string integrity_format = "markdown";
-            std::string integrity_as_of;
-            int integrity_stale_days = 90;
-            integrityCmd->add_option("--product", integrity_products, "Product name; repeat to scan multiple products");
-            integrityCmd->add_option("--backlog-root", integrity_backlog_root, "Path to _kano/backlog");
-            integrityCmd->add_option("--format", integrity_format, "Output format: markdown|json");
-            integrityCmd->add_option("--as-of", integrity_as_of, "As-of date for stale checks (YYYY-MM-DD)");
-            integrityCmd->add_option("--stale-days", integrity_stale_days, "Updated-age threshold in days");
-            integrityCmd->callback([&]() {
-                const auto format = lower_copy(integrity_format);
+            struct InspectIntegrityCommandState {
+                std::vector<std::string> products;
+                std::string backlog_root;
+                std::string format = "markdown";
+                std::string as_of;
+                int stale_days = 90;
+            };
+            const auto integrityState = std::make_shared<InspectIntegrityCommandState>();
+            integrityCmd->add_option("--product", integrityState->products, "Product name; repeat to scan multiple products");
+            integrityCmd->add_option("--backlog-root", integrityState->backlog_root, "Path to _kano/backlog");
+            integrityCmd->add_option("--format", integrityState->format, "Output format: markdown|json");
+            integrityCmd->add_option("--as-of", integrityState->as_of, "As-of date for stale checks (YYYY-MM-DD)");
+            integrityCmd->add_option("--stale-days", integrityState->stale_days, "Updated-age threshold in days");
+            integrityCmd->callback([&, integrityState]() {
+                const auto format = lower_copy(integrityState->format);
                 if (format != "markdown" && format != "json") {
-                    throw std::runtime_error("Unsupported inspect integrity --format: " + integrity_format + " (expected markdown|json)");
+                    throw std::runtime_error(
+                        "Unsupported inspect integrity --format: " + integrityState->format +
+                        " (expected markdown|json)");
                 }
                 IntegrityOptions options;
-                options.backlog_root = resolve_backlog_root_arg(integrity_backlog_root);
-                options.products = integrity_products;
-                options.as_of = integrity_as_of;
-                options.stale_days = integrity_stale_days;
+                options.backlog_root = resolve_backlog_root_arg(integrityState->backlog_root);
+                options.products = integrityState->products;
+                options.as_of = integrityState->as_of;
+                options.stale_days = integrityState->stale_days;
                 const auto report = IntegrityOps::inspect(options);
                 const auto rendered = format == "json"
                     ? IntegrityOps::render_json(report)

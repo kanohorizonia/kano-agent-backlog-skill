@@ -1861,7 +1861,27 @@ int main(int argc, char** argv) {
             "--backlog-root", backlog_root.string(),
             "--format", "json"
         }, inspect_output) == 0, "inspect health failed");
-        expect(read_text(inspect_output).find("\"total_items_scanned\"") != std::string::npos, "inspect health did not emit scan count");
+        const auto inspect_health_text = read_text(inspect_output);
+        expect(inspect_health_text.find("\"total_items_scanned\"") != std::string::npos, "inspect health did not emit scan count");
+        expect(inspect_health_text.find("\"total_items_scanned\" : 1") != std::string::npos,
+               "inspect health did not retain its explicit item filter");
+
+        const auto integrity_output = temp_root / "inspect-integrity.json";
+        expect(run_command_capture(binary, {
+            "inspect", "integrity",
+            "--product", "kano-ai-3d-asset-skill",
+            "--backlog-root", backlog_root.string(),
+            "--format", "json",
+            "--as-of", "2026-07-23",
+            "--stale-days", "90"
+        }, integrity_output) == 0, "inspect integrity failed");
+        const auto integrity_text = read_text(integrity_output);
+        expect(integrity_text.find("\"products_scanned\"") != std::string::npos,
+               "inspect integrity did not emit scanned products");
+        expect(integrity_text.find("kano-ai-3d-asset-skill") != std::string::npos,
+               "inspect integrity did not retain its explicit product");
+        expect(integrity_text.find("\"as_of\" : \"2026-07-23\"") != std::string::npos,
+               "inspect integrity did not retain its explicit as-of date");
 
         const auto tokenizer_output = temp_root / "tokenizer.json";
         expect(run_command_capture(binary, {

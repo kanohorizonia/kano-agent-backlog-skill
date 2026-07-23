@@ -411,6 +411,30 @@ bool evidence_remote_published(const std::optional<std::string>& value) {
     return normalized.find('/') != std::string::npos;
 }
 
+bool is_structured_branch_convergence_evidence_line(const std::string& line) {
+    if (lower_copy(line).find("branch convergence:") != std::string::npos) {
+        return true;
+    }
+    const bool hasTarget =
+        extract_evidence_field(line, "target_branch").has_value() ||
+        extract_evidence_field(line, "target").has_value();
+    return hasTarget && extract_evidence_field(line, "implementation_commit").has_value();
+}
+
+std::vector<std::string> structured_branch_convergence_evidence_lines(
+    const std::vector<std::string>& evidence
+) {
+    std::vector<std::string> lines;
+    for (const auto& text : evidence) {
+        for (const auto& line : split_evidence_lines(text)) {
+            if (is_structured_branch_convergence_evidence_line(line)) {
+                lines.push_back(line);
+            }
+        }
+    }
+    return lines;
+}
+
 bool is_complete_branch_convergence_line(const std::string& line) {
     if (lower_copy(line).find("branch convergence:") == std::string::npos) {
         return false;
@@ -478,8 +502,9 @@ std::vector<std::string> missing_non_implementation_contract_fields(const Backlo
 
 std::vector<std::string> branch_convergence_diagnostics(const BacklogItem& item) {
     std::vector<std::string> diagnostics;
-    const auto lines = branch_convergence_evidence_lines(item);
-    const auto blocked = find_blocked_convergence(lines);
+    const auto evidenceLines = branch_convergence_evidence_lines(item);
+    const auto convergenceLines = structured_branch_convergence_evidence_lines(evidenceLines);
+    const auto blocked = find_blocked_convergence(evidenceLines);
     if (blocked.present) {
         diagnostics.push_back(
             "Review->Done branch convergence: blocked convergence recorded; item should remain not Done until resolved "
@@ -490,32 +515,32 @@ std::vector<std::string> branch_convergence_diagnostics(const BacklogItem& item)
         return diagnostics;
     }
 
-    const bool has_target = extract_evidence_token(lines, "target_branch").has_value() ||
-        extract_evidence_token(lines, "target", true).has_value();
+    const bool has_target = extract_evidence_token(convergenceLines, "target_branch").has_value() ||
+        extract_evidence_token(convergenceLines, "target").has_value();
     if (!has_target) {
         diagnostics.push_back(
             "Review->Done branch convergence: missing target branch evidence; record "
             "Branch convergence: target=<repo-default-branch> unless a human explicitly names another target.");
     }
 
-    if (!extract_evidence_token(lines, "implementation_commit").has_value()) {
+    if (!extract_evidence_token(convergenceLines, "implementation_commit").has_value()) {
         diagnostics.push_back(
             "Review->Done branch convergence: missing implementation_commit=<sha> evidence.");
     }
 
-    if (!evidence_yes(extract_evidence_token(lines, "reachable_from_target"))) {
+    if (!evidence_yes(extract_evidence_token(convergenceLines, "reachable_from_target"))) {
         diagnostics.push_back(
             "Review->Done branch convergence: missing reachable_from_target=true/yes evidence for the implementation commit.");
     }
 
-    if (!extract_evidence_token(lines, "remote_publication").has_value()) {
+    if (!extract_evidence_token(convergenceLines, "remote_publication").has_value()) {
         diagnostics.push_back(
             "Review->Done branch convergence: missing remote_publication=<remote/ref> or true/yes evidence.");
     }
 
-    const auto side_branch_delivery = extract_evidence_token(lines, "side_branch_delivery");
+    const auto side_branch_delivery = extract_evidence_token(evidenceLines, "side_branch_delivery");
     const bool mentions_side_branch = side_branch_delivery.has_value() ||
-        evidence_contains_any(lines, {"side-branch", "side branch"});
+        evidence_contains_any(evidenceLines, {"side-branch", "side branch"});
     if (mentions_side_branch) {
         const auto normalized = side_branch_delivery ? lower_copy(trim_text(*side_branch_delivery)) : "";
         if (normalized != "explicit-human-choice" && normalized != "human-approved") {
@@ -525,8 +550,8 @@ std::vector<std::string> branch_convergence_diagnostics(const BacklogItem& item)
         }
     }
 
-    const bool has_nested_gitlink = extract_evidence_token(lines, "nested_gitlink").has_value();
-    const bool mentions_nested_work = evidence_contains_any(lines, {
+    const bool has_nested_gitlink = extract_evidence_token(evidenceLines, "nested_gitlink").has_value();
+    const bool mentions_nested_work = evidence_contains_any(evidenceLines, {
         "nested/submodule", "submodule", "nested repo", "nested-repo", "nested work", "gitlink"
     });
     if (mentions_nested_work && !has_nested_gitlink) {

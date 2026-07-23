@@ -1187,6 +1187,47 @@ int main() {
                 "Review->Done branch convergence",
                 "complete explicit target convergence evidence should not warn");
 
+            const auto descriptive_token_prose_id = create_review_task(
+                "Descriptive convergence token prose smoke",
+                {
+                    "Implementation summary: accepted syntax includes reachable_from_target=true/yes "
+                    "and remote_publication=true/yes.",
+                    complete_convergence
+                });
+            auto descriptive_token_prose_done = close_review_task(descriptive_token_prose_id);
+            expect_no_diagnostic_contains(
+                descriptive_token_prose_done,
+                "Review->Done branch convergence",
+                "descriptive token prose should not shadow later complete convergence evidence");
+
+            const auto descriptive_only_id = create_review_task(
+                "Descriptive-only convergence token prose smoke",
+                {
+                    "Implementation summary: accepted syntax includes reachable_from_target=true "
+                    "and remote_publication=origin/main."
+                });
+            auto descriptive_only_done = close_review_task(descriptive_only_id);
+            expect_diagnostic_contains(
+                descriptive_only_done,
+                "missing reachable_from_target",
+                "descriptive prose should not satisfy structured reachability evidence");
+            expect_diagnostic_contains(
+                descriptive_only_done,
+                "missing remote_publication",
+                "descriptive prose should not satisfy structured publication evidence");
+
+            const auto legacy_complete_id = create_review_task(
+                "Legacy complete convergence evidence smoke",
+                {
+                    "Follow-up validation: target_branch=main; implementation_commit=face123; "
+                    "reachable_from_target=true; remote_publication=origin/main"
+                });
+            auto legacy_complete_done = close_review_task(legacy_complete_id);
+            expect_no_diagnostic_contains(
+                legacy_complete_done,
+                "Review->Done branch convergence",
+                "legacy complete key-value convergence evidence should remain accepted");
+
             const auto side_branch_id = create_review_task(
                 "Side branch delivery without human choice smoke",
                 {"Branch convergence: target=feature/side-only; implementation_commit=f00d123; reachable_from_target=true; remote_publication=origin/feature/side-only; side_branch_delivery=agent-choice"});

@@ -1055,22 +1055,57 @@ int main() {
                 "Review->Done intent alignment",
                 "canonical OK/WARN/VIOLATION template wording should not trigger intent alignment warning");
 
+            const auto incidental_classifier_summary_id = create_review_task(
+                "Incidental classifier terminology smoke",
+                {
+                    "Implementation audit: active unresolved drift is classifier terminology in this summary; "
+                    "explicit resolution markers clear earlier findings.",
+                    "Do Not Compliance: Task completion: OK. Intent amendments resolved: OK - none outstanding.",
+                    complete_convergence
+                });
+            auto incidental_classifier_summary_done = close_review_task(incidental_classifier_summary_id);
+            expect_no_diagnostic_contains(
+                incidental_classifier_summary_done,
+                "Review->Done intent alignment",
+                "incidental implementation-summary classifier terminology should not trigger intent alignment warning");
+
             const auto active_drift_id = create_review_task(
                 "Active intent drift smoke",
                 {
                     "Intent Drift Finding: Do Not violation blocks Done and remains unresolved.",
                     complete_convergence
-                },
-                std::string(
-                    "correction: Unresolved violation blocks Done.\n"
-                    "reason: Drift finding remains unresolved.\n"
-                    "Guidance: Drift finding: resolve explicitly before Done, or create an "
-                    "Intent Drift Resolution ticket if scope changed."));
+                });
             auto active_drift_done = close_review_task(active_drift_id);
             expect_diagnostic_contains(
                 active_drift_done,
                 "Review->Done intent alignment",
                 "explicit unresolved intent drift should retain the intent alignment warning");
+
+            const auto active_compliance_violation_id = create_review_task(
+                "Active Do Not compliance violation smoke",
+                {
+                    "Do Not Compliance: Task completion: VIOLATION - a documented boundary remains breached.",
+                    complete_convergence
+                });
+            auto active_compliance_violation_done = close_review_task(active_compliance_violation_id);
+            expect_diagnostic_contains(
+                active_compliance_violation_done,
+                "Review->Done intent alignment",
+                "explicit Do Not compliance violation status should retain the intent alignment warning");
+
+            const auto active_amendment_id = create_review_task(
+                "Active intent amendment smoke",
+                {complete_convergence},
+                std::string(
+                    "correction: Unresolved violation blocks Done.\n"
+                    "reason: Drift finding remains unresolved.\n"
+                    "Guidance: Drift finding: resolve explicitly before Done, or create an "
+                    "Intent Drift Resolution ticket if scope changed."));
+            auto active_amendment_done = close_review_task(active_amendment_id);
+            expect_diagnostic_contains(
+                active_amendment_done,
+                "Review->Done intent alignment",
+                "structured intent-amend blocking evidence should retain the intent alignment warning");
 
             const auto resolved_drift_id = create_review_task(
                 "Resolved intent drift smoke",

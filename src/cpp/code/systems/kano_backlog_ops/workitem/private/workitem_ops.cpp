@@ -212,7 +212,7 @@ std::vector<std::string> split_evidence_lines(const std::string& text) {
 }
 
 bool has_unresolved_intent_alignment_evidence(const BacklogItem& item) {
-    static constexpr std::array<std::string_view, 10> resolution_markers = {
+    static constexpr std::array<std::string_view, 11> resolution_markers = {
         "intent alignment resolution:",
         "intent drift resolution:",
         "drift resolution:",
@@ -222,22 +222,23 @@ bool has_unresolved_intent_alignment_evidence(const BacklogItem& item) {
         "no intent violation",
         "no do not violation",
         "no unresolved drift",
+        "intent amendments resolved: ok",
         "warning is explicitly resolved"
     };
-    static constexpr std::array<std::string_view, 9> active_markers = {
-        "intent drift finding",
-        "drift finding",
+    static constexpr std::array<std::string_view, 2> structured_active_markers = {
+        "intent drift finding:",
+        "intent drift finding recorded"
+    };
+    static constexpr std::array<std::string_view, 5> amendment_active_markers = {
         "blocks done",
         "unresolved drift",
         "remains unresolved",
         "do not violation",
-        "intent violation",
-        "compliance report: violation",
-        "compliance: violation"
+        "intent violation"
     };
 
     bool unresolved = false;
-    const auto inspect_text = [&](const std::string& text) {
+    const auto inspect_text = [&](const std::string& text, const bool is_intent_amendment) {
         for (const auto& evidence_line : split_evidence_lines(text)) {
             const auto line = lower_copy(evidence_line);
             const auto contains_any = [&](const auto& markers) {
@@ -250,17 +251,32 @@ bool has_unresolved_intent_alignment_evidence(const BacklogItem& item) {
             // including when the resolution line repeats the finding it closes.
             if (contains_any(resolution_markers)) {
                 unresolved = false;
-            } else if (contains_any(active_markers)) {
+                continue;
+            }
+            const bool compliance_scope =
+                line.find("do not compliance") != std::string::npos ||
+                line.find("intent alignment") != std::string::npos;
+            const bool explicit_violation_status = line.find(": violation") != std::string::npos;
+            if (contains_any(structured_active_markers) || (compliance_scope && explicit_violation_status)) {
                 unresolved = true;
+                continue;
+            }
+            if (is_intent_amendment) {
+                const auto trimmed = trim_text(line);
+                const bool is_active_field =
+                    trimmed.starts_with("reason:") || trimmed.starts_with("correction:");
+                if (is_active_field && contains_any(amendment_active_markers)) {
+                    unresolved = true;
+                }
             }
         }
     };
 
     if (item.intent_amendments) {
-        inspect_text(*item.intent_amendments);
+        inspect_text(*item.intent_amendments, true);
     }
     for (const auto& entry : item.worklog) {
-        inspect_text(entry);
+        inspect_text(entry, false);
     }
     return unresolved;
 }

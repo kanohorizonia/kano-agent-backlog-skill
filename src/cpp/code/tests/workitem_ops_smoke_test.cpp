@@ -1157,6 +1157,18 @@ int main() {
                 "missing target branch evidence",
                 "missing branch convergence evidence should warn about target/default target evidence");
 
+            const auto embedded_target_token_id = create_review_task(
+                "Embedded target token convergence evidence smoke",
+                {
+                    "Branch convergence: implementation_commit=abc1234; "
+                    "reachable_from_target=true; remote_publication=origin/main"
+                });
+            auto embedded_target_token_done = close_review_task(embedded_target_token_id);
+            expect_diagnostic_contains(
+                embedded_target_token_done,
+                "missing target branch evidence",
+                "reachable_from_target should not be misread as standalone target evidence");
+
             const auto default_target_id = create_review_task(
                 "Default target convergence evidence smoke",
                 {"Branch convergence: target=repo-default; implementation_commit=abc1234; reachable_from_target=true; remote_publication=origin/main"});
@@ -1224,6 +1236,72 @@ int main() {
                 blocked_convergence_done,
                 "branch=feature/stuck; blocker=KOB-TSK-0099; reason=target conflict; next=ask maintainer to choose target",
                 "blocked convergence diagnostic should retain branch, blocker, reason, and next step");
+
+            const std::string historical_block =
+                "Blocked convergence: branch=main; reason=push authorization pending; "
+                "next=publish the accepted commits; blocker=user authorization";
+            const auto resolved_blocked_convergence_id = create_review_task(
+                "Resolved historical convergence block smoke",
+                {historical_block, complete_convergence});
+            auto resolved_blocked_convergence_done = close_review_task(resolved_blocked_convergence_id);
+            expect_no_diagnostic_contains(
+                resolved_blocked_convergence_done,
+                "blocked convergence recorded",
+                "later complete publication evidence should clear an earlier convergence block");
+
+            const auto inline_resolved_convergence_id = create_review_task(
+                "Inline resolved historical convergence block smoke",
+                {historical_block});
+            auto inline_resolved_convergence_done = WorkitemOps::update_state(
+                index,
+                root,
+                inline_resolved_convergence_id,
+                ItemState::Done,
+                "opencode",
+                complete_convergence);
+            expect_no_diagnostic_contains(
+                inline_resolved_convergence_done,
+                "blocked convergence recorded",
+                "complete inline publication evidence should clear an earlier convergence block");
+
+            const auto partial_resolution_id = create_review_task(
+                "Partial convergence resolution smoke",
+                {
+                    historical_block,
+                    "Branch convergence: target=main; reachable_from_target=true; remote_publication=origin/main"
+                });
+            auto partial_resolution_done = close_review_task(partial_resolution_id);
+            expect_diagnostic_contains(
+                partial_resolution_done,
+                "blocked convergence recorded",
+                "partial convergence evidence should not clear an earlier convergence block");
+
+            const auto pending_publication_id = create_review_task(
+                "Pending publication convergence resolution smoke",
+                {
+                    historical_block,
+                    "Branch convergence: target=main; implementation_commit=abc1234; "
+                    "reachable_from_target=true; remote_publication=pending-authorization"
+                });
+            auto pending_publication_done = close_review_task(pending_publication_id);
+            expect_diagnostic_contains(
+                pending_publication_done,
+                "blocked convergence recorded",
+                "pending publication evidence should not clear an earlier convergence block");
+
+            const auto reblocked_convergence_id = create_review_task(
+                "Reblocked convergence smoke",
+                {
+                    historical_block,
+                    complete_convergence,
+                    "Blocked convergence: branch=release/stuck; reason=remote rejected update; "
+                    "next=repair remote policy; blocker=KOB-BUG-0069"
+                });
+            auto reblocked_convergence_done = close_review_task(reblocked_convergence_id);
+            expect_diagnostic_contains(
+                reblocked_convergence_done,
+                "branch=release/stuck; blocker=KOB-BUG-0069; reason=remote rejected update; next=repair remote policy",
+                "a later convergence block should reactivate the warning with its own fields");
 
             auto missing_parent_task = stack_task;
             missing_parent_task.id = "TST-TSK-9997";

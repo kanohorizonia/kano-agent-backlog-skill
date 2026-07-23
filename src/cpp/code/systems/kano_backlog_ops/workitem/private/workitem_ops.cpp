@@ -300,6 +300,31 @@ bool evidence_contains_any(const std::vector<std::string>& lines, const std::vec
     });
 }
 
+std::optional<std::size_t> find_evidence_key_position(
+    const std::string& lowered,
+    const std::string& key_pattern
+) {
+    std::size_t searchBegin = 0;
+    while (searchBegin < lowered.size()) {
+        const auto keyPos = lowered.find(key_pattern, searchBegin);
+        if (keyPos == std::string::npos) {
+            return std::nullopt;
+        }
+        if (keyPos == 0) {
+            return keyPos;
+        }
+        const auto preceding = static_cast<unsigned char>(lowered[keyPos - 1]);
+        if (std::isspace(preceding) ||
+            lowered[keyPos - 1] == ';' ||
+            lowered[keyPos - 1] == ',' ||
+            lowered[keyPos - 1] == ':') {
+            return keyPos;
+        }
+        searchBegin = keyPos + 1;
+    }
+    return std::nullopt;
+}
+
 std::optional<std::string> extract_evidence_token(
     const std::vector<std::string>& lines,
     const std::string& key,
@@ -311,11 +336,11 @@ std::optional<std::string> extract_evidence_token(
         if (require_branch_convergence_line && lowered.find("branch convergence:") == std::string::npos) {
             continue;
         }
-        const auto key_pos = lowered.find(key_pattern);
-        if (key_pos == std::string::npos) {
+        const auto keyPos = find_evidence_key_position(lowered, key_pattern);
+        if (!keyPos) {
             continue;
         }
-        auto value_begin = key_pos + key_pattern.size();
+        auto value_begin = *keyPos + key_pattern.size();
         while (value_begin < line.size() && std::isspace(static_cast<unsigned char>(line[value_begin]))) {
             ++value_begin;
         }
@@ -338,11 +363,11 @@ std::optional<std::string> extract_evidence_token(
 std::optional<std::string> extract_evidence_field(const std::string& line, const std::string& key) {
     const std::string key_pattern = lower_copy(key) + "=";
     const std::string lowered = lower_copy(line);
-    const auto key_pos = lowered.find(key_pattern);
-    if (key_pos == std::string::npos) {
+    const auto keyPos = find_evidence_key_position(lowered, key_pattern);
+    if (!keyPos) {
         return std::nullopt;
     }
-    auto value_begin = key_pos + key_pattern.size();
+    auto value_begin = *keyPos + key_pattern.size();
     while (value_begin < line.size() && std::isspace(static_cast<unsigned char>(line[value_begin]))) {
         ++value_begin;
     }
@@ -365,6 +390,40 @@ bool evidence_yes(const std::optional<std::string>& value) {
     return normalized == "true" || normalized == "yes";
 }
 
+bool evidence_remote_published(const std::optional<std::string>& value) {
+    if (!value) {
+        return false;
+    }
+    if (evidence_yes(value)) {
+        return true;
+    }
+    const auto normalized = lower_copy(trim_text(*value));
+    if (normalized.empty() ||
+        normalized.starts_with("pending") ||
+        normalized == "false" ||
+        normalized == "no" ||
+        normalized == "none" ||
+        normalized == "unknown" ||
+        normalized == "unpublished" ||
+        normalized == "local-only") {
+        return false;
+    }
+    return normalized.find('/') != std::string::npos;
+}
+
+bool is_complete_branch_convergence_line(const std::string& line) {
+    if (lower_copy(line).find("branch convergence:") == std::string::npos) {
+        return false;
+    }
+    const bool hasTarget =
+        extract_evidence_field(line, "target_branch").has_value() ||
+        extract_evidence_field(line, "target").has_value();
+    return hasTarget &&
+        extract_evidence_field(line, "implementation_commit").has_value() &&
+        evidence_yes(extract_evidence_field(line, "reachable_from_target")) &&
+        evidence_remote_published(extract_evidence_field(line, "remote_publication"));
+}
+
 struct BlockedConvergenceEvidence {
     bool present = false;
     std::optional<std::string> branch;
@@ -375,16 +434,20 @@ struct BlockedConvergenceEvidence {
 
 BlockedConvergenceEvidence find_blocked_convergence(const std::vector<std::string>& lines) {
     BlockedConvergenceEvidence evidence;
-    for (const auto& line : lines) {
-        if (lower_copy(line).find("blocked convergence:") == std::string::npos) {
-            continue;
+    for (const auto& text : lines) {
+        for (const auto& line : split_evidence_lines(text)) {
+            if (lower_copy(line).find("blocked convergence:") != std::string::npos) {
+                evidence.present = true;
+                evidence.branch = extract_evidence_field(line, "branch");
+                evidence.reason = extract_evidence_field(line, "reason");
+                evidence.next = extract_evidence_field(line, "next");
+                evidence.blocker = extract_evidence_field(line, "blocker");
+                continue;
+            }
+            if (evidence.present && is_complete_branch_convergence_line(line)) {
+                evidence = {};
+            }
         }
-        evidence.present = true;
-        evidence.branch = extract_evidence_field(line, "branch");
-        evidence.reason = extract_evidence_field(line, "reason");
-        evidence.next = extract_evidence_field(line, "next");
-        evidence.blocker = extract_evidence_field(line, "blocker");
-        return evidence;
     }
     return evidence;
 }

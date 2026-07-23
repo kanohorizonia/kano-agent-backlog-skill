@@ -211,6 +211,60 @@ std::vector<std::string> split_evidence_lines(const std::string& text) {
     return lines;
 }
 
+bool has_unresolved_intent_alignment_evidence(const BacklogItem& item) {
+    static constexpr std::array<std::string_view, 10> resolution_markers = {
+        "intent alignment resolution:",
+        "intent drift resolution:",
+        "drift resolution:",
+        "drift finding resolved",
+        "drift resolved",
+        "violation resolved",
+        "no intent violation",
+        "no do not violation",
+        "no unresolved drift",
+        "warning is explicitly resolved"
+    };
+    static constexpr std::array<std::string_view, 9> active_markers = {
+        "intent drift finding",
+        "drift finding",
+        "blocks done",
+        "unresolved drift",
+        "remains unresolved",
+        "do not violation",
+        "intent violation",
+        "compliance report: violation",
+        "compliance: violation"
+    };
+
+    bool unresolved = false;
+    const auto inspect_text = [&](const std::string& text) {
+        for (const auto& evidence_line : split_evidence_lines(text)) {
+            const auto line = lower_copy(evidence_line);
+            const auto contains_any = [&](const auto& markers) {
+                return std::any_of(markers.begin(), markers.end(), [&](std::string_view marker) {
+                    return line.find(marker) != std::string::npos;
+                });
+            };
+
+            // Evidence is chronological. An explicit resolution clears earlier findings,
+            // including when the resolution line repeats the finding it closes.
+            if (contains_any(resolution_markers)) {
+                unresolved = false;
+            } else if (contains_any(active_markers)) {
+                unresolved = true;
+            }
+        }
+    };
+
+    if (item.intent_amendments) {
+        inspect_text(*item.intent_amendments);
+    }
+    for (const auto& entry : item.worklog) {
+        inspect_text(entry);
+    }
+    return unresolved;
+}
+
 std::vector<std::string> branch_convergence_evidence_lines(const BacklogItem& item) {
     std::vector<std::string> lines;
     if (item.intent_amendments) {
@@ -621,8 +675,7 @@ std::vector<std::string> intent_transition_diagnostics(
     }
 
     if (old_state == ItemState::Review && new_state == ItemState::Done) {
-        const bool has_unresolved_drift = text_contains_any(item.intent_amendments, {"drift finding", "violation", "blocks done", "unresolved"}) ||
-            worklog_contains_any(item, {"drift finding", "violation", "blocks done", "unresolved"});
+        const bool has_unresolved_drift = has_unresolved_intent_alignment_evidence(item);
         if (has_unresolved_drift) {
             diagnostics.push_back("Review->Done intent alignment: unresolved drift or Do Not violation evidence detected; confirm explicit resolution before accepting Done.");
         }

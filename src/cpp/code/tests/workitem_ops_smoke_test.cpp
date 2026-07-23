@@ -1027,6 +1027,92 @@ int main() {
                     std::string("Done branch convergence smoke"));
             };
 
+            const std::string complete_convergence =
+                "Branch convergence: target=main; implementation_commit=abc1234; "
+                "reachable_from_target=true; remote_publication=origin/main";
+
+            const auto incidental_violation_id = create_review_task(
+                "Incidental violation wording smoke",
+                {
+                    "Negative validation fixtures exercise manifest violations without intent drift.",
+                    complete_convergence
+                });
+            auto incidental_violation_done = close_review_task(incidental_violation_id);
+            expect_no_diagnostic_contains(
+                incidental_violation_done,
+                "Review->Done intent alignment",
+                "incidental negative-fixture violation wording should not trigger intent alignment warning");
+
+            const auto canonical_template_id = create_review_task(
+                "Canonical compliance template smoke",
+                {
+                    "Do Not Compliance: OK/WARN/VIOLATION - no active breach.",
+                    complete_convergence
+                });
+            auto canonical_template_done = close_review_task(canonical_template_id);
+            expect_no_diagnostic_contains(
+                canonical_template_done,
+                "Review->Done intent alignment",
+                "canonical OK/WARN/VIOLATION template wording should not trigger intent alignment warning");
+
+            const auto active_drift_id = create_review_task(
+                "Active intent drift smoke",
+                {
+                    "Intent Drift Finding: Do Not violation blocks Done and remains unresolved.",
+                    complete_convergence
+                },
+                std::string(
+                    "correction: Unresolved violation blocks Done.\n"
+                    "reason: Drift finding remains unresolved.\n"
+                    "Guidance: Drift finding: resolve explicitly before Done, or create an "
+                    "Intent Drift Resolution ticket if scope changed."));
+            auto active_drift_done = close_review_task(active_drift_id);
+            expect_diagnostic_contains(
+                active_drift_done,
+                "Review->Done intent alignment",
+                "explicit unresolved intent drift should retain the intent alignment warning");
+
+            const auto resolved_drift_id = create_review_task(
+                "Resolved intent drift smoke",
+                {
+                    "Intent Drift Finding: Do Not violation blocks Done and remains unresolved.",
+                    "Intent Alignment Resolution: drift resolved; no intent violation exists.",
+                    complete_convergence
+                });
+            auto resolved_drift_done = close_review_task(resolved_drift_id);
+            expect_no_diagnostic_contains(
+                resolved_drift_done,
+                "Review->Done intent alignment",
+                "later explicit intent resolution should clear the earlier warning evidence");
+
+            const auto inline_resolution_id = create_review_task(
+                "Inline intent resolution smoke",
+                {
+                    "Intent Drift Finding: Do Not violation blocks Done and remains unresolved.",
+                    complete_convergence
+                });
+            auto inline_resolution_done = WorkitemOps::update_state(
+                index,
+                root,
+                inline_resolution_id,
+                ItemState::Done,
+                "opencode",
+                std::string("Intent Alignment Resolution: drift resolved; no intent violation exists."));
+            expect_no_diagnostic_contains(
+                inline_resolution_done,
+                "Review->Done intent alignment",
+                "inline transition resolution should clear the earlier warning evidence");
+            const auto inline_resolution_stored = RefResolver(store).resolve(inline_resolution_id);
+            std::size_t inline_resolution_count = 0;
+            for (const auto& entry : inline_resolution_stored.worklog) {
+                if (entry.find("Intent Alignment Resolution") != std::string::npos) {
+                    ++inline_resolution_count;
+                }
+            }
+            expect(
+                inline_resolution_count == 1,
+                "inline intent resolution evidence should be appended exactly once");
+
             const auto missing_convergence_id = create_review_task(
                 "Missing branch convergence evidence smoke",
                 {"Implementation finished; validation passed without branch convergence keys."});

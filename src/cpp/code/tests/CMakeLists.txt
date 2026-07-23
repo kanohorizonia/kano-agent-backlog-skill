@@ -106,6 +106,18 @@ set_tests_properties("${KB_TEST_CLI_QUICK}" PROPERTIES
     ENVIRONMENT "CI=true;KANO_BACKLOG_NONINTERACTIVE=1;KANO_TEST_NONINTERACTIVE=1;GIT_TERMINAL_PROMPT=0"
 )
 
+add_executable(infra_config_smoke_test
+    infra_config_smoke_test.cpp
+)
+target_compile_features(infra_config_smoke_test PRIVATE cxx_std_23)
+target_link_libraries(infra_config_smoke_test PRIVATE KanoInfra::config)
+set(KB_TEST_INFRA_CONFIG "[bdd][featured][feature:infra-config][scenario:KOB-BDD-INFRA-CONFIG-001] Shared config safely loads empty arrays and quote-aware comments")
+add_test(NAME "${KB_TEST_INFRA_CONFIG}" COMMAND infra_config_smoke_test)
+set_tests_properties("${KB_TEST_INFRA_CONFIG}" PROPERTIES
+    TIMEOUT 30
+    ENVIRONMENT "CI=true;KANO_BACKLOG_NONINTERACTIVE=1;KANO_TEST_NONINTERACTIVE=1"
+)
+
 if(TARGET kano::kano_backlog_webview_core)
     add_executable(webview_service_smoke_test
         webview_service_smoke_test.cpp

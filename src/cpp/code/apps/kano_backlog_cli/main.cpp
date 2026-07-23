@@ -9486,39 +9486,47 @@ int main(int InArgc, char* InArgv[]) {
         {
             auto* decisionCmd = workitemCmd->add_subcommand("decision", "Record a decision for an item");
             decisionCmd->alias("add-decision");
-            std::string dec_ref, dec_text, dec_text_opt, dec_text_file, dec_agent, dec_source;
-            bool dec_consume_input_files = false;
-            decisionCmd->add_option("ref", dec_ref, "Item ID or UID")->required();
-            decisionCmd->add_option("text", dec_text, "Decision text (positional)");
-            decisionCmd->add_option("--decision", dec_text_opt, "Decision text (option form)");
-            decisionCmd->add_option("--decision-file", dec_text_file, "Read decision text from file");
-            decisionCmd->add_option("--agent", dec_agent, "Agent ID")->required();
-            decisionCmd->add_option("--source", dec_source, "Source of decision (e.g. meeting, email)");
-            decisionCmd->add_flag("--consume-input-files", dec_consume_input_files, "Delete input files after a successful update; files must be under ~/.kano/tmp/backlog or KANO_BACKLOG_TEXT_TMP");
-            decisionCmd->callback([&]() {
+            struct DecisionCommandState {
+                std::string ref;
+                std::string text;
+                std::string text_option;
+                std::string text_file;
+                std::string agent;
+                std::string source;
+                bool consume_input_files = false;
+            };
+            const auto state = std::make_shared<DecisionCommandState>();
+            decisionCmd->add_option("ref", state->ref, "Item ID or UID")->required();
+            decisionCmd->add_option("text", state->text, "Decision text (positional)");
+            decisionCmd->add_option("--decision", state->text_option, "Decision text (option form)");
+            decisionCmd->add_option("--decision-file", state->text_file, "Read decision text from file");
+            decisionCmd->add_option("--agent", state->agent, "Agent ID")->required();
+            decisionCmd->add_option("--source", state->source, "Source of decision (e.g. meeting, email)");
+            decisionCmd->add_flag("--consume-input-files", state->consume_input_files, "Delete input files after a successful update; files must be under ~/.kano/tmp/backlog or KANO_BACKLOG_TEXT_TMP");
+            decisionCmd->callback([&, state]() {
                 auto ctx = resolve_ctx();
                 BacklogIndex index(ctx.backlog_root / ".cache" / "index" / "backlog.db");
-                std::string effective_decision = !dec_text_opt.empty() ? dec_text_opt : dec_text;
-                if (!dec_text_file.empty()) {
-                    if (!dec_text.empty() || !dec_text_opt.empty()) {
+                std::string effective_decision = !state->text_option.empty() ? state->text_option : state->text;
+                if (!state->text_file.empty()) {
+                    if (!state->text.empty() || !state->text_option.empty()) {
                         throw std::runtime_error("Use either positional/--decision text or --decision-file, not both");
                     }
-                    effective_decision = read_text_file_option(dec_text_file, "--decision-file");
+                    effective_decision = read_text_file_option(state->text_file, "--decision-file");
                 }
                 if (effective_decision.empty()) {
                     throw std::runtime_error("Missing decision text. Use positional <text>, --decision <text>, or --decision-file <path>");
                 }
                 auto result = WorkitemOps::add_decision_writeback(
-                    index, ctx.product_root, dec_ref, effective_decision, dec_agent,
-                    dec_source.empty() ? std::nullopt : std::optional<std::string>(dec_source)
+                    index, ctx.product_root, state->ref, effective_decision, state->agent,
+                    state->source.empty() ? std::nullopt : std::optional<std::string>(state->source)
                 );
                 if (result.added) {
                     std::cout << "Added decision to " << result.item_id << "\n";
                 } else {
                     std::cout << "Decision already exists in " << result.item_id << "\n";
                 }
-                if (dec_consume_input_files) {
-                    consume_backlog_text_file(dec_text_file, "--decision-file");
+                if (state->consume_input_files) {
+                    consume_backlog_text_file(state->text_file, "--decision-file");
                 }
             });
         }

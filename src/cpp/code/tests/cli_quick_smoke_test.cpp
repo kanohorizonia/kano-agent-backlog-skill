@@ -233,6 +233,35 @@ int main(int argc, char** argv) {
             "workitem create failed");
         const auto task_receipt_path = temp_root / "_kano" / "backlog" / "products" / "quick-smoke-product" / "_meta" / "duplicate-admission" / "QS-TSK-0001.json";
         expect(std::filesystem::exists(task_receipt_path), "workitem create should write duplicate admission receipt");
+        const auto task_path = temp_root / "_kano" / "backlog" / "products" / "quick-smoke-product" / "items" / "task" / "0000" / "QS-TSK-0001_quick-smoke-task.md";
+
+        expect(run_command(binary, {
+            "-P", "quick-smoke-product", "workitem", "decision", "QS-TSK-0001",
+            "Retain positional decision text.", "--agent", "tester", "--source", "quick-smoke"
+        }) == 0, "workitem decision positional text failed");
+        expect(run_command(binary, {
+            "-P", "quick-smoke-product", "workitem", "decision", "QS-TSK-0001",
+            "--decision", "Retain option decision text.", "--agent", "tester"
+        }) == 0, "workitem decision option text failed");
+        const auto decision_text_path = temp_root / "decision-input.txt";
+        write_text(decision_text_path, "Retain file decision text.\n");
+        expect(run_command(binary, {
+            "-P", "quick-smoke-product", "item", "add-decision", "QS-TSK-0001",
+            "--decision-file", decision_text_path.string(), "--agent", "tester"
+        }) == 0, "add-decision alias file text failed");
+        const auto decision_conflict_output = temp_root / "decision-conflict.txt";
+        expect(run_command_capture(binary, {
+            "-P", "quick-smoke-product", "workitem", "decision", "QS-TSK-0001",
+            "Conflicting decision text.", "--decision-file", decision_text_path.string(), "--agent", "tester"
+        }, decision_conflict_output) != 0, "decision text plus decision-file should fail");
+        expect(read_text(decision_conflict_output).find(
+            "Use either positional/--decision text or --decision-file, not both") != std::string::npos,
+            "decision text plus decision-file should report the real conflict");
+        const auto decision_task_text = read_text(task_path);
+        expect(decision_task_text.find("Retain positional decision text.") != std::string::npos &&
+               decision_task_text.find("Retain option decision text.") != std::string::npos &&
+               decision_task_text.find("Retain file decision text.") != std::string::npos,
+            "decision command variants should persist their text");
 
         expect(run_command(binary, {"admin", "init", "--product", "second-product", "--agent", "tester", "--skip-refresh-views"}) == 0,
             "second product admin init failed");
@@ -275,7 +304,6 @@ int main(int argc, char** argv) {
         expect(read_text(empty_product_list_output).find("No items found.") != std::string::npos,
             "empty product-scoped item list should render an explicit empty result");
 
-        const auto task_path = temp_root / "_kano" / "backlog" / "products" / "quick-smoke-product" / "items" / "task" / "0000" / "QS-TSK-0001_quick-smoke-task.md";
         const auto second_task_path = temp_root / "_kano" / "backlog" / "products" / "second-product" / "items" / "task" / "0000" / "SP-TSK-0001_cross-product-target.md";
         const auto unrepairable_uid_path = temp_root / "_kano" / "backlog" / "products" / "quick-smoke-product" / "items" / "task" / "0000" / "QS-TSK-0999_unrepairable.md";
         auto stale_second_task_text = read_text(second_task_path);

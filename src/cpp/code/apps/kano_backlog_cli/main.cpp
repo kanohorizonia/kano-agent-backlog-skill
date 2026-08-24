@@ -48,6 +48,10 @@
 #include <utility>
 
 #ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
 #include <process.h>
 #endif
 
@@ -2157,6 +2161,66 @@ std::optional<std::filesystem::path> find_skill_repo_root_for_webview_invocation
     return std::nullopt;
 }
 
+#ifdef _WIN32
+int run_windows_process_in_kill_on_close_job(
+    const char* executable,
+    const char* const* argv,
+    bool search_path,
+    const std::string& description) {
+    HANDLE job_handle = CreateJobObjectW(nullptr, nullptr);
+    if (job_handle == nullptr) {
+        std::cerr << "Failed to create " << description << " process job: Windows error "
+                  << GetLastError() << "\n";
+        return -1;
+    }
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION job_info{};
+    job_info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    if (SetInformationJobObject(
+            job_handle, JobObjectExtendedLimitInformation, &job_info, sizeof(job_info)) == FALSE) {
+        const DWORD job_error = GetLastError();
+        CloseHandle(job_handle);
+        std::cerr << "Failed to configure " << description << " process job: Windows error "
+                  << job_error << "\n";
+        return -1;
+    }
+
+    errno = 0;
+    const intptr_t spawned = search_path
+        ? _spawnvp(_P_NOWAIT, executable, argv)
+        : _spawnv(_P_NOWAIT, executable, argv);
+    const int spawn_error = errno;
+    if (spawned == -1) {
+        CloseHandle(job_handle);
+        std::cerr << "Failed to spawn " << description << ": " << std::strerror(spawn_error) << "\n";
+        return -1;
+    }
+
+    HANDLE process_handle = reinterpret_cast<HANDLE>(spawned);
+    if (AssignProcessToJobObject(job_handle, process_handle) == FALSE) {
+        const DWORD assign_error = GetLastError();
+        TerminateProcess(process_handle, 1);
+        WaitForSingleObject(process_handle, INFINITE);
+        CloseHandle(process_handle);
+        CloseHandle(job_handle);
+        std::cerr << "Failed to assign " << description << " process job: Windows error "
+                  << assign_error << "\n";
+        return -1;
+    }
+
+    const DWORD wait_result = WaitForSingleObject(process_handle, INFINITE);
+    DWORD exit_code = 1;
+    const BOOL exit_code_read =
+        wait_result == WAIT_OBJECT_0 && GetExitCodeProcess(process_handle, &exit_code);
+    if (!exit_code_read) {
+        std::cerr << "Failed to wait for " << description << ": Windows error "
+                  << GetLastError() << "\n";
+    }
+    CloseHandle(process_handle);
+    CloseHandle(job_handle);
+    return exit_code_read ? static_cast<int>(exit_code) : -1;
+}
+#endif
+
 int run_pixi_task_in_dir(const std::filesystem::path& cwd, const std::string& task) {
 #ifdef _WIN32
     const auto original_cwd = std::filesystem::current_path();
@@ -2167,14 +2231,9 @@ int run_pixi_task_in_dir(const std::filesystem::path& cwd, const std::string& ta
         task.c_str(),
         nullptr,
     };
-    errno = 0;
-    const int rc = static_cast<int>(_spawnvp(_P_WAIT, "pixi.exe", argv.data()));
-    const int spawn_error = errno;
+    const int rc = run_windows_process_in_kill_on_close_job(
+        "pixi.exe", argv.data(), true, "pixi task '" + task + "'");
     std::filesystem::current_path(original_cwd);
-    if (rc == -1) {
-        std::cerr << "Failed to spawn pixi task '" << task
-                  << "': " << std::strerror(spawn_error) << "\n";
-    }
     return rc;
 #else
     return std::system(
@@ -2238,11 +2297,8 @@ int launch_webview_process(const std::filesystem::path& webview_exe, const std::
         argv.push_back(arg.c_str());
     }
     argv.push_back(nullptr);
-    const int rc = static_cast<int>(_spawnv(_P_WAIT, webview_exe.string().c_str(), argv.data()));
-    if (rc == -1) {
-        std::cerr << "Failed to spawn webview executable: " << std::strerror(errno) << "\n";
-    }
-    return rc;
+    return run_windows_process_in_kill_on_close_job(
+        argv_storage.front().c_str(), argv.data(), false, "webview executable");
 #else
     std::string command = shell_quote_arg(webview_exe.string());
     for (const auto& arg : args) {

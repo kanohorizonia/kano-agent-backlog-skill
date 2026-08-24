@@ -366,6 +366,11 @@ int main(int argc, char** argv) {
             "KOB-TSK-0004",
         };
         const auto skill_contract = read_text(repo_root / "SKILL.md");
+        const auto cli_source = read_text(repo_root / "src/cpp/code/apps/kano_backlog_cli/main.cpp");
+        expect(cli_source.find("JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE") != std::string::npos &&
+                cli_source.find("\"pixi.exe\", argv.data(), true") != std::string::npos &&
+                cli_source.find("argv_storage.front().c_str(), argv.data(), false") != std::string::npos,
+            "Windows webview launch must own both Pixi and Drogon process trees in kill-on-close jobs");
         for (const auto& asset_path : std::vector<std::filesystem::path>{
                  repo_root / "src/cpp/code/apps/kano_backlog_webview/assets/backboard_app_js.hpp",
                  repo_root / "src/cpp/code/apps/kano_backlog_webview/assets/backboard_graph_inspector_js.hpp",

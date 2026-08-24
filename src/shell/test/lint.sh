@@ -107,6 +107,18 @@ check_universal_pixi_task "build-webview" "pixi exposes universal Webview Releas
 check_universal_pixi_task "build-webview-release" "pixi exposes universal explicit Webview Release build task"
 check_universal_pixi_task "build-webview-debug" "pixi exposes universal explicit Webview Debug build task"
 check_universal_pixi_task "webview-host" "pixi exposes universal Webview build-and-host task"
+check_present 'webview-host = "pixi run build-webview-release && bash src/shell/webview/host.sh"' \
+  "$SKILL_ROOT/pixi.toml" "pixi host launcher avoids recursive task aliases"
+check_present 'webview-host-debug = "pixi run build-webview-debug && bash src/shell/webview/host.sh"' \
+  "$SKILL_ROOT/pixi.toml" "pixi debug host launcher avoids recursive task aliases"
+check_present 'webview = "pixi run build-webview-release && bash src/shell/webview/host.sh"' \
+  "$SKILL_ROOT/pixi.toml" "primary pixi Webview launcher avoids recursive task aliases"
+check_absent 'webview-host = "pixi run webview-host-build && pixi run webview-host-serve"' \
+  "$SKILL_ROOT/pixi.toml" "no platform Webview host override restores recursive task aliases"
+check_absent 'webview-host-debug = "pixi run webview-host-build-debug && pixi run webview-host-serve"' \
+  "$SKILL_ROOT/pixi.toml" "no platform debug host override restores recursive task aliases"
+check_absent 'webview = "pixi run webview-host"' \
+  "$SKILL_ROOT/pixi.toml" "no platform primary Webview override restores recursive task aliases"
 check_present 'webview-smoke-artifacts = "pixi run build-webview-release && bash src/shell/webview/smoke-artifacts.sh"' \
   "$SKILL_ROOT/pixi.toml" "pixi Webview smoke task builds its required Release binary"
 check_present "Wno-error" "$SKILL_ROOT/src/cpp/CMakeLists.txt" \

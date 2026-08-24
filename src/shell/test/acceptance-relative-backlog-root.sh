@@ -10,35 +10,45 @@ cleanup() {
 }
 trap cleanup EXIT
 
-case "$(uname -s):$(uname -m)" in
-  Darwin:arm64|Darwin:aarch64) preset="macos-ninja-clang-arm64" ;;
-  Darwin:*) preset="macos-ninja-clang-x64" ;;
-  Linux:*) preset="linux-ninja-gcc" ;;
-  *) echo "SKIP: unsupported shell acceptance host"; exit 0 ;;
-esac
+expect_output_contains() {
+  local expected="$1"
+  if [[ "$output" != *"$expected"* ]]; then
+    printf 'FAIL: expected <%s> in launcher output:\n%s\n' "$expected" "$output" >&2
+    exit 1
+  fi
+}
 
 mkdir -p \
   "$CASE_ROOT/skill/src/shell/core" \
-  "$CASE_ROOT/skill/src/cpp/out/bin/$preset/release" \
   "$CASE_ROOT/workspace/_kano/backlog/.kano"
 cp "$ROOT_DIR/src/shell/core/kano-backlog" "$CASE_ROOT/skill/src/shell/core/kano-backlog"
 cp "$ROOT_DIR/VERSION" "$CASE_ROOT/skill/VERSION"
 
-cat > "$CASE_ROOT/skill/src/cpp/out/bin/$preset/release/kano-backlog" <<EOF
+fake_bin="$CASE_ROOT/fake-kano-backlog"
+cat > "$fake_bin" <<EOF
 #!/usr/bin/env bash
 if [[ "\${1:-}" == "--version" ]]; then printf 'kano-backlog %s\n' '$(tr -d '\r\n' < "$ROOT_DIR/VERSION")'; exit 0; fi
 printf 'cwd=%s\n' "\$PWD"
 printf 'args='; printf '<%s>' "\$@"; printf '\n'
 EOF
-chmod +x "$CASE_ROOT/skill/src/cpp/out/bin/$preset/release/kano-backlog"
+chmod +x "$fake_bin"
+export KANO_BACKLOG_BINARY="$fake_bin"
 printf '[products.test]\nprefix = "TST"\nbacklog_root = "products/test"\n' > "$CASE_ROOT/workspace/_kano/backlog/.kano/backlog_config.toml"
 
 output="$(cd "$CASE_ROOT/workspace" && bash "$CASE_ROOT/skill/src/shell/core/kano-backlog" doctor --backlog-root _kano/backlog)"
-grep -F "cwd=$CASE_ROOT/workspace/_kano/backlog" <<<"$output" >/dev/null
-grep -F "<--backlog-root><$CASE_ROOT/workspace/_kano/backlog>" <<<"$output" >/dev/null
-if grep -F "$CASE_ROOT/workspace/_kano/backlog/_kano/backlog" <<<"$output" >/dev/null; then
+expect_output_contains "cwd=$CASE_ROOT/workspace/_kano/backlog"
+expect_output_contains "<--backlog-root><$CASE_ROOT/workspace/_kano/backlog>"
+if [[ "$output" == *"$CASE_ROOT/workspace/_kano/backlog/_kano/backlog"* ]]; then
   echo "FAIL: relative backlog root was resolved after launcher cwd changed" >&2
   exit 1
 fi
 
-echo "PASS: launcher resolves explicit relative backlog root against invocation cwd exactly once"
+windows_drive_root='C:\Users\example\backlog'
+output="$(cd "$CASE_ROOT/workspace" && bash "$CASE_ROOT/skill/src/shell/core/kano-backlog" doctor --backlog-root "$windows_drive_root")"
+expect_output_contains "<--backlog-root><$windows_drive_root>"
+
+windows_unc_root='\\server\share\backlog'
+output="$(cd "$CASE_ROOT/workspace" && bash "$CASE_ROOT/skill/src/shell/core/kano-backlog" doctor --backlog-root="$windows_unc_root")"
+expect_output_contains "<--backlog-root=$windows_unc_root>"
+
+echo "PASS: launcher resolves relative roots once and preserves native Windows absolute roots"

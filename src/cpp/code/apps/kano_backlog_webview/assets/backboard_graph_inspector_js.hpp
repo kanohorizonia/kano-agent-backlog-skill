@@ -268,7 +268,7 @@ inline constexpr std::string_view kBackboardGraphInspectorJs = R"JS(
         ? 'Restored the node to the graph canvas'
         : 'Hid the node from the canvas; relationship evidence remains in diagnostics');
     }
-
+)JS" R"JS(
     function toggleGraphNodePinned(key) {
       const cleanKey = String(key || '').trim();
       if (!cleanKey) return;
@@ -469,7 +469,7 @@ inline constexpr std::string_view kBackboardGraphInspectorJs = R"JS(
         `<li><code>${esc(entry.ref)}</code><span class="pill missing">${esc(entry.kind)} / ${esc(entry.status)}</span></li>`
       ).join('')}</ul>${hiddenCount ? `<div class="muted">${hiddenCount} additional unresolved reference(s) remain outside this compact panel.</div>` : ''}</section>`;
     }
-
+)JS" R"JS(
     function renderGraphNodeInspector(baseData, nodes, edges) {
       const node = graphInspectorSelectedNode(nodes);
       if (!node) return '';

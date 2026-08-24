@@ -410,7 +410,7 @@ int main() {
         const auto source_path = std::filesystem::path(KANO_REPO_ROOT) /
             "src/cpp/code/apps/kano_backlog_cli/main.cpp";
         const auto inventory = audit_cli11_lifetimes(source_path);
-        expect(inventory.total == 695, "CLI11 binding inventory changed; review every added or removed binding and update the audited baseline");
+        expect(inventory.total == 696, "CLI11 binding inventory changed; review every added or removed binding and update the audited baseline");
         expect(inventory.lexical > 0, "CLI11 audit did not classify lexical main-lifetime bindings");
         expect(inventory.arena_direct > 0, "CLI11 audit did not classify arena-retained direct bindings");
         expect(inventory.arena_owner > 0, "CLI11 audit did not classify arena-retained shared owners");

@@ -125,13 +125,16 @@ intent, scope, acceptance, risk, decisions, and evidence across agent sessions.
 
 ## Backboard
 
-Backboard is the local read-mostly review surface for backlog state. The host
-path builds the native KOB Webview runtime and serves Backboard on the
-workstation:
+Backboard is the local read-mostly review surface for backlog state. The primary
+CLI entrypoint builds the native Drogon KOB Webview runtime, opens the local URL,
+and serves Backboard on the workstation:
 
 ```bash
-pixi run webview
+kob webview
 ```
+
+This delegates to `pixi run webview`. Use `kob webview serve` only when the
+Drogon binary is already built and a server-only foreground process is wanted.
 
 The Docker path builds the image, starts a restartable container, and opens the
 same local URL:
@@ -146,7 +149,8 @@ The CLI shortcut `kob gui` runs the same Docker path. Stop the container with
 Backboard is the maintained backlog review surface. The product `views/`
 directory remains available for hand-authored Markdown, Dataview, and Bases
 content. `kob view list --product <product>` discovers Markdown custom-view
-files only; it does not discover `.base` files.
+files only; it does not create or refresh files and does not discover `.base`
+files.
 
 For bounded review evidence without browser dependencies, capture deterministic
 repo-local smoke artifacts with:

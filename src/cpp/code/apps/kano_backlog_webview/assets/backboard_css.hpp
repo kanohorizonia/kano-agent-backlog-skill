@@ -207,7 +207,7 @@ inline constexpr std::string_view kBackboardCssPart2 = R"CSS(
     .graph-inspector-identity code, .graph-inspector-ref-list code { overflow-wrap: anywhere; word-break: break-word; }
     .graph-inspector-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; min-width: 0; }
     .graph-inspector-actions .btn { min-width: 0; min-height: 34px; white-space: normal; }
-    .graph-inspector-actions .btn[aria-pressed="true"] { border-color: var(--kob-accent); background: var(--kob-accent-soft); }
+    )CSS" R"CSS(.graph-inspector-actions .btn[aria-pressed="true"] { border-color: var(--kob-accent); background: var(--kob-accent-soft); }
     .graph-inspector-actions .btn[disabled] { opacity: 0.58; cursor: default; }
     .graph-inspector-warning { border: 1px solid #d5b15d; border-left: 4px solid #b57b18; border-radius: 6px; padding: 8px 10px; background: #fff9e8; color: #6a4c0f; overflow-wrap: break-word; }
     .graph-inspector-expansion-status { display: grid; gap: 5px; color: #586074; font-size: 12px; overflow-wrap: anywhere; }

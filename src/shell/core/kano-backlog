@@ -8,7 +8,11 @@ INVOCATION_DIR="$PWD"
 
 resolve_invocation_path() {
   local value="$1"
-  if [[ "$value" == /* ]]; then
+  # Windows-native paths can arrive from cygpath before this Git Bash wrapper runs.
+  if [[ "$value" == /* ||
+        ( "${value:0:1}" == [[:alpha:]] && "${value:1:1}" == ":" &&
+          ( "${value:2:1}" == "/" || "${value:2:1}" == "\\" ) ) ||
+        "${value:0:2}" == "\\\\" ]]; then
     printf '%s\n' "$value"
     return 0
   fi

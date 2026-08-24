@@ -745,7 +745,7 @@ inline constexpr std::string_view kBackboardAppJsPart1b = R"JS(
       }
       return error?.message || String(error || 'Unknown refresh error');
     }
-
+)JS" R"JS(
     function makeRefreshDiagnostic(status, detail, startedAt, failures = [], refresh = state.activeRefresh) {
       const active = refresh || {};
       const startedAtMs = active.started_at_ms || startedAt || Date.now();
@@ -965,7 +965,7 @@ inline constexpr std::string_view kBackboardAppJsPart1b = R"JS(
       };
       return edgeTypes[normalizeGraphMode(mode)] || edgeTypes.dependency;
     }
-
+)JS" R"JS(
     function normalizeSavedGraphQuery(entry) {
       if (!entry || typeof entry !== 'object' || Number(entry.schema_version) !== 1) {
         return null;
@@ -1442,7 +1442,7 @@ inline constexpr std::string_view kBackboardAppJsPart1bb = R"JS(
         edgeKeys.add(edgeKey);
         edges.push(normalized);
       });
-
+)JS" R"JS(
       state.graphExpansionOrder.forEach((key) => {
         const payload = state.graphExpansionPayloads.get(key);
         if (!payload) return;
@@ -3581,7 +3581,7 @@ inline constexpr std::string_view kBackboardAppJsPart5aaab = R"JS(
           },
         };
       }
-
+)JS" R"JS(
       const incomingDependency = new Set(edges
         .filter((edge) => edge.dependency)
         .map((edge) => edge.to));
@@ -4090,7 +4090,7 @@ inline constexpr std::string_view kBackboardAppJsPart5ad = R"JS(
         });
       });
     }
-
+)JS" R"JS(
     function isResolvedGraphItemNode(node) {
       const kind = String(node?.kind || '').trim().toLowerCase();
       const nodeId = String(node?.id || '').trim().toLowerCase();
@@ -4172,7 +4172,7 @@ inline constexpr std::string_view kBackboardAppJsPart5ad = R"JS(
       const notice = state.graphExpansionNotice || 'Expansion overlays are ephemeral and are not included in URLs, saved queries, or workspace storage.';
       return `<section class="graph-expansion-diagnostics" aria-labelledby="graph-expansion-title"><div class="graph-expansion-header"><h4 id="graph-expansion-title">Expansion overlays</h4><div class="muted">Base mode summaries are not recomputed. Base nodes and edges retain priority; overlays compose in first-click order within the effective node and edge caps.</div></div><div id="graph-expansion-status" class="muted" role="status" aria-live="polite" aria-atomic="true">${esc(notice)}</div>${idle}${entries ? `<div class="graph-expansion-diagnostic-list">${entries}</div>` : ''}</section>`;
     }
-
+)JS" R"JS(
     function renderGraphView(data = null, options = {}) {
       const baseData = data && typeof data === 'object' ? data : (state.graphBasePayload || {});
       const composition = composeGraphPayload(baseData);
@@ -4663,7 +4663,7 @@ inline constexpr std::string_view kBackboardAppJsPart6 = R"JS(
       markLoadedViewsStale('assignment case filter changed');
       scheduleRefresh(0);
     });
-
+)JS" R"JS(
     document.getElementById('clear-assignment-filters').addEventListener('click', clearAssignmentFilters);
 
     document.addEventListener('click', (event) => {

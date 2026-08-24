@@ -2141,11 +2141,45 @@ std::optional<std::filesystem::path> find_skill_repo_root_for_webview(const std:
     return std::nullopt;
 }
 
-int run_shell_command_in_dir(const std::filesystem::path& cwd, const std::string& command) {
+std::optional<std::filesystem::path> find_skill_repo_root_for_webview_invocation(int argc, char** argv) {
+    std::vector<std::filesystem::path> seeds;
+    if (argc > 0 && argv != nullptr && argv[0] != nullptr) {
+        const std::filesystem::path cli_exe = std::filesystem::absolute(argv[0]);
+        seeds.push_back(cli_exe.parent_path());
+    }
+    seeds.push_back(std::filesystem::current_path());
+
+    for (const auto& seed : seeds) {
+        if (auto repo_root = find_skill_repo_root_for_webview(seed)) {
+            return repo_root;
+        }
+    }
+    return std::nullopt;
+}
+
+int run_pixi_task_in_dir(const std::filesystem::path& cwd, const std::string& task) {
 #ifdef _WIN32
-    return std::system(("cd /d " + shell_quote_arg(cwd.string()) + " && " + command).c_str());
+    const auto original_cwd = std::filesystem::current_path();
+    std::filesystem::current_path(cwd);
+    const std::array<const char*, 4> argv = {
+        "pixi",
+        "run",
+        task.c_str(),
+        nullptr,
+    };
+    errno = 0;
+    const int rc = static_cast<int>(_spawnvp(_P_WAIT, "pixi.exe", argv.data()));
+    const int spawn_error = errno;
+    std::filesystem::current_path(original_cwd);
+    if (rc == -1) {
+        std::cerr << "Failed to spawn pixi task '" << task
+                  << "': " << std::strerror(spawn_error) << "\n";
+    }
+    return rc;
 #else
-    return std::system(("cd " + shell_quote_arg(cwd.string()) + " && " + command).c_str());
+    return std::system(
+        ("cd " + shell_quote_arg(cwd.string()) +
+         " && pixi run " + shell_quote_arg(task)).c_str());
 #endif
 }
 
@@ -21252,20 +21286,7 @@ int main(int InArgc, char* InArgv[]) {
         {
             auto* guiCmd = app.add_subcommand("gui", "Build and launch the Docker webview");
             guiCmd->callback([&]() {
-                std::vector<std::filesystem::path> seeds;
-                if (InArgc > 0 && InArgv != nullptr && InArgv[0] != nullptr) {
-                    const std::filesystem::path cli_exe = std::filesystem::absolute(InArgv[0]);
-                    seeds.push_back(cli_exe.parent_path());
-                }
-                seeds.push_back(std::filesystem::current_path());
-
-                std::optional<std::filesystem::path> repo_root;
-                for (const auto& seed : seeds) {
-                    repo_root = find_skill_repo_root_for_webview(seed);
-                    if (repo_root) {
-                        break;
-                    }
-                }
+                const auto repo_root = find_skill_repo_root_for_webview_invocation(InArgc, InArgv);
                 if (!repo_root) {
                     throw std::runtime_error("Could not locate kano-agent-backlog-skill repo root for webview Docker launch");
                 }
@@ -21273,19 +21294,46 @@ int main(int InArgc, char* InArgv[]) {
                 std::cout << "Launching backlog webview Docker stack...\n";
                 std::cout << "Repo root: " << *repo_root << "\n";
                 std::cout << "Command: pixi run webview-docker\n";
-                const int rc = run_shell_command_in_dir(*repo_root, "pixi run webview-docker");
+                const int rc = run_pixi_task_in_dir(*repo_root, "webview-docker");
                 if (rc != 0) {
                     throw std::runtime_error("webview Docker launcher exited with error");
                 }
             });
 
-            auto* webviewCmd = app.add_subcommand("webview", "Launch local webview server");
+            auto* webviewCmd = app.add_subcommand("webview", "Build and launch the native Drogon Backboard");
             webviewCmd->require_subcommand(0);
-            auto* serveCmd = webviewCmd->add_subcommand("serve", "Start the webview HTTP server");
+            auto& webview_dry_run = cli11_state.keep<bool>(false);
+            webviewCmd->add_flag("--dry-run", webview_dry_run, "Print the native host launch without starting it");
+
+            auto* serveCmd = webviewCmd->add_subcommand("serve", "Start the prebuilt Drogon webview HTTP server");
             auto& backlog_root_opt = cli11_state.keep<std::string>();
             auto& port_opt = cli11_state.keep<std::string>();
             serveCmd->add_option("--backlog-root", backlog_root_opt, "Backlog products root");
             serveCmd->add_option("--port", port_opt, "HTTP port (default: 8787)");
+
+            webviewCmd->callback([&, serveCmd]() {
+                if (serveCmd->parsed()) {
+                    return;
+                }
+
+                const auto repo_root = find_skill_repo_root_for_webview_invocation(InArgc, InArgv);
+                if (!repo_root) {
+                    throw std::runtime_error("Could not locate kano-agent-backlog-skill repo root for native Drogon webview launch");
+                }
+
+                std::cout << "Backboard launcher: native Drogon host\n";
+                std::cout << "Repo root: " << *repo_root << "\n";
+                std::cout << "Command: pixi run webview\n";
+                if (webview_dry_run) {
+                    std::cout << "Dry run: no build, server, or browser started.\n";
+                    return;
+                }
+
+                const int rc = run_pixi_task_in_dir(*repo_root, "webview");
+                if (rc != 0) {
+                    throw std::runtime_error("native Drogon webview launcher exited with error");
+                }
+            });
 
             serveCmd->callback([&]() {
                 // Find the webview binary relative to the CLI binary location

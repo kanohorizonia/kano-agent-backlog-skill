@@ -76,6 +76,42 @@ std::string read_text(const std::filesystem::path& path) {
     return buffer.str();
 }
 
+void expect_embedded_raw_literals_within_msvc_limit(const std::filesystem::path& path) {
+    constexpr std::size_t kMaxRawLiteralBytes = 16000;
+    const auto source = read_text(path);
+    std::size_t cursor = 0;
+    std::size_t literal_count = 0;
+
+    while (true) {
+        const auto raw_start = source.find("R\"", cursor);
+        if (raw_start == std::string::npos) {
+            break;
+        }
+        const auto content_start_marker = source.find('(', raw_start + 2);
+        expect(content_start_marker != std::string::npos,
+            "unterminated raw literal delimiter in " + path.string());
+        const auto delimiter = source.substr(
+            raw_start + 2,
+            content_start_marker - (raw_start + 2));
+        expect(delimiter.size() <= 16,
+            "invalid raw literal delimiter in " + path.string());
+
+        const auto close_token = ")" + delimiter + "\"";
+        const auto content_start = content_start_marker + 1;
+        const auto content_end = source.find(close_token, content_start);
+        expect(content_end != std::string::npos,
+            "unterminated raw literal in " + path.string());
+        const auto literal_bytes = content_end - content_start;
+        expect(literal_bytes <= kMaxRawLiteralBytes,
+            "embedded raw literal exceeds the 16000-byte MSVC guard in " +
+                path.string() + ": " + std::to_string(literal_bytes) + " bytes");
+        ++literal_count;
+        cursor = content_end + close_token.size();
+    }
+
+    expect(literal_count > 0, "no embedded raw literals found in " + path.string());
+}
+
 Json::Value read_json(const std::filesystem::path& path) {
     const auto text = read_text(path);
     Json::CharReaderBuilder builder;
@@ -330,6 +366,14 @@ int main(int argc, char** argv) {
             "KOB-TSK-0004",
         };
         const auto skill_contract = read_text(repo_root / "SKILL.md");
+        for (const auto& asset_path : std::vector<std::filesystem::path>{
+                 repo_root / "src/cpp/code/apps/kano_backlog_webview/assets/backboard_app_js.hpp",
+                 repo_root / "src/cpp/code/apps/kano_backlog_webview/assets/backboard_graph_inspector_js.hpp",
+                 repo_root / "src/cpp/code/apps/kano_backlog_webview/assets/backboard_css.hpp",
+             }) {
+            expect_embedded_raw_literals_within_msvc_limit(asset_path);
+        }
+
         expect(skill_contract.find("### Reactivation Review") != std::string::npos,
             "SKILL contract should define Reactivation Review");
         expect(skill_contract.find("### Stale Solution Check") != std::string::npos,
@@ -352,14 +396,29 @@ int main(int argc, char** argv) {
                 "SKILL contract should list initial reactivation dogfood item " + dogfood_id);
         }
 
+        const auto unique = std::chrono::steady_clock::now().time_since_epoch().count();
+
         expect(run_command(binary, {"--help"}) == 0, "help command failed");
         expect(run_command(binary, {"--version"}) == 0, "version command failed");
         expect(run_command(binary, {"gui", "--help"}) == 0, "gui help failed");
         expect(run_command(binary, {"webview", "--help"}) == 0, "webview help failed");
+        const auto webview_dry_run_output = std::filesystem::temp_directory_path() /
+            ("kano-backlog-webview-dry-run-" + std::to_string(unique) + ".txt");
+        expect_command_capture_success(
+            run_command_capture(binary, {"webview", "--dry-run"}, webview_dry_run_output),
+            webview_dry_run_output,
+            "webview dry-run failed");
+        const auto webview_dry_run_text = read_text(webview_dry_run_output);
+        expect(webview_dry_run_text.find("Backboard launcher: native Drogon host") != std::string::npos,
+            "webview dry-run should select the native Drogon host launcher");
+        expect(webview_dry_run_text.find("Command: pixi run webview") != std::string::npos,
+            "webview dry-run should delegate to the established all-in-one host task");
+        expect(webview_dry_run_text.find("no build, server, or browser started") != std::string::npos,
+            "webview dry-run should remain side-effect free");
+        std::filesystem::remove(webview_dry_run_output);
         expect(run_command(binary, {"admin", "items", "--help"}) == 0, "admin items help failed");
         expect(run_command(binary, {"admin", "validate", "--help"}) == 0, "admin validate help failed");
 
-        const auto unique = std::chrono::steady_clock::now().time_since_epoch().count();
         const auto temp_root = std::filesystem::temp_directory_path() / ("kano-backlog-cli-quick-smoke-" + std::to_string(unique));
         std::filesystem::create_directories(temp_root);
         const auto original_cwd = std::filesystem::current_path();

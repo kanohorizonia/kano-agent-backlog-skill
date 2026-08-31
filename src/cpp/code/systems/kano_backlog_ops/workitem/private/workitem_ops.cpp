@@ -1374,10 +1374,7 @@ CreateItemResult WorkitemOps::create_item(
     std::filesystem::path item_path = *item.file_path;
     {
         diagnostics::ScopedMutationSpan span("workitem.create_item.write_file", item.id);
-        std::filesystem::create_directories(item_path.parent_path());
-        std::ofstream ofs(item_path);
-        ofs << content;
-        ofs.close();
+        store.write_materialized(item_path, content);
     }
     if (shared_reservations) {
         shared_reservations->commit_reservation(prefix, type_code, reserved_number);
@@ -1621,10 +1618,10 @@ TrashItemResult WorkitemOps::trash_item(
     // 3. Update worklog before moving
     StateMachine::record_worklog(item, agent, "Trashed item: " + reason.value_or("duplicate or obsolete"));
     store.write(item);
+    index.index_item(item);
     
     // 4. Move file
-    std::filesystem::create_directories(trashed_path.parent_path());
-    std::filesystem::rename(source_path, trashed_path);
+    store.move_file(source_path, trashed_path);
     
     // 5. Remove from index (or update path if we still want to track it as trashed)
     // For now we'll remove it to be clean, or we could have a 'Trashed' state.

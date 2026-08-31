@@ -2,10 +2,12 @@
 
 #include "kano/backlog_core/models/models.hpp"
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <vector>
 #include <optional>
 #include <string>
+#include <string_view>
 
 namespace kano::backlog_core {
 
@@ -14,6 +16,15 @@ struct ItemIdLookupDiagnostics {
     std::size_t candidate_files_read = 0;
     std::size_t matches = 0;
     bool canonical_filename_filter = true;
+};
+
+struct CanonicalWriteRevision {
+    std::string current;
+    std::optional<std::string> previous;
+    std::string operation = "unbound";
+    std::optional<std::string> source_ref_hash;
+    std::uint64_t content_size = 0;
+    std::optional<std::string> content_hash;
 };
 
 class CanonicalStore {
@@ -47,6 +58,24 @@ public:
      * Throws ValidationError or WriteError.
      */
     void write(BacklogItem& item) const;
+
+    CanonicalWriteRevision write_materialized(
+        const std::filesystem::path& item_path,
+        std::string_view content
+    ) const;
+
+    CanonicalWriteRevision remove_file(const std::filesystem::path& item_path) const;
+
+    CanonicalWriteRevision move_file(
+        const std::filesystem::path& source_path,
+        const std::filesystem::path& destination_path
+    ) const;
+
+    CanonicalWriteRevision read_write_revision() const;
+
+    CanonicalWriteRevision begin_write() const;
+
+    CanonicalWriteRevision reset_write_revision() const;
 
     /**
      * Create a new item with auto-generated ID, UID, and file path.

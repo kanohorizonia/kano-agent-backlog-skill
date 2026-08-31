@@ -5,17 +5,272 @@
 #include "kano/backlog_core/models/errors.hpp"
 #include <algorithm>
 #include <array>
-#include <fstream>
+#include <charconv>
 #include <cctype>
-#include <regex>
 #include <chrono>
-#include <random>
+#include <fstream>
 #include <iomanip>
+#include <random>
+#include <regex>
 #include <sstream>
+#include <string_view>
+#include <system_error>
+#include <thread>
+
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <Windows.h>
+#else
+#include <fcntl.h>
+#include <sys/file.h>
+#include <unistd.h>
+#endif
 
 namespace kano::backlog_core {
 
 namespace {
+
+constexpr std::string_view kCanonicalWriteRevisionSchema =
+    "kob-canonical-write-revision-v2";
+constexpr std::uintmax_t kMaximumCanonicalWriteRevisionBytes = 512;
+constexpr std::uint64_t kFNVOffset = 14695981039346656037ULL;
+constexpr std::uint64_t kFNVPrime = 1099511628211ULL;
+constexpr std::uint64_t kMaximumCanonicalItemBytes = 64ULL * 1024ULL * 1024ULL;
+
+std::filesystem::path canonical_write_revision_path(
+    const std::filesystem::path& product_root
+) {
+    return product_root / ".cache" / "canonical-write-revision-v1";
+}
+
+std::filesystem::path canonical_write_revision_lock_path(
+    const std::filesystem::path& product_root
+) {
+    return product_root / ".cache" / "canonical-write-revision-v1.lock";
+}
+
+class RevisionLock {
+public:
+    explicit RevisionLock(const std::filesystem::path& path) {
+#ifdef _WIN32
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (handle_ == INVALID_HANDLE_VALUE) {
+            handle_ = CreateFileW(
+                path.c_str(),
+                GENERIC_READ | GENERIC_WRITE,
+                0,
+                nullptr,
+                OPEN_ALWAYS,
+                FILE_ATTRIBUTE_NORMAL,
+                nullptr);
+            if (handle_ != INVALID_HANDLE_VALUE) {
+                break;
+            }
+            const auto error = GetLastError();
+            if (error != ERROR_SHARING_VIOLATION && error != ERROR_LOCK_VIOLATION) {
+                throw WriteError("canonical_write_revision_lock_failed");
+            }
+            if (std::chrono::steady_clock::now() >= deadline) {
+                throw WriteError("canonical_write_revision_lock_timeout");
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+#else
+        descriptor_ = ::open(path.c_str(), O_CREAT | O_RDWR, 0600);
+        if (descriptor_ < 0 || ::flock(descriptor_, LOCK_EX) != 0) {
+            if (descriptor_ >= 0) {
+                ::close(descriptor_);
+                descriptor_ = -1;
+            }
+            throw WriteError("canonical_write_revision_lock_failed");
+        }
+#endif
+    }
+
+    ~RevisionLock() {
+#ifdef _WIN32
+        if (handle_ != INVALID_HANDLE_VALUE) {
+            CloseHandle(handle_);
+        }
+#else
+        if (descriptor_ >= 0) {
+            ::flock(descriptor_, LOCK_UN);
+            ::close(descriptor_);
+        }
+#endif
+    }
+
+    RevisionLock(const RevisionLock&) = delete;
+    RevisionLock& operator=(const RevisionLock&) = delete;
+
+private:
+#ifdef _WIN32
+    HANDLE handle_ = INVALID_HANDLE_VALUE;
+#else
+    int descriptor_ = -1;
+#endif
+};
+
+bool valid_write_revision_token(const std::string& value) {
+    return !value.empty() && value != "-" && value.size() <= 64 &&
+        std::all_of(value.begin(), value.end(), [](unsigned char ch) {
+            return std::isalnum(ch) || ch == '-';
+        });
+}
+
+bool valid_hash_token(const std::string& value) {
+    if (value.size() != 24 || !value.starts_with("fnv1a64:")) {
+        return false;
+    }
+    return std::all_of(value.begin() + 8, value.end(), [](const unsigned char ch) {
+        return std::isxdigit(ch) != 0;
+    });
+}
+
+std::string hash_content(const std::string_view content) {
+    std::uint64_t hash = kFNVOffset;
+    for (const unsigned char ch : content) {
+        hash ^= static_cast<std::uint64_t>(ch);
+        hash *= kFNVPrime;
+    }
+    std::ostringstream output;
+    output << "fnv1a64:" << std::hex << std::setw(16) << std::setfill('0') << hash;
+    return output.str();
+}
+
+std::optional<std::uint64_t> parse_uint64(const std::string_view value) {
+    std::uint64_t result = 0;
+    const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), result);
+    if (error != std::errc{} || end != value.data() + value.size()) {
+        return std::nullopt;
+    }
+    return result;
+}
+
+std::string source_ref_hash(
+    const std::filesystem::path& product_root,
+    const std::filesystem::path& source
+) {
+    std::error_code error;
+    const auto absolute_root = std::filesystem::absolute(product_root, error).lexically_normal();
+    if (error) {
+        throw WriteError("canonical_write_receipt_source_invalid");
+    }
+    const auto absolute_source = std::filesystem::absolute(source, error).lexically_normal();
+    if (error) {
+        throw WriteError("canonical_write_receipt_source_invalid");
+    }
+    const auto relative = absolute_source.lexically_relative(absolute_root).lexically_normal();
+    const auto value = relative.generic_string();
+    if (relative.empty() || relative.is_absolute() || value == ".."
+        || value.starts_with("../") || value.find("/../") != std::string::npos) {
+        throw WriteError("canonical_write_receipt_source_invalid");
+    }
+    return hash_content(value);
+}
+
+std::string read_exact_bytes(
+    const std::filesystem::path& path,
+    const std::uint64_t maximum_bytes
+) {
+    std::error_code error;
+    const auto size = std::filesystem::file_size(path, error);
+    if (error || size > maximum_bytes) {
+        throw WriteError("canonical_write_readback_failed");
+    }
+    std::ifstream input(path, std::ios::binary);
+    if (!input.is_open()) {
+        throw WriteError("canonical_write_readback_failed");
+    }
+    std::string result(static_cast<std::size_t>(size), '\0');
+    if (!result.empty()) {
+        input.read(result.data(), static_cast<std::streamsize>(result.size()));
+    }
+    if (input.bad() || static_cast<std::size_t>(input.gcount()) != result.size()) {
+        throw WriteError("canonical_write_readback_failed");
+    }
+    return result;
+}
+
+std::string serialize_write_revision(const CanonicalWriteRevision& revision) {
+    const auto source_hash = revision.source_ref_hash.value_or("-");
+    const auto content_hash = revision.content_hash.value_or("-");
+    std::ostringstream output;
+    output << kCanonicalWriteRevisionSchema << '\n'
+           << revision.current << '\n'
+           << revision.previous.value_or("-") << '\n'
+           << revision.operation << '\n'
+           << source_hash << '\n'
+           << revision.content_size << '\n'
+           << content_hash << '\n';
+    return output.str();
+}
+
+void replace_file_atomically(
+    const std::filesystem::path& temporary,
+    const std::filesystem::path& destination
+) {
+#ifdef _WIN32
+    if (!MoveFileExW(
+            temporary.c_str(),
+            destination.c_str(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        throw WriteError("canonical_write_revision_replace_failed");
+    }
+#else
+    std::error_code error;
+    std::filesystem::rename(temporary, destination, error);
+    if (error) {
+        throw WriteError("canonical_write_revision_replace_failed");
+    }
+#endif
+}
+
+void write_canonical_write_revision(
+    const std::filesystem::path& product_root,
+    const CanonicalWriteRevision& revision
+) {
+    const auto path = canonical_write_revision_path(product_root);
+    std::error_code ec;
+    std::filesystem::create_directories(path.parent_path(), ec);
+    if (ec) {
+        throw WriteError("canonical_write_revision_parent_create_failed");
+    }
+    const auto serialized = serialize_write_revision(revision);
+    if (serialized.size() > kMaximumCanonicalWriteRevisionBytes) {
+        throw WriteError("canonical_write_revision_invalid");
+    }
+    auto temporary = path;
+    temporary += ".tmp-" + CanonicalStore::generate_uuid_v7();
+    std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
+    if (!output.is_open()) {
+        throw WriteError("canonical_write_revision_open_failed");
+    }
+    output.write(serialized.data(), static_cast<std::streamsize>(serialized.size()));
+    output.flush();
+    if (!output.good()) {
+        throw WriteError("canonical_write_revision_write_failed");
+    }
+    output.close();
+    if (output.fail()) {
+        throw WriteError("canonical_write_revision_close_failed");
+    }
+    try {
+        if (read_exact_bytes(temporary, kMaximumCanonicalWriteRevisionBytes) != serialized) {
+            throw WriteError("canonical_write_revision_readback_failed");
+        }
+        replace_file_atomically(temporary, path);
+    } catch (...) {
+        std::error_code cleanup_error;
+        std::filesystem::remove(temporary, cleanup_error);
+        throw;
+    }
+}
 
 bool is_blank(const std::string& value) {
     return std::all_of(
@@ -326,6 +581,256 @@ BacklogItem item_from_context(
 CanonicalStore::CanonicalStore(const std::filesystem::path& product_root)
     : product_root_(product_root), items_root_(product_root / "items") {}
 
+CanonicalWriteRevision CanonicalStore::read_write_revision() const {
+    const auto path = canonical_write_revision_path(product_root_);
+    std::error_code ec;
+    if (!std::filesystem::exists(path, ec) || ec) {
+        throw WriteError("canonical_write_revision_missing");
+    }
+    const auto size = std::filesystem::file_size(path, ec);
+    if (ec || size == 0 || size > kMaximumCanonicalWriteRevisionBytes) {
+        throw WriteError("canonical_write_revision_invalid");
+    }
+    std::ifstream input(path, std::ios::binary);
+    if (!input.is_open()) {
+        throw WriteError("canonical_write_revision_read_failed");
+    }
+    std::string schema;
+    std::string current;
+    std::string previous;
+    std::string operation;
+    std::string source_hash;
+    std::string content_size;
+    std::string content_hash;
+    std::string trailing;
+    if (!std::getline(input, schema) ||
+        !std::getline(input, current) ||
+        !std::getline(input, previous) ||
+        !std::getline(input, operation) ||
+        !std::getline(input, source_hash) ||
+        !std::getline(input, content_size) ||
+        !std::getline(input, content_hash) ||
+        (std::getline(input, trailing) && !trailing.empty()) ||
+        schema != kCanonicalWriteRevisionSchema ||
+        !valid_write_revision_token(current) ||
+        (previous != "-" && !valid_write_revision_token(previous))) {
+        throw WriteError("canonical_write_revision_invalid");
+    }
+    const auto parsed_size = parse_uint64(content_size);
+    const bool bound_write = operation == "write" && valid_hash_token(source_hash)
+        && parsed_size && *parsed_size <= kMaximumCanonicalItemBytes
+        && valid_hash_token(content_hash);
+    const bool bound_delete = operation == "delete" && valid_hash_token(source_hash)
+        && parsed_size && *parsed_size == 0 && content_hash == "-";
+    const bool unbound = (operation == "unbound" || operation == "reset")
+        && source_hash == "-" && parsed_size && *parsed_size == 0 && content_hash == "-";
+    if (!bound_write && !bound_delete && !unbound) {
+        throw WriteError("canonical_write_revision_invalid");
+    }
+    return CanonicalWriteRevision{
+        current,
+        previous == "-" ? std::nullopt : std::optional<std::string>(previous),
+        operation,
+        source_hash == "-" ? std::nullopt : std::optional<std::string>(source_hash),
+        *parsed_size,
+        content_hash == "-" ? std::nullopt : std::optional<std::string>(content_hash)};
+}
+
+CanonicalWriteRevision CanonicalStore::begin_write() const {
+    std::error_code parent_error;
+    std::filesystem::create_directories(
+        canonical_write_revision_path(product_root_).parent_path(), parent_error);
+    if (parent_error) {
+        throw WriteError("canonical_write_revision_parent_create_failed");
+    }
+    RevisionLock lock(canonical_write_revision_lock_path(product_root_));
+    std::optional<std::string> previous;
+    const auto path = canonical_write_revision_path(product_root_);
+    std::error_code ec;
+    const bool exists = std::filesystem::exists(path, ec);
+    if (ec) {
+        throw WriteError("canonical_write_revision_stat_failed");
+    }
+    if (exists) {
+        previous = read_write_revision().current;
+    }
+    CanonicalWriteRevision revision{
+        generate_uuid_v7(), previous, "unbound", std::nullopt, 0, std::nullopt};
+    write_canonical_write_revision(product_root_, revision);
+    return revision;
+}
+
+CanonicalWriteRevision CanonicalStore::reset_write_revision() const {
+    std::error_code parent_error;
+    std::filesystem::create_directories(
+        canonical_write_revision_path(product_root_).parent_path(), parent_error);
+    if (parent_error) {
+        throw WriteError("canonical_write_revision_parent_create_failed");
+    }
+    RevisionLock lock(canonical_write_revision_lock_path(product_root_));
+    CanonicalWriteRevision revision{
+        generate_uuid_v7(), std::nullopt, "reset", std::nullopt, 0, std::nullopt};
+    write_canonical_write_revision(product_root_, revision);
+    return revision;
+}
+
+CanonicalWriteRevision CanonicalStore::write_materialized(
+    const std::filesystem::path& item_path,
+    const std::string_view content
+) const {
+    if (!is_inside_path(item_path, product_root_)) {
+        throw WriteError("canonical_write_source_outside_product");
+    }
+    if (content.size() > kMaximumCanonicalItemBytes) {
+        throw WriteError("canonical_write_source_too_large");
+    }
+
+    const auto receipt_source_hash = source_ref_hash(product_root_, item_path);
+    std::error_code error;
+    std::filesystem::create_directories(
+        canonical_write_revision_path(product_root_).parent_path(), error);
+    if (error) {
+        throw WriteError("canonical_write_revision_parent_create_failed");
+    }
+    RevisionLock lock(canonical_write_revision_lock_path(product_root_));
+
+    std::optional<std::string> previous;
+    const auto revision_path = canonical_write_revision_path(product_root_);
+    const bool revision_exists = std::filesystem::exists(revision_path, error);
+    if (error) {
+        throw WriteError("canonical_write_revision_stat_failed");
+    }
+    if (revision_exists) {
+        previous = read_write_revision().current;
+    }
+
+    std::filesystem::create_directories(item_path.parent_path(), error);
+    if (error) {
+        throw WriteError("canonical_write_parent_create_failed");
+    }
+    std::ofstream output(item_path, std::ios::binary | std::ios::trunc);
+    if (!output.is_open()) {
+        throw WriteError("canonical_write_open_failed");
+    }
+    output.write(content.data(), static_cast<std::streamsize>(content.size()));
+    output.flush();
+    if (!output.good()) {
+        throw WriteError("canonical_write_failed");
+    }
+    output.close();
+    if (output.fail()) {
+        throw WriteError("canonical_write_close_failed");
+    }
+    if (read_exact_bytes(item_path, kMaximumCanonicalItemBytes) != content) {
+        throw WriteError("canonical_write_readback_mismatch");
+    }
+
+    CanonicalWriteRevision revision{
+        generate_uuid_v7(),
+        previous,
+        "write",
+        receipt_source_hash,
+        static_cast<std::uint64_t>(content.size()),
+        hash_content(content),
+    };
+    write_canonical_write_revision(product_root_, revision);
+    return revision;
+}
+
+CanonicalWriteRevision CanonicalStore::remove_file(
+    const std::filesystem::path& item_path
+) const {
+    if (!is_inside_path(item_path, product_root_)) {
+        throw WriteError("canonical_delete_source_outside_product");
+    }
+    const auto receipt_source_hash = source_ref_hash(product_root_, item_path);
+    std::error_code error;
+    std::filesystem::create_directories(
+        canonical_write_revision_path(product_root_).parent_path(), error);
+    if (error) {
+        throw WriteError("canonical_write_revision_parent_create_failed");
+    }
+    RevisionLock lock(canonical_write_revision_lock_path(product_root_));
+
+    std::optional<std::string> previous;
+    const auto revision_path = canonical_write_revision_path(product_root_);
+    const bool revision_exists = std::filesystem::exists(revision_path, error);
+    if (error) {
+        throw WriteError("canonical_write_revision_stat_failed");
+    }
+    if (revision_exists) {
+        previous = read_write_revision().current;
+    }
+    if (!std::filesystem::remove(item_path, error) || error) {
+        throw WriteError("canonical_delete_failed");
+    }
+    if (std::filesystem::exists(item_path, error) || error) {
+        throw WriteError("canonical_delete_readback_failed");
+    }
+
+    CanonicalWriteRevision revision{
+        generate_uuid_v7(),
+        previous,
+        "delete",
+        receipt_source_hash,
+        0,
+        std::nullopt,
+    };
+    write_canonical_write_revision(product_root_, revision);
+    return revision;
+}
+
+CanonicalWriteRevision CanonicalStore::move_file(
+    const std::filesystem::path& source_path,
+    const std::filesystem::path& destination_path
+) const {
+    if (!is_inside_path(source_path, product_root_)
+        || !is_inside_path(destination_path, product_root_)) {
+        throw WriteError("canonical_move_source_outside_product");
+    }
+    const auto receipt_source_hash = source_ref_hash(product_root_, source_path);
+    std::error_code error;
+    std::filesystem::create_directories(
+        canonical_write_revision_path(product_root_).parent_path(), error);
+    if (error) {
+        throw WriteError("canonical_write_revision_parent_create_failed");
+    }
+    RevisionLock lock(canonical_write_revision_lock_path(product_root_));
+
+    std::optional<std::string> previous;
+    const auto revision_path = canonical_write_revision_path(product_root_);
+    const bool revision_exists = std::filesystem::exists(revision_path, error);
+    if (error) {
+        throw WriteError("canonical_write_revision_stat_failed");
+    }
+    if (revision_exists) {
+        previous = read_write_revision().current;
+    }
+    std::filesystem::create_directories(destination_path.parent_path(), error);
+    if (error) {
+        throw WriteError("canonical_move_parent_create_failed");
+    }
+    std::filesystem::rename(source_path, destination_path, error);
+    if (error) {
+        throw WriteError("canonical_move_failed");
+    }
+    if (std::filesystem::exists(source_path, error) || error
+        || !std::filesystem::exists(destination_path, error) || error) {
+        throw WriteError("canonical_move_readback_failed");
+    }
+
+    CanonicalWriteRevision revision{
+        generate_uuid_v7(),
+        previous,
+        "delete",
+        receipt_source_hash,
+        0,
+        std::nullopt,
+    };
+    write_canonical_write_revision(product_root_, revision);
+    return revision;
+}
+
 BacklogItem CanonicalStore::read(const std::filesystem::path& item_path) const {
     diagnostics::ScopedMutationSpan span("canonical_store.read", item_path.filename().string());
     if (!is_inside_path(item_path, product_root_)) {
@@ -556,12 +1061,7 @@ void CanonicalStore::write(BacklogItem& item) const {
     ctx.metadata = metadata;
     ctx.body = Frontmatter::serialize_body_sections(sections);
 
-    std::filesystem::create_directories(item.file_path->parent_path());
-    std::ofstream f(*item.file_path);
-    if (!f.is_open()) {
-        throw WriteError("Failed to open " + item.file_path->string() + " for writing");
-    }
-    f << Frontmatter::serialize(ctx);
+    write_materialized(*item.file_path, Frontmatter::serialize(ctx));
 }
 
 BacklogItem CanonicalStore::create(const std::string& prefix, ItemType type, const std::string& title, int next_number, const std::optional<std::string>& parent) const {

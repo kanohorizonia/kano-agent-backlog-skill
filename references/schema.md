@@ -353,6 +353,22 @@ They do not implement authentication, RBAC enforcement, approval workflows,
 permission matrix behavior, multi-tenant membership, enterprise UI, or Ark
 Console coupling.
 
+## KOA metadata-index consumer contract
+
+KOA backlog search and status adapters use the KOB-owned schema in
+[koa-metadata-index-consumer.schema.json](koa-metadata-index-consumer.schema.json)
+and the executable cases in
+[koa-metadata-index-consumer.fixture.json](koa-metadata-index-consumer.fixture.json).
+
+The contract freezes public KOB query, snapshot, and status versions; request
+bounds; deterministic ordering; canonical identity projection; freshness and
+fallback diagnostics; and fail-closed version handling. Adapter output excludes
+database, source path, index path, and change-proof identity fields.
+
+See
+[KOA Metadata Index Consumer Contract](../docs/design/koa-metadata-index-consumer-contract.md)
+for ownership and upgrade rules.
+
 ## Parent reference format (collision-safe)
 
 - Same-product parent: use the display ID in `parent` (e.g., `KABSD-FTR-0002`).

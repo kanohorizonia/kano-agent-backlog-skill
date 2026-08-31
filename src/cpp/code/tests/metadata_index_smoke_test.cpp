@@ -4,13 +4,17 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <iostream>
 #include <map>
 #include <optional>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
+
+#include <json/json.h>
 
 #include "kano/backlog_core/frontmatter/canonical_store.hpp"
 #include "kano/backlog_core/models/models.hpp"
@@ -52,6 +56,730 @@ std::string read_text(const std::filesystem::path& path) {
     std::ostringstream buffer;
     buffer << input.rdbuf();
     return buffer.str();
+}
+
+std::filesystem::path repository_root_from_source() {
+    auto candidate = std::filesystem::path(__FILE__).parent_path();
+    for (int depth = 0; depth < 8; ++depth) {
+        if (std::filesystem::exists(candidate / "pixi.toml") &&
+            std::filesystem::exists(candidate / "references")) {
+            return candidate;
+        }
+        candidate = candidate.parent_path();
+    }
+    throw std::runtime_error("failed to resolve repository root for contract fixtures");
+}
+
+Json::Value parse_json_fixture(
+    const std::filesystem::path& path,
+    const std::string& label
+) {
+    Json::CharReaderBuilder builder;
+    builder["collectComments"] = false;
+    Json::Value root;
+    std::string errors;
+    std::istringstream input(read_text(path));
+    if (!Json::parseFromStream(builder, input, &root, &errors)) {
+        throw std::runtime_error("failed to parse " + label + ": " + errors);
+    }
+    return root;
+}
+
+void expect_json_subset(
+    const Json::Value& expected,
+    const Json::Value& actual,
+    const std::string& context
+) {
+    if (expected.isObject()) {
+        expect(actual.isObject(), context + " must be an object");
+        for (const auto& name : expected.getMemberNames()) {
+            expect(actual.isMember(name), context + " is missing " + name);
+            expect_json_subset(expected[name], actual[name], context + "." + name);
+        }
+        return;
+    }
+    if (expected.isArray()) {
+        expect(actual.isArray() && actual.size() == expected.size(),
+            context + " must preserve the expected array shape");
+        for (Json::ArrayIndex index = 0; index < expected.size(); ++index) {
+            expect_json_subset(
+                expected[index], actual[index], context + "[" + std::to_string(index) + "]");
+        }
+        return;
+    }
+    if (expected.isNumeric() && actual.isNumeric()) {
+        expect(std::abs(actual.asDouble() - expected.asDouble()) < 0.000001,
+            context + " must preserve the expected numeric value");
+        return;
+    }
+    expect(actual == expected, context + " must preserve the expected value");
+}
+
+void expect_no_forbidden_consumer_fields(
+    const Json::Value& value,
+    const std::string& context
+) {
+    static const std::set<std::string> forbidden{
+        "backlog_root",
+        "index_ref",
+        "journal_id",
+        "proof_root_file_id",
+        "proof_root_volume_serial",
+        "source_hash",
+        "source_ref",
+        "sqlite",
+    };
+    if (value.isObject()) {
+        for (const auto& name : value.getMemberNames()) {
+            expect(!forbidden.contains(name),
+                context + " must not expose forbidden field " + name);
+            expect_no_forbidden_consumer_fields(value[name], context + "." + name);
+        }
+    } else if (value.isArray()) {
+        for (Json::ArrayIndex index = 0; index < value.size(); ++index) {
+            expect_no_forbidden_consumer_fields(
+                value[index], context + "[" + std::to_string(index) + "]");
+        }
+    }
+}
+
+bool has_members(
+    const Json::Value& value,
+    const std::initializer_list<const char*> names
+) {
+    return value.isObject() && std::all_of(
+        names.begin(), names.end(),
+        [&](const char* name) { return value.isMember(name); });
+}
+
+bool has_only_members(
+    const Json::Value& value,
+    const std::initializer_list<const char*> names
+) {
+    if (!value.isObject()) {
+        return false;
+    }
+    const auto member_names = value.getMemberNames();
+    return std::all_of(
+        member_names.begin(), member_names.end(),
+        [&](const std::string& name) {
+            return std::any_of(
+                names.begin(), names.end(),
+                [&](const char* allowed) { return name == allowed; });
+        });
+}
+
+bool is_bounded_string(
+    const Json::Value& value,
+    const std::size_t maximum,
+    const bool allow_empty = true
+) {
+    return value.isString() && value.asString().size() <= maximum &&
+        (allow_empty || !value.asString().empty());
+}
+
+bool is_nullable_bounded_string(
+    const Json::Value& value,
+    const std::size_t maximum
+) {
+    return value.isNull() || is_bounded_string(value, maximum);
+}
+
+bool is_bounded_unsigned(
+    const Json::Value& value,
+    const Json::UInt64 maximum
+) {
+    return value.isUInt64() && value.asUInt64() <= maximum;
+}
+
+bool is_nonnegative_number(const Json::Value& value) {
+    return value.isNumeric() && std::isfinite(value.asDouble()) &&
+        value.asDouble() >= 0.0;
+}
+
+bool is_one_of_string(
+    const Json::Value& value,
+    const std::initializer_list<const char*> allowed
+) {
+    return value.isString() && std::any_of(
+        allowed.begin(), allowed.end(),
+        [&](const char* candidate) { return value.asString() == candidate; });
+}
+
+bool is_valid_query_diagnostics(const Json::Value& diagnostics) {
+    return has_members(diagnostics, {
+               "index_used", "index_status", "index_revision",
+               "canonical_revision", "product_revision", "fallback_scan",
+               "scanned_count", "matched_count", "revision_check_ms",
+               "elapsed_ms", "stale_reason", "recovery"}) &&
+        has_only_members(diagnostics, {
+            "index_used", "index_status", "index_revision",
+            "canonical_revision", "product_revision", "fallback_scan",
+            "scanned_count", "matched_count", "revision_check_ms",
+            "elapsed_ms", "stale_reason", "recovery"}) &&
+        diagnostics["index_used"].isBool() &&
+        is_one_of_string(
+            diagnostics["index_status"], {"ready", "stale", "missing", "corrupt"}) &&
+        is_bounded_string(diagnostics["index_revision"], 96) &&
+        is_bounded_string(diagnostics["canonical_revision"], 96) &&
+        is_bounded_string(diagnostics["product_revision"], 96) &&
+        diagnostics["fallback_scan"].isBool() &&
+        is_bounded_unsigned(diagnostics["scanned_count"], 20000) &&
+        is_bounded_unsigned(diagnostics["matched_count"], 20000) &&
+        is_nonnegative_number(diagnostics["revision_check_ms"]) &&
+        is_nonnegative_number(diagnostics["elapsed_ms"]) &&
+        is_nullable_bounded_string(diagnostics["stale_reason"], 128) &&
+        is_bounded_string(diagnostics["recovery"], 128) &&
+        (diagnostics["index_status"].asString() == "ready"
+            ? diagnostics["index_used"].asBool() &&
+                !diagnostics["fallback_scan"].asBool() &&
+                diagnostics["stale_reason"].isNull()
+            : !diagnostics["index_used"].asBool() &&
+                diagnostics["fallback_scan"].asBool() &&
+                is_bounded_string(diagnostics["stale_reason"], 128, false));
+}
+
+bool is_valid_metadata_item(
+    const Json::Value& item,
+    const std::string& product
+) {
+    if (!has_members(item, {
+            "id", "uid", "product", "type", "state",
+            "title", "parent", "updated"}) ||
+        !has_only_members(item, {
+            "id", "uid", "product", "type", "state", "title", "priority",
+            "slug", "parent", "updated", "source_ref", "source_hash",
+            "estimated_tokens"})) {
+        return false;
+    }
+    return is_bounded_string(item["id"], 160, false) &&
+        is_bounded_string(item["uid"], 64, false) &&
+        is_bounded_string(item["product"], 128, false) &&
+        item["product"].asString() == product &&
+        is_bounded_string(item["type"], 32) &&
+        is_bounded_string(item["state"], 32) &&
+        is_bounded_string(item["title"], 512) &&
+        is_nullable_bounded_string(item["parent"], 160) &&
+        is_bounded_string(item["updated"], 64) &&
+        (!item.isMember("priority") ||
+         is_nullable_bounded_string(item["priority"], 32)) &&
+        (!item.isMember("slug") || is_bounded_string(item["slug"], 512)) &&
+        (!item.isMember("source_ref") ||
+         is_bounded_string(item["source_ref"], 4096)) &&
+        (!item.isMember("source_hash") ||
+         is_bounded_string(item["source_hash"], 128)) &&
+        (!item.isMember("estimated_tokens") ||
+         item["estimated_tokens"].isUInt64());
+}
+
+bool is_valid_status_entry(
+    const Json::Value& status,
+    const std::string& product
+) {
+    if (!has_members(status, {
+            "product", "status", "item_count", "index_revision",
+            "product_revision", "requested_revision", "unchanged",
+            "fallback_scan", "scanned_count", "elapsed_ms", "stale_reason"}) ||
+        !has_only_members(status, {
+            "product", "index_ref", "exists", "status", "item_count",
+            "size_bytes", "schema_version", "snapshot_schema_version",
+            "index_revision", "canonical_revision", "product_revision",
+            "requested_revision", "unchanged", "fallback_scan", "scanned_count",
+            "proof_records_read", "proof_bytes_read", "proof_usn_span",
+            "proof_checkpoint_required", "proof_checkpoint_persisted",
+            "revision_check_ms", "elapsed_ms", "stale_reason", "recovery"})) {
+        return false;
+    }
+    return is_bounded_string(status["product"], 128, false) &&
+        status["product"].asString() == product &&
+        is_one_of_string(
+            status["status"], {"ready", "unchanged", "stale", "missing", "corrupt"}) &&
+        is_bounded_unsigned(status["item_count"], 20000) &&
+        is_bounded_string(status["index_revision"], 96) &&
+        is_bounded_string(status["product_revision"], 96) &&
+        is_nullable_bounded_string(status["requested_revision"], 96) &&
+        status["unchanged"].isBool() && status["fallback_scan"].isBool() &&
+        is_bounded_unsigned(status["scanned_count"], 20000) &&
+        is_nonnegative_number(status["elapsed_ms"]) &&
+        is_nullable_bounded_string(status["stale_reason"], 128) &&
+        (!status.isMember("index_ref") || is_bounded_string(status["index_ref"], 128)) &&
+        (!status.isMember("exists") || status["exists"].isBool()) &&
+        (!status.isMember("size_bytes") || status["size_bytes"].isUInt64()) &&
+        (!status.isMember("schema_version") || status["schema_version"].isUInt64()) &&
+        (!status.isMember("snapshot_schema_version") ||
+         status["snapshot_schema_version"].isUInt64()) &&
+        (!status.isMember("canonical_revision") ||
+         is_bounded_string(status["canonical_revision"], 96)) &&
+        (!status.isMember("proof_records_read") ||
+         status["proof_records_read"].isUInt64()) &&
+        (!status.isMember("proof_bytes_read") || status["proof_bytes_read"].isUInt64()) &&
+        (!status.isMember("proof_usn_span") || status["proof_usn_span"].isUInt64()) &&
+        (!status.isMember("proof_checkpoint_required") ||
+         status["proof_checkpoint_required"].isBool()) &&
+        (!status.isMember("proof_checkpoint_persisted") ||
+         status["proof_checkpoint_persisted"].isBool()) &&
+        (!status.isMember("revision_check_ms") ||
+         is_nonnegative_number(status["revision_check_ms"])) &&
+        (!status.isMember("recovery") || is_bounded_string(status["recovery"], 128)) &&
+        !status["fallback_scan"].asBool() &&
+        (status["status"].asString() == "unchanged" ?
+            status["unchanged"].asBool() &&
+                status["scanned_count"].asUInt64() == 0 &&
+                is_bounded_string(status["requested_revision"], 96, false) &&
+                status["requested_revision"].asString() ==
+                    status["product_revision"].asString() &&
+                status["stale_reason"].isNull() :
+         status["status"].asString() == "ready" ?
+            !status["unchanged"].asBool() && status["stale_reason"].isNull() :
+            !status["unchanged"].asBool() &&
+                is_bounded_string(status["stale_reason"], 128, false));
+}
+
+bool is_valid_consumer_item(const Json::Value& item) {
+    return has_members(item, {
+               "id", "uid", "product", "type", "state",
+               "title", "parent", "updated"}) &&
+        has_only_members(item, {
+            "id", "uid", "product", "type", "state", "title", "parent", "updated"}) &&
+        is_bounded_string(item["id"], 160, false) &&
+        is_bounded_string(item["uid"], 64, false) &&
+        is_bounded_string(item["product"], 128, false) &&
+        is_bounded_string(item["type"], 32) &&
+        is_bounded_string(item["state"], 32) &&
+        is_bounded_string(item["title"], 512) &&
+        is_nullable_bounded_string(item["parent"], 160) &&
+        is_bounded_string(item["updated"], 64);
+}
+
+bool is_valid_consumer_response(const Json::Value& response) {
+    if (!has_members(response, {
+            "schema", "ok", "status", "operation", "product", "error_code",
+            "items", "matched_count", "returned_count", "scanned_count",
+            "elapsed_ms", "cache_status", "fallback_scan", "unchanged"}) ||
+        !has_only_members(response, {
+            "schema", "ok", "status", "operation", "product", "error_code",
+            "items", "matched_count", "returned_count", "scanned_count",
+            "elapsed_ms", "cache_status", "fallback_scan", "unchanged",
+            "product_revision", "index_revision", "requested_revision", "stale_reason"}) ||
+        !response["schema"].isString() ||
+        response["schema"].asString() != "kob.koa-metadata-index-adapter.v1" ||
+        !response["ok"].isBool() ||
+        !is_one_of_string(response["status"], {
+            "ok", "error", "ready", "unchanged", "stale", "missing", "corrupt"}) ||
+        !is_bounded_string(response["operation"], 32) ||
+        !is_bounded_string(response["product"], 128) ||
+        !is_nullable_bounded_string(response["error_code"], 64) ||
+        !response["items"].isArray() || response["items"].size() > 20000 ||
+        !is_bounded_unsigned(response["matched_count"], 20000) ||
+        !is_bounded_unsigned(response["returned_count"], 20000) ||
+        !is_bounded_unsigned(response["scanned_count"], 20000) ||
+        !is_nonnegative_number(response["elapsed_ms"]) ||
+        !is_one_of_string(response["cache_status"], {
+            "ready", "unchanged", "stale", "missing", "corrupt", "unavailable"}) ||
+        !response["fallback_scan"].isBool() || !response["unchanged"].isBool() ||
+        (response.isMember("product_revision") &&
+         !is_bounded_string(response["product_revision"], 96)) ||
+        (response.isMember("index_revision") &&
+         !is_bounded_string(response["index_revision"], 96)) ||
+        (response.isMember("requested_revision") &&
+         !is_nullable_bounded_string(response["requested_revision"], 96)) ||
+        (response.isMember("stale_reason") &&
+         !is_nullable_bounded_string(response["stale_reason"], 128))) {
+        return false;
+    }
+    return std::all_of(
+        response["items"].begin(), response["items"].end(),
+        [](const Json::Value& item) { return is_valid_consumer_item(item); });
+}
+
+Json::Value consumer_error(
+    const Json::Value& request,
+    const std::string& code
+) {
+    Json::Value response(Json::objectValue);
+    response["schema"] = "kob.koa-metadata-index-adapter.v1";
+    response["ok"] = false;
+    response["status"] = "error";
+    response["operation"] =
+        request.isObject() && is_bounded_string(request["operation"], 32, false)
+        ? request["operation"]
+        : Json::Value("unknown");
+    response["product"] =
+        request.isObject() && is_bounded_string(request["product"], 128)
+        ? request["product"]
+        : Json::Value("");
+    response["error_code"] = code;
+    response["items"] = Json::arrayValue;
+    response["matched_count"] = Json::UInt64{0};
+    response["returned_count"] = Json::UInt64{0};
+    response["scanned_count"] = Json::UInt64{0};
+    response["elapsed_ms"] = 0.0;
+    response["cache_status"] = "unavailable";
+    response["fallback_scan"] = false;
+    response["unchanged"] = false;
+    return response;
+}
+
+Json::Value adapt_koa_metadata_index_response(
+    const Json::Value& request,
+    const Json::Value& upstream
+) {
+    if (!request.isObject() || !request["consumer_schema"].isString() ||
+        request["consumer_schema"].asString() !=
+            "kob.koa-metadata-index-consumer.v1") {
+        return consumer_error(request, "unsupported_consumer_contract");
+    }
+
+    if (!has_members(request, {"consumer_schema", "operation", "product"}) ||
+        !has_only_members(request, {
+            "consumer_schema", "operation", "product", "exact_ref", "query",
+            "state", "type", "limit", "case_sensitive", "requested_revision"}) ||
+        !is_bounded_string(request["consumer_schema"], 64, false) ||
+        !is_bounded_string(request["operation"], 32, false) ||
+        !is_bounded_string(request["product"], 128, false) ||
+        (request.isMember("exact_ref") &&
+         !is_bounded_string(request["exact_ref"], 160, false)) ||
+        (request.isMember("query") && !is_bounded_string(request["query"], 512)) ||
+        (request.isMember("state") && !is_bounded_string(request["state"], 32)) ||
+        (request.isMember("type") && !is_bounded_string(request["type"], 32)) ||
+        (request.isMember("limit") &&
+         (!is_bounded_unsigned(request["limit"], 20000) ||
+          request["limit"].asUInt64() == 0)) ||
+        (request.isMember("case_sensitive") && !request["case_sensitive"].isBool()) ||
+        (request.isMember("requested_revision") &&
+         !is_bounded_string(request["requested_revision"], 96, false))) {
+        return consumer_error(request, "invalid_request");
+    }
+
+    const auto operation = request["operation"].asString();
+    const auto product = request["product"].asString();
+
+    Json::Value response(Json::objectValue);
+    response["schema"] = "kob.koa-metadata-index-adapter.v1";
+    response["ok"] = true;
+    response["status"] = "ok";
+    response["operation"] = operation;
+    response["product"] = product;
+    response["error_code"] = Json::nullValue;
+    response["items"] = Json::arrayValue;
+    response["matched_count"] = Json::UInt64{0};
+    response["returned_count"] = Json::UInt64{0};
+    response["scanned_count"] = Json::UInt64{0};
+    response["elapsed_ms"] = 0.0;
+    response["cache_status"] = "missing";
+    response["fallback_scan"] = false;
+    response["unchanged"] = false;
+
+    if (operation == "item_search") {
+        const auto limit = request.get(
+            "limit", Json::Value(Json::UInt64{20000})).asUInt64();
+        const auto exact_ref = request.get("exact_ref", "").asString();
+        const auto query = request.get("query", "").asString();
+        std::istringstream query_stream(query);
+        std::string query_token;
+        std::size_t query_tokens = 0;
+        while (query_stream >> query_token) {
+            ++query_tokens;
+        }
+        if (limit == 0 || limit > 20000 || exact_ref.size() > 160 ||
+            exact_ref.find('/') != std::string::npos ||
+            exact_ref.find(static_cast<char>(0x5c)) != std::string::npos ||
+            query.size() > 512 || query_tokens > 16) {
+            return consumer_error(request, "invalid_request");
+        }
+        if (!upstream.isObject() || !upstream["schema"].isString() ||
+            !upstream["snapshot_schema"].isString() ||
+            upstream["schema"].asString() !=
+                "kob.metadata-index-query.v1" ||
+            upstream["snapshot_schema"].asString() !=
+                "kob.metadata-index-snapshot.v2") {
+            return consumer_error(request, "unsupported_upstream_schema");
+        }
+        if (!has_members(upstream, {
+                "schema", "snapshot_schema", "product", "diagnostics", "items"}) ||
+            !has_only_members(upstream, {
+                "schema", "snapshot_schema", "product", "diagnostics", "items"}) ||
+            !is_bounded_string(upstream["schema"], 64, false) ||
+            !is_bounded_string(upstream["snapshot_schema"], 64, false) ||
+            !is_bounded_string(upstream["product"], 128, false) ||
+            upstream["product"].asString() != product ||
+            !is_valid_query_diagnostics(upstream["diagnostics"]) ||
+            !upstream["items"].isArray() ||
+            upstream["items"].size() > limit) {
+            return consumer_error(request, "invalid_upstream_response");
+        }
+
+        const auto& diagnostics = upstream["diagnostics"];
+        response["matched_count"] = diagnostics["matched_count"];
+        response["returned_count"] =
+            static_cast<Json::UInt64>(upstream["items"].size());
+        response["scanned_count"] = diagnostics["scanned_count"];
+        response["elapsed_ms"] = diagnostics["elapsed_ms"];
+        response["cache_status"] = diagnostics["index_status"];
+        response["fallback_scan"] = diagnostics["fallback_scan"];
+        response["product_revision"] = diagnostics["product_revision"];
+        response["index_revision"] = diagnostics["index_revision"];
+        response["stale_reason"] = diagnostics["stale_reason"];
+        for (const auto& item : upstream["items"]) {
+            if (!is_valid_metadata_item(item, product)) {
+                return consumer_error(request, "invalid_upstream_response");
+            }
+            Json::Value projected(Json::objectValue);
+            for (const auto* field : {
+                     "id", "uid", "product", "type", "state", "title", "parent", "updated"}) {
+                projected[field] = item[field];
+            }
+            response["items"].append(projected);
+        }
+        return response;
+    }
+
+    if (operation == "status_overview") {
+        const auto requested_revision =
+            request.get("requested_revision", "").asString();
+        if (requested_revision.size() > 96 ||
+            (!requested_revision.empty() &&
+             !requested_revision.starts_with("kob-pr-v1:"))) {
+            return consumer_error(request, "invalid_request");
+        }
+        if (!upstream.isObject() || !upstream["schema"].isString() ||
+            upstream["schema"].asString() !=
+                "kob.metadata-index-status.v2") {
+            return consumer_error(request, "unsupported_upstream_schema");
+        }
+        if (!has_members(upstream, {"schema", "indexes"}) ||
+            !has_only_members(upstream, {"schema", "indexes"}) ||
+            !is_bounded_string(upstream["schema"], 64, false) ||
+            !upstream["indexes"].isArray() || upstream["indexes"].size() != 1 ||
+            !is_valid_status_entry(upstream["indexes"][0], product)) {
+            return consumer_error(request, "invalid_upstream_response");
+        }
+
+        const auto& status = upstream["indexes"][0];
+        if ((requested_revision.empty() && !status["requested_revision"].isNull()) ||
+            (!requested_revision.empty() &&
+             (!status["requested_revision"].isString() ||
+              status["requested_revision"].asString() != requested_revision))) {
+            return consumer_error(request, "invalid_upstream_response");
+        }
+        response["status"] = status["status"];
+        response["cache_status"] = status["status"];
+        response["unchanged"] = status["unchanged"];
+        response["fallback_scan"] = status["fallback_scan"];
+        response["scanned_count"] = status["scanned_count"];
+        response["matched_count"] = status["item_count"];
+        response["elapsed_ms"] = status["elapsed_ms"];
+        response["product_revision"] = status["product_revision"];
+        response["index_revision"] = status["index_revision"];
+        response["requested_revision"] = status["requested_revision"];
+        response["stale_reason"] = status["stale_reason"];
+        return response;
+    }
+
+    return consumer_error(request, "unsupported_operation");
+}
+
+void validate_koa_metadata_index_consumer_fixture() {
+    const auto repository_root = repository_root_from_source();
+    const auto schema = parse_json_fixture(
+        repository_root / "references/koa-metadata-index-consumer.schema.json",
+        "KOA metadata-index consumer schema");
+    const auto fixture = parse_json_fixture(
+        repository_root / "references/koa-metadata-index-consumer.fixture.json",
+        "KOA metadata-index consumer fixture");
+
+    expect(schema.get("$schema", "").asString() ==
+               "https://json-schema.org/draft/2020-12/schema",
+        "consumer schema must use JSON Schema 2020-12");
+    expect(schema["properties"]["schema"].get("const", "").asString() ==
+               "kob.koa-metadata-index-consumer-fixture.v1",
+        "consumer fixture schema must freeze its public version");
+    expect(schema["$defs"]["request"]["properties"]["query"]
+               .get("maxLength", 0).asUInt() == 512 &&
+           schema["$defs"]["request"]["properties"]["exact_ref"]
+               .get("maxLength", 0).asUInt() == 160 &&
+           schema["$defs"]["request"]["properties"]["limit"]
+               .get("maximum", 0).asUInt64() == 20000 &&
+           schema["$defs"]["request"]["properties"]["requested_revision"]
+               .get("maxLength", 0).asUInt() == 96,
+        "consumer schema must freeze KOB query and revision bounds");
+    expect(!schema["$defs"]["consumer_item"]["properties"].isMember("source_ref") &&
+           !schema["$defs"]["consumer_item"]["properties"].isMember("source_hash") &&
+           schema["$defs"]["expected_response"]["properties"]["items"]["items"]
+               .get("$ref", "").asString() == "#/$defs/consumer_item",
+        "consumer item schema must exclude producer-private source fields");
+    expect(!schema.get("additionalProperties", true).asBool() &&
+           !schema["$defs"]["request"].get("additionalProperties", true).asBool() &&
+           !schema["$defs"]["query_response"]
+               .get("additionalProperties", true).asBool() &&
+           !schema["$defs"]["status_response"]
+               .get("additionalProperties", true).asBool() &&
+           !schema["$defs"]["expected_response"]
+               .get("additionalProperties", true).asBool(),
+        "consumer schema must fail closed on undeclared fields");
+    expect(schema["$defs"]["diagnostics"]["allOf"].isArray() &&
+           schema["$defs"]["diagnostics"]["allOf"].size() == 1 &&
+           schema["$defs"]["status_entry"]["allOf"].isArray() &&
+           schema["$defs"]["status_entry"]["allOf"].size() == 1 &&
+           !schema["$defs"]["status_entry"]["properties"]["fallback_scan"]
+                .get("const", true).asBool(),
+        "consumer schema must encode coherent cache and fallback diagnostics");
+    expect(has_members(fixture, {
+               "schema", "consumer_schema", "upstream_schemas",
+               "limits", "ordering", "scenarios"}) &&
+           has_only_members(fixture, {
+               "schema", "consumer_schema", "upstream_schemas",
+               "limits", "ordering", "scenarios"}) &&
+           fixture.get("schema", "").asString() ==
+               "kob.koa-metadata-index-consumer-fixture.v1" &&
+           fixture.get("consumer_schema", "").asString() ==
+               "kob.koa-metadata-index-consumer.v1" &&
+           fixture["scenarios"].isArray(),
+        "consumer fixture must declare the supported contract and scenarios");
+    expect(fixture["upstream_schemas"].get("query", "").asString() ==
+               "kob.metadata-index-query.v1" &&
+           fixture["upstream_schemas"].get("snapshot", "").asString() ==
+               "kob.metadata-index-snapshot.v2" &&
+           fixture["upstream_schemas"].get("status", "").asString() ==
+               "kob.metadata-index-status.v2" &&
+           fixture["limits"].get("query_bytes", 0).asUInt() == 512 &&
+           fixture["limits"].get("query_tokens", 0).asUInt() == 16 &&
+           fixture["limits"].get("result_count", 0).asUInt64() == 20000 &&
+           fixture["limits"].get("exact_ref_bytes", 0).asUInt() == 160 &&
+           fixture["limits"].get("revision_bytes", 0).asUInt() == 96 &&
+           fixture["limits"].get("requested_status_budget_ms", 0).asUInt() == 80 &&
+           fixture["ordering"].isArray() && fixture["ordering"].size() == 2 &&
+           fixture["ordering"][0].asString() == "updated_desc" &&
+           fixture["ordering"][1].asString() == "item_id_asc",
+        "consumer fixture must match the versioned public bounds and ordering");
+
+    std::set<std::string> remaining{
+        "corrupt-fallback",
+        "exact-indexed",
+        "metadata-filtered",
+        "missing-index-fallback",
+        "stale-fallback",
+        "token-query",
+        "unchanged-status",
+        "unsupported-consumer-version",
+        "unsupported-upstream-version",
+    };
+    Json::Value valid_query_request;
+    Json::Value valid_query_upstream;
+    Json::Value valid_status_request;
+    Json::Value valid_status_upstream;
+    for (const auto& scenario : fixture["scenarios"]) {
+        expect(has_members(scenario, {"id", "request", "upstream", "expected"}) &&
+               has_only_members(scenario, {"id", "request", "upstream", "expected"}) &&
+               is_bounded_string(scenario["id"], 64, false) &&
+               is_valid_consumer_response(scenario["expected"]),
+            "consumer fixture scenario must satisfy its declared schema shape");
+        const auto id = scenario.get("id", "").asString();
+        expect(remaining.erase(id) == 1,
+            "consumer fixture contains an unexpected or duplicate scenario");
+        if (id == "exact-indexed") {
+            valid_query_request = scenario["request"];
+            valid_query_upstream = scenario["upstream"];
+        } else if (id == "unchanged-status") {
+            valid_status_request = scenario["request"];
+            valid_status_upstream = scenario["upstream"];
+        }
+        const auto actual = adapt_koa_metadata_index_response(
+            scenario["request"], scenario["upstream"]);
+        expect(is_valid_consumer_response(actual),
+            "scenario " + id + " must emit a schema-conforming response");
+        expect_json_subset(scenario["expected"], actual, "scenario " + id);
+        expect_no_forbidden_consumer_fields(actual, "scenario " + id);
+    }
+    expect(remaining.empty(),
+        "consumer fixture must cover every required adapter scenario");
+    expect(valid_query_request.isObject() && valid_query_upstream.isObject() &&
+           valid_status_request.isObject() && valid_status_upstream.isObject(),
+        "consumer fixture must provide mutation baselines");
+
+    const auto expect_adapter_error = [](
+        const Json::Value& request,
+        const Json::Value& upstream,
+        const std::string& code,
+        const std::string& label
+    ) {
+        const auto actual = adapt_koa_metadata_index_response(request, upstream);
+        expect(actual["error_code"].isString() && actual["error_code"].asString() == code,
+            label + " must fail with " + code);
+        expect(is_valid_consumer_response(actual),
+            label + " must preserve the bounded response envelope");
+        expect_no_forbidden_consumer_fields(actual, label);
+    };
+
+    auto malformed_request = valid_query_request;
+    malformed_request["query"] =
+        "one two three four five six seven eight nine ten eleven twelve "
+        "thirteen fourteen fifteen sixteen seventeen";
+    expect_adapter_error(
+        malformed_request, valid_query_upstream, "invalid_request", "17-token query");
+    malformed_request = valid_query_request;
+    malformed_request["limit"] = "1";
+    expect_adapter_error(
+        malformed_request, valid_query_upstream, "invalid_request", "string limit");
+    malformed_request = valid_query_request;
+    malformed_request["undeclared"] = true;
+    expect_adapter_error(
+        malformed_request, valid_query_upstream, "invalid_request", "undeclared request field");
+
+    auto malformed_upstream = valid_query_upstream;
+    malformed_upstream["diagnostics"]["matched_count"] = Json::UInt64{20001};
+    expect_adapter_error(
+        valid_query_request, malformed_upstream,
+        "invalid_upstream_response", "oversized matched count");
+    malformed_upstream = valid_query_upstream;
+    malformed_upstream["diagnostics"]["product_revision"] = std::string(97, 'r');
+    expect_adapter_error(
+        valid_query_request, malformed_upstream,
+        "invalid_upstream_response", "oversized revision token");
+    malformed_upstream = valid_query_upstream;
+    malformed_upstream["diagnostics"]["index_used"] = false;
+    expect_adapter_error(
+        valid_query_request, malformed_upstream,
+        "invalid_upstream_response", "ready response without index use");
+    malformed_upstream = valid_query_upstream;
+    malformed_upstream["items"][0].removeMember("uid");
+    expect_adapter_error(
+        valid_query_request, malformed_upstream,
+        "invalid_upstream_response", "missing canonical item field");
+
+    auto malformed_status = valid_status_upstream;
+    malformed_status["indexes"][0]["elapsed_ms"] = -1.0;
+    expect_adapter_error(
+        valid_status_request, malformed_status,
+        "invalid_upstream_response", "negative status timing");
+    malformed_status = valid_status_upstream;
+    malformed_status["indexes"][0]["unchanged"] = false;
+    expect_adapter_error(
+        valid_status_request, malformed_status,
+        "invalid_upstream_response", "contradictory unchanged status");
+    malformed_status = valid_status_upstream;
+    malformed_status["indexes"][0]["status"] = "stale";
+    malformed_status["indexes"][0]["unchanged"] = false;
+    expect_adapter_error(
+        valid_status_request, malformed_status,
+        "invalid_upstream_response", "stale status without reason");
+    malformed_status = valid_status_upstream;
+    malformed_status["indexes"][0]["status"] = "ready";
+    malformed_status["indexes"][0]["unchanged"] = false;
+    malformed_status["indexes"][0]["stale_reason"] = "unexpected_stale_reason";
+    expect_adapter_error(
+        valid_status_request, malformed_status,
+        "invalid_upstream_response", "ready status with stale reason");
+    malformed_status = valid_status_upstream;
+    malformed_status["indexes"][0]["fallback_scan"] = true;
+    expect_adapter_error(
+        valid_status_request, malformed_status,
+        "invalid_upstream_response", "status fallback mislabel");
+    malformed_request = valid_status_request;
+    malformed_request["requested_revision"] = "kob-pr-v1:other-revision";
+    expect_adapter_error(
+        malformed_request, valid_status_upstream,
+        "invalid_upstream_response", "mismatched requested revision echo");
 }
 
 void write_text(const std::filesystem::path& path, const std::string& value) {
@@ -337,6 +1065,7 @@ int main() {
 
     std::filesystem::path fixture_root;
     try {
+        validate_koa_metadata_index_consumer_fixture();
         fixture_root = make_temp_root();
         const auto backlog_root = fixture_root / "backlog";
         const std::string product = "metadata-product";

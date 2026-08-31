@@ -197,6 +197,16 @@ coverage for invalid persisted strings and reasons. Windows witness checks run
 only where NTFS and USN are available. Portable assertions define conditional
 contract coverage and do not claim Linux or macOS execution evidence.
 
+## KOA consumer boundary
+
+KOA consumes only the versioned public query, snapshot, and status envelopes.
+It does not parse this index, source files, product roots, or proof records.
+
+The bounded request, response, ordering, fallback, error, ownership, and upgrade
+rules are defined in
+[KOA Metadata Index Consumer Contract](koa-metadata-index-consumer-contract.md).
+Its executable fixture is part of metadata_index_smoke_test.
+
 ## Boundaries
 
 - The index is not canonical storage.

@@ -8,6 +8,8 @@ target_sources(kano_backlog_ops
     view/private/view_ops.cpp
     index/public/kano/backlog_ops/index/backlog_index.hpp
     index/private/backlog_index.cpp
+    index/private/change_probe.hpp
+    index/private/change_probe.cpp
     templates/public/kano/backlog_ops/templates/template_ops.hpp
     templates/private/template_ops.cpp
     topic/public/kano/backlog_ops/topic/topic_ops.hpp

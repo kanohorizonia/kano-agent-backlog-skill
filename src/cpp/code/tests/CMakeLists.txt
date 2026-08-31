@@ -43,6 +43,18 @@ set_tests_properties("${KB_TEST_METADATA_INDEX}" PROPERTIES
     ENVIRONMENT "CI=true;KANO_BACKLOG_NONINTERACTIVE=1;KANO_TEST_NONINTERACTIVE=1;GIT_TERMINAL_PROMPT=0"
 )
 
+add_executable(change_probe_smoke_test
+    change_probe_smoke_test.cpp
+)
+target_compile_features(change_probe_smoke_test PRIVATE cxx_std_23)
+target_link_libraries(change_probe_smoke_test PRIVATE kano::backlog_ops)
+set(KB_TEST_CHANGE_PROBE "[bdd][featured][feature:metadata-index][scenario:KOB-BDD-CHANGE-PROBE-001] NTFS change proof filters unrelated writes and fails closed on invalid journal state")
+add_test(NAME "${KB_TEST_CHANGE_PROBE}" COMMAND change_probe_smoke_test)
+set_tests_properties("${KB_TEST_CHANGE_PROBE}" PROPERTIES
+    TIMEOUT 30
+    ENVIRONMENT "CI=true;KANO_BACKLOG_NONINTERACTIVE=1;KANO_TEST_NONINTERACTIVE=1;GIT_TERMINAL_PROMPT=0"
+)
+
 add_executable(integrity_ops_smoke_test
     integrity_ops_smoke_test.cpp
 )

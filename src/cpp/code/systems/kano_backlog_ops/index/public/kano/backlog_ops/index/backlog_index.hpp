@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -14,8 +15,8 @@
 
 namespace kano::backlog_ops {
 
-inline constexpr int kMetadataIndexSchemaVersion = 1;
-inline constexpr int kMetadataSnapshotSchemaVersion = 1;
+inline constexpr int kMetadataIndexSchemaVersion = 3;
+inline constexpr int kMetadataSnapshotSchemaVersion = 3;
 
 struct IndexItem {
     std::string id;
@@ -54,6 +55,7 @@ struct IndexDiagnostics {
     std::string index_status = "missing";
     std::string index_revision;
     std::string canonical_revision;
+    std::string product_revision;
     bool fallback_scan = false;
     std::size_t scanned_count = 0;
     std::size_t matched_count = 0;
@@ -79,6 +81,10 @@ struct IndexDoctorResult {
 
 class BacklogIndex {
 public:
+    struct RebuildMetadataTestHooks {
+        std::function<void()> after_change_watch_capture;
+    };
+
     struct SyncSequencesResult {
         std::vector<std::string> synced_pairs;
         int max_number_found;
@@ -150,7 +156,8 @@ public:
 
     void rebuild_metadata(
         const std::filesystem::path& product_root,
-        const std::string& product
+        const std::string& product,
+        const RebuildMetadataTestHooks& test_hooks = {}
     );
 
     void invalidate_metadata(const std::string& product, const std::string& reason);
@@ -173,6 +180,7 @@ struct BuildIndexResult {
     double build_time_ms = 0.0;
     std::string index_revision;
     std::string canonical_revision;
+    std::string product_revision;
 };
 
 struct RefreshIndexResult {
@@ -184,6 +192,17 @@ struct RefreshIndexResult {
     double refresh_time_ms = 0.0;
     std::string index_revision;
     std::string canonical_revision;
+    std::string product_revision;
+};
+
+struct GetIndexStatusTestHooks {
+    std::size_t checkpoint_record_cap = 8192;
+    std::size_t checkpoint_byte_cap = 1U * 1024U * 1024U;
+    std::uint64_t checkpoint_usn_span_cap = 1U * 1024U * 1024U;
+    std::optional<std::size_t> proof_records_read_override;
+    std::optional<std::size_t> proof_bytes_read_override;
+    std::optional<std::uint64_t> proof_usn_span_override;
+    std::function<void()> after_revision_state_read;
 };
 
 struct IndexStatusEntry {
@@ -198,7 +217,20 @@ struct IndexStatusEntry {
     std::string status = "missing";
     std::string index_revision;
     std::string canonical_revision;
+    std::string product_revision;
+    std::optional<std::string> requested_revision;
+    bool unchanged = false;
+    bool fallback_scan = false;
+    std::size_t scanned_count = 0;
+    std::size_t proof_records_read = 0;
+    std::size_t proof_bytes_read = 0;
+    std::uint64_t proof_usn_span = 0;
+    bool proof_checkpoint_required = false;
+    bool proof_checkpoint_persisted = false;
+    double revision_check_ms = 0.0;
+    double elapsed_ms = 0.0;
     std::optional<std::string> stale_reason;
+    std::string recovery;
 };
 
 struct GetIndexStatusResult {
@@ -221,7 +253,9 @@ RefreshIndexResult refresh_index(
 GetIndexStatusResult get_index_status(
     const std::filesystem::path& backlog_root,
     const std::optional<std::string>& product_name = std::nullopt,
-    const std::optional<std::filesystem::path>& product_root = std::nullopt
+    const std::optional<std::filesystem::path>& product_root = std::nullopt,
+    const std::optional<std::string>& requested_revision = std::nullopt,
+    const GetIndexStatusTestHooks& test_hooks = {}
 );
 
 IndexQueryResult query_metadata_index(

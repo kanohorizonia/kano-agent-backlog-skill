@@ -20233,6 +20233,7 @@ int main(int InArgc, char* InArgv[]) {
                 value["index_status"] = diagnostics.index_status;
                 value["index_revision"] = diagnostics.index_revision;
                 value["canonical_revision"] = diagnostics.canonical_revision;
+                value["product_revision"] = diagnostics.product_revision;
                 value["fallback_scan"] = diagnostics.fallback_scan;
                 value["scanned_count"] =
                     static_cast<Json::UInt64>(diagnostics.scanned_count);
@@ -20269,7 +20270,7 @@ int main(int InArgc, char* InArgv[]) {
                 buildCmd->add_option("--product", state->product, "Product name");
                 buildCmd->add_option("--format", state->format, "Output format: plain|json");
                 buildCmd->add_flag("--force", state->force, "Rebuild even when the snapshot is current");
-                buildCmd->callback([&, state]() {
+                buildCmd->callback([&, state, resolve_index_ctx, require_index_format]() {
                     const auto format = require_index_format(state->format);
                     auto ctx = resolve_index_ctx(state->product);
                     const auto idx_path = ctx.backlog_root / ".cache" / "index" / "backlog.db";
@@ -20277,14 +20278,15 @@ int main(int InArgc, char* InArgv[]) {
                         ctx.product_root, idx_path, state->force, ctx.product_name);
                     if (format == "json") {
                         Json::Value payload(Json::objectValue);
-                        payload["schema"] = "kob.metadata-index.v1";
-                        payload["snapshot_schema"] = "kob.metadata-index-snapshot.v1";
+                        payload["schema"] = "kob.metadata-index.v2";
+                        payload["snapshot_schema"] = "kob.metadata-index-snapshot.v2";
                         payload["status"] = "ready";
                         payload["product"] = ctx.product_name;
                         payload["index_ref"] = result.index_ref;
                         payload["items_indexed"] = result.items_indexed;
                         payload["index_revision"] = result.index_revision;
                         payload["canonical_revision"] = result.canonical_revision;
+                        payload["product_revision"] = result.product_revision;
                         payload["elapsed_ms"] = result.build_time_ms;
                         std::cout << json_to_string(payload, true) << "\n";
                         return;
@@ -20292,6 +20294,7 @@ int main(int InArgc, char* InArgv[]) {
                     std::cout << "Built index: " << result.index_ref << "\n";
                     std::cout << "  Items: " << result.items_indexed << "\n";
                     std::cout << "  Revision: " << result.index_revision << "\n";
+                    std::cout << "  Product revision: " << result.product_revision << "\n";
                     std::cout << "  Time: " << std::fixed << std::setprecision(1) << result.build_time_ms << " ms\n";
                 });
             }
@@ -20308,7 +20311,7 @@ int main(int InArgc, char* InArgv[]) {
                 const auto state = cli11_state.make_shared<IndexRefreshCommandState>();
                 refreshCmd->add_option("--product", state->product, "Product name");
                 refreshCmd->add_option("--format", state->format, "Output format: plain|json");
-                refreshCmd->callback([&, state]() {
+                refreshCmd->callback([&, state, resolve_index_ctx, require_index_format]() {
                     const auto format = require_index_format(state->format);
                     auto ctx = resolve_index_ctx(state->product);
                     const auto idx_path = ctx.backlog_root / ".cache" / "index" / "backlog.db";
@@ -20316,14 +20319,15 @@ int main(int InArgc, char* InArgv[]) {
                         ctx.product_root, idx_path, ctx.product_name);
                     if (format == "json") {
                         Json::Value payload(Json::objectValue);
-                        payload["schema"] = "kob.metadata-index.v1";
-                        payload["snapshot_schema"] = "kob.metadata-index-snapshot.v1";
+                        payload["schema"] = "kob.metadata-index.v2";
+                        payload["snapshot_schema"] = "kob.metadata-index-snapshot.v2";
                         payload["status"] = "ready";
                         payload["product"] = ctx.product_name;
                         payload["index_ref"] = result.index_ref;
                         payload["items_indexed"] = result.items_added;
                         payload["index_revision"] = result.index_revision;
                         payload["canonical_revision"] = result.canonical_revision;
+                        payload["product_revision"] = result.product_revision;
                         payload["elapsed_ms"] = result.refresh_time_ms;
                         std::cout << json_to_string(payload, true) << "\n";
                         return;
@@ -20331,6 +20335,7 @@ int main(int InArgc, char* InArgv[]) {
                     std::cout << "Refreshed index: " << result.index_ref << "\n";
                     std::cout << "  Items: " << result.items_added << "\n";
                     std::cout << "  Revision: " << result.index_revision << "\n";
+                    std::cout << "  Product revision: " << result.product_revision << "\n";
                     std::cout << "  Time: " << std::fixed << std::setprecision(1) << result.refresh_time_ms << " ms\n";
                 });
             }
@@ -20340,23 +20345,33 @@ int main(int InArgc, char* InArgv[]) {
                 auto* statusCmd = indexCmd->add_subcommand("status", "Show SQLite index status and statistics");
                 struct IndexStatusCommandState {
                     std::string product;
+                    std::string requested_revision;
                     std::string format = "plain";
                 };
                 const auto state = cli11_state.make_shared<IndexStatusCommandState>();
                 statusCmd->add_option("--product", state->product, "Product name");
+                statusCmd->add_option(
+                    "--requested-revision",
+                    state->requested_revision,
+                    "Return unchanged when this authoritative product revision is current");
                 statusCmd->add_option("--format", state->format, "Output format: plain|json");
-                statusCmd->callback([&, state]() {
+                statusCmd->callback([&, state, resolve_index_ctx, require_index_format]() {
                     const auto format = require_index_format(state->format);
                     auto ctx = resolve_index_ctx(state->product);
                     const auto result = get_index_status(
-                        ctx.backlog_root, ctx.product_name, ctx.product_root);
+                        ctx.backlog_root,
+                        ctx.product_name,
+                        ctx.product_root,
+                        state->requested_revision.empty()
+                            ? std::nullopt
+                            : std::optional<std::string>(state->requested_revision));
                     if (result.indexes.empty()) {
                         std::cout << "No indexes found.\n";
                         return;
                     }
                     if (format == "json") {
                         Json::Value payload(Json::objectValue);
-                        payload["schema"] = "kob.metadata-index-status.v1";
+                        payload["schema"] = "kob.metadata-index-status.v2";
                         payload["indexes"] = Json::arrayValue;
                         for (const auto& idx : result.indexes) {
                             Json::Value value(Json::objectValue);
@@ -20370,9 +20385,30 @@ int main(int InArgc, char* InArgv[]) {
                             value["snapshot_schema_version"] = idx.snapshot_schema_version;
                             value["index_revision"] = idx.index_revision;
                             value["canonical_revision"] = idx.canonical_revision;
+                            value["product_revision"] = idx.product_revision;
+                            value["requested_revision"] = idx.requested_revision
+                                ? Json::Value(*idx.requested_revision)
+                                : Json::Value(Json::nullValue);
+                            value["unchanged"] = idx.unchanged;
+                            value["fallback_scan"] = idx.fallback_scan;
+                            value["scanned_count"] =
+                                static_cast<Json::UInt64>(idx.scanned_count);
+                            value["proof_records_read"] =
+                                static_cast<Json::UInt64>(idx.proof_records_read);
+                            value["proof_bytes_read"] =
+                                static_cast<Json::UInt64>(idx.proof_bytes_read);
+                            value["proof_usn_span"] =
+                                static_cast<Json::UInt64>(idx.proof_usn_span);
+                            value["proof_checkpoint_required"] =
+                                idx.proof_checkpoint_required;
+                            value["proof_checkpoint_persisted"] =
+                                idx.proof_checkpoint_persisted;
+                            value["revision_check_ms"] = idx.revision_check_ms;
+                            value["elapsed_ms"] = idx.elapsed_ms;
                             value["stale_reason"] = idx.stale_reason
                                 ? Json::Value(*idx.stale_reason)
                                 : Json::Value(Json::nullValue);
+                            value["recovery"] = idx.recovery;
                             payload["indexes"].append(value);
                         }
                         std::cout << json_to_string(payload, true) << "\n";
@@ -20388,6 +20424,27 @@ int main(int InArgc, char* InArgv[]) {
                         }
                         std::cout << "  Index revision: " << idx.index_revision << "\n";
                         std::cout << "  Canonical revision: " << idx.canonical_revision << "\n";
+                        std::cout << "  Product revision: " << idx.product_revision << "\n";
+                        std::cout << "  Fallback scan: "
+                                  << (idx.fallback_scan ? "true" : "false") << "\n";
+                        std::cout << "  Scanned: " << idx.scanned_count << "\n";
+                        std::cout << "  Proof records read: "
+                                  << idx.proof_records_read << "\n";
+                        std::cout << "  Proof bytes read: "
+                                  << idx.proof_bytes_read << "\n";
+                        std::cout << "  Proof USN span: "
+                                  << idx.proof_usn_span << "\n";
+                        std::cout << "  Proof checkpoint required: "
+                                  << (idx.proof_checkpoint_required ? "true" : "false")
+                                  << "\n";
+                        std::cout << "  Proof checkpoint persisted: "
+                                  << (idx.proof_checkpoint_persisted ? "true" : "false")
+                                  << "\n";
+                        std::cout << "  Elapsed: " << idx.elapsed_ms << " ms\n";
+                        if (idx.requested_revision) {
+                            std::cout << "  Requested revision: "
+                                      << *idx.requested_revision << "\n";
+                        }
                         if (idx.stale_reason) {
                             std::cout << "  Stale reason: " << *idx.stale_reason << "\n";
                         }
@@ -20417,7 +20474,7 @@ int main(int InArgc, char* InArgv[]) {
                 queryCmd->add_option("--query", state->text, "Bounded metadata token query");
                 queryCmd->add_option("--limit", state->limit, "Maximum result count");
                 queryCmd->add_option("--format", state->format, "Output format: plain|json");
-                queryCmd->callback([&, state]() {
+                queryCmd->callback([&, state, resolve_index_ctx, require_index_format, diagnostics_json]() {
                     const auto format = require_index_format(state->format);
                     auto ctx = resolve_index_ctx(state->product);
                     IndexQuery query;
@@ -20452,7 +20509,7 @@ int main(int InArgc, char* InArgv[]) {
 
                     Json::Value payload(Json::objectValue);
                     payload["schema"] = "kob.metadata-index-query.v1";
-                    payload["snapshot_schema"] = "kob.metadata-index-snapshot.v1";
+                    payload["snapshot_schema"] = "kob.metadata-index-snapshot.v2";
                     payload["product"] = ctx.product_name;
                     payload["diagnostics"] = diagnostics_json(result.diagnostics);
                     payload["items"] = Json::arrayValue;
@@ -20499,7 +20556,7 @@ int main(int InArgc, char* InArgv[]) {
                     "--skip-source-hashes",
                     state->skip_source_hashes,
                     "Run the cheap revision check without full source-hash verification");
-                doctorCmd->callback([&, state]() {
+                doctorCmd->callback([&, state, resolve_index_ctx, require_index_format, diagnostics_json]() {
                     const auto format = require_index_format(state->format);
                     auto ctx = resolve_index_ctx(state->product);
                     const auto result = doctor_metadata_index(
@@ -20522,7 +20579,7 @@ int main(int InArgc, char* InArgv[]) {
                     }
                     Json::Value payload(Json::objectValue);
                     payload["schema"] = "kob.metadata-index-doctor.v1";
-                    payload["snapshot_schema"] = "kob.metadata-index-snapshot.v1";
+                    payload["snapshot_schema"] = "kob.metadata-index-snapshot.v2";
                     payload["product"] = ctx.product_name;
                     payload["healthy"] = result.healthy;
                     payload["missing_rows"] =

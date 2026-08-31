@@ -840,15 +840,156 @@ int main(int argc, char** argv) {
             quick_index_build_output,
             "quick product metadata index build failed");
         const auto quick_index_build = read_json(quick_index_build_output);
-        expect(quick_index_build["schema"].asString() == "kob.metadata-index.v1" &&
-                   quick_index_build["status"].asString() == "ready" &&
-                   quick_index_build["items_indexed"].asInt() == 1 &&
-                   quick_index_build["index_revision"].asString() ==
-                       quick_index_build["canonical_revision"].asString(),
+        expect(quick_index_build["schema"].asString() == "kob.metadata-index.v2" &&
+                    quick_index_build["status"].asString() == "ready" &&
+                    quick_index_build["items_indexed"].asInt() == 1 &&
+                    !quick_index_build["product_revision"].asString().empty() &&
+                    quick_index_build["index_revision"].asString() ==
+                        quick_index_build["canonical_revision"].asString(),
             "metadata index build must emit a verified versioned snapshot");
         expect(read_text(quick_index_build_output).find(temp_root.string()) ==
                    std::string::npos,
             "metadata index build must not expose a raw workspace path");
+
+        const auto quick_product_revision =
+            quick_index_build["product_revision"].asString();
+        auto current_quick_product_revision = quick_product_revision;
+        const auto quick_index_unchanged_output =
+            temp_root / "quick-index-unchanged.json";
+        expect_command_capture_success(
+            run_command_capture(binary, {
+                "-P", "QS", "index", "status", "--requested-revision",
+                quick_product_revision, "--format", "json"
+            }, quick_index_unchanged_output),
+            quick_index_unchanged_output,
+            "matching requested metadata revision failed");
+        const auto quick_index_unchanged = read_json(
+            quick_index_unchanged_output);
+        expect(
+            quick_index_unchanged["schema"].asString() ==
+                    "kob.metadata-index-status.v2" &&
+                quick_index_unchanged["indexes"].size() == 1,
+            "matching requested revision must return one versioned status");
+        const auto& quick_index_unchanged_entry =
+            quick_index_unchanged["indexes"][0];
+        expect(!quick_index_unchanged_entry["fallback_scan"].asBool() &&
+                   quick_index_unchanged_entry["scanned_count"].asUInt64() == 0 &&
+                   quick_index_unchanged_entry["proof_records_read"].isUInt64() &&
+                   quick_index_unchanged_entry["proof_bytes_read"].isUInt64() &&
+                   quick_index_unchanged_entry["proof_usn_span"].isUInt64() &&
+                   quick_index_unchanged_entry["proof_checkpoint_required"].isBool() &&
+                   quick_index_unchanged_entry["proof_checkpoint_persisted"].isBool() &&
+                   quick_index_unchanged_entry["elapsed_ms"].asDouble() >= 0.0 &&
+                   quick_index_unchanged_entry["product_revision"].asString() ==
+                        quick_product_revision,
+            "matching requested revision must return bounded zero-scan CLI diagnostics");
+#ifdef _WIN32
+        expect(
+            quick_index_unchanged_entry["status"].asString() == "unchanged" &&
+                quick_index_unchanged_entry["unchanged"].asBool(),
+            "matching requested revision must return the verified Windows fast path");
+#else
+        expect(
+            quick_index_unchanged_entry["status"].asString() == "stale" &&
+                !quick_index_unchanged_entry["unchanged"].asBool() &&
+                quick_index_unchanged_entry["proof_records_read"].asUInt64() == 0 &&
+                quick_index_unchanged_entry["proof_bytes_read"].asUInt64() == 0 &&
+                quick_index_unchanged_entry["proof_usn_span"].asUInt64() == 0 &&
+                !quick_index_unchanged_entry["proof_checkpoint_required"].asBool() &&
+                !quick_index_unchanged_entry["proof_checkpoint_persisted"].asBool() &&
+                quick_index_unchanged_entry["stale_reason"].asString() ==
+                    "change_proof_unsupported" &&
+                quick_index_unchanged_entry["recovery"].asString() ==
+                    "kob index rebuild --product quick-smoke-product",
+            "matching requested revision must fail closed when proof is unsupported");
+#endif
+        const auto quick_index_unchanged_text =
+            read_text(quick_index_unchanged_output);
+        expect(quick_index_unchanged_text.find(temp_root.string()) ==
+                       std::string::npos &&
+                   quick_index_unchanged_text.find("proof_verified_usn") ==
+                       std::string::npos &&
+                   quick_index_unchanged_text.find("proof_journal_id") ==
+                       std::string::npos &&
+                   quick_index_unchanged_text.find("proof_root_file_id") ==
+                       std::string::npos &&
+                   quick_index_unchanged_text.find("proof_root_volume_serial") ==
+                       std::string::npos,
+            "unchanged status must expose only bounded non-identifying proof diagnostics");
+
+        const auto invalid_revision_output =
+            temp_root / "quick-index-invalid-revision.txt";
+        expect(run_command_capture(binary, {
+                   "-P", "QS", "index", "status", "--requested-revision",
+                   "../../outside", "--format", "json"
+               }, invalid_revision_output) != 0,
+            "path-like requested revision must be rejected");
+        const auto invalid_revision_text = read_text(invalid_revision_output);
+        expect(invalid_revision_text.find(
+                   "metadata_index_requested_revision_invalid") !=
+                   std::string::npos &&
+                   invalid_revision_text.find("../../outside") ==
+                       std::string::npos,
+            "invalid revision diagnostics must be bounded and path-safe");
+
+        const auto expect_quick_revision_advanced = [&](const std::string& mutation) {
+            const auto output = temp_root /
+                ("quick-index-" + mutation + "-revision.json");
+            expect_command_capture_success(
+                run_command_capture(binary, {
+                    "-P", "QS", "index", "status", "--requested-revision",
+                    current_quick_product_revision, "--format", "json"
+                }, output),
+                output,
+                mutation + " revision comparison failed");
+            const auto status = read_json(output);
+            expect(status["indexes"].size() == 1 &&
+                       status["indexes"][0]["status"].asString() == "ready" &&
+                       !status["indexes"][0]["unchanged"].asBool() &&
+                       !status["indexes"][0]["fallback_scan"].asBool() &&
+                       status["indexes"][0]["scanned_count"].asUInt64() == 0 &&
+                       status["indexes"][0]["proof_records_read"].asUInt64() == 0 &&
+                       status["indexes"][0]["proof_bytes_read"].asUInt64() == 0 &&
+                       status["indexes"][0]["proof_usn_span"].asUInt64() == 0 &&
+                       !status["indexes"][0]["proof_checkpoint_required"].asBool() &&
+                       !status["indexes"][0]["proof_checkpoint_persisted"].asBool() &&
+                       status["indexes"][0]["elapsed_ms"].asDouble() < 100.0 &&
+                       status["indexes"][0]["product_revision"].asString() !=
+                           current_quick_product_revision,
+                mutation +
+                    " must expose the advanced product revision without a canonical scan");
+            current_quick_product_revision =
+                status["indexes"][0]["product_revision"].asString();
+        };
+
+        expect(run_command(binary, {
+            "-P", "quick-smoke-product", "workitem", "decision", "QS-TSK-0001",
+            "Revision contract decision after index.", "--agent", "tester"
+        }) == 0, "indexed decision mutation failed");
+        expect_quick_revision_advanced("decision");
+
+        expect(run_command(binary, {
+            "relation", "add", "QS-TSK-0001", "SP-TSK-0001",
+            "--source-product", "quick-smoke-product",
+            "--target-product", "second-product",
+            "--type", "relates", "--agent", "tester", "--apply"
+        }) == 0, "indexed relation mutation failed");
+        expect_quick_revision_advanced("relation");
+
+        expect(run_command(binary, {
+            "-P", "quick-smoke-product", "worklog", "append", "QS-TSK-0001",
+            "Revision contract worklog after index.", "--agent", "tester"
+        }) == 0, "indexed worklog mutation failed");
+        expect_quick_revision_advanced("worklog");
+
+        const auto revision_artifact = temp_root / "revision-evidence.txt";
+        write_text(revision_artifact, "revision contract artifact\n");
+        expect(run_command(binary, {
+            "-P", "quick-smoke-product", "workitem", "attach-artifact",
+            "QS-TSK-0001", "--path", revision_artifact.string(),
+            "--no-shared", "--agent", "tester", "--format", "json"
+        }) == 0, "indexed artifact mutation failed");
+        expect_quick_revision_advanced("artifact");
 
         const auto quick_index_query_output = temp_root / "quick-index-query.json";
         expect_command_capture_success(
@@ -879,6 +1020,7 @@ int main(int argc, char** argv) {
                  "index_status",
                  "index_revision",
                  "canonical_revision",
+                 "product_revision",
                  "fallback_scan",
                  "scanned_count",
                  "matched_count",
@@ -1673,6 +1815,47 @@ int main(int argc, char** argv) {
         expect(read_text(validate_ambiguous_link_output).find("unresolvable ref: SP-TSK-0001") != std::string::npos,
             "ambiguous structured links should retain the validator diagnostic");
         std::filesystem::remove(ambiguous_link_peer_path);
+
+        const auto raw_fixture_status_output = temp_root / "quick-index-raw-fixture-stale.json";
+        expect_command_capture_success(
+            run_command_capture(binary, {
+                "-P", "quick-smoke-product", "index", "status", "--format", "json"
+            }, raw_fixture_status_output),
+            raw_fixture_status_output,
+            "raw fixture metadata status failed");
+        const auto raw_fixture_status = read_json(raw_fixture_status_output);
+        expect(raw_fixture_status["indexes"].size() == 1 &&
+                   raw_fixture_status["indexes"][0]["status"].asString() == "stale",
+            "raw canonical fixture writes must invalidate the authoritative index proof");
+#ifdef _WIN32
+        expect(
+            raw_fixture_status["indexes"][0]["stale_reason"].asString() ==
+                "change_proof_relevant_change",
+            "Windows raw writes must invalidate the verified change witness");
+#else
+        expect(
+            raw_fixture_status["indexes"][0]["stale_reason"].asString() ==
+                    "canonical_item_count_changed" &&
+                !raw_fixture_status["indexes"][0]["fallback_scan"].asBool() &&
+                raw_fixture_status["indexes"][0]["scanned_count"].asUInt64() == 2 &&
+                raw_fixture_status["indexes"][0]["proof_records_read"].asUInt64() == 0 &&
+                raw_fixture_status["indexes"][0]["proof_bytes_read"].asUInt64() == 0 &&
+                raw_fixture_status["indexes"][0]["proof_usn_span"].asUInt64() == 0,
+            "portable raw writes must fail canonical validation without proof work");
+#endif
+
+        const auto raw_fixture_rebuild_output = temp_root / "quick-index-raw-fixture-rebuild.json";
+        expect_command_capture_success(
+            run_command_capture(binary, {
+                "-P", "quick-smoke-product", "index", "build",
+                "--force", "--format", "json"
+            }, raw_fixture_rebuild_output),
+            raw_fixture_rebuild_output,
+            "raw fixture metadata index rebuild failed");
+        const auto raw_fixture_rebuild = read_json(raw_fixture_rebuild_output);
+        expect(raw_fixture_rebuild["status"].asString() == "ready" &&
+                   raw_fixture_rebuild["items_indexed"].asInt() == 2,
+            "explicit rebuild must recover the index after raw canonical fixture writes");
 
         const auto text_root = temp_root / "ready-fields";
         write_text(text_root / "context.md", "Quick smoke context.\n");
@@ -2715,6 +2898,87 @@ int main(int argc, char** argv) {
                 boundary_quote_title) != nullptr,
             "compact CLI create should round-trip intentional boundary quotes canonically");
 
+        const std::string sensitive_marker = "../../private/persisted-snapshot";
+        const auto corrupt_index_dir =
+            temp_root / "_kano" / "backlog" / ".cache" / "index";
+        const auto corrupt_index_db = corrupt_index_dir / "backlog.db";
+        std::filesystem::create_directories(corrupt_index_dir);
+        for (const auto* sibling : {"backlog.db-wal", "backlog.db-shm"}) {
+            std::error_code sibling_error;
+            std::filesystem::remove(corrupt_index_dir / sibling, sibling_error);
+        }
+        write_text(corrupt_index_db, sensitive_marker);
+
+        const auto corrupt_json_output =
+            temp_root / "quick-index-corrupt-revision.json";
+        expect_command_capture_success(
+            run_command_capture(binary, {
+                "-P", "QS", "index", "status", "--requested-revision",
+                quick_product_revision, "--format", "json"
+            }, corrupt_json_output),
+            corrupt_json_output,
+            "corrupt requested metadata revision JSON status failed");
+        const auto corrupt_json = read_json(corrupt_json_output);
+        expect(
+            corrupt_json["schema"].asString() ==
+                    "kob.metadata-index-status.v2" &&
+                corrupt_json["indexes"].size() == 1 &&
+                corrupt_json["indexes"][0]["status"].asString() == "corrupt" &&
+                !corrupt_json["indexes"][0]["unchanged"].asBool() &&
+                !corrupt_json["indexes"][0]["fallback_scan"].asBool() &&
+                corrupt_json["indexes"][0]["scanned_count"].asUInt64() == 0 &&
+                corrupt_json["indexes"][0]["item_count"].asUInt64() == 0 &&
+                corrupt_json["indexes"][0]["index_revision"].asString().empty() &&
+                corrupt_json["indexes"][0]["canonical_revision"].asString().empty() &&
+                corrupt_json["indexes"][0]["product_revision"].asString().empty() &&
+                corrupt_json["indexes"][0]["proof_records_read"].asUInt64() == 0 &&
+                corrupt_json["indexes"][0]["proof_bytes_read"].asUInt64() == 0 &&
+                corrupt_json["indexes"][0]["proof_usn_span"].asUInt64() == 0 &&
+                !corrupt_json["indexes"][0]["proof_checkpoint_required"].asBool() &&
+                !corrupt_json["indexes"][0]["proof_checkpoint_persisted"].asBool() &&
+                corrupt_json["indexes"][0]["stale_reason"].asString() ==
+                    "metadata_index_open_or_doctor_failed",
+            "corrupt requested revision must return fixed zero-scan JSON redacted diagnostics");
+        expect(
+            corrupt_json["indexes"][0]["recovery"].asString() ==
+                "kob index rebuild --product quick-smoke-product",
+            "corrupt status must publish a product-scoped recovery command");
+        const auto corrupt_json_text = read_text(corrupt_json_output);
+        expect(
+            corrupt_json_text.find(sensitive_marker) == std::string::npos &&
+                corrupt_json_text.find(temp_root.string()) == std::string::npos &&
+                corrupt_json_text.find("proof_verified_usn") == std::string::npos &&
+                corrupt_json_text.find("proof_journal_id") == std::string::npos &&
+                corrupt_json_text.find("proof_root_file_id") == std::string::npos &&
+                corrupt_json_text.find("proof_root_volume_serial") == std::string::npos,
+            "corrupt JSON status must not expose sensitive markers or raw proof identity fields");
+
+        const auto corrupt_plain_output =
+            temp_root / "quick-index-corrupt-revision.txt";
+        expect_command_capture_success(
+            run_command_capture(binary, {
+                "-P", "QS", "index", "status", "--requested-revision",
+                quick_product_revision, "--format", "plain"
+            }, corrupt_plain_output),
+            corrupt_plain_output,
+            "corrupt requested metadata revision plain status failed");
+        const auto corrupt_plain_text = read_text(corrupt_plain_output);
+        expect(
+            corrupt_plain_text.find("Status: corrupt") != std::string::npos &&
+                corrupt_plain_text.find("Fallback scan: false") != std::string::npos &&
+                corrupt_plain_text.find("Scanned: 0") != std::string::npos &&
+                corrupt_plain_text.find(
+                    "Stale reason: metadata_index_open_or_doctor_failed") !=
+                    std::string::npos,
+            "corrupt plain status must surface the bounded stale reason");
+        expect(
+            corrupt_plain_text.find(sensitive_marker) == std::string::npos &&
+                corrupt_plain_text.find(temp_root.string()) == std::string::npos &&
+                corrupt_plain_text.find("proof_verified_usn") == std::string::npos &&
+                corrupt_plain_text.find("proof_journal_id") == std::string::npos &&
+                corrupt_plain_text.find("proof_root_file_id") == std::string::npos &&
+                corrupt_plain_text.find("proof_root_volume_serial") == std::string::npos,
+            "corrupt plain status must not expose sensitive markers or raw proof identity labels");
 
         std::filesystem::current_path(original_cwd);
         std::filesystem::remove_all(temp_root);

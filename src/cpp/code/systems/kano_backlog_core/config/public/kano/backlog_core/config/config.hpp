@@ -56,10 +56,22 @@ struct PipelineConfig {
     VectorConfig vector;
 };
 
+enum class ProductResolutionKind {
+    CanonicalSlug,
+    Prefix,
+    DisplayName,
+    RepoBinding,
+    ExplicitAlias,
+};
+
+std::string to_string(ProductResolutionKind kind);
+
 struct ProductDefinition {
     std::string name;
     std::string prefix;
     std::string backlog_root;
+    std::vector<std::string> aliases;
+    std::vector<std::string> repo_bindings;
 
     // Flattened overrides
     std::optional<bool> vector_enabled;
@@ -81,6 +93,26 @@ struct ProductDefinition {
     std::string topics_date_prefix_policy = "warn";
 };
 
+struct ProductResolution {
+    std::string canonical_slug;
+    ProductResolutionKind resolution_kind = ProductResolutionKind::CanonicalSlug;
+    std::string requested_selector;
+    std::string normalized_selector;
+    std::string matched_selector;
+};
+
+struct ProductSelectorClaim {
+    std::string canonical_slug;
+    ProductResolutionKind resolution_kind = ProductResolutionKind::CanonicalSlug;
+    std::string selector;
+    std::string normalized_selector;
+};
+
+struct ProductSelectorCollision {
+    std::string normalized_selector;
+    std::vector<ProductSelectorClaim> claims;
+};
+
 struct ProductPrefixCollision {
     std::string prefix;
     std::string left_product;
@@ -99,8 +131,15 @@ public:
 
     static std::optional<ProjectConfig> load_from_toml(const std::filesystem::path& file_path);
     std::optional<ProductDefinition> get_product(const std::string& name) const;
+    static std::string normalize_product_selector(const std::string& selector);
+    std::vector<ProductSelectorClaim> selector_claims() const;
+    std::optional<ProductResolution> resolve_product(const std::string& selector) const;
     std::optional<std::string> resolve_product_name(const std::string& name_or_prefix) const;
     std::optional<std::filesystem::path> resolve_backlog_root(const std::string& product_name, const std::filesystem::path& config_file_path) const;
+    std::optional<std::filesystem::path> resolve_backlog_root(const ProductResolution& resolution, const std::filesystem::path& config_file_path) const;
+    std::vector<ProductSelectorCollision> find_selector_collisions() const;
+    static std::string describe_selector_collision(const ProductSelectorCollision& collision);
+    static std::string describe_selector_collisions(const std::vector<ProductSelectorCollision>& collisions);
     std::vector<ProductPrefixCollision> find_prefix_collisions(const std::filesystem::path& config_file_path) const;
     static std::string describe_prefix_collision(const ProductPrefixCollision& collision);
     static std::string describe_prefix_collisions(const std::vector<ProductPrefixCollision>& collisions);
@@ -113,6 +152,7 @@ public:
     std::filesystem::path product_root;
     std::optional<std::filesystem::path> sandbox_root;
     std::string product_name;
+    ProductResolution product_resolution;
     bool is_sandbox = false;
     
     ProductDefinition product_def;

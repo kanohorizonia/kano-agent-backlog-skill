@@ -411,7 +411,7 @@ int main() {
             "src/cpp/code/apps/kano_backlog_cli/main.cpp";
         const auto inventory = audit_cli11_lifetimes(source_path);
         expect(
-            inventory.total == 752,
+            inventory.total == 760,
             "CLI11 binding inventory changed (actual " +
                 std::to_string(inventory.total) +
                 "); review every added or removed binding and update the audited baseline");

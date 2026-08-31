@@ -1,3 +1,4 @@
+#include "kano/backlog_core/config/config.hpp"
 #include "kano/backlog_core/frontmatter/canonical_store.hpp"
 #include "kano/backlog_core/process/noninteractive_errors.hpp"
 #include "kano/backlog_ops/prefix_migration/prefix_migration_ops.hpp"
@@ -193,6 +194,7 @@ int main() {
     kano::backlog_core::ConfigureNoninteractiveErrorHandling();
     using kano::backlog_core::CanonicalStore;
     using kano::backlog_core::ItemType;
+    using kano::backlog_core::ProjectConfig;
     using kano::backlog_ops::PrefixMigrationOps;
 
     std::filesystem::path root;
@@ -202,7 +204,13 @@ int main() {
             "[products.quick-source]\n"
             "name = \"Quick source\"\n"
             "prefix = \"QS\"\n"
-            "backlog_root = \"products/quick-source\"\n\n"
+            "backlog_root = \"products/quick-source\"\n"
+            "aliases = [\"quick-source-migration\"]\n\n"
+            "[products.quick-source-shadow]\n"
+            "name = \"Quick source canonical shadow\"\n"
+            "prefix = \"QSS\"\n"
+            "backlog_root = \"products/quick-source-shadow\"\n"
+            "aliases = [\"quick-source\"]\n\n"
             "[products.parametric]\n"
             "name = \"Parametric\"\n"
             "prefix = \"NEWQSEO\"\n"
@@ -217,6 +225,28 @@ int main() {
         const auto observer_root = root / "products" / "observer";
         std::filesystem::create_directories(
             root / "products" / "parametric" / "items");
+        std::filesystem::create_directories(
+            root / "products" / "quick-source-shadow" / "items");
+
+        const auto project_config = ProjectConfig::load_from_toml(
+            root / ".kano" / "backlog_config.toml");
+        expect(project_config.has_value(), "selector fixture config should parse");
+        const auto unique_source =
+            project_config->resolve_product("quick-source-migration");
+        expect(
+            unique_source && unique_source->canonical_slug == "quick-source",
+            "the unique source alias should resolve to the intended canonical product");
+        bool canonical_source_ambiguous = false;
+        try {
+            (void)project_config->resolve_product("quick-source");
+        } catch (const std::exception& error) {
+            canonical_source_ambiguous = std::string(error.what()).find(
+                "Product selector collision: normalized selector 'quick-source'") !=
+                std::string::npos;
+        }
+        expect(
+            canonical_source_ambiguous,
+            "the ambiguous canonical-looking source token should fail closed as public input");
 
         auto feature = create_item(
             source_root, "QS", ItemType::Feature, 1, "Prefix fixture feature");
@@ -264,7 +294,7 @@ int main() {
         PrefixMigrationOps::PlanOptions options;
         options.start_path = root;
         options.backlog_root = root;
-        options.request.product = "quick-source";
+        options.request.product = "quick-source-migration";
         options.request.expected_from_prefix = "QS";
         options.request.to_prefix = "NEWQS";
         options.request.max_files = 100;
@@ -283,6 +313,10 @@ int main() {
         }
         expect(first.ready(), "fixture should produce a ready plan");
         expect(first.items.size() == 2, "planner should map both source items");
+        expect(
+            first.request.product == "quick-source-migration" &&
+                first.product == "quick-source",
+            "alias-based planning should store the intended canonical product identity");
         expect(
             first.plan_hash.size() == 64 &&
                 first.plan_hash == second.plan_hash,

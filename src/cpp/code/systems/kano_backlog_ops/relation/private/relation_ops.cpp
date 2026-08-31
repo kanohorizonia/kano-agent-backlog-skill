@@ -24,12 +24,13 @@
 namespace kano::backlog_ops {
 namespace {
 
-using kano::backlog_core::BacklogContext;
 using kano::backlog_core::BacklogItem;
 using kano::backlog_core::CanonicalStore;
 using kano::backlog_core::ConfigLoader;
 using kano::backlog_core::DisplayIdRef;
 using kano::backlog_core::ProjectConfig;
+using kano::backlog_core::ProductResolution;
+using kano::backlog_core::ProductResolutionKind;
 using kano::backlog_core::RefParser;
 using kano::backlog_core::RefResolver;
 using kano::backlog_core::StateMachine;
@@ -38,11 +39,13 @@ using kano::backlog_core::UuidRef;
 struct ProductRuntime {
     std::string name;
     std::string prefix;
-    BacklogContext context;
+    std::filesystem::path product_root;
+    std::filesystem::path backlog_root;
 };
 
 struct Catalog {
     std::filesystem::path config_path;
+    ProjectConfig config;
     std::vector<ProductRuntime> products;
 };
 
@@ -79,6 +82,12 @@ std::string trim_copy(const std::string& value) {
     return value.substr(first, last - first + 1);
 }
 
+void require_product_selector(const std::string& value, const std::string& field) {
+    if (ProjectConfig::normalize_product_selector(value).empty()) {
+        throw std::runtime_error(field + " is required");
+    }
+}
+
 void require_safe_identifier(const std::string& value, const std::string& field) {
     const std::string trimmed = trim_copy(value);
     if (trimmed.empty()) {
@@ -108,9 +117,6 @@ Catalog load_catalog(const std::filesystem::path& start_path, std::size_t max_pr
     if (!config) {
         throw std::runtime_error("Failed to parse project config: " + config_path->string());
     }
-    if (const auto collisions = config->find_prefix_collisions(*config_path); !collisions.empty()) {
-        throw std::runtime_error(ProjectConfig::describe_prefix_collisions(collisions));
-    }
     if (config->products.size() > max_products) {
         throw std::runtime_error("Relation product scan limit exceeded: " +
             std::to_string(config->products.size()) + " > " + std::to_string(max_products));
@@ -118,39 +124,56 @@ Catalog load_catalog(const std::filesystem::path& start_path, std::size_t max_pr
 
     Catalog catalog;
     catalog.config_path = *config_path;
+    catalog.config = *config;
     for (const auto& [name, definition] : config->products) {
         ProductRuntime runtime;
         runtime.name = name;
         runtime.prefix = definition.prefix;
-        runtime.context = BacklogContext::resolve(*config_path, name, std::nullopt);
+        const ProductResolution canonical_resolution{
+            name,
+            ProductResolutionKind::CanonicalSlug,
+            name,
+            ProjectConfig::normalize_product_selector(name),
+            name,
+        };
+        const auto product_root = config->resolve_backlog_root(
+            canonical_resolution, *config_path);
+        if (!product_root) {
+            throw std::runtime_error(
+                "Configured product root disappeared during relation operation: " + name);
+        }
+        runtime.product_root = *product_root;
+        runtime.backlog_root = product_root->parent_path().filename() == "products"
+            ? product_root->parent_path().parent_path()
+            : *product_root;
         catalog.products.push_back(std::move(runtime));
     }
     return catalog;
 }
 
 const ProductRuntime& resolve_product(const Catalog& catalog, const std::string& alias, const std::string& field) {
-    require_safe_identifier(alias, field);
-    const std::string needle = lower_copy(trim_copy(alias));
-    std::vector<const ProductRuntime*> matches;
-    for (const auto& product : catalog.products) {
-        if (lower_copy(product.name) == needle || lower_copy(product.prefix) == needle) {
-            matches.push_back(&product);
-        }
-    }
-    if (matches.empty()) {
+    require_product_selector(alias, field);
+    const auto resolution = catalog.config.resolve_product(alias);
+    if (!resolution) {
+        require_safe_identifier(alias, field);
         throw std::runtime_error("Unknown " + field + ": " + alias);
     }
-    if (matches.size() != 1) {
-        throw std::runtime_error("Ambiguous " + field + ": " + alias);
+    const auto product = std::find_if(
+        catalog.products.begin(), catalog.products.end(), [&](const auto& candidate) {
+            return candidate.name == resolution->canonical_slug;
+        });
+    if (product == catalog.products.end()) {
+        throw std::runtime_error(
+            "Configured product disappeared during relation operation: " + resolution->canonical_slug);
     }
-    return *matches.front();
+    return *product;
 }
 
 const ProductRuntime* product_for_prefix(const Catalog& catalog, const std::string& prefix) {
-    const std::string needle = lower_copy(prefix);
+    const std::string needle = ProjectConfig::normalize_product_selector(prefix);
     const ProductRuntime* match = nullptr;
     for (const auto& product : catalog.products) {
-        if (lower_copy(product.prefix) == needle) {
+        if (ProjectConfig::normalize_product_selector(product.prefix) == needle) {
             if (match != nullptr) {
                 return nullptr;
             }
@@ -166,7 +189,7 @@ RelationEndpoint resolve_endpoint(
     const std::string& field
 ) {
     require_safe_item_ref(item_ref, field);
-    CanonicalStore store(product.context.product_root);
+    CanonicalStore store(product.product_root);
     RefResolver resolver(store);
     const auto item = resolver.resolve(item_ref);
     return RelationEndpoint{product.name, item.id, item.uid};
@@ -191,7 +214,7 @@ MutationTargetResolution resolve_mutation_target(
                 "Missing target display ID prefix does not match target product: " + item_ref +
                 " vs " + product.prefix);
         }
-        CanonicalStore store(product.context.product_root);
+        CanonicalStore store(product.product_root);
         if (store.find_item_paths_by_id(item_ref).empty()) {
             return MutationTargetResolution{RelationEndpoint{product.name, item_ref, ""}, false};
         }
@@ -234,7 +257,7 @@ ScanResult scan_catalog(const Catalog& catalog, std::size_t max_items) {
     ScanResult result;
     std::vector<ItemReadTask> tasks;
     for (const auto& product : catalog.products) {
-        CanonicalStore store(product.context.product_root);
+        CanonicalStore store(product.product_root);
         for (const auto& path : store.list_items()) {
             if (tasks.size() >= max_items) {
                 throw std::runtime_error("Relation item scan limit exceeded: " + std::to_string(max_items));
@@ -258,7 +281,7 @@ ScanResult scan_catalog(const Catalog& catalog, std::size_t max_items) {
             auto& scanned = metadata[index];
             scanned.product = task.product;
             try {
-                CanonicalStore store(task.product->context.product_root);
+                CanonicalStore store(task.product->product_root);
                 scanned.item = store.read_metadata(task.path);
                 scanned.valid = true;
             } catch (...) {
@@ -442,8 +465,8 @@ std::string relation_worklog_message(
 }
 
 void validate_mutation_request(const RelationMutationRequest& request) {
-    require_safe_identifier(request.source_product, "source_product");
-    require_safe_identifier(request.target_product, "target_product");
+    require_product_selector(request.source_product, "source_product");
+    require_product_selector(request.target_product, "target_product");
     require_safe_item_ref(request.source_item, "source_item");
     require_safe_item_ref(request.target_item, "target_item");
     if (request.agent.empty()) {
@@ -472,7 +495,7 @@ RelationMutationResult remove_unresolved_target_relation(
     result.items_scanned = 1;
     result.unresolved_links = 1;
 
-    CanonicalStore source_store(source_product.context.product_root);
+    CanonicalStore source_store(source_product.product_root);
     RefResolver source_resolver(source_store);
     auto source_item = source_resolver.resolve(source.item_id);
     const auto& current_values = relation_values(source_item, request.relation_type);
@@ -491,7 +514,7 @@ RelationMutationResult remove_unresolved_target_relation(
         return result;
     }
 
-    CanonicalStore target_store(target_product.context.product_root);
+    CanonicalStore target_store(target_product.product_root);
     if (!target_store.find_item_paths_by_id(target.item_id).empty()) {
         throw std::runtime_error("Missing relation target appeared before apply; retry through canonical removal: " + target.item_id);
     }
@@ -518,7 +541,7 @@ RelationMutationResult remove_unresolved_target_relation(
     result.changed = true;
     result.worklog_appended = true;
 
-    BacklogIndex index(source_product.context.backlog_root / ".cache" / "index" / "backlog.db");
+    BacklogIndex index(source_product.backlog_root / ".cache" / "index" / "backlog.db");
     index.initialize();
     index.index_item(source_item);
     result.index_refreshed = true;
@@ -629,7 +652,7 @@ RelationMutationResult mutate(const RelationMutationRequest& request, bool add) 
         stored_type = matches.front().stored_relation_type;
     }
     const auto& owner_product = product_by_name(catalog, owner_endpoint.product);
-    CanonicalStore owner_store(owner_product.context.product_root);
+    CanonicalStore owner_store(owner_product.product_root);
     RefResolver owner_resolver(owner_store);
     auto owner_item = owner_resolver.resolve(owner_endpoint.item_id);
     auto& values = relation_values(owner_item, stored_type);
@@ -650,7 +673,7 @@ RelationMutationResult mutate(const RelationMutationRequest& request, bool add) 
     result.changed = true;
     result.worklog_appended = true;
 
-    BacklogIndex index(owner_product.context.backlog_root / ".cache" / "index" / "backlog.db");
+    BacklogIndex index(owner_product.backlog_root / ".cache" / "index" / "backlog.db");
     index.initialize();
     index.index_item(owner_item);
     result.index_refreshed = true;
@@ -739,7 +762,7 @@ RelationListResult RelationOps::list(const RelationListRequest& request) {
     if (request.limit == 0 || request.limit > 500) {
         throw std::runtime_error("relation list limit must be between 1 and 500");
     }
-    require_safe_identifier(request.product, "product");
+    require_product_selector(request.product, "product");
     require_safe_item_ref(request.item, "item");
     auto catalog = load_catalog(request.start_path, request.max_products);
     const auto& product = resolve_product(catalog, request.product, "product");

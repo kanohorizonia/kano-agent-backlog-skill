@@ -313,47 +313,49 @@ std::vector<std::filesystem::path> planned_scaffold_files(const std::filesystem:
     };
 }
 
-void validate_prefix_collision(
-    const std::filesystem::path& config_path,
-    const std::string& product,
-    const std::string& prefix
+std::vector<std::string> normalize_selector_list(
+    const std::vector<std::string>& selectors,
+    const std::string& selector_kind
 ) {
-    if (!std::filesystem::exists(config_path)) {
-        return;
+    std::vector<std::string> normalized;
+    normalized.reserve(selectors.size());
+    for (const auto& selector : selectors) {
+        auto value = kano::backlog_core::ProjectConfig::normalize_product_selector(selector);
+        if (value.empty()) {
+            throw std::runtime_error(selector_kind + " cannot normalize to empty");
+        }
+        normalized.push_back(std::move(value));
     }
+    std::sort(normalized.begin(), normalized.end());
+    normalized.erase(std::unique(normalized.begin(), normalized.end()), normalized.end());
+    return normalized;
+}
 
-    const auto config = kano::backlog_core::ProjectConfig::load_from_toml(config_path);
-    if (!config) {
-        return;
+void validate_selector_collisions(
+    const std::optional<kano::backlog_core::ProjectConfig>& existing_config,
+    const std::string& product,
+    const kano::backlog_core::ProductDefinition& product_definition
+) {
+    kano::backlog_core::ProjectConfig prospective = existing_config.value_or(
+        kano::backlog_core::ProjectConfig{});
+    prospective.products[product] = product_definition;
+
+    std::vector<kano::backlog_core::ProductSelectorCollision> product_collisions;
+    for (const auto& collision : prospective.find_selector_collisions()) {
+        const bool involves_product = std::any_of(
+            collision.claims.begin(), collision.claims.end(),
+            [&](const auto& claim) { return claim.canonical_slug == product; });
+        const bool involves_other_product = std::any_of(
+            collision.claims.begin(), collision.claims.end(),
+            [&](const auto& claim) { return claim.canonical_slug != product; });
+        if (involves_product && involves_other_product) {
+            product_collisions.push_back(collision);
+        }
     }
-    const auto existing_collisions = config->find_prefix_collisions(config_path);
-    const auto collision_involves_product = [&](const kano::backlog_core::ProductPrefixCollision& collision) {
-        return collision.left_product == product || collision.right_product == product;
-    };
-    const bool repairing_colliding_product = std::any_of(
-        existing_collisions.begin(),
-        existing_collisions.end(),
-        collision_involves_product
-    );
-
-    auto prospective = *config;
-    prospective.products[product].prefix = prefix;
-    const auto prospective_collisions = prospective.find_prefix_collisions(config_path);
-    std::vector<kano::backlog_core::ProductPrefixCollision> product_collisions;
-    std::copy_if(
-        prospective_collisions.begin(),
-        prospective_collisions.end(),
-        std::back_inserter(product_collisions),
-        collision_involves_product
-    );
     if (!product_collisions.empty()) {
-        throw std::runtime_error(kano::backlog_core::ProjectConfig::describe_prefix_collisions(product_collisions));
-    }
-    if (!existing_collisions.empty() && !repairing_colliding_product) {
         throw std::runtime_error(
-            kano::backlog_core::ProjectConfig::describe_prefix_collisions(existing_collisions) +
-            "\nExisting product prefix collisions must be repaired before registering or updating an unaffected product."
-        );
+            kano::backlog_core::ProjectConfig::describe_selector_collisions(
+                product_collisions));
     }
 }
 
@@ -384,6 +386,19 @@ std::string toml_string(const std::string& value) {
         }
     }
     out << '"';
+    return out.str();
+}
+
+std::string toml_string_array(const std::vector<std::string>& values) {
+    std::ostringstream out;
+    out << '[';
+    for (std::size_t index = 0; index < values.size(); ++index) {
+        if (index > 0) {
+            out << ", ";
+        }
+        out << toml_string(values[index]);
+    }
+    out << ']';
     return out.str();
 }
 
@@ -466,9 +481,7 @@ std::optional<std::filesystem::path> upsert_project_gitignore(const std::filesys
 std::filesystem::path upsert_project_config(
     const std::filesystem::path& project_root,
     const std::string& product,
-    const std::string& product_name,
-    const std::string& prefix,
-    const std::string& backlog_root,
+    const kano::backlog_core::ProductDefinition& product_definition,
     const std::string& agent,
     bool force,
     bool& created
@@ -522,9 +535,15 @@ std::filesystem::path upsert_project_config(
     out << trim(text) << "\n\n"
         << "# Added by kano-backlog admin init (" << utc_timestamp() << ", agent=" << agent << ")\n"
         << product_table << "\n"
-        << "name = " << toml_string(product_name) << "\n"
-        << "prefix = " << toml_string(prefix) << "\n"
-        << "backlog_root = " << toml_string(backlog_root) << "\n";
+        << "name = " << toml_string(product_definition.name) << "\n"
+        << "prefix = " << toml_string(product_definition.prefix) << "\n"
+        << "backlog_root = " << toml_string(product_definition.backlog_root) << "\n";
+    if (!product_definition.aliases.empty()) {
+        out << "aliases = " << toml_string_array(product_definition.aliases) << "\n";
+    }
+    if (!product_definition.repo_bindings.empty()) {
+        out << "repo_bindings = " << toml_string_array(product_definition.repo_bindings) << "\n";
+    }
     return config_path;
 }
 
@@ -536,32 +555,44 @@ using namespace kano::backlog_core;
 
 OrchestrationOps::InitResult OrchestrationOps::initialize_backlog(const InitOptions& options) {
     const std::string agent = normalize_agent_id(options.agent);
-    const std::string product = normalize_product_name(options.product);
     const std::filesystem::path backlog_root = resolve_backlog_root(options);
     const std::filesystem::path project_root = resolve_project_root(backlog_root);
+    const std::filesystem::path config_path = project_root / ".kano" / "backlog_config.toml";
+    std::optional<kano::backlog_core::ProjectConfig> existing_config;
+    if (std::filesystem::exists(config_path)) {
+        existing_config = kano::backlog_core::ProjectConfig::load_from_toml(config_path);
+    }
+
+    std::string product;
+    if (existing_config) {
+        if (const auto resolution = existing_config->resolve_product(options.product)) {
+            product = resolution->canonical_slug;
+        }
+    }
+    if (product.empty()) {
+        product = normalize_product_name(options.product);
+    }
+
     const std::filesystem::path products_root = backlog_root / "products";
     const std::filesystem::path product_root = products_root / product;
-    const std::filesystem::path config_path = project_root / ".kano" / "backlog_config.toml";
-
     if (std::filesystem::exists(product_root) && !options.force) {
         throw std::runtime_error("Product backlog already exists: " + product_root.string() + " (use --force to update config/scaffold)");
+    }
+
+    std::optional<kano::backlog_core::ProductDefinition> existing_product;
+    if (existing_config) {
+        existing_product = existing_config->get_product(product);
     }
 
     std::string actual_product_name = options.product_name ? trim(*options.product_name) : product;
     if (actual_product_name.empty()) {
         throw std::runtime_error("Product name cannot be empty");
     }
-    std::optional<kano::backlog_core::ProjectConfig> existing_config;
-    if (std::filesystem::exists(config_path)) {
-        existing_config = kano::backlog_core::ProjectConfig::load_from_toml(config_path);
-    }
 
     std::optional<std::string> existing_product_prefix;
-    if (existing_config) {
-        if (const auto existing_product = existing_config->get_product(product)) {
-            if (!trim(existing_product->prefix).empty()) {
-                existing_product_prefix = existing_product->prefix;
-            }
+    if (existing_product) {
+        if (!trim(existing_product->prefix).empty()) {
+            existing_product_prefix = existing_product->prefix;
         }
     }
 
@@ -591,13 +622,34 @@ OrchestrationOps::InitResult OrchestrationOps::initialize_backlog(const InitOpti
         prefix_source = prefix_candidates.size() == 1 ? "derived" : "derived_collision_free";
     }
 
-    validate_prefix_collision(config_path, product, actual_prefix);
+    std::vector<std::string> alias_candidates = options.aliases;
+    std::vector<std::string> repo_binding_candidates = options.repo_bindings;
+    if (alias_candidates.empty() && existing_product) {
+        alias_candidates = existing_product->aliases;
+    }
+    if (repo_binding_candidates.empty() && existing_product) {
+        repo_binding_candidates = existing_product->repo_bindings;
+    }
+    auto aliases = normalize_selector_list(alias_candidates, "Product alias selector");
+    auto repo_bindings = normalize_selector_list(
+        repo_binding_candidates, "Product repository binding selector");
+
+    kano::backlog_core::ProductDefinition product_definition =
+        existing_product.value_or(kano::backlog_core::ProductDefinition{});
+    product_definition.name = actual_product_name;
+    product_definition.prefix = actual_prefix;
+    product_definition.backlog_root = relativize(product_root, project_root);
+    product_definition.aliases = aliases;
+    product_definition.repo_bindings = repo_bindings;
+    validate_selector_collisions(existing_config, product, product_definition);
 
     InitResult result;
     result.status = options.dry_run ? "dry-run" : "initialized";
     result.product = product;
     result.product_name = actual_product_name;
     result.prefix = actual_prefix;
+    result.aliases = aliases;
+    result.repo_bindings = repo_bindings;
     result.prefix_source = prefix_source;
     result.prefix_candidates = std::move(prefix_candidates);
     result.dry_run = options.dry_run;
@@ -624,9 +676,7 @@ OrchestrationOps::InitResult OrchestrationOps::initialize_backlog(const InitOpti
     result.config_path = upsert_project_config(
         project_root,
         product,
-        actual_product_name,
-        actual_prefix,
-        relativize(product_root, project_root),
+        product_definition,
         agent,
         options.force,
         config_created

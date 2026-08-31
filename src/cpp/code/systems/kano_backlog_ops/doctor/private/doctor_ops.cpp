@@ -137,7 +137,15 @@ std::optional<std::filesystem::path> resolve_backlog_root_from_config(
     const std::filesystem::path& config_path
 ) {
     for (const auto& product_name : sorted_product_names(config)) {
-        auto product_root = config.resolve_backlog_root(product_name, config_path);
+        const kano::backlog_core::ProductResolution canonical_resolution{
+            product_name,
+            kano::backlog_core::ProductResolutionKind::CanonicalSlug,
+            product_name,
+            ProjectConfig::normalize_product_selector(product_name),
+            product_name,
+        };
+        auto product_root = config.resolve_backlog_root(
+            canonical_resolution, config_path);
         if (!product_root) {
             continue;
         }
@@ -401,9 +409,9 @@ DoctorCheckResult check_backlog_discovery(const DoctorDiscovery& discovery) {
     return res;
 }
 
-DoctorCheckResult check_product_prefix_uniqueness(const DoctorDiscovery& discovery) {
+DoctorCheckResult check_product_selector_uniqueness(const DoctorDiscovery& discovery) {
     DoctorCheckResult res;
-    res.name = "Product Prefix Uniqueness";
+    res.name = "Product Selector Uniqueness";
 
     if (!discovery.project_config || !discovery.config_path || !exists_path(*discovery.config_path)) {
         res.passed = true;
@@ -411,16 +419,16 @@ DoctorCheckResult check_product_prefix_uniqueness(const DoctorDiscovery& discove
         return res;
     }
 
-    const auto collisions = discovery.project_config->find_prefix_collisions(*discovery.config_path);
+    const auto collisions = discovery.project_config->find_selector_collisions();
     if (collisions.empty()) {
         res.passed = true;
-        res.message = "No duplicate product prefixes found";
+        res.message = "No product selector collisions found";
         return res;
     }
 
     res.passed = false;
-    res.message = "Duplicate product prefixes found";
-    res.details = ProjectConfig::describe_prefix_collisions(collisions);
+    res.message = "Product selector collisions found";
+    res.details = ProjectConfig::describe_selector_collisions(collisions);
     return res;
 }
 
@@ -432,7 +440,7 @@ std::vector<DoctorCheckResult> DoctorOps::run_all_checks(const DoctorOptions& op
     const auto backlog_root = discovery.backlog_root.value_or(std::filesystem::path{});
 
     results.push_back(check_backlog_discovery(discovery));
-    results.push_back(check_product_prefix_uniqueness(discovery));
+    results.push_back(check_product_selector_uniqueness(discovery));
     results.push_back(check_backlog_structure(backlog_root));
     results.push_back(check_backlog_initialized(backlog_root, discovery.config_path));
     results.push_back(check_sqlite_status(backlog_root));

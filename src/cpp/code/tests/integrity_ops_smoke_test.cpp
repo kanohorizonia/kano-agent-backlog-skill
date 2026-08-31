@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -19,16 +20,30 @@ void expect(bool condition, const std::string& message) {
     }
 }
 
-std::filesystem::path make_temp_root() {
+std::filesystem::path make_temp_root(
+    const std::filesystem::path& base = std::filesystem::temp_directory_path()
+) {
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_int_distribution<unsigned int> dist(0, 0xffffff);
     std::ostringstream suffix;
     suffix << std::hex << dist(gen);
-    const auto root = std::filesystem::temp_directory_path() / "kano-backlog-integrity-smoke" / suffix.str();
+    const auto root = base / "kano-backlog-integrity-smoke" / suffix.str();
     std::filesystem::remove_all(root);
     std::filesystem::create_directories(root / "products");
     return root;
+}
+
+std::filesystem::path make_no_config_temp_root() {
+#ifdef _WIN32
+    const auto* public_directory = std::getenv("PUBLIC");
+    if (public_directory == nullptr || *public_directory == '\0') {
+        throw std::runtime_error("PUBLIC is required for the isolated no-config Windows fixture");
+    }
+    return make_temp_root(public_directory);
+#else
+    return make_temp_root();
+#endif
 }
 
 void write_text(const std::filesystem::path& path, const std::string& text) {
@@ -128,6 +143,29 @@ std::string join_rule_ids(const std::vector<std::string>& ids) {
         out << ids[i];
     }
     return out.str();
+}
+
+void create_project_config(const std::filesystem::path& root) {
+    write_text(
+        root / ".kano" / "backlog_config.toml",
+        "[products.clean-a]\n"
+        "name = \"Clean Alpha\"\n"
+        "prefix = \"CLNA\"\n"
+        "backlog_root = \"products/clean-a\"\n"
+        "aliases = [\"clean-alpha-alias\"]\n"
+        "repo_bindings = [\"clean-alpha-repo\"]\n\n"
+        "[products.clean-b]\n"
+        "name = \"Clean Beta\"\n"
+        "prefix = \"CLNB\"\n"
+        "backlog_root = \"products/clean-b\"\n"
+        "aliases = [\"clean-beta\", \"shared-integrity\"]\n"
+        "repo_bindings = [\"clean-beta-repo\"]\n\n"
+        "[products.dirty]\n"
+        "name = \"Dirty Product\"\n"
+        "prefix = \"DRTY\"\n"
+        "backlog_root = \"products/dirty\"\n"
+        "aliases = [\"dirty-alias\", \"SHARED-INTEGRITY\"]\n"
+        "repo_bindings = [\"dirty-repo\"]\n");
 }
 
 void create_clean_fixture(const std::filesystem::path& root) {
@@ -338,24 +376,49 @@ int main() {
         const auto root = make_temp_root();
         create_clean_fixture(root);
         create_dirty_fixture(root);
+        create_project_config(root);
 
         kano::backlog_ops::IntegrityOptions clean_options;
         clean_options.backlog_root = root;
-        clean_options.products = {"clean-a", "clean-b"};
+        clean_options.products = {
+            "clean-beta-repo",
+            "Clean Alpha",
+            "CLNB",
+            "clean-alpha-alias",
+            "clean-alpha-repo",
+            "clean-a",
+            "Clean Beta",
+            "clean-beta",
+            "CLNA",
+            "clean-b"
+        };
         clean_options.as_of = "2026-06-25";
         clean_options.stale_days = 90;
         const auto clean_report = kano::backlog_ops::IntegrityOps::inspect(clean_options);
         expect(clean_report.items_scanned == 3, "clean fixture should scan three items");
+        expect(clean_report.products_scanned == std::vector<std::string>({"clean-a", "clean-b"}),
+            "configured selector variants should deduplicate to deterministic canonical products");
         expect(clean_report.findings.empty(), "clean fixture should produce no findings");
         expect(kano::backlog_ops::IntegrityOps::render_markdown(clean_report).find("No integrity findings.") != std::string::npos,
             "clean markdown should say no findings");
 
+        auto exact_canonical_options = clean_options;
+        exact_canonical_options.products = {"clean-a"};
+        const auto exact_canonical_report = kano::backlog_ops::IntegrityOps::inspect(exact_canonical_options);
+        expect(exact_canonical_report.items_scanned == 2 &&
+                exact_canonical_report.products_scanned == std::vector<std::string>({"clean-a"}),
+            "an exact canonical selector should remain usable despite an unrelated registry collision");
+
         kano::backlog_ops::IntegrityOptions dirty_options;
         dirty_options.backlog_root = root;
-        dirty_options.products = {"dirty"};
+        dirty_options.products = {"dirty-repo", "Dirty Product", "DRTY", "dirty-alias", "dirty"};
         dirty_options.as_of = "2026-06-25";
         dirty_options.stale_days = 90;
         const auto dirty_report = kano::backlog_ops::IntegrityOps::inspect(dirty_options);
+        expect(dirty_report.items_scanned == 11,
+            "dirty selector variants should scan the canonical product exactly once");
+        expect(dirty_report.products_scanned == std::vector<std::string>({"dirty"}),
+            "dirty selector variants should report the canonical product slug");
         const std::vector<std::string> expected_rules = {
             "drift.duplicate_state",
             "drift.path_id",
@@ -376,6 +439,10 @@ int main() {
             actual_rules == expected_rules,
             "dirty fixture rule ordering should be deterministic; actual: " + join_rule_ids(actual_rules));
         expect(dirty_report.findings.size() == expected_rules.size(), "dirty fixture finding count mismatch");
+        expect(std::all_of(dirty_report.findings.begin(), dirty_report.findings.end(), [](const auto& finding) {
+                return finding.product == "dirty";
+            }),
+            "configured selector variants should use the canonical slug in every finding");
         const auto dirty_markdown = kano::backlog_ops::IntegrityOps::render_markdown(dirty_report);
         expect(dirty_markdown.find("## duplicate") != std::string::npos, "dirty markdown should group duplicate findings");
         expect(dirty_markdown.find("## drift") != std::string::npos, "dirty markdown should group drift findings");
@@ -392,6 +459,59 @@ int main() {
         expect(all_report.items_scanned == 14, "all-product scan should include clean and dirty products");
         expect(all_report.findings.size() == expected_rules.size(), "all-product scan should only report dirty findings");
 
+        auto ambiguous_options = clean_options;
+        ambiguous_options.products = {" \tShArEd-InTeGrItY\r "};
+        std::string collision_diagnostic;
+        try {
+            static_cast<void>(kano::backlog_ops::IntegrityOps::inspect(ambiguous_options));
+        } catch (const std::exception& error) {
+            collision_diagnostic = error.what();
+        }
+        expect(
+            collision_diagnostic ==
+                "Product selector collision: normalized selector 'shared-integrity' is claimed by multiple products: "
+                "clean-b (kind=explicit_alias, selector='shared-integrity'), "
+                "dirty (kind=explicit_alias, selector='SHARED-INTEGRITY')",
+            "ambiguous integrity selectors should preserve the normalized core collision diagnostic");
+
+        std::filesystem::create_directories(root / "products" / "unregistered" / "items");
+        auto unknown_options = clean_options;
+        unknown_options.products = {"unregistered"};
+        std::string unknown_diagnostic;
+        try {
+            static_cast<void>(kano::backlog_ops::IntegrityOps::inspect(unknown_options));
+        } catch (const std::exception& error) {
+            unknown_diagnostic = error.what();
+        }
+        expect(unknown_diagnostic == "Product 'unregistered' not found in project config",
+            "an existing unregistered product directory must not bypass configured selector resolution");
+
+        const auto fallback_root = make_no_config_temp_root();
+        write_item(
+            fallback_root,
+            "legacy-direct",
+            "task",
+            "LGCY-TSK-0001_legacy-direct.md",
+            item_markdown(
+                "LGCY-TSK-0001",
+                "019cdf6a-3000-7000-8000-000000000001",
+                "Task",
+                "Legacy direct fixture",
+                "Planned",
+                "2026-06-01",
+                "2026-06-20"));
+        kano::backlog_ops::IntegrityOptions fallback_options;
+        fallback_options.backlog_root = fallback_root;
+        fallback_options.products = {"legacy-direct", "legacy-direct"};
+        fallback_options.as_of = "2026-06-25";
+        fallback_options.stale_days = 90;
+        const auto fallback_report = kano::backlog_ops::IntegrityOps::inspect(fallback_options);
+        expect(fallback_report.items_scanned == 1 && fallback_report.findings.empty(),
+            "no-config direct product selection should preserve standalone fixture behavior");
+        expect(fallback_report.products_scanned == std::vector<std::string>({"legacy-direct"}),
+            "no-config direct product selection should preserve exact raw deduplication");
+
+        std::filesystem::remove_all(fallback_root);
         std::filesystem::remove_all(root);
         return 0;
     } catch (const std::exception& ex) {

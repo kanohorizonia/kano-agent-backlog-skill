@@ -232,6 +232,15 @@ TreeSnapshot snapshot_tree(const std::filesystem::path& root) {
     return snapshot;
 }
 
+bool has_only_canonical_write_receipt(
+    const std::filesystem::path& product_root
+) {
+    const auto cache = snapshot_tree(product_root / ".cache");
+    return cache.size() == 2 &&
+           cache.contains("file:canonical-write-revision-v1") &&
+           cache.contains("file:canonical-write-revision-v1.lock");
+}
+
 bool is_strict_uuid_v7(const std::string& value) {
     static const std::regex pattern(
         R"(^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$)");
@@ -471,10 +480,10 @@ Fixture make_fixture() {
         !std::filesystem::exists(fixture.destination),
         "canonical destination must begin absent");
     expect(
-        !std::filesystem::exists(fixture.external_root / ".cache") &&
+        has_only_canonical_write_receipt(fixture.external_root) &&
             !std::filesystem::exists(fixture.external_root / "_meta") &&
             !std::filesystem::exists(fixture.external_root / "views"),
-        "external fixture must begin without generated scaffolding");
+        "external fixture must begin with only the canonical write receipt");
     expect(
         fixture.config_before.find("[products.HorizonQuestDemo]") ==
             std::string::npos,
@@ -494,6 +503,9 @@ kano::backlog_ops::ProductRegistrationOps::PlanOptions plan_options(
         .product = "HorizonQuestDemo",
         .product_name = "Horizon Quest Demo",
         .prefix = "HQST",
+        .aliases = {" Quest Demo ", "HORIZON-DEMO", "horizon-demo"},
+        .repo_bindings = {
+            " Repo/HorizonQuestDemo ", "repo/horizonquestdemo"},
         .external_root = fixture.external_root,
     };
     options.limits = ProductRegistrationLimits{
@@ -781,6 +793,8 @@ make_rival_plan_options(Fixture& fixture) {
     options.request.product = "RivalDemo";
     options.request.product_name = "Rival Demo";
     options.request.prefix = "RIV";
+    options.request.aliases = {"Rival Demo Alias"};
+    options.request.repo_bindings = {"repo/rivaldemo"};
     options.request.external_root =
         fixture.root / "external-products" / "RivalDemo";
     write_text(
@@ -805,7 +819,9 @@ std::string expected_config_after(const Fixture& fixture) {
            "prefix = \"HQST\"\n"
            "backlog_root = \"" +
            std::filesystem::canonical(fixture.external_root).generic_string() +
-           "\"\n";
+           "\"\n"
+           "aliases = [\"horizon-demo\", \"quest demo\"]\n"
+           "repo_bindings = [\"repo/horizonquestdemo\"]\n";
 }
 
 void cleanup(Fixture& fixture) {
@@ -846,10 +862,10 @@ void expect_source_and_destination_invariant(const Fixture& fixture) {
         !std::filesystem::exists(fixture.destination),
         "registration must never scaffold the canonical destination");
     expect(
-        !std::filesystem::exists(fixture.external_root / ".cache") &&
+        has_only_canonical_write_receipt(fixture.external_root) &&
             !std::filesystem::exists(fixture.external_root / "_meta") &&
             !std::filesystem::exists(fixture.external_root / "views"),
-        "registration must not scaffold or derive data in the external root");
+        "registration must preserve only the canonical write receipt scaffolding");
 }
 
 void expect_blocked_plan(
@@ -916,8 +932,28 @@ void append_registry_entry(
     const std::string& product,
     const std::string& name,
     const std::string& prefix,
-    const std::filesystem::path& backlog_root
+    const std::filesystem::path& backlog_root,
+    const std::vector<std::string>& aliases = {},
+    const std::vector<std::string>& repo_bindings = {}
 ) {
+    const auto string_array = [](const std::vector<std::string>& values) {
+        std::string serialized = "[";
+        for (std::size_t index = 0; index < values.size(); ++index) {
+            if (index > 0u) {
+                serialized += ", ";
+            }
+            serialized += "\"" + values[index] + "\"";
+        }
+        return serialized + "]";
+    };
+    std::string selectors;
+    if (!aliases.empty()) {
+        selectors += "aliases = " + string_array(aliases) + "\n";
+    }
+    if (!repo_bindings.empty()) {
+        selectors +=
+            "repo_bindings = " + string_array(repo_bindings) + "\n";
+    }
     write_text(
         fixture.config,
         read_text(fixture.config) +
@@ -925,7 +961,7 @@ void append_registry_entry(
             "name = \"" + name + "\"\n" +
             "prefix = \"" + prefix + "\"\n" +
             "backlog_root = \"" + backlog_root.generic_string() +
-            "\"\n");
+            "\"\n" + selectors);
 }
 
 void test_deterministic_read_only_plan() {
@@ -959,10 +995,16 @@ void test_deterministic_read_only_plan() {
             first.product == "HorizonQuestDemo" &&
                 first.product_name == "Horizon Quest Demo" &&
                 first.prefix == "HQST" &&
+                first.aliases == std::vector<std::string>{
+                    "horizon-demo", "quest demo"} &&
+                first.repo_bindings == std::vector<std::string>{
+                    "repo/horizonquestdemo"} &&
+                first.request.aliases == first.aliases &&
+                first.request.repo_bindings == first.repo_bindings &&
                 first.proposed_config_revision ==
                     sha256_hex(expected_config_after(fixture)),
-            "plan must preserve exact key case and hash the exact proposed "
-            "config bytes");
+            "plan must preserve exact key case, normalize selector arrays, "
+            "and hash the exact proposed config bytes");
         expect(
             first.config_ref ==
                     "project-config:.kano/backlog_config.toml" &&
@@ -1004,8 +1046,12 @@ void test_deterministic_read_only_plan() {
         expect(
             json.find("\"max_files\"") != std::string::npos &&
                 json.find("\"max_bytes\"") != std::string::npos &&
-                json.find("\"max_items\"") != std::string::npos,
-            "the immutable plan must publish every inventory bound");
+                json.find("\"max_items\"") != std::string::npos &&
+                json.find("\"aliases\":[\"horizon-demo\",\"quest demo\"]") !=
+                    std::string::npos &&
+                json.find("\"repo_bindings\":[\"repo/horizonquestdemo\"]") !=
+                    std::string::npos,
+            "the immutable plan must publish every bound selector array");
 
         auto changed_limit_options = options;
         ++changed_limit_options.limits.max_files;
@@ -1015,6 +1061,15 @@ void test_deterministic_read_only_plan() {
             changed_limit.ready() &&
                 changed_limit.plan_hash != first.plan_hash,
             "inventory limits must participate in the reviewed plan hash");
+        auto changed_selector_options = options;
+        changed_selector_options.request.aliases.push_back("Alternate Demo");
+        const auto changed_selector =
+            ProductRegistrationOps::plan(changed_selector_options);
+        expect(
+            changed_selector.ready() &&
+                changed_selector.plan_hash != first.plan_hash,
+            "normalized selector arrays must participate in the reviewed "
+            "plan hash");
         expect(
             read_text(fixture.config) == fixture.config_before,
             "planning must leave shared registry bytes exact");
@@ -1026,6 +1081,17 @@ void test_deterministic_read_only_plan() {
             hyphenated_plan.ready() &&
                 hyphenated_plan.product == "Horizon-QuestDemo",
             "uppercase and hyphenated safe TOML/path keys must remain valid");
+        write_text(
+            fixture.config,
+            fixture.config_before + "aliases = [\"observer-extra\"]\n");
+        const auto changed_existing_selectors =
+            ProductRegistrationOps::plan(options);
+        expect(
+            changed_existing_selectors.ready() &&
+                changed_existing_selectors.registry_revision !=
+                    first.registry_revision,
+            "existing registry selector arrays must participate in the "
+            "registry revision");
         expect_source_and_destination_invariant(fixture);
     });
 }
@@ -1074,6 +1140,41 @@ void test_derived_source_authority_filter() {
         expect(
             ProductRegistrationOps::verify(recovery).status == "verified",
             "verification must ignore the same derived source set");
+    });
+}
+
+void test_unrelated_registry_collisions_do_not_block_registration() {
+    using kano::backlog_ops::ProductRegistrationOps;
+    with_fixture([](Fixture& fixture) {
+        const auto first_root =
+            fixture.shared / "products" / "unrelated-collision-one";
+        const auto second_root =
+            fixture.shared / "products" / "unrelated-collision-two";
+        std::filesystem::create_directories(first_root / "items");
+        std::filesystem::create_directories(second_root / "items");
+        append_registry_entry(
+            fixture,
+            "unrelated-collision-one",
+            "Unrelated Collision One",
+            "DUP",
+            first_root,
+            {"unrelated-shared-selector"});
+        append_registry_entry(
+            fixture,
+            "unrelated-collision-two",
+            "Unrelated Collision Two",
+            "DUP",
+            second_root,
+            {"unrelated-shared-selector"});
+
+        const auto plan = ProductRegistrationOps::plan(plan_options(fixture));
+        if (!plan.ready()) {
+            std::cerr << plan.to_json(true) << "\n";
+        }
+        expect(
+            plan.ready(),
+            "unrelated existing selector and prefix collisions must not "
+            "block registration of a unique product");
     });
 }
 
@@ -1186,6 +1287,62 @@ void test_blocked_registration_inputs() {
         expect_blocked_plan(
             fixture, options, "invalid_prefix",
             "prefix must be canonical uppercase ASCII alphanumeric text");
+    });
+
+    with_fixture([](Fixture& fixture) {
+        auto options = plan_options(fixture);
+        options.request.aliases.push_back(" \t ");
+        expect_blocked_plan(
+            fixture, options, "invalid_alias_selector",
+            "aliases that normalize to empty must block registration");
+    });
+
+    with_fixture([](Fixture& fixture) {
+        auto options = plan_options(fixture);
+        options.request.repo_bindings.push_back(" \r\n ");
+        expect_blocked_plan(
+            fixture, options, "invalid_repo_binding_selector",
+            "repository bindings that normalize to empty must block "
+            "registration");
+    });
+
+    with_fixture([](Fixture& fixture) {
+        const auto owner_root = fixture.root / "selector-owner";
+        std::filesystem::create_directories(owner_root / "items");
+        append_registry_entry(
+            fixture,
+            "selector-owner",
+            "Selector Owner",
+            "SEL",
+            owner_root,
+            {"shared-selector"});
+        auto options = plan_options(fixture);
+        options.request.aliases = {
+            " Shared-Selector ", "shared-selector"};
+        expect_blocked_plan(
+            fixture, options, "product_selector_collision:shared-selector",
+            "normalized duplicate aliases claimed by another product must "
+            "block registration");
+    });
+
+    with_fixture([](Fixture& fixture) {
+        const auto owner_root = fixture.root / "binding-owner";
+        std::filesystem::create_directories(owner_root / "items");
+        append_registry_entry(
+            fixture,
+            "binding-owner",
+            "Binding Owner",
+            "BND",
+            owner_root,
+            {"cross-kind-selector"});
+        auto options = plan_options(fixture);
+        options.request.aliases.clear();
+        options.request.repo_bindings = {" CROSS-KIND-SELECTOR "};
+        expect_blocked_plan(
+            fixture, options,
+            "product_selector_collision:cross-kind-selector",
+            "cross-kind selector claims owned by different products must "
+            "block registration");
     });
 
     with_fixture([](Fixture& fixture) {
@@ -1654,10 +1811,27 @@ void test_success_replay_verify_status_and_relocation_handoff() {
             definition.has_value() &&
                 definition->name == "Horizon Quest Demo" &&
                 definition->prefix == "HQST" &&
+                definition->aliases == std::vector<std::string>{
+                    "horizon-demo", "quest demo"} &&
+                definition->repo_bindings == std::vector<std::string>{
+                    "repo/horizonquestdemo"} &&
                 definition->backlog_root ==
                     std::filesystem::canonical(fixture.external_root)
                         .generic_string(),
             "registry entry must preserve the exact requested identity");
+        for (const auto& selector : std::vector<std::string>{
+                 "HorizonQuestDemo",
+                 "HQST",
+                 "Horizon Quest Demo",
+                 "horizon-demo",
+                 "repo/horizonquestdemo",
+             }) {
+            expect(
+                config->resolve_product_name(selector) ==
+                    std::optional<std::string>("HorizonQuestDemo"),
+                "every persisted canonical, prefix, display, alias, and "
+                "repository selector must resolve to the canonical product");
+        }
         const auto resolved = config->resolve_backlog_root(
             "HorizonQuestDemo", fixture.config);
         expect(
@@ -1666,6 +1840,19 @@ void test_success_replay_verify_status_and_relocation_handoff() {
                     std::filesystem::weakly_canonical(
                         fixture.external_root),
             "registered product must resolve to the exact external root");
+        const auto transaction = registration_transaction(
+            fixture, plan.plan_hash);
+        const auto receipt_bytes = read_text(transaction / "receipt.json");
+        const auto journal_bytes = read_text(transaction / "journal.json");
+        expect(
+            receipt_bytes.find("horizon-demo") != std::string::npos &&
+                receipt_bytes.find("repo/horizonquestdemo") !=
+                    std::string::npos &&
+                journal_bytes.find("horizon-demo") != std::string::npos &&
+                journal_bytes.find("repo/horizonquestdemo") !=
+                    std::string::npos,
+            "persisted receipt and journal evidence must bind normalized "
+            "selector arrays");
         expect_source_and_destination_invariant(fixture);
 
         ProductRegistrationOps::RecoveryOptions recovery;
@@ -3150,6 +3337,7 @@ int main(int argc, char** argv) {
         }
         test_deterministic_read_only_plan();
         test_derived_source_authority_filter();
+        test_unrelated_registry_collisions_do_not_block_registration();
         test_blocked_registration_inputs();
         test_inventory_limits();
         test_pre_materialization_inventory_limits();

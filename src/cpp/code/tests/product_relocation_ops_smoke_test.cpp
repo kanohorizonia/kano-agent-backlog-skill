@@ -140,13 +140,21 @@ Fixture make_fixture(bool raw_path_ref = false) {
         "prefix = \"HRR\"\n"
         "backlog_root = \"" +
         fixture.source.generic_string() +
-        "\" # external root before relocation\n\n"
+        "\" # external root before relocation\n"
+        "aliases = [\"human-rig-runtime-relocation\"]\n\n"
+        "[products.human-rig-runtime-shadow]\n"
+        "name = \"Human Rig Runtime canonical shadow\"\n"
+        "prefix = \"HRS\"\n"
+        "backlog_root = \"products/human-rig-runtime-shadow\"\n"
+        "aliases = [\"human-rig-runtime\"]\n\n"
         "[products.observer]\n"
         "name = \"Observer\"\n"
         "prefix = \"OBS\"\n"
         "backlog_root = \"products/observer\"\n";
     write_text(fixture.config, config);
     fixture.config_before = config;
+    std::filesystem::create_directories(
+        fixture.shared / "products" / "human-rig-runtime-shadow" / "items");
 
     auto feature = create_item(
         fixture.source, "HRR", ItemType::Feature, 1,
@@ -232,7 +240,7 @@ kano::backlog_ops::ProductRelocationOps::PlanOptions plan_options(
     kano::backlog_ops::ProductRelocationOps::PlanOptions options;
     options.start_path = fixture.shared;
     options.backlog_root = fixture.shared;
-    options.request.product = "human-rig-runtime";
+    options.request.product = "human-rig-runtime-relocation";
     options.request.destination_root = fixture.destination;
     options.request.max_files = 1000;
     options.request.max_bytes = 16u * 1024u * 1024u;
@@ -249,9 +257,31 @@ void cleanup(Fixture& fixture) {
 }
 
 void test_plan_and_collisions() {
+    using kano::backlog_core::ProjectConfig;
     using kano::backlog_ops::ProductRelocationOps;
     auto fixture = make_fixture();
     try {
+        const auto project_config =
+            ProjectConfig::load_from_toml(fixture.config);
+        expect(project_config.has_value(), "selector fixture config should parse");
+        const auto unique_product =
+            project_config->resolve_product("human-rig-runtime-relocation");
+        expect(
+            unique_product &&
+                unique_product->canonical_slug == "human-rig-runtime",
+            "the unique relocation alias should resolve to the intended canonical product");
+        bool canonical_product_ambiguous = false;
+        try {
+            (void)project_config->resolve_product("human-rig-runtime");
+        } catch (const std::exception& error) {
+            canonical_product_ambiguous = std::string(error.what()).find(
+                "Product selector collision: normalized selector 'human-rig-runtime'") !=
+                std::string::npos;
+        }
+        expect(
+            canonical_product_ambiguous,
+            "the ambiguous canonical-looking relocation token should fail closed as public input");
+
         const auto options = plan_options(fixture);
         const auto first = ProductRelocationOps::plan(options);
         const auto second = ProductRelocationOps::plan(options);
@@ -259,6 +289,10 @@ void test_plan_and_collisions() {
             std::cerr << first.to_json(true) << "\n";
         }
         expect(first.ready(), "HRR-shaped plan should be ready");
+        expect(
+            first.request.product == "human-rig-runtime-relocation" &&
+                first.product == "human-rig-runtime",
+            "alias-based relocation should store the intended canonical product identity");
         expect(
             first.plan_hash.size() == 64 &&
                 first.plan_hash == second.plan_hash,
@@ -521,7 +555,7 @@ void test_success_verify_replay_and_rollback() {
             ProjectConfig::load_from_toml(fixture.config);
         expect(config.has_value(), "relocated config should parse");
         const auto resolved = config->resolve_backlog_root(
-            "human-rig-runtime", fixture.config);
+            "human-rig-runtime-relocation", fixture.config);
         expect(
             resolved.has_value() &&
                 std::filesystem::weakly_canonical(*resolved) ==

@@ -1,5 +1,6 @@
 #include "kano/backlog_ops/integrity/integrity_ops.hpp"
 
+#include "kano/backlog_core/config/config.hpp"
 #include "kano/backlog_core/frontmatter/canonical_store.hpp"
 #include "kano/backlog_core/models/models.hpp"
 #include "kano/backlog_core/validation/validator.hpp"
@@ -33,6 +34,11 @@ using kano::backlog_core::to_string;
 struct ScannedItem {
     BacklogItem item;
     std::filesystem::path path;
+};
+
+struct ResolvedProductRoot {
+    std::string canonical_slug;
+    std::filesystem::path root;
 };
 
 std::filesystem::path normalized_absolute_path(const std::filesystem::path& path) {
@@ -128,12 +134,46 @@ std::string product_name_for_root(const std::filesystem::path& product_root) {
     return product_root.filename().string();
 }
 
-std::vector<std::filesystem::path> list_product_roots(
+std::vector<ResolvedProductRoot> list_product_roots(
     const std::filesystem::path& backlog_root,
     const std::vector<std::string>& products
 ) {
-    std::vector<std::filesystem::path> roots;
+    std::vector<ResolvedProductRoot> roots;
     if (!products.empty()) {
+        const auto config_path = kano::backlog_core::ConfigLoader::find_project_config(backlog_root);
+        if (config_path) {
+            const auto project_config = kano::backlog_core::ProjectConfig::load_from_toml(*config_path);
+            if (!project_config) {
+                throw std::runtime_error("Failed to parse project config at " + config_path->string());
+            }
+
+            std::set<std::string> seen;
+            for (const auto& product : products) {
+                const auto resolution = project_config->resolve_product(product);
+                if (!resolution) {
+                    throw std::runtime_error("Product '" + product + "' not found in project config");
+                }
+                const auto resolved_root = project_config->resolve_backlog_root(*resolution, *config_path);
+                if (!resolved_root) {
+                    throw std::runtime_error(
+                        "Product '" + resolution->canonical_slug + "' not found in project config");
+                }
+                const auto product_root = normalized_absolute_path(*resolved_root);
+                if (!std::filesystem::exists(product_root / "items")) {
+                    throw std::runtime_error(
+                        "Product root not found or missing items directory: " + product_root.string());
+                }
+                if (seen.insert(resolution->canonical_slug).second) {
+                    roots.push_back(ResolvedProductRoot{resolution->canonical_slug, product_root});
+                }
+            }
+            std::sort(roots.begin(), roots.end(), [](const auto& left, const auto& right) {
+                return std::tie(left.canonical_slug, left.root) <
+                    std::tie(right.canonical_slug, right.root);
+            });
+            return roots;
+        }
+
         std::set<std::string> seen;
         for (const auto& product : products) {
             if (product.empty() || !seen.insert(product).second) {
@@ -146,9 +186,12 @@ std::vector<std::filesystem::path> list_product_roots(
             if (!std::filesystem::exists(product_root / "items")) {
                 throw std::runtime_error("Product root not found or missing items directory: " + product_root.string());
             }
-            roots.push_back(normalized_absolute_path(product_root));
+            const auto normalized_root = normalized_absolute_path(product_root);
+            roots.push_back(ResolvedProductRoot{product_name_for_root(normalized_root), normalized_root});
         }
-        std::sort(roots.begin(), roots.end());
+        std::sort(roots.begin(), roots.end(), [](const auto& left, const auto& right) {
+            return left.root < right.root;
+        });
         return roots;
     }
 
@@ -156,14 +199,18 @@ std::vector<std::filesystem::path> list_product_roots(
     if (std::filesystem::exists(products_root)) {
         for (const auto& entry : std::filesystem::directory_iterator(products_root)) {
             if (entry.is_directory() && std::filesystem::exists(entry.path() / "items")) {
-                roots.push_back(normalized_absolute_path(entry.path()));
+                const auto product_root = normalized_absolute_path(entry.path());
+                roots.push_back(ResolvedProductRoot{product_name_for_root(product_root), product_root});
             }
         }
     }
     if (std::filesystem::exists(backlog_root / "items")) {
-        roots.push_back(normalized_absolute_path(backlog_root));
+        const auto product_root = normalized_absolute_path(backlog_root);
+        roots.push_back(ResolvedProductRoot{product_name_for_root(product_root), product_root});
     }
-    std::sort(roots.begin(), roots.end());
+    std::sort(roots.begin(), roots.end(), [](const auto& left, const auto& right) {
+        return left.root < right.root;
+    });
     return roots;
 }
 
@@ -478,7 +525,7 @@ IntegrityReport IntegrityOps::inspect(const IntegrityOptions& options) {
 
     const auto product_roots = list_product_roots(report.backlog_root, options.products);
     for (const auto& product_root : product_roots) {
-        inspect_product(report, product_root, product_name_for_root(product_root), *as_of_days);
+        inspect_product(report, product_root.root, product_root.canonical_slug, *as_of_days);
     }
     std::sort(report.products_scanned.begin(), report.products_scanned.end());
     report.products_scanned.erase(std::unique(report.products_scanned.begin(), report.products_scanned.end()), report.products_scanned.end());

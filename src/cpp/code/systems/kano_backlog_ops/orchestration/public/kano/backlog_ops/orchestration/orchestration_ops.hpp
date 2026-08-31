@@ -21,6 +21,8 @@ public:
         std::string agent;
         std::optional<std::string> product_name;
         std::optional<std::string> prefix;
+        std::vector<std::string> aliases;
+        std::vector<std::string> repo_bindings;
         bool force = false;
         bool dry_run = false;
     };
@@ -30,6 +32,8 @@ public:
         std::string product;
         std::string product_name;
         std::string prefix;
+        std::vector<std::string> aliases;
+        std::vector<std::string> repo_bindings;
         std::string prefix_source;
         std::vector<std::string> prefix_candidates;
         bool dry_run = false;

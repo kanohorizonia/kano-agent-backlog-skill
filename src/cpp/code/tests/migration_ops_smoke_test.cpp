@@ -4,6 +4,7 @@
 #include "kano/backlog_ops/migration/migration_ops.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <filesystem>
 #include <fstream>
@@ -11,6 +12,7 @@
 #include <random>
 #include <sstream>
 #include <stdexcept>
+#include <utility>
 
 namespace {
 
@@ -107,15 +109,39 @@ int main() {
             "[products.kto-source]\n"
             "name = \"KTO source\"\n"
             "prefix = \"KTO\"\n"
-            "backlog_root = \"_kano/backlog/products/kto-source\"\n\n"
+            "backlog_root = \"_kano/backlog/products/kto-source\"\n"
+            "aliases = [\"kto-migration-source\"]\n"
+            "repo_bindings = [\"repo/kto-source\"]\n\n"
             "[products.parametric-target]\n"
             "name = \"Parametric target\"\n"
             "prefix = \"KPG\"\n"
-            "backlog_root = \"_kano/backlog/products/parametric-target\"\n\n"
+            "backlog_root = \"_kano/backlog/products/parametric-target\"\n"
+            "aliases = [\"parametric-migration-target\"]\n"
+            "repo_bindings = [\"repo/parametric-target\"]\n\n"
+            "[products.kto-source-shadow]\n"
+            "name = \"KTO source canonical shadow\"\n"
+            "prefix = \"KSS\"\n"
+            "backlog_root = \"_kano/backlog/products/kto-source-shadow\"\n"
+            "aliases = [\"kto-source\"]\n\n"
+            "[products.parametric-target-shadow]\n"
+            "name = \"Parametric target canonical shadow\"\n"
+            "prefix = \"PTS\"\n"
+            "backlog_root = \"_kano/backlog/products/parametric-target-shadow\"\n"
+            "aliases = [\"parametric-target\"]\n\n"
             "[products.observer]\n"
             "name = \"Observer\"\n"
             "prefix = \"OBS\"\n"
-            "backlog_root = \"_kano/backlog/products/observer\"\n";
+            "backlog_root = \"_kano/backlog/products/observer\"\n\n"
+            "[products.selector-alias-owner]\n"
+            "name = \"Selector alias owner\"\n"
+            "prefix = \"SAO\"\n"
+            "backlog_root = \"_kano/backlog/products/selector-alias-owner\"\n"
+            "aliases = [\"migration-shared-selector\"]\n\n"
+            "[products.selector-repo-owner]\n"
+            "name = \"Selector repo owner\"\n"
+            "prefix = \"SRO\"\n"
+            "backlog_root = \"_kano/backlog/products/selector-repo-owner\"\n"
+            "repo_bindings = [\"migration-shared-selector\"]\n";
         write_text(root / ".kano" / "backlog_config.toml", config_text);
 
         const auto backlog_root = root / "_kano" / "backlog";
@@ -123,6 +149,14 @@ int main() {
         const auto target_root = backlog_root / "products" / "parametric-target";
         const auto observer_root = backlog_root / "products" / "observer";
         std::filesystem::create_directories(target_root / "items");
+        std::filesystem::create_directories(
+            backlog_root / "products" / "kto-source-shadow" / "items");
+        std::filesystem::create_directories(
+            backlog_root / "products" / "parametric-target-shadow" / "items");
+        std::filesystem::create_directories(
+            backlog_root / "products" / "selector-alias-owner" / "items");
+        std::filesystem::create_directories(
+            backlog_root / "products" / "selector-repo-owner" / "items");
 
         const auto source_initiative = create_ready_item(source_root, "KTO", ItemType::Initiative, 1, "Parametric geometry subtree");
         for (int number = 1; number <= 44; ++number) {
@@ -145,9 +179,9 @@ int main() {
         options.start_path = root;
         options.backlog_root = backlog_root;
         options.request = MigrationRequest{
-            .source_product = "kto-source",
+            .source_product = "kto-migration-source",
             .source_ref = source_initiative.uid,
-            .target_product = "parametric-target",
+            .target_product = "parametric-migration-target",
             .scope = "subtree",
             .include_owned_artifacts = true,
             .max_items = 45,
@@ -178,6 +212,98 @@ int main() {
         }), "planner should classify external references");
         expect(first.plan_hash.size() == 64 && first.plan_hash == second.plan_hash,
             "identical inputs should produce one deterministic SHA-256 plan hash");
+        expect(first.request.source_product == "kto-source" &&
+               first.request.target_product == "parametric-target",
+            "unique aliases should store canonical product slugs in the migration request");
+
+        const std::array<std::pair<std::string, std::string>, 4> selector_variants{{
+            {"KTO source", "Parametric target"},
+            {"KTO", "KPG"},
+            {"kto-migration-source", "parametric-migration-target"},
+            {"repo/kto-source", "repo/parametric-target"},
+        }};
+        for (const auto& [source_selector, target_selector] : selector_variants) {
+            auto selector_options = options;
+            selector_options.request.source_product = source_selector;
+            selector_options.request.target_product = target_selector;
+            const auto selector_plan = MigrationOps::plan(selector_options);
+            expect(selector_plan.ready(),
+                "display-name, prefix, alias, and repo-binding endpoints should produce ready plans");
+            expect(selector_plan.request.source_product == "kto-source" &&
+                   selector_plan.request.target_product == "parametric-target",
+                "resolved endpoint variants should store canonical product slugs");
+            expect(selector_plan.plan_hash == first.plan_hash,
+                "semantically identical endpoint selectors should produce the canonical plan hash");
+        }
+
+        auto same_product_options = options;
+        same_product_options.request.source_product = "KTO source";
+        same_product_options.request.target_product = "kto-migration-source";
+        const auto same_product = MigrationOps::plan(same_product_options);
+        expect(!same_product.ready() &&
+               contains_prefix(same_product.blockers, "source_and_target_product_must_differ") &&
+               same_product.request.source_product == "kto-source" &&
+               same_product.request.target_product == "kto-source",
+            "distinct selectors resolving to one canonical product should fail before migration planning");
+
+        auto missing_source_options = options;
+        missing_source_options.request.source_product = "missing-migration-source";
+        const auto missing_source = MigrationOps::plan(missing_source_options);
+        expect(!missing_source.ready() &&
+               contains_prefix(missing_source.blockers, "source_product_not_registered"),
+            "a missing source selector should fail with an endpoint-specific blocker");
+
+        auto missing_target_options = options;
+        missing_target_options.request.target_product = "missing-migration-target";
+        const auto missing_target = MigrationOps::plan(missing_target_options);
+        expect(!missing_target.ready() &&
+               contains_prefix(missing_target.blockers, "target_product_not_registered"),
+            "a missing target selector should fail with an endpoint-specific blocker");
+
+        const std::string source_canonical_collision_diagnostic =
+            "Product selector collision: normalized selector 'kto-source'";
+        auto canonical_source_options = options;
+        canonical_source_options.request.source_product = "kto-source";
+        const auto canonical_source = MigrationOps::plan(canonical_source_options);
+        expect(!canonical_source.ready() && contains_prefix(
+                   canonical_source.blockers,
+                   "source_product_resolution_failed:" + source_canonical_collision_diagnostic),
+            "an ambiguous canonical-looking source selector should fail closed as public input");
+
+        const std::string target_canonical_collision_diagnostic =
+            "Product selector collision: normalized selector 'parametric-target'";
+        auto canonical_target_options = options;
+        canonical_target_options.request.target_product = "parametric-target";
+        const auto canonical_target = MigrationOps::plan(canonical_target_options);
+        expect(!canonical_target.ready() && contains_prefix(
+                   canonical_target.blockers,
+                   "target_product_resolution_failed:" + target_canonical_collision_diagnostic),
+            "an ambiguous canonical-looking target selector should fail closed as public input");
+
+        const std::string collision_diagnostic =
+            "Product selector collision: normalized selector 'migration-shared-selector'";
+        auto ambiguous_source_options = options;
+        ambiguous_source_options.request.source_product = " MIGRATION-SHARED-SELECTOR ";
+        const auto ambiguous_source = MigrationOps::plan(ambiguous_source_options);
+        auto ambiguous_source_repeat_options = ambiguous_source_options;
+        ambiguous_source_repeat_options.request.source_product = "migration-shared-selector";
+        const auto ambiguous_source_repeat = MigrationOps::plan(ambiguous_source_repeat_options);
+        expect(!ambiguous_source.ready() && contains_prefix(
+                   ambiguous_source.blockers,
+                   "source_product_resolution_failed:" + collision_diagnostic),
+            "an ambiguous source selector should retain the normalized core collision diagnostic");
+        expect(ambiguous_source.blockers == ambiguous_source_repeat.blockers,
+            "equivalent ambiguous source selectors should produce deterministic blockers");
+
+        auto ambiguous_target_options = options;
+        ambiguous_target_options.request.target_product = "migration-shared-selector";
+        const auto ambiguous_target = MigrationOps::plan(ambiguous_target_options);
+        expect(!ambiguous_target.ready() && contains_prefix(
+                   ambiguous_target.blockers,
+                   "target_product_resolution_failed:" + collision_diagnostic),
+            "an ambiguous target selector should retain an endpoint-specific core collision diagnostic");
+        expect(first.ready(),
+            "trusted canonical identities from unique aliases should survive unrelated selector collisions");
         expect(first.request.expected_source_revision == first.source_revision &&
                first.request.expected_target_prefix == first.target_prefix,
             "ready plans should normalize resolved source revision and target prefix guards into the hashed request");
@@ -290,6 +416,8 @@ int main() {
 
         MigrationOps::ApplyOptions apply_options;
         apply_options.plan = options;
+        apply_options.plan.request.source_product = "kto-migration-source";
+        apply_options.plan.request.target_product = "parametric-migration-target";
         apply_options.plan.request.expected_source_revision = first.source_revision;
         apply_options.plan.request.expected_target_prefix = first.target_prefix;
         apply_options.expected_plan_hash = first.plan_hash;
@@ -374,9 +502,16 @@ int main() {
             "apply should publish the owned artifact with its target owner");
         expect(!std::filesystem::exists(source_artifact),
             "apply should retire the source-owned artifact");
-        expect(std::filesystem::is_regular_file(
-            target_root / "_meta" / "migrations" / (first.plan_hash + ".json")),
+        const auto alias_metadata_path =
+            target_root / "_meta" / "migrations" / (first.plan_hash + ".json");
+        expect(std::filesystem::is_regular_file(alias_metadata_path),
             "apply should persist the old-ID alias mapping as migration metadata");
+        const auto alias_metadata = read_text(alias_metadata_path);
+        expect(alias_metadata.find("\"kto-source\"") != std::string::npos &&
+               alias_metadata.find("\"parametric-target\"") != std::string::npos &&
+               alias_metadata.find("kto-migration-source") == std::string::npos &&
+               alias_metadata.find("repo/parametric-target") == std::string::npos,
+            "apply should persist canonical product identifiers after selector-based planning");
 
         MigrationOps::RecoveryOptions recovery_options{
             .start_path = root,

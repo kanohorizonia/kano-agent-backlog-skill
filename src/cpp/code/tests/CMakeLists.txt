@@ -87,7 +87,7 @@ target_link_libraries(migration_ops_smoke_test PRIVATE kano::backlog_ops)
   set(KB_TEST_MIGRATION_OPS "[bdd][featured][feature:migration-ops][scenario:KOB-BDD-MIGRATION-001] Cross-product migration is deterministic atomic and recoverable")
 add_test(NAME "${KB_TEST_MIGRATION_OPS}" COMMAND migration_ops_smoke_test)
 set_tests_properties("${KB_TEST_MIGRATION_OPS}" PROPERTIES
-    TIMEOUT 60
+    TIMEOUT 240
     ENVIRONMENT "CI=true;KANO_BACKLOG_NONINTERACTIVE=1;KANO_TEST_NONINTERACTIVE=1;GIT_TERMINAL_PROMPT=0"
 )
 

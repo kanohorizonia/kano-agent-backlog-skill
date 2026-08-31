@@ -51,6 +51,8 @@ using kano::backlog_core::BacklogItem;
 using kano::backlog_core::CanonicalStore;
 using kano::backlog_core::ItemType;
 using kano::backlog_core::ParseError;
+using kano::backlog_core::ProductDefinition;
+using kano::backlog_core::ProjectConfig;
 using kano::backlog_ops::ProductRegistrationFile;
 using kano::backlog_ops::ProductRegistrationIdentity;
 using kano::backlog_ops::ProductRegistrationLimits;
@@ -443,6 +445,24 @@ template <typename T>
 void sort_unique(std::vector<T>& values) {
     std::sort(values.begin(), values.end());
     values.erase(std::unique(values.begin(), values.end()), values.end());
+}
+
+std::vector<std::string> normalize_selector_list(
+    const std::vector<std::string>& selectors,
+    bool& has_empty_selector
+) {
+    std::vector<std::string> normalized;
+    normalized.reserve(selectors.size());
+    for (const auto& selector : selectors) {
+        auto value = ProjectConfig::normalize_product_selector(selector);
+        if (value.empty()) {
+            has_empty_selector = true;
+            continue;
+        }
+        normalized.push_back(std::move(value));
+    }
+    sort_unique(normalized);
+    return normalized;
 }
 
 std::string read_file(
@@ -872,6 +892,41 @@ Json::Value string_array(const std::vector<std::string>& values) {
     return result;
 }
 
+std::optional<std::vector<std::string>> persisted_selector_array(
+    const Json::Value& object,
+    const char* member
+) {
+    if (!object.isObject()) {
+        return std::nullopt;
+    }
+    if (!object.isMember(member)) {
+        return std::vector<std::string>{};
+    }
+    const auto& value = object[member];
+    if (!value.isArray()) {
+        return std::nullopt;
+    }
+
+    std::vector<std::string> selectors;
+    selectors.reserve(value.size());
+    for (Json::ArrayIndex index = 0; index < value.size(); ++index) {
+        if (!value[index].isString()) {
+            return std::nullopt;
+        }
+        const auto selector = value[index].asString();
+        if (selector.empty() ||
+            ProjectConfig::normalize_product_selector(selector) != selector) {
+            return std::nullopt;
+        }
+        selectors.push_back(selector);
+    }
+    auto normalized = selectors;
+    sort_unique(normalized);
+    return normalized == selectors
+        ? std::optional<std::vector<std::string>>(std::move(selectors))
+        : std::nullopt;
+}
+
 Json::Value nullable_string(const std::optional<std::string>& value) {
     return value ? Json::Value(*value) : Json::Value(Json::nullValue);
 }
@@ -881,6 +936,8 @@ Json::Value request_json(const ProductRegistrationRequest& request) {
     value["product"] = request.product;
     value["product_name"] = request.product_name;
     value["prefix"] = request.prefix;
+    value["aliases"] = string_array(request.aliases);
+    value["repo_bindings"] = string_array(request.repo_bindings);
     value["external_root_supplied"] = !request.external_root.empty();
     return value;
 }
@@ -905,6 +962,8 @@ Json::Value plan_json(
     value["product"] = plan.product;
     value["product_name"] = plan.product_name;
     value["prefix"] = plan.prefix;
+    value["aliases"] = string_array(plan.aliases);
+    value["repo_bindings"] = string_array(plan.repo_bindings);
     value["config_ref"] = plan.config_ref;
     value["source_root_ref"] = plan.source_root_ref;
     value["canonical_destination_ref"] =
@@ -1029,11 +1088,27 @@ std::string escape_toml_basic_string(const std::string& value) {
     return escaped.str();
 }
 
+std::string toml_string_array(const std::vector<std::string>& values) {
+    std::string serialized = "[";
+    for (std::size_t index = 0; index < values.size(); ++index) {
+        if (index > 0u) {
+            serialized += ", ";
+        }
+        serialized += '"';
+        serialized += escape_toml_basic_string(values[index]);
+        serialized += '"';
+    }
+    serialized += ']';
+    return serialized;
+}
+
 std::string append_product_block(
     const std::string& before,
     const std::string& product,
     const std::string& name,
     const std::string& prefix,
+    const std::vector<std::string>& aliases,
+    const std::vector<std::string>& repo_bindings,
     const std::filesystem::path& external_root
 ) {
     std::string after = before;
@@ -1049,6 +1124,13 @@ std::string append_product_block(
     after += "backlog_root = \"" +
              escape_toml_basic_string(external_root.generic_string()) +
              "\"\n";
+    if (!aliases.empty()) {
+        after += "aliases = " + toml_string_array(aliases) + "\n";
+    }
+    if (!repo_bindings.empty()) {
+        after += "repo_bindings = " + toml_string_array(repo_bindings) +
+                 "\n";
+    }
     return after;
 }
 
@@ -1057,7 +1139,35 @@ struct RegistryEntry {
     std::string name;
     std::string prefix;
     std::string backlog_root;
+    std::vector<std::string> aliases;
+    std::vector<std::string> repo_bindings;
 };
+
+bool read_registry_string_array(
+    const toml::table& table,
+    std::string_view key,
+    std::vector<std::string>& values
+) {
+    const auto* node = table.get(key);
+    if (!node) {
+        values.clear();
+        return true;
+    }
+    const auto* array = node->as_array();
+    if (!array) {
+        return false;
+    }
+    values.clear();
+    values.reserve(array->size());
+    for (const auto& element : *array) {
+        const auto value = element.value<std::string>();
+        if (!value) {
+            return false;
+        }
+        values.push_back(*value);
+    }
+    return true;
+}
 
 std::optional<std::vector<RegistryEntry>> parse_registry(
     const std::string& content
@@ -1080,8 +1190,20 @@ std::optional<std::vector<RegistryEntry>> parse_registry(
             if (!name || !prefix || !root || root->empty()) {
                 return std::nullopt;
             }
-            entries.push_back({
-                std::string(key.str()), *name, *prefix, *root,
+            std::vector<std::string> aliases;
+            std::vector<std::string> repo_bindings;
+            if (!read_registry_string_array(*table, "aliases", aliases) ||
+                !read_registry_string_array(
+                    *table, "repo_bindings", repo_bindings)) {
+                return std::nullopt;
+            }
+            entries.push_back(RegistryEntry{
+                .product = std::string(key.str()),
+                .name = *name,
+                .prefix = *prefix,
+                .backlog_root = *root,
+                .aliases = std::move(aliases),
+                .repo_bindings = std::move(repo_bindings),
             });
         }
         std::sort(
@@ -1129,6 +1251,8 @@ bool config_registration_matches(
     const auto entry = find_registry_entry(content, request.product);
     return entry && entry->name == request.product_name &&
            entry->prefix == request.prefix &&
+           entry->aliases == request.aliases &&
+           entry->repo_bindings == request.repo_bindings &&
            resolve_registered_root(config_root, entry->backlog_root) ==
                external_root;
 }
@@ -1567,6 +1691,65 @@ std::vector<std::filesystem::path> registry_item_paths(
     return paths;
 }
 
+ProductDefinition registry_product_definition(const RegistryEntry& entry) {
+    ProductDefinition definition;
+    definition.name = entry.name;
+    definition.prefix = entry.prefix;
+    definition.backlog_root = entry.backlog_root;
+    definition.aliases = entry.aliases;
+    definition.repo_bindings = entry.repo_bindings;
+    return definition;
+}
+
+void add_selector_collision_blockers(
+    PreparedRegistration& prepared,
+    const std::vector<RegistryEntry>& registry
+) {
+    ProjectConfig prospective;
+    for (const auto& entry : registry) {
+        prospective.products.emplace(
+            entry.product, registry_product_definition(entry));
+    }
+    if (!prospective.products.contains(prepared.plan.product)) {
+        ProductDefinition proposed;
+        proposed.name = prepared.plan.product_name;
+        proposed.prefix = prepared.plan.prefix;
+        proposed.backlog_root = prepared.external_root.generic_string();
+        proposed.aliases = prepared.plan.aliases;
+        proposed.repo_bindings = prepared.plan.repo_bindings;
+        prospective.products.emplace(
+            prepared.plan.product, std::move(proposed));
+    }
+    for (const auto& collision : prospective.find_selector_collisions()) {
+        const auto proposed_product_claims_selector = std::any_of(
+            collision.claims.begin(),
+            collision.claims.end(),
+            [&](const auto& claim) {
+                return claim.canonical_slug == prepared.plan.product;
+            });
+        if (!proposed_product_claims_selector) {
+            continue;
+        }
+        add_blocker(
+            prepared.plan,
+            "product_selector_collision:" + collision.normalized_selector);
+    }
+}
+
+void update_registry_selector_revision(
+    StreamingSha256& revision,
+    std::string_view kind,
+    const std::vector<std::string>& values
+) {
+    revision.update(kind.data(), kind.size());
+    revision.update("\0", 1u);
+    for (const auto& value : values) {
+        revision.update(value);
+        revision.update("\0", 1u);
+    }
+    revision.update("\n", 1u);
+}
+
 void scan_registry(
     PreparedRegistration& prepared,
     const std::vector<RegistryEntry>& registry
@@ -1585,6 +1768,8 @@ void scan_registry(
         prepared.plan.limits.max_items,
         prepared.source_metadata_attempts);
 
+    add_selector_collision_blockers(prepared, registry);
+
     for (const auto& entry : registry) {
         revision.update(entry.product);
         revision.update("\0", 1u);
@@ -1594,6 +1779,10 @@ void scan_registry(
         revision.update("\0", 1u);
         revision.update(entry.backlog_root);
         revision.update("\n", 1u);
+        update_registry_selector_revision(
+            revision, "aliases", entry.aliases);
+        update_registry_selector_revision(
+            revision, "repo_bindings", entry.repo_bindings);
 
         if (entry.product == prepared.plan.product) {
             add_blocker(prepared.plan, "product_already_registered");
@@ -1607,10 +1796,13 @@ void scan_registry(
         }
         const auto prior_prefix = prefixes.find(normalized_prefix);
         if (!normalized_prefix.empty() && prior_prefix != prefixes.end()) {
-            add_blocker(
-                prepared.plan,
-                "existing_prefix_collision:" + prior_prefix->second + ":" +
-                    entry.product);
+            if (prior_prefix->second == prepared.plan.product ||
+                entry.product == prepared.plan.product) {
+                add_blocker(
+                    prepared.plan,
+                    "existing_prefix_collision:" + prior_prefix->second + ":" +
+                        entry.product);
+            }
         } else if (!normalized_prefix.empty()) {
             prefixes.emplace(normalized_prefix, entry.product);
         }
@@ -1767,6 +1959,20 @@ PreparedRegistration build_prepared(
     prepared.plan.product = options.request.product;
     prepared.plan.product_name = options.request.product_name;
     prepared.plan.prefix = options.request.prefix;
+    bool has_empty_alias = false;
+    bool has_empty_repo_binding = false;
+    prepared.plan.aliases = normalize_selector_list(
+        options.request.aliases, has_empty_alias);
+    prepared.plan.repo_bindings = normalize_selector_list(
+        options.request.repo_bindings, has_empty_repo_binding);
+    prepared.plan.request.aliases = prepared.plan.aliases;
+    prepared.plan.request.repo_bindings = prepared.plan.repo_bindings;
+    if (has_empty_alias) {
+        add_blocker(prepared.plan, "invalid_alias_selector");
+    }
+    if (has_empty_repo_binding) {
+        add_blocker(prepared.plan, "invalid_repo_binding_selector");
+    }
     prepared.plan.config_ref =
         "project-config:.kano/backlog_config.toml";
     prepared.plan.source_root_ref =
@@ -2002,13 +2208,15 @@ PreparedRegistration build_prepared(
         options.request.product,
         options.request.product_name,
         options.request.prefix,
+        prepared.plan.aliases,
+        prepared.plan.repo_bindings,
         prepared.external_root);
     prepared.plan.proposed_config_revision =
         sha256_hex(prepared.config_after);
     if (!config_registration_matches(
             prepared.config_after,
             prepared.config_root,
-            options.request,
+            prepared.plan.request,
             prepared.external_root)) {
         add_blocker(prepared.plan, "prospective_config_resolution_failed");
     }
@@ -2953,6 +3161,8 @@ struct ValidatedEvidence {
     std::string product;
     std::string product_name;
     std::string prefix;
+    std::vector<std::string> aliases;
+    std::vector<std::string> repo_bindings;
     std::string apply_agent;
     std::optional<std::string> recovery_agent;
     std::filesystem::path external_root;
@@ -3014,6 +3224,35 @@ ValidatedEvidence load_validated_evidence(
     if (sha256_hex(json_string(plan_for_hash, false)) != options.plan_hash) {
         throw std::runtime_error("embedded_plan_hash_mismatch");
     }
+    const auto plan_aliases = persisted_selector_array(
+        evidence.plan, "aliases");
+    const auto plan_repo_bindings = persisted_selector_array(
+        evidence.plan, "repo_bindings");
+    const auto request_aliases = persisted_selector_array(
+        evidence.plan["request"], "aliases");
+    const auto request_repo_bindings = persisted_selector_array(
+        evidence.plan["request"], "repo_bindings");
+    const auto receipt_aliases = persisted_selector_array(
+        evidence.receipt, "aliases");
+    const auto receipt_repo_bindings = persisted_selector_array(
+        evidence.receipt, "repo_bindings");
+    const auto journal_aliases = persisted_selector_array(
+        evidence.journal, "aliases");
+    const auto journal_repo_bindings = persisted_selector_array(
+        evidence.journal, "repo_bindings");
+    if (!plan_aliases || !plan_repo_bindings || !request_aliases ||
+        !request_repo_bindings || !receipt_aliases ||
+        !receipt_repo_bindings || !journal_aliases ||
+        !journal_repo_bindings || *plan_aliases != *request_aliases ||
+        *plan_aliases != *receipt_aliases ||
+        *plan_aliases != *journal_aliases ||
+        *plan_repo_bindings != *request_repo_bindings ||
+        *plan_repo_bindings != *receipt_repo_bindings ||
+        *plan_repo_bindings != *journal_repo_bindings) {
+        throw std::runtime_error("invalid_product_registration_selectors");
+    }
+    evidence.aliases = *plan_aliases;
+    evidence.repo_bindings = *plan_repo_bindings;
     const auto before_sha256 = sha256_hex(evidence.before);
     const auto after_sha256 = sha256_hex(evidence.after);
     if (before_sha256 != evidence.plan["config_revision"].asString() ||
@@ -3054,7 +3293,9 @@ ValidatedEvidence load_validated_evidence(
     }
     const auto entry = find_registry_entry(evidence.after, evidence.product);
     if (!entry || entry->name != evidence.product_name ||
-        entry->prefix != evidence.prefix) {
+        entry->prefix != evidence.prefix ||
+        entry->aliases != evidence.aliases ||
+        entry->repo_bindings != evidence.repo_bindings) {
         throw std::runtime_error("config_after_registration_mismatch");
     }
     const std::filesystem::path configured_root(entry->backlog_root);
@@ -3095,6 +3336,12 @@ bool options_match_evidence(
     }
     try {
         const auto& limits = evidence.plan["limits"];
+        bool has_empty_alias = false;
+        bool has_empty_repo_binding = false;
+        const auto aliases = normalize_selector_list(
+            options.request.aliases, has_empty_alias);
+        const auto repo_bindings = normalize_selector_list(
+            options.request.repo_bindings, has_empty_repo_binding);
         auto requested_external = normalized_absolute(
             options.request.external_root);
         if (std::filesystem::exists(requested_external)) {
@@ -3104,6 +3351,9 @@ bool options_match_evidence(
         return options.request.product == evidence.product &&
                options.request.product_name == evidence.product_name &&
                options.request.prefix == evidence.prefix &&
+               !has_empty_alias && !has_empty_repo_binding &&
+               aliases == evidence.aliases &&
+               repo_bindings == evidence.repo_bindings &&
                path_equal(
                    existing_path_identity(options.backlog_root).final_path,
                    evidence.paths.config_root) &&
@@ -3313,6 +3563,10 @@ std::vector<std::string> recovery_registry_failures(
     prepared.plan.product = evidence.product;
     prepared.plan.product_name = evidence.product_name;
     prepared.plan.prefix = evidence.prefix;
+    prepared.plan.aliases = evidence.aliases;
+    prepared.plan.repo_bindings = evidence.repo_bindings;
+    prepared.plan.request.aliases = evidence.aliases;
+    prepared.plan.request.repo_bindings = evidence.repo_bindings;
     prepared.config_root = evidence.paths.config_root;
     prepared.config_path = evidence.paths.config_path;
     prepared.products_root = evidence.paths.products_root;
@@ -3350,6 +3604,8 @@ std::vector<std::string> registration_postcondition_failures(
             .product = evidence.product,
             .product_name = evidence.product_name,
             .prefix = evidence.prefix,
+            .aliases = evidence.aliases,
+            .repo_bindings = evidence.repo_bindings,
             .external_root = evidence.external_root,
         };
         if (!config_registration_matches(
@@ -3379,6 +3635,8 @@ Json::Value make_receipt(
     receipt["source_root_ref"] = prepared.plan.source_root_ref;
     receipt["canonical_destination_ref"] =
         prepared.plan.canonical_destination_ref;
+    receipt["aliases"] = string_array(prepared.plan.aliases);
+    receipt["repo_bindings"] = string_array(prepared.plan.repo_bindings);
     receipt["plan"] = plan_json(prepared.plan, true);
     return receipt;
 }
@@ -3399,6 +3657,8 @@ Json::Value make_journal(
     journal["config_before_sha256"] = sha256_hex(prepared.config_before);
     journal["config_after_sha256"] = sha256_hex(prepared.config_after);
     journal["receipt_sha256"] = sha256_hex(receipt_bytes);
+    journal["aliases"] = string_array(prepared.plan.aliases);
+    journal["repo_bindings"] = string_array(prepared.plan.repo_bindings);
     Json::Value attempt(Json::objectValue);
     attempt["sequence"] = 1u;
     attempt["kind"] = "apply";
@@ -3465,6 +3725,7 @@ std::vector<std::string> stale_receipts(
                 return value.starts_with("product_already_registered") ||
                        value.starts_with("product_case_fold_collision") ||
                        value.starts_with("prefix_collision") ||
+                       value.starts_with("product_selector_collision") ||
                        value.starts_with("external_root_collision");
             });
         receipts.push_back(

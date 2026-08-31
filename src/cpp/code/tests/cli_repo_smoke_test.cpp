@@ -309,6 +309,20 @@ int main(int argc, char** argv) {
         const auto original_cwd = std::filesystem::current_path();
         std::filesystem::current_path(temp_root);
 
+        const auto admin_init_help_output = temp_root / "admin-init-help.txt";
+        expect_command_capture_success(
+            run_command_capture(binary, {
+                "admin", "init", "--help"
+            }, admin_init_help_output),
+            admin_init_help_output,
+            "admin init help failed"
+        );
+        const auto admin_init_help_text = read_text(admin_init_help_output);
+        expect(
+            admin_init_help_text.find("--alias") != std::string::npos &&
+                admin_init_help_text.find("--repo-binding") != std::string::npos,
+            "CLI11 admin init help must expose repeatable selector options");
+
         const auto kfg_dry_run_output = temp_root / "admin-init-kfg-dry-run.json";
         expect_command_capture_success(
             run_command_capture(binary, {
@@ -317,6 +331,12 @@ int main(int argc, char** argv) {
                 "--agent", "tester",
                 "--product-name", "Kano Forge Skill",
                 "--prefix", " kfg ",
+                "--alias", " Forge ",
+                "--alias=forge",
+                "--alias", "HorizonRPG",
+                "--repo-binding", " Repo/Kano-Forge-Skill ",
+                "--repo-binding=repo/kano-forge-skill",
+                "--repo-binding", "repo/kano-forge",
                 "--dry-run"
             }, kfg_dry_run_output),
             kfg_dry_run_output,
@@ -327,6 +347,14 @@ int main(int argc, char** argv) {
         expect(kfg_dry_run_text.find("\"dry_run\" : true") != std::string::npos, "admin init dry-run did not report dry_run=true");
         expect(kfg_dry_run_text.find("kano-forge-skill") != std::string::npos, "admin init dry-run did not plan kano-forge-skill paths");
         expect(kfg_dry_run_text.find("KFG") != std::string::npos, "admin init dry-run did not normalize KFG prefix");
+        expect(
+            kfg_dry_run_text.find("\"aliases\"") != std::string::npos &&
+                kfg_dry_run_text.find("\"forge\"") != std::string::npos &&
+                kfg_dry_run_text.find("\"horizonrpg\"") != std::string::npos &&
+                kfg_dry_run_text.find("\"repo_bindings\"") != std::string::npos &&
+                kfg_dry_run_text.find("\"repo/kano-forge\"") != std::string::npos &&
+                kfg_dry_run_text.find("\"repo/kano-forge-skill\"") != std::string::npos,
+            "admin init dry-run did not return normalized selector arrays");
         expect(kfg_dry_run_text.find("\"prefix_source\" : \"explicit\"") != std::string::npos, "admin init dry-run did not report explicit prefix source");
         expect(kfg_dry_run_text.find("\"prefix_candidates\"") != std::string::npos, "admin init dry-run did not report prefix candidates");
         expect(kfg_dry_run_text.find("planned_paths") != std::string::npos, "admin init dry-run did not emit planned paths");
@@ -339,11 +367,23 @@ int main(int argc, char** argv) {
             "--product", "kano-forge-skill",
             "--agent", "tester",
             "--product-name", "Kano Forge Skill",
-            "--prefix", "KFG"
+            "--prefix", "KFG",
+            "--alias", " Forge ",
+            "--alias=forge",
+            "--alias", "HorizonRPG",
+            "--repo-binding", " Repo/Kano-Forge-Skill ",
+            "--repo-binding=repo/kano-forge-skill",
+            "--repo-binding", "repo/kano-forge"
         }) == 0, "admin init KFG registration failed");
         const auto kfg_product_root = temp_root / "_kano" / "backlog" / "products" / "kano-forge-skill";
         expect(std::filesystem::exists(kfg_product_root / "decisions"), "admin init KFG did not create decisions directory");
-        expect(read_text(temp_root / ".kano" / "backlog_config.toml").find("prefix = \"KFG\"") != std::string::npos, "admin init KFG did not register normalized prefix");
+        const auto kfg_config_path = temp_root / ".kano" / "backlog_config.toml";
+        const auto kfg_config_text = read_text(kfg_config_path);
+        expect(kfg_config_text.find("prefix = \"KFG\"") != std::string::npos, "admin init KFG did not register normalized prefix");
+        expect(
+            kfg_config_text.find("aliases = [\"forge\", \"horizonrpg\"]") != std::string::npos &&
+                kfg_config_text.find("repo_bindings = [\"repo/kano-forge\", \"repo/kano-forge-skill\"]") != std::string::npos,
+            "admin init did not persist sorted unique selector arrays");
         expect(run_command(binary, {
             "-P", "KFG",
             "workitem", "list"
@@ -352,7 +392,62 @@ int main(int argc, char** argv) {
             "-P", " kfg ",
             "workitem", "list"
         }) == 0, "registered KFG prefix did not resolve case-insensitively after trimming");
+        expect(run_command(binary, {
+            "-P", " FORGE ",
+            "workitem", "list"
+        }) == 0, "registered explicit alias did not resolve through the global product option");
+        expect(run_command(binary, {
+            "-P", " REPO/KANO-FORGE-SKILL ",
+            "workitem", "list"
+        }) == 0, "registered repo binding did not resolve through the global product option");
 
+        const auto adr_alias_output = temp_root / "adr-create-alias.txt";
+        expect_command_capture_success(
+            run_command_capture(binary, {
+                "adr", "create",
+                "--title", "Selector alias ADR smoke",
+                "--product", "FORGE",
+                "--agent", "tester",
+                "--backlog-root", (temp_root / "_kano" / "backlog").string()
+            }, adr_alias_output),
+            adr_alias_output,
+            "ADR create through an explicit alias failed"
+        );
+        expect(
+            std::filesystem::exists(kfg_product_root / "decisions" / "ADR-1.md"),
+            "ADR create through an alias did not write to the canonical product root");
+        expect(
+            !std::filesystem::exists(temp_root / "_kano" / "backlog" / "products" / "FORGE"),
+            "ADR create through an alias constructed an alias-named product directory");
+
+        const auto alias_config_show_output = temp_root / "config-show-alias.json";
+        expect_command_capture_success(
+            run_command_capture(binary, {
+                "config", "show",
+                "--path", temp_root.string(),
+                "--product", " FORGE "
+            }, alias_config_show_output),
+            alias_config_show_output,
+            "config show through an explicit alias failed"
+        );
+        const auto alias_config_show_text = read_text(alias_config_show_output);
+        expect(
+            alias_config_show_text.find("\"aliases\"") != std::string::npos &&
+                alias_config_show_text.find("\"forge\"") != std::string::npos &&
+                alias_config_show_text.find("\"horizonrpg\"") != std::string::npos &&
+                alias_config_show_text.find("\"repo_bindings\"") != std::string::npos &&
+                alias_config_show_text.find("\"repo/kano-forge\"") != std::string::npos &&
+                alias_config_show_text.find("\"repo/kano-forge-skill\"") != std::string::npos,
+            "config show did not expose the selected product selector arrays");
+        expect(
+            alias_config_show_text.find("\"requested_product\" : \" FORGE \"") != std::string::npos &&
+                alias_config_show_text.find("\"canonical_product\" : \"kano-forge-skill\"") != std::string::npos &&
+                alias_config_show_text.find("\"resolution_kind\" : \"explicit_alias\"") != std::string::npos &&
+                alias_config_show_text.find("\"normalized_selector\" : \"forge\"") != std::string::npos &&
+                alias_config_show_text.find("\"matched_selector\" : \"forge\"") != std::string::npos,
+            "config show did not expose deterministic product resolution diagnostics");
+
+        const auto config_before_selector_failures = read_text(kfg_config_path);
         const auto kfg_collision_output = temp_root / "admin-init-kfg-collision.txt";
         expect_command_capture_failure(
             run_command_capture(binary, {
@@ -364,27 +459,107 @@ int main(int argc, char** argv) {
             }, kfg_collision_output),
             kfg_collision_output,
             "admin init should reject colliding product prefix",
-            "Product prefix collision"
+            "Product selector collision"
         );
         const auto kfg_collision_text = read_text(kfg_collision_output);
         expect(kfg_collision_text.find("kano-forge-skill") != std::string::npos, "prefix collision did not list existing product");
         expect(kfg_collision_text.find("another-forge-skill") != std::string::npos, "prefix collision did not list requested product");
-        expect(kfg_collision_text.find("prefix=KFG") != std::string::npos, "prefix collision did not list both prefixes");
-        expect(kfg_collision_text.find("backlog_config.toml") != std::string::npos, "prefix collision did not list config path");
+        expect(kfg_collision_text.find("normalized selector 'kfg'") != std::string::npos, "prefix collision did not use the normalized shared selector diagnostic");
         expect(!std::filesystem::exists(temp_root / "_kano" / "backlog" / "products" / "another-forge-skill"), "prefix collision created the other product directory");
-        expect(read_text(temp_root / ".kano" / "backlog_config.toml").find("[products.another-forge-skill]") == std::string::npos, "prefix collision registered the other product");
+        expect(read_text(kfg_config_path) == config_before_selector_failures, "prefix selector collision changed project config bytes");
+
+        const auto cross_kind_collision_output = temp_root / "admin-init-cross-kind-collision.txt";
+        expect_command_capture_failure(
+            run_command_capture(binary, {
+                "admin", "init",
+                "--product", "cross-kind-collision-product",
+                "--agent", "tester",
+                "--prefix", "CKC",
+                "--alias", " REPO/KANO-FORGE ",
+                "--dry-run"
+            }, cross_kind_collision_output),
+            cross_kind_collision_output,
+            "admin init dry-run should reject cross-kind selector collisions",
+            "Product selector collision"
+        );
+        expect(
+            read_text(cross_kind_collision_output).find("normalized selector 'repo/kano-forge'") != std::string::npos,
+            "cross-kind collision did not identify the shared normalized selector");
+        expect(
+            read_text(kfg_config_path) == config_before_selector_failures &&
+                !std::filesystem::exists(temp_root / "_kano" / "backlog" / "products" / "cross-kind-collision-product"),
+            "colliding admin init dry-run produced filesystem or config side effects");
+
+        const auto empty_alias_output = temp_root / "admin-init-empty-alias.txt";
+        expect_command_capture_failure(
+            run_command_capture(binary, {
+                "admin", "init",
+                "--product", "empty-alias-product",
+                "--agent", "tester",
+                "--prefix", "EAP",
+                "--alias", "   ",
+                "--dry-run"
+            }, empty_alias_output),
+            empty_alias_output,
+            "admin init should reject aliases that normalize to empty",
+            "Product alias selector cannot normalize to empty"
+        );
+        expect(
+            read_text(kfg_config_path) == config_before_selector_failures &&
+                !std::filesystem::exists(temp_root / "_kano" / "backlog" / "products" / "empty-alias-product"),
+            "invalid selector dry-run produced filesystem or config side effects");
+
+        const auto empty_repo_binding_output = temp_root / "admin-init-empty-repo-binding.txt";
+        expect_command_capture_failure(
+            run_command_capture(binary, {
+                "admin", "init",
+                "--product", "empty-repo-binding-product",
+                "--agent", "tester",
+                "--prefix", "ERB",
+                "--repo-binding", "   ",
+                "--dry-run"
+            }, empty_repo_binding_output),
+            empty_repo_binding_output,
+            "admin init should reject repo bindings that normalize to empty",
+            "Product repository binding selector cannot normalize to empty"
+        );
+        expect(
+            read_text(kfg_config_path) == config_before_selector_failures &&
+                !std::filesystem::exists(temp_root / "_kano" / "backlog" / "products" / "empty-repo-binding-product"),
+            "invalid repo-binding dry-run produced filesystem or config side effects");
 
         expect(run_command(binary, {
             "admin", "init",
-            "--product", "kano-forge-skill",
+            "--product", " FORGE ",
             "--agent", "tester",
             "--product-name", "Kano Forge Skill Updated",
             "--force"
-        }) == 0, "forced admin init should preserve existing explicit product prefix");
-        const auto kfg_force_text = read_text(temp_root / ".kano" / "backlog_config.toml");
+        }) == 0, "forced admin init through an alias should update the canonical product");
+        const auto kfg_force_text = read_text(kfg_config_path);
         expect(kfg_force_text.find("name = \"Kano Forge Skill Updated\"") != std::string::npos, "force admin init did not update product display name");
         expect(kfg_force_text.find("prefix = \"KFG\"") != std::string::npos, "force admin init did not preserve explicit KFG prefix");
+        expect(
+            kfg_force_text.find("aliases = [\"forge\", \"horizonrpg\"]") != std::string::npos &&
+                kfg_force_text.find("repo_bindings = [\"repo/kano-forge\", \"repo/kano-forge-skill\"]") != std::string::npos,
+            "force admin init without selector flags did not preserve existing arrays");
         expect(kfg_force_text.find("[products.kano-forge-skill]", kfg_force_text.find("[products.kano-forge-skill]") + 1) == std::string::npos, "force admin init duplicated explicit-prefix product config block");
+        expect(kfg_force_text.find("[products.FORGE]") == std::string::npos, "alias update changed the canonical product table key");
+
+        expect(run_command(binary, {
+            "admin", "init",
+            "--product", " REPO/KANO-FORGE-SKILL ",
+            "--agent", "tester",
+            "--product-name", "Kano Forge Skill Repo Updated",
+            "--force"
+        }) == 0, "forced admin init through a repo binding should update the canonical product");
+        const auto kfg_repo_force_text = read_text(kfg_config_path);
+        expect(
+            kfg_repo_force_text.find("name = \"Kano Forge Skill Repo Updated\"") != std::string::npos &&
+                kfg_repo_force_text.find("[products.kano-forge-skill]") != std::string::npos &&
+                kfg_repo_force_text.find("[products.REPO/KANO-FORGE-SKILL]") == std::string::npos &&
+                kfg_repo_force_text.find("aliases = [\"forge\", \"horizonrpg\"]") != std::string::npos &&
+                kfg_repo_force_text.find("repo_bindings = [\"repo/kano-forge\", \"repo/kano-forge-skill\"]") != std::string::npos,
+            "repo-binding update did not preserve canonical identity and selector arrays");
 
         for (const auto& bad_prefix : std::vector<std::string>{"K/FG", "K\\FG", "..", "K.FG", "K FG", "1FG", "KFGKFGKFGKFGKFGKFG"}) {
             const auto invalid_prefix_output = temp_root / ("admin-init-invalid-prefix-" + std::to_string(std::hash<std::string>{}(bad_prefix)) + ".txt");
@@ -439,6 +614,47 @@ int main(int argc, char** argv) {
             "admin init did not persist deterministic collision-free derived prefix");
         std::filesystem::current_path(temp_root);
 
+        const auto canonical_discovery_root = temp_root / "canonical-selector-discovery";
+        const auto canonical_discovery_backlog =
+            canonical_discovery_root / "_kano" / "backlog";
+        std::filesystem::create_directories(
+            canonical_discovery_backlog / "products" / "canonical-owner" / "items");
+        std::filesystem::create_directories(
+            canonical_discovery_backlog / "products" / "peer" / "items");
+        write_text(
+            canonical_discovery_root / ".kano" / "backlog_config.toml",
+            "[products.canonical-owner]\n"
+            "name = \"Canonical Owner\"\n"
+            "prefix = \"OWN\"\n"
+            "backlog_root = \"_kano/backlog/products/canonical-owner\"\n\n"
+            "[products.peer]\n"
+            "name = \"Peer\"\n"
+            "prefix = \"PER\"\n"
+            "backlog_root = \"_kano/backlog/products/peer\"\n"
+            "aliases = [\"canonical-owner\"]\n");
+
+        const auto canonical_links_output =
+            canonical_discovery_root / "links-canonical-discovery.json";
+        expect_command_capture_success(
+            run_command_capture(binary, {
+                "links", "fix",
+                "--path", canonical_discovery_root.string(),
+                "--format", "json"
+            }, canonical_links_output),
+            canonical_links_output,
+            "CLI root discovery must not publicly re-resolve a trusted canonical map key"
+        );
+
+        std::filesystem::current_path(canonical_discovery_root);
+        const auto canonical_doctor_output =
+            canonical_discovery_root / "doctor-canonical-discovery.txt";
+        expect(run_command_capture(binary, {"doctor"}, canonical_doctor_output) == 0,
+            "doctor root discovery must not publicly re-resolve a trusted canonical map key");
+        expect(read_text(canonical_doctor_output).find("[FAIL] Product Selector Uniqueness") !=
+                std::string::npos,
+            "doctor should diagnose the selector collision after canonical root discovery succeeds");
+        std::filesystem::current_path(temp_root);
+
         const auto duplicate_prefix_root = temp_root / "duplicate-prefix-config";
         std::filesystem::create_directories(duplicate_prefix_root);
         std::filesystem::current_path(duplicate_prefix_root);
@@ -452,7 +668,8 @@ int main(int argc, char** argv) {
             "admin", "init",
             "--product", "duplicate-prefix-two",
             "--agent", "tester",
-            "--prefix", "UNQ"
+            "--prefix", "UNQ",
+            "--alias", "duplicate-two"
         }) == 0, "admin init second duplicate-prefix fixture failed");
         expect(run_command(binary, {
             "admin", "init",
@@ -483,24 +700,30 @@ int main(int argc, char** argv) {
         write_text(duplicate_config_path, duplicate_config_text);
 
         const auto duplicate_doctor_output = duplicate_prefix_root / "doctor-duplicate-prefix.txt";
-        expect(run_command_capture(binary, {"doctor"}, duplicate_doctor_output) == 0, "doctor should report duplicate prefix diagnostics without crashing");
+        expect(run_command_capture(binary, {"doctor"}, duplicate_doctor_output) == 0, "doctor should report product selector diagnostics without crashing");
         const auto duplicate_doctor_text = read_text(duplicate_doctor_output);
-        expect(duplicate_doctor_text.find("[FAIL] Product Prefix Uniqueness") != std::string::npos, "doctor did not fail duplicate prefix check");
-        expect(duplicate_doctor_text.find("duplicate-prefix-one") != std::string::npos, "doctor duplicate prefix did not list first product");
-        expect(duplicate_doctor_text.find("duplicate-prefix-two") != std::string::npos, "doctor duplicate prefix did not list second product");
+        expect(duplicate_doctor_text.find("[FAIL] Product Selector Uniqueness") != std::string::npos, "doctor did not fail product selector check");
+        expect(duplicate_doctor_text.find("duplicate-prefix-one") != std::string::npos, "doctor selector collision did not list first product");
+        expect(duplicate_doctor_text.find("duplicate-prefix-two") != std::string::npos, "doctor selector collision did not list second product");
+        const auto duplicate_selector_diagnostic = duplicate_doctor_text.find("normalized selector 'dup'");
+        const auto independent_selector_diagnostic = duplicate_doctor_text.find("normalized selector 'tri'");
+        expect(
+            duplicate_selector_diagnostic != std::string::npos &&
+                independent_selector_diagnostic != std::string::npos &&
+                duplicate_selector_diagnostic < independent_selector_diagnostic,
+            "doctor did not report all normalized selector collisions deterministically");
 
-        const auto blocked_registration_output = duplicate_prefix_root / "admin-init-blocked-unaffected-product.txt";
-        expect_command_capture_failure(
-            run_command_capture(binary, {
-                "admin", "init",
-                "--product", "blocked-unaffected-product",
-                "--agent", "tester",
-                "--prefix", "BLK"
-            }, blocked_registration_output),
-            blocked_registration_output,
-            "new product registration should not proceed while the registry is colliding",
-            "must be repaired before registering or updating an unaffected product"
-        );
+        expect(run_command(binary, {
+            "admin", "init",
+            "--product", "unaffected-prospective-product",
+            "--agent", "tester",
+            "--prefix", "UFP"
+        }) == 0,
+            "admin init should not apply catalog-wide blocking for unrelated selector collisions");
+        expect(
+            read_text(duplicate_config_path).find(
+                "[products.unaffected-prospective-product]") != std::string::npos,
+            "unaffected prospective product was not registered by canonical key");
 
         const auto duplicate_validate_output = duplicate_prefix_root / "config-validate-duplicate-prefix.txt";
         expect_command_capture_failure(
@@ -510,23 +733,23 @@ int main(int argc, char** argv) {
                 "--product", "duplicate-prefix-one"
             }, duplicate_validate_output),
             duplicate_validate_output,
-            "config validate should reject duplicate product prefixes",
-            "Product prefix collision"
+            "config validate should reject a colliding product selector registry",
+            "Product selector collision"
         );
+        const auto duplicate_validate_text = read_text(duplicate_validate_output);
+        const auto duplicate_validate_selector = duplicate_validate_text.find("normalized selector 'dup'");
+        const auto independent_validate_selector = duplicate_validate_text.find("normalized selector 'tri'");
+        expect(
+            duplicate_validate_selector != std::string::npos &&
+                independent_validate_selector != std::string::npos &&
+                duplicate_validate_selector < independent_validate_selector,
+            "config validate did not report all normalized selector collisions deterministically");
 
-        const auto duplicate_create_output = duplicate_prefix_root / "workitem-create-duplicate-prefix.txt";
-        expect_command_capture_failure(
-            run_command_capture(binary, {
-                "-P", "duplicate-prefix-one",
-                "workitem", "create",
-                "-t", "task",
-                "--title", "Ambiguous prefix smoke",
-                "--agent", "tester"
-            }, duplicate_create_output),
-            duplicate_create_output,
-            "workitem create should reject ambiguous duplicate prefixes",
-            "Product prefix collision"
-        );
+        expect(run_command(binary, {
+            "-P", "duplicate-prefix-one",
+            "workitem", "list"
+        }) == 0,
+            "exact canonical backlog lookup should remain available during selector repair");
 
         const auto duplicate_alias_output = duplicate_prefix_root / "workitem-list-duplicate-prefix-alias.txt";
         expect_command_capture_failure(
@@ -536,7 +759,19 @@ int main(int argc, char** argv) {
             }, duplicate_alias_output),
             duplicate_alias_output,
             "ambiguous prefix alias should remain blocked during recovery",
-            "requires an exact canonical product slug"
+            "Product selector collision"
+        );
+
+        const auto duplicate_schema_selector_output = duplicate_prefix_root / "schema-check-duplicate-prefix-alias.txt";
+        expect_command_capture_failure(
+            run_command_capture(binary, {
+                "schema", "check",
+                "--backlog-root", (duplicate_prefix_root / "_kano" / "backlog").string(),
+                "--product", "DUP"
+            }, duplicate_schema_selector_output),
+            duplicate_schema_selector_output,
+            "legacy schema callback should reject an ambiguous configured selector",
+            "Product selector collision"
         );
 
         expect(run_command(binary, with_duplicate_admission({
@@ -557,8 +792,8 @@ int main(int argc, char** argv) {
         }) == 0, "forced admin init should repair a participating product prefix");
         const auto partially_repaired_doctor_output = duplicate_prefix_root / "doctor-partially-repaired-prefix.txt";
         expect(run_command_capture(binary, {"doctor"}, partially_repaired_doctor_output) == 0, "doctor should run after partial prefix repair");
-        expect(read_text(partially_repaired_doctor_output).find("[FAIL] Product Prefix Uniqueness") != std::string::npos,
-            "doctor should retain the independent collision after one pair is repaired");
+        expect(read_text(partially_repaired_doctor_output).find("[FAIL] Product Selector Uniqueness") != std::string::npos,
+            "doctor should retain the independent selector collision after one pair is repaired");
         expect(run_command(binary, {
             "admin", "init",
             "--product", "duplicate-prefix-four",
@@ -568,8 +803,21 @@ int main(int argc, char** argv) {
         }) == 0, "forced admin init should repair a second independent collision");
         const auto repaired_doctor_output = duplicate_prefix_root / "doctor-repaired-prefix.txt";
         expect(run_command_capture(binary, {"doctor"}, repaired_doctor_output) == 0, "doctor should run after all prefix repairs");
-        expect(read_text(repaired_doctor_output).find("[PASS] Product Prefix Uniqueness") != std::string::npos,
-            "doctor did not report repaired global prefix uniqueness");
+        expect(read_text(repaired_doctor_output).find("[PASS] Product Selector Uniqueness") != std::string::npos,
+            "doctor did not report repaired global selector uniqueness");
+        const auto repaired_validate_output = duplicate_prefix_root / "config-validate-repaired-selectors.txt";
+        expect_command_capture_success(
+            run_command_capture(binary, {
+                "config", "validate",
+                "--path", duplicate_prefix_root.string(),
+                "--product", "duplicate-prefix-one"
+            }, repaired_validate_output),
+            repaired_validate_output,
+            "config validate should accept the repaired selector registry"
+        );
+        expect(
+            read_text(repaired_validate_output).find("Config is valid") != std::string::npos,
+            "config validate did not report repaired registry success");
 
         expect(run_command(binary, with_duplicate_admission({
             "-P", "duplicate-prefix-two",
@@ -590,7 +838,7 @@ int main(int argc, char** argv) {
             run_command_capture(binary, {
                 "schema", "check",
                 "--backlog-root", (duplicate_prefix_root / "_kano" / "backlog").string(),
-                "--product", "duplicate-prefix-two"
+                "--product", "duplicate-two"
             }, prefix_drift_output),
             prefix_drift_output,
             "schema check should reject canonical item prefix drift",
@@ -632,6 +880,12 @@ int main(int argc, char** argv) {
         expect(config_text.find("backlog_root = \"_kano/backlog/products/kano-ai-3d-asset-skill\"") != std::string::npos, "admin init registered unexpected backlog_root");
         expect(config_text.find("name = \"Kano AI 3D Asset Skill\"") != std::string::npos, "admin init did not preserve spaced product display name");
         expect(config_text.find("[products.kano-ai-3d-asset-skill]", config_text.find("[products.kano-ai-3d-asset-skill]") + 1) == std::string::npos, "force admin init duplicated product config block");
+        const auto empty_selector_product_block = config_text.substr(
+            config_text.find("[products.kano-ai-3d-asset-skill]"));
+        expect(
+            empty_selector_product_block.find("aliases =") == std::string::npos &&
+                empty_selector_product_block.find("repo_bindings =") == std::string::npos,
+            "new products without selector flags must default to empty arrays");
 
         const std::string gitignore_text = read_text(temp_root / ".gitignore");
         expect(gitignore_text.find(".kano/cache/") != std::string::npos, "admin init did not add .kano/cache to .gitignore");
@@ -751,7 +1005,12 @@ int main(int argc, char** argv) {
             config_show_output,
             "config show failed after spaced product-name init"
         );
-        expect(read_text(config_show_output).find("Kano AI 3D Asset Skill") != std::string::npos, "config show did not reload spaced product name");
+        const auto config_show_text = read_text(config_show_output);
+        expect(config_show_text.find("Kano AI 3D Asset Skill") != std::string::npos, "config show did not reload spaced product name");
+        expect(
+            config_show_text.find("\"aliases\" : []") != std::string::npos &&
+                config_show_text.find("\"repo_bindings\" : []") != std::string::npos,
+            "config show did not expose empty selector arrays");
 
         const auto profile_path = temp_root / ".kano" / "backlog_config" / "embedding" / "local-noop.toml";
         write_text(profile_path, "[embedding]\nprovider = \"noop\"\nmodel = \"noop-embedding\"\n");
@@ -1063,7 +1322,7 @@ int main(int argc, char** argv) {
             "--path", artifact_source.string(),
             "--no-shared",
             "--agent", "tester",
-            "--product", "kano-ai-3d-asset-skill",
+            "--product", "Kano AI 3D Asset Skill",
             "--backlog-root-override", backlog_root.string(),
             "--note", "attached by native smoke",
             "--format", "json"
@@ -1085,7 +1344,7 @@ int main(int argc, char** argv) {
         const auto links_fix_dry_run = temp_root / "links-fix-dry-run.json";
         expect(run_command_capture(binary, {
             "links", "fix",
-            "--product", "kano-ai-3d-asset-skill",
+            "--product", "Kano AI 3D Asset Skill",
             "--backlog-root", backlog_root.string(),
             "--resolve-id",
             "--format", "json"
@@ -1096,7 +1355,7 @@ int main(int argc, char** argv) {
         const auto links_fix_apply = temp_root / "links-fix-apply.json";
         expect(run_command_capture(binary, {
             "links", "fix",
-            "--product", "kano-ai-3d-asset-skill",
+            "--product", "Kano AI 3D Asset Skill",
             "--backlog-root", backlog_root.string(),
             "--resolve-id",
             "--apply",
@@ -1237,7 +1496,7 @@ int main(int argc, char** argv) {
         const auto restore_probe_output = temp_root / "links-restore-from-vcs.json";
         expect(run_command_capture(binary, {
             "links", "restore-from-vcs",
-            "--product", "kano-ai-3d-asset-skill",
+            "--product", "Kano AI 3D Asset Skill",
             "--backlog-root", backlog_root.string(),
             "--format", "json"
         }, restore_probe_output) == 0, "links restore-from-vcs no-vcs probe failed");
@@ -1255,7 +1514,7 @@ int main(int argc, char** argv) {
         const auto ref_remap_dry_run = temp_root / "links-remap-ref-dry-run.json";
         expect(run_command_capture(binary, {
             "links", "remap-ref", ref_remap_path.string(),
-            "--product", "kano-ai-3d-asset-skill",
+            "--product", "Kano AI 3D Asset Skill",
             "--backlog-root", backlog_root.string(),
             "--format", "json"
         }, ref_remap_dry_run) == 0, "links remap-ref dry-run failed");
@@ -1265,7 +1524,7 @@ int main(int argc, char** argv) {
         const auto ref_remap_apply = temp_root / "links-remap-ref-apply.json";
         expect(run_command_capture(binary, {
             "links", "remap-ref", ref_remap_path.string(),
-            "--product", "kano-ai-3d-asset-skill",
+            "--product", "Kano AI 3D Asset Skill",
             "--backlog-root", backlog_root.string(),
             "--apply",
             "--format", "json"
@@ -2031,11 +2290,15 @@ int main(int argc, char** argv) {
         const auto search_output = temp_root / "search.json";
         expect(run_command_capture(binary, {
             "search", "query", "Native",
-            "--product", "kano-ai-3d-asset-skill",
+            "--product", "Kano AI 3D Asset Skill",
             "--backlog-root", backlog_root.string(),
             "--format", "json"
         }, search_output) == 0, "search query failed");
-        expect(read_text(search_output).find("\"corpus\"") != std::string::npos, "search query did not emit json payload");
+        const auto search_text = read_text(search_output);
+        expect(search_text.find("\"corpus\"") != std::string::npos, "search query did not emit json payload");
+        expect(
+            search_text.find("\"product\" : \"kano-ai-3d-asset-skill\"") != std::string::npos,
+            "search query did not report the canonical product for a display-name selector");
 
         const auto issue_search_output = temp_root / "issue-search.json";
         expect(run_command_capture(binary, {
@@ -2049,11 +2312,15 @@ int main(int argc, char** argv) {
         const auto embedding_status_output = temp_root / "embedding-status.json";
         expect(run_command_capture(binary, {
             "embedding", "status",
-            "--product", "kano-ai-3d-asset-skill",
+            "--product", "Kano AI 3D Asset Skill",
             "--backlog-root", backlog_root.string(),
             "--format", "json"
         }, embedding_status_output) == 0, "embedding status failed");
-        expect(read_text(embedding_status_output).find("\"backend_type\"") != std::string::npos, "embedding status did not emit backend type");
+        const auto embedding_status_text = read_text(embedding_status_output);
+        expect(embedding_status_text.find("\"backend_type\"") != std::string::npos, "embedding status did not emit backend type");
+        expect(
+            embedding_status_text.find("\"product\" : \"kano-ai-3d-asset-skill\"") != std::string::npos,
+            "embedding status did not report the canonical product for a display-name selector");
 
         const auto embedding_text_output = temp_root / "embedding-text.json";
         expect(run_command_capture(binary, {
@@ -2086,6 +2353,85 @@ int main(int argc, char** argv) {
         expect(inspect_health_text.find("\"total_items_scanned\"") != std::string::npos, "inspect health did not emit scan count");
         expect(inspect_health_text.find("\"total_items_scanned\" : 1") != std::string::npos,
                "inspect health did not retain its explicit item filter");
+
+        const auto inspect_health_help_output = temp_root / "inspect-health-help.txt";
+        expect_command_capture_success(
+            run_command_capture(binary, {
+                "inspect", "health", "--help"
+            }, inspect_health_help_output),
+            inspect_health_help_output,
+            "inspect health help failed");
+        expect(
+            read_text(inspect_health_help_output).find("--product") != std::string::npos,
+            "inspect health help must expose command-local product selection");
+
+        const auto inspect_global_alias_output =
+            temp_root / "inspect-health-global-alias.json";
+        expect(run_command_capture(binary, {
+            "-P", "FORGE",
+            "inspect", "health",
+            "--backlog-root", backlog_root.string(),
+            "--format", "json"
+        }, inspect_global_alias_output) == 0,
+            "inspect health through a global alias failed");
+        expect(
+            read_text(inspect_global_alias_output).find(
+                "\"total_items_scanned\" : 0") != std::string::npos,
+            "global alias selection must scan only the empty canonical Forge product");
+
+        const auto inspect_local_alias_output =
+            temp_root / "inspect-health-local-alias.json";
+        expect(run_command_capture(binary, {
+            "inspect", "health",
+            "--product", "FORGE",
+            "--backlog-root", backlog_root.string(),
+            "--format", "json"
+        }, inspect_local_alias_output) == 0,
+            "inspect health through a command-local alias failed");
+        expect(
+            read_text(inspect_local_alias_output).find(
+                "\"total_items_scanned\" : 0") != std::string::npos,
+            "command-local alias selection must scan only the canonical Forge product");
+
+        const auto inspect_unknown_product_output =
+            temp_root / "inspect-health-unknown-product.txt";
+        expect_command_capture_failure(
+            run_command_capture(binary, {
+                "inspect", "health",
+                "--product", "missing-inspect-health-product",
+                "--backlog-root", backlog_root.string(),
+                "--format", "json"
+            }, inspect_unknown_product_output),
+            inspect_unknown_product_output,
+            "inspect health should reject an unknown product selector",
+            "Product 'missing-inspect-health-product' not found in project config");
+
+        const auto config_before_health_collision = read_text(config_path);
+        const auto forge_shadow_root =
+            backlog_root / "products" / "forge-health-shadow";
+        std::filesystem::create_directories(forge_shadow_root / "items");
+        write_text(
+            config_path,
+            config_before_health_collision +
+                "\n[products.forge-health-shadow]\n"
+                "name = \"Forge Health Shadow\"\n"
+                "prefix = \"FGS\"\n"
+                "backlog_root = \"_kano/backlog/products/forge-health-shadow\"\n"
+                "aliases = [\"forge\"]\n");
+        const auto inspect_ambiguous_product_output =
+            temp_root / "inspect-health-ambiguous-product.txt";
+        expect_command_capture_failure(
+            run_command_capture(binary, {
+                "-P", "FORGE",
+                "inspect", "health",
+                "--backlog-root", backlog_root.string(),
+                "--format", "json"
+            }, inspect_ambiguous_product_output),
+            inspect_ambiguous_product_output,
+            "inspect health should reject an ambiguous product selector",
+            "Product selector collision: normalized selector 'forge'");
+        write_text(config_path, config_before_health_collision);
+        std::filesystem::remove_all(forge_shadow_root);
 
         const auto integrity_output = temp_root / "inspect-integrity.json";
         expect(run_command_capture(binary, {

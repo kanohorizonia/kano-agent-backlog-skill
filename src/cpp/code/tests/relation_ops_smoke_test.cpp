@@ -121,11 +121,15 @@ int main() {
             "[products.alpha-product]\n"
             "name = \"Alpha\"\n"
             "prefix = \"ALP\"\n"
-            "backlog_root = \"_kano/backlog/products/alpha-product\"\n\n"
+            "backlog_root = \"_kano/backlog/products/alpha-product\"\n"
+            "aliases = [\"alpha-alias\"]\n"
+            "repo_bindings = [\"repo/alpha\"]\n\n"
             "[products.beta-product]\n"
             "name = \"Beta\"\n"
             "prefix = \"BET\"\n"
-            "backlog_root = \"_kano/backlog/products/beta-product\"\n\n"
+            "backlog_root = \"_kano/backlog/products/beta-product\"\n"
+            "aliases = [\"beta-alias\"]\n"
+            "repo_bindings = [\"repo/beta\"]\n\n"
             "[products.alp]\n"
             "name = \"Alias ambiguity fixture\"\n"
             "prefix = \"AMB\"\n"
@@ -133,21 +137,23 @@ int main() {
 
         const auto alpha_root = root / "_kano" / "backlog" / "products" / "alpha-product";
         const auto beta_root = root / "_kano" / "backlog" / "products" / "beta-product";
+        const auto repair_root = root / "_kano" / "backlog" / "products" / "alp";
         const auto alpha_one = create_item(alpha_root, "ALP", 1, "Alpha one");
         const auto alpha_two = create_item(alpha_root, "ALP", 2, "Alpha two");
         const auto beta_one = create_item(beta_root, "BET", 1, "Beta one");
         const auto beta_two = create_item(beta_root, "BET", 2, "Beta two");
+        const auto repair_one = create_item(repair_root, "AMB", 1, "Repair one");
 
         const auto dry_run = RelationOps::add(request(
-            root, "alpha-product", alpha_one.id, "BET", beta_one.id, RelationType::Relates, false));
+            root, "alpha-alias", alpha_one.id, "repo/beta", beta_one.id, RelationType::Relates, false));
         expect(dry_run.status == "dry_run" && dry_run.changed && !dry_run.applied,
-            "add should default to a non-mutating plan");
+            "relation product selectors should use configured aliases and repo bindings");
         CanonicalStore alpha_store(alpha_root);
         RefResolver alpha_resolver(alpha_store);
         expect(alpha_resolver.resolve(alpha_one.id).links.relates.empty(), "dry-run must not mutate frontmatter");
 
         const auto added = RelationOps::add(request(
-            root, "alpha-product", alpha_one.id, "beta-product", beta_one.id, RelationType::Relates));
+            root, "repo/alpha", alpha_one.id, "repo/beta", beta_one.id, RelationType::Relates));
         expect(added.status == "added" && added.applied && added.read_after_write && added.index_refreshed,
             "confirmed relates add should return write and index evidence");
         const auto alpha_after_add = alpha_resolver.resolve(alpha_one.id);
@@ -164,7 +170,7 @@ int main() {
 
         RelationListRequest incoming;
         incoming.start_path = root;
-        incoming.product = "beta-product";
+        incoming.product = "repo/beta";
         incoming.item = beta_one.id;
         incoming.relation_type = RelationType::Relates;
         incoming.direction = RelationDirection::Incoming;
@@ -183,7 +189,7 @@ int main() {
         expect(second_relates.status == "added", "second relates edge should be created");
         RelationListRequest paged;
         paged.start_path = root;
-        paged.product = "alpha-product";
+        paged.product = "repo/alpha";
         paged.item = alpha_one.id;
         paged.relation_type = RelationType::Relates;
         paged.direction = RelationDirection::Outgoing;
@@ -203,6 +209,10 @@ int main() {
         const auto chain = RelationOps::add(request(
             root, "beta-product", beta_one.id, "alpha-product", alpha_two.id, RelationType::Blocks));
         expect(chain.status == "added", "second dependency edge should be created");
+        const auto repair_selector_dry_run = RelationOps::add(request(
+            root, "AMB", repair_one.id, "beta-product", beta_one.id, RelationType::Relates, false));
+        expect(repair_selector_dry_run.status == "dry_run" && !repair_selector_dry_run.applied,
+            "another unique selector should keep a collided product available for repair");
         const auto cycle = RelationOps::add(request(
             root, "alpha-product", alpha_two.id, "alpha-product", alpha_one.id, RelationType::Blocks));
         expect(cycle.status == "cycle_rejected" && !cycle.applied && cycle.cycle_path.size() >= 4,
@@ -221,7 +231,7 @@ int main() {
         expect(equivalent.status == "already_present", "blocks and inverse blocked_by storage should be semantically idempotent");
 
         const auto remove_dry_run = RelationOps::remove(request(
-            root, "alpha-product", alpha_one.id, "beta-product", beta_two.id, RelationType::Blocks, false));
+            root, "repo/alpha", alpha_one.id, "repo/beta", beta_two.id, RelationType::Blocks, false));
         expect(remove_dry_run.status == "dry_run" && !remove_dry_run.applied,
             "remove should support dry-run");
         CanonicalStore beta_store(beta_root);
@@ -229,13 +239,13 @@ int main() {
         expect(contains(beta_resolver.resolve(beta_two.id).links.blocked_by, alpha_one.id),
             "dry-run remove must preserve inverse storage");
         const auto removed = RelationOps::remove(request(
-            root, "alpha-product", alpha_one.id, "beta-product", beta_two.id, RelationType::Blocks));
+            root, "repo/alpha", alpha_one.id, "repo/beta", beta_two.id, RelationType::Blocks));
         expect(removed.status == "removed" && removed.read_after_write,
             "remove should find and mutate inverse blocked_by ownership");
         expect(!contains(beta_resolver.resolve(beta_two.id).links.blocked_by, alpha_one.id),
             "remove should clear the single canonical owner");
         const auto absent = RelationOps::remove(request(
-            root, "alpha-product", alpha_one.id, "beta-product", beta_two.id, RelationType::Blocks));
+            root, "repo/alpha", alpha_one.id, "repo/beta", beta_two.id, RelationType::Blocks));
         expect(absent.status == "already_absent" && absent.already_in_desired_state,
             "duplicate remove should be idempotent");
 
@@ -271,11 +281,16 @@ int main() {
         expect_throws_contains([&]() {
             auto invalid = request(root, "../alpha-product", alpha_one.id, "beta-product", beta_one.id, RelationType::Relates);
             (void)RelationOps::add(invalid);
-        }, "path-like", "path-like product identifiers must be rejected");
+        }, "path-like", "unknown path-like product selectors must retain the path-like diagnostic");
+        expect_throws_contains([&]() {
+            auto invalid = request(root, "repo/alpha", "../" + alpha_one.id,
+                "repo/beta", beta_one.id, RelationType::Relates);
+            (void)RelationOps::add(invalid);
+        }, "path-like", "path-like item identifiers must remain rejected");
         expect_throws_contains([&]() {
             auto ambiguous = request(root, "alp", alpha_one.id, "beta-product", beta_one.id, RelationType::Relates);
             (void)RelationOps::add(ambiguous);
-        }, "Ambiguous", "ambiguous product aliases must be rejected");
+        }, "Product selector collision", "exact canonical tokens must fail closed when normalization is ambiguous");
         expect_throws_contains([&]() {
             auto missing = request(root, "alpha-product", "ALP-TSK-9999", "beta-product", beta_one.id, RelationType::Relates);
             (void)RelationOps::add(missing);

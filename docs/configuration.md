@@ -17,6 +17,36 @@
 
 These derived paths should be ignored in version control unless your team has a deliberate reason to keep selected generated artifacts.
 
+## Product selectors
+
+Each product can expose configured selectors while retaining its table key as the
+canonical storage identity:
+
+```toml
+[products.horizon-rpg]
+name = "Horizon RPG"
+prefix = "HRR"
+backlog_root = "_kano/backlog/products/horizon-rpg"
+aliases = ["horizon", "horizon-game"]
+repo_bindings = ["horizon-rpg-plugin"]
+```
+
+Every selector, including a canonical product key, uses only leading/trailing
+ASCII whitespace trimming and ASCII `A-Z` lowercasing. KOB does not remove
+separators or apply Unicode case folding. Claims from one canonical product are
+deduplicated with this precedence: canonical slug, prefix, display name, repo
+binding, then explicit alias.
+
+A lookup fails closed when the requested normalized token is owned by multiple
+canonical products, even if the original input exactly matches one canonical
+table key. Collisions on unrelated tokens do not block safe selectors, so a
+different unique selector remains available for registry repair. Relation
+operations use the same resolver.
+
+`kob admin init` and `kob migration register-product plan|apply` accept
+repeatable `--alias` and `--repo-binding` options. Values are normalized,
+deduplicated, sorted, and checked for cross-product collisions before a write.
+
 ## Product assignment defaults
 
 Product configuration can define repo-visible actor aliases for new items:

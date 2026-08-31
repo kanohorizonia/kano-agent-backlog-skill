@@ -2,6 +2,7 @@
 
 #include "kano/backlog_core/config/config.hpp"
 #include "kano/backlog_core/frontmatter/canonical_store.hpp"
+#include "kano/backlog_ops/index/backlog_index.hpp"
 
 #include <json/json.h>
 
@@ -29,6 +30,9 @@ using kano::backlog_core::BacklogItem;
 using kano::backlog_core::CanonicalStore;
 using kano::backlog_core::ConfigLoader;
 using kano::backlog_core::ProjectConfig;
+using kano::backlog_core::ProductResolution;
+using kano::backlog_core::ProductResolutionKind;
+using kano::backlog_ops::BacklogIndex;
 using kano::backlog_ops::PrefixMigrationFileChange;
 using kano::backlog_ops::PrefixMigrationItemMapping;
 using kano::backlog_ops::PrefixMigrationPlan;
@@ -39,6 +43,18 @@ constexpr const char* kReceiptSchemaV2 = "kob.product_prefix_migration.receipt.v
 constexpr const char* kReceiptSchemaV3 = "kob.product_prefix_migration.receipt.v3";
 constexpr const char* kJournalSchemaV2 = "kob.product_prefix_migration.journal.v2";
 constexpr const char* kJournalSchemaV3 = "kob.product_prefix_migration.journal.v3";
+
+ProductResolution trusted_canonical_product_resolution(
+    const std::string& canonical_slug
+) {
+    return ProductResolution{
+        canonical_slug,
+        ProductResolutionKind::CanonicalSlug,
+        canonical_slug,
+        ProjectConfig::normalize_product_selector(canonical_slug),
+        canonical_slug,
+    };
+}
 
 std::string lowercase_ascii(std::string value) {
     std::transform(value.begin(), value.end(), value.begin(), [](unsigned char character) {
@@ -844,6 +860,7 @@ struct ValidatedJournalEvidence {
     Json::Value journal;
     Json::Value plan;
     std::vector<JournalOperation> operations;
+    std::filesystem::path product_root;
     std::string status;
     std::string receipt_path;
     std::optional<std::string> apply_agent;
@@ -1095,18 +1112,20 @@ ValidatedJournalEvidence load_validated_journal(
     if (!project) {
         throw std::runtime_error("embedded_plan_config_unreadable");
     }
-    const auto product_root = project->resolve_backlog_root(
-        evidence.plan["product"].asString(), config_path);
+    const auto product_resolution = trusted_canonical_product_resolution(
+        evidence.plan["product"].asString());
+    const auto product_root =
+        project->resolve_backlog_root(product_resolution, config_path);
     if (!product_root) {
         throw std::runtime_error("embedded_plan_product_root_missing");
     }
     const auto normalized_backlog_root = normalized_absolute(backlog_root);
-    const auto normalized_product_root = normalized_absolute(*product_root);
-    if (!is_within(normalized_product_root, normalized_backlog_root)) {
+    evidence.product_root = normalized_absolute(*product_root);
+    if (!is_within(evidence.product_root, normalized_backlog_root)) {
         throw std::runtime_error("embedded_plan_product_root_outside_backlog");
     }
     const auto expected_receipt = relative_path(
-        normalized_product_root / "_meta" / "prefix-migrations" /
+        evidence.product_root / "_meta" / "prefix-migrations" /
             (evidence.plan["from_prefix"].asString() + "-to-" +
              evidence.plan["to_prefix"].asString() + ".json"),
         normalized_backlog_root);
@@ -1362,6 +1381,23 @@ std::filesystem::path resolve_backlog_root(
     return normalized_absolute(*root);
 }
 
+void rebuild_existing_metadata_index(
+    const std::filesystem::path& product_root,
+    const std::string& canonical_product
+) {
+    auto backlog_root = product_root;
+    if (product_root.parent_path().filename() == "products") {
+        backlog_root = product_root.parent_path().parent_path();
+    }
+    const auto index_path = backlog_root / ".cache" / "index" / "backlog.db";
+    if (!std::filesystem::is_regular_file(index_path)) {
+        return;
+    }
+    BacklogIndex index(index_path, canonical_product, product_root);
+    index.initialize();
+    index.rebuild_metadata(product_root, canonical_product);
+}
+
 struct ParsedItem {
     std::string product;
     std::filesystem::path product_root;
@@ -1442,23 +1478,25 @@ PreparedPrefixMigration build_prepared(
         finalize_plan(prepared);
         return prepared;
     }
-    const auto product_name = project->resolve_product_name(options.request.product);
-    if (!product_name) {
+    const auto product_resolution = project->resolve_product(options.request.product);
+    if (!product_resolution) {
         add_blocker(prepared.plan, "product_not_registered:" + options.request.product);
         finalize_plan(prepared);
         return prepared;
     }
-    prepared.plan.product = *product_name;
-    const auto product = project->get_product(*product_name);
-    const auto product_root = project->resolve_backlog_root(*product_name, prepared.config_path);
+    const auto& product_name = product_resolution->canonical_slug;
+    prepared.plan.product = product_name;
+    const auto product = project->get_product(product_name);
+    const auto product_root =
+        project->resolve_backlog_root(*product_resolution, prepared.config_path);
     if (!product || !product_root) {
-        add_blocker(prepared.plan, "product_config_incomplete:" + *product_name);
+        add_blocker(prepared.plan, "product_config_incomplete:" + product_name);
         finalize_plan(prepared);
         return prepared;
     }
     prepared.product_root = normalized_absolute(*product_root);
     if (!is_within(prepared.product_root, prepared.backlog_root)) {
-        add_blocker(prepared.plan, "product_root_outside_shared_backlog:" + *product_name);
+        add_blocker(prepared.plan, "product_root_outside_shared_backlog:" + product_name);
         finalize_plan(prepared);
         return prepared;
     }
@@ -1481,13 +1519,13 @@ PreparedPrefixMigration build_prepared(
                 collision.left_product + ":" + collision.right_product);
     }
     for (const auto& [name, definition] : project->products) {
-        if (name != *product_name &&
+        if (name != product_name &&
             upper_copy(definition.prefix) == upper_copy(options.request.to_prefix)) {
             add_blocker(
                 prepared.plan,
                 "target_prefix_collision:" + options.request.to_prefix + ":" + name);
         }
-        if (name != *product_name &&
+        if (name != product_name &&
             (upper_copy(definition.prefix).starts_with(upper_copy(options.request.to_prefix)) ||
              upper_copy(options.request.to_prefix).starts_with(upper_copy(definition.prefix)))) {
             prepared.plan.resolver_checks.push_back(
@@ -1496,9 +1534,9 @@ PreparedPrefixMigration build_prepared(
         }
     }
     prepared.plan.resolver_checks.push_back("target_prefix_unique:" + options.request.to_prefix);
-    prepared.plan.resolver_checks.push_back("canonical_product_slug:" + *product_name);
+    prepared.plan.resolver_checks.push_back("canonical_product_slug:" + product_name);
     prepared.plan.required_external_updates.push_back(
-        "repo_catalog:" + *product_name + ":backlog_prefix=" + options.request.to_prefix);
+        "repo_catalog:" + product_name + ":backlog_prefix=" + options.request.to_prefix);
 
     std::vector<ParsedItem> parsed_items;
     std::vector<std::filesystem::path> target_derived_items;
@@ -1508,7 +1546,8 @@ PreparedPrefixMigration build_prepared(
 
     for (const auto& [name, definition] : project->products) {
         (void)definition;
-        const auto root = project->resolve_backlog_root(name, prepared.config_path);
+        const auto root = project->resolve_backlog_root(
+            trusted_canonical_product_resolution(name), prepared.config_path);
         if (!root) {
             add_blocker(prepared.plan, "product_root_unresolved:" + name);
             continue;
@@ -1531,7 +1570,7 @@ PreparedPrefixMigration build_prepared(
                 continue;
             }
             snapshot_paths.insert(relative_path(path, prepared.backlog_root));
-            if (name == *product_name &&
+            if (name == product_name &&
                 path.filename().generic_string().starts_with(product->prefix + "-") &&
                 path.filename().generic_string().find(".index.md") != std::string::npos) {
                 target_derived_items.push_back(path);
@@ -1540,11 +1579,11 @@ PreparedPrefixMigration build_prepared(
             try {
                 parsed_items.push_back(ParsedItem{name, normalized_root, path, store.read(path)});
             } catch (const std::exception&) {
-                if (name == *product_name && path.extension() == ".md" &&
+                if (name == product_name && path.extension() == ".md" &&
                     path.filename().generic_string().starts_with(product->prefix + "-") &&
                     path.filename().generic_string().find(".index.md") != std::string::npos) {
                     target_derived_items.push_back(path);
-                } else if (name == *product_name &&
+                } else if (name == product_name &&
                            path.filename().generic_string().starts_with(product->prefix + "-")) {
                     add_blocker(
                         prepared.plan,
@@ -1584,7 +1623,7 @@ PreparedPrefixMigration build_prepared(
     std::map<std::string, std::vector<const ParsedItem*>> global_by_id;
     for (const auto& parsed : parsed_items) {
         global_by_id[parsed.item.id].push_back(&parsed);
-        if (parsed.product == *product_name) {
+        if (parsed.product == product_name) {
             target_by_id[parsed.item.id].push_back(&parsed);
             target_by_uid[parsed.item.uid].push_back(&parsed);
         }
@@ -1610,7 +1649,7 @@ PreparedPrefixMigration build_prepared(
     }
 
     for (const auto& parsed : parsed_items) {
-        if (parsed.product != *product_name ||
+        if (parsed.product != product_name ||
             !parsed.item.id.starts_with(product->prefix + "-")) {
             continue;
         }
@@ -1787,7 +1826,7 @@ PreparedPrefixMigration build_prepared(
     try {
         const auto config_content = read_file(prepared.config_path);
         const auto updated_config = rewrite_config_prefix(
-            config_content, *product_name, product->prefix, options.request.to_prefix);
+            config_content, product_name, product->prefix, options.request.to_prefix);
         add_mutation(
             prepared, prepared.plan.config_path, "product_config", updated_config);
         add_file_change(
@@ -2157,6 +2196,8 @@ PrefixMigrationResult PrefixMigrationOps::apply(const ApplyOptions& options) {
             throw std::runtime_error(
                 "postcondition_verification_failed:" + failures);
         }
+        rebuild_existing_metadata_index(
+            prepared.product_root, prepared.plan.product);
 
         result.status = "applied";
         result.recovery_status = "available";
@@ -2213,6 +2254,9 @@ PrefixMigrationResult PrefixMigrationOps::apply(const ApplyOptions& options) {
                         "injected_automatic_recovery_exception_after_restore");
                 }
                 if (automatic_recovery_failures.empty()) {
+                    rebuild_existing_metadata_index(
+                        evidence.product_root,
+                        evidence.plan["product"].asString());
                     recovery_journal["status"] = "rolled_back";
                     const auto rolled_back_at = mark_rollback_attempt_completed(
                         recovery_journal, *recovery_attempt_index);
@@ -2335,39 +2379,34 @@ PrefixMigrationVerification PrefixMigrationOps::verify(
         }
 
         if (project) {
-            const auto product_root =
-                project->resolve_backlog_root(product_name, config_path);
-            if (!product_root) {
-                verification.failures.push_back("post_migration_product_root_missing");
-            } else {
-                CanonicalStore store(*product_root);
-                for (const auto& mapping : embedded_plan["items"]) {
-                    const auto source_id = mapping["source_id"].asString();
-                    const auto target_id = mapping["target_id"].asString();
-                    if (store.find_item_path_by_id(source_id)) {
+            CanonicalStore store(evidence.product_root);
+            for (const auto& mapping : embedded_plan["items"]) {
+                const auto source_id = mapping["source_id"].asString();
+                const auto target_id = mapping["target_id"].asString();
+                if (store.find_item_path_by_id(source_id)) {
+                    verification.failures.push_back(
+                        "source_id_still_resolves:" + source_id);
+                }
+                const auto target_path = confined_journal_path(
+                    backlog_root, mapping["target_path"].asString(),
+                    "invalid_embedded_plan_item_path");
+                try {
+                    const auto item = store.read(target_path);
+                    if (item.id != target_id ||
+                        item.uid != mapping["uid"].asString()) {
                         verification.failures.push_back(
-                            "source_id_still_resolves:" + source_id);
+                            "item_identity_mismatch:" + target_id);
                     }
-                    const auto target_path = confined_journal_path(
-                        backlog_root, mapping["target_path"].asString(),
-                        "invalid_embedded_plan_item_path");
-                    try {
-                        const auto item = store.read(target_path);
-                        if (item.id != target_id ||
-                            item.uid != mapping["uid"].asString()) {
-                            verification.failures.push_back(
-                                "item_identity_mismatch:" + target_id);
-                        }
-                    } catch (const std::exception&) {
-                        verification.failures.push_back(
-                            "target_item_unreadable:" + target_id);
-                    }
+                } catch (const std::exception&) {
+                    verification.failures.push_back(
+                        "target_item_unreadable:" + target_id);
                 }
             }
 
             for (const auto& [name, definition] : project->products) {
                 (void)definition;
-                const auto root = project->resolve_backlog_root(name, config_path);
+                const auto root = project->resolve_backlog_root(
+                    trusted_canonical_product_resolution(name), config_path);
                 if (!root) {
                     continue;
                 }
@@ -2484,6 +2523,9 @@ PrefixMigrationRollback PrefixMigrationOps::rollback(
             backlog_root, transaction, options.plan_hash);
         result.apply_agent = evidence.apply_agent;
         if (evidence.status == "rolled_back") {
+            rebuild_existing_metadata_index(
+                evidence.product_root,
+                evidence.plan["product"].asString());
             result.rollback_agent = evidence.rollback_agent;
             result.rollback_mode = evidence.rollback_mode;
             result.rollback_attempted_at = evidence.rollback_attempted_at;
@@ -2507,6 +2549,9 @@ PrefixMigrationRollback PrefixMigrationOps::rollback(
             result.restored_paths, result.failures,
             options.inject_rollback_failure_after);
         if (result.failures.empty()) {
+            rebuild_existing_metadata_index(
+                evidence.product_root,
+                evidence.plan["product"].asString());
             journal["status"] = "rolled_back";
             const auto rolled_back_at = mark_rollback_attempt_completed(
                 journal, *attempt_index);

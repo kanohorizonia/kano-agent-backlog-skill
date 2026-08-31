@@ -42,6 +42,8 @@ using kano::backlog_core::BacklogItem;
 using kano::backlog_core::CanonicalStore;
 using kano::backlog_core::ConfigLoader;
 using kano::backlog_core::ProjectConfig;
+using kano::backlog_core::ProductResolution;
+using kano::backlog_core::ProductResolutionKind;
 using kano::backlog_ops::ProductRelocationFile;
 using kano::backlog_ops::ProductRelocationIdentity;
 using kano::backlog_ops::ProductRelocationPlan;
@@ -1216,8 +1218,16 @@ void scan_registry_identities(
         if (name == prepared.plan.product) {
             continue;
         }
+        const ProductResolution canonical_resolution{
+            name,
+            ProductResolutionKind::CanonicalSlug,
+            name,
+            ProjectConfig::normalize_product_selector(name),
+            name,
+        };
         const auto root =
-            project.resolve_backlog_root(name, prepared.config_path);
+            project.resolve_backlog_root(
+                canonical_resolution, prepared.config_path);
         if (!root) {
             add_blocker(
                 prepared.plan,
@@ -1423,23 +1433,24 @@ PreparedRelocation build_prepared(
                 collision.left_product + ":" +
                 collision.right_product);
     }
-    const auto product_name =
-        project->resolve_product_name(options.request.product);
-    if (!product_name) {
+    const auto product_resolution =
+        project->resolve_product(options.request.product);
+    if (!product_resolution) {
         add_blocker(
             prepared.plan,
             "product_not_registered:" + options.request.product);
         finalize_plan(prepared);
         return prepared;
     }
-    prepared.plan.product = *product_name;
-    const auto definition = project->get_product(*product_name);
+    const auto& product_name = product_resolution->canonical_slug;
+    prepared.plan.product = product_name;
+    const auto definition = project->get_product(product_name);
     const auto source_root =
         project->resolve_backlog_root(
-            *product_name, prepared.config_path);
+            *product_resolution, prepared.config_path);
     if (!definition || !source_root) {
         add_blocker(
-            prepared.plan, "product_config_incomplete:" + *product_name);
+            prepared.plan, "product_config_incomplete:" + product_name);
         finalize_plan(prepared);
         return prepared;
     }
@@ -1448,14 +1459,14 @@ PreparedRelocation build_prepared(
     prepared.destination_root =
         options.request.destination_root.empty()
             ? normalized_absolute(
-                  prepared.config_root / "products" / *product_name)
+                  prepared.config_root / "products" / product_name)
             : normalized_absolute(options.request.destination_root);
     const auto expected_destination = normalized_absolute(
-        prepared.config_root / "products" / *product_name);
+        prepared.config_root / "products" / product_name);
     prepared.plan.source_root_ref =
-        "product:" + *product_name + ":configured-root";
+        "product:" + product_name + ":configured-root";
     prepared.plan.destination_root_ref =
-        "product:" + *product_name + ":shared-root";
+        "product:" + product_name + ":shared-root";
     prepared.plan.destination_path_digest =
         sha256_hex(prepared.destination_root.generic_string());
 
@@ -1500,8 +1511,8 @@ PreparedRelocation build_prepared(
 
     try {
         prepared.config_after = rewrite_product_root(
-            prepared.config_before, *product_name,
-            "products/" + *product_name);
+            prepared.config_before, product_name,
+            "products/" + product_name);
     } catch (const std::exception& error) {
         add_blocker(prepared.plan, error.what());
     }
@@ -1529,7 +1540,7 @@ PreparedRelocation build_prepared(
         add_blocker(prepared.plan, "expected_source_revision_mismatch");
     }
     prepared.plan.derived_surfaces.push_back(
-        "target:product-cache:" + *product_name +
+        "target:product-cache:" + product_name +
         "/index/backlog.db:rebuild");
     prepared.plan.warnings.push_back(
         "derived_views_are_not_copied_as_authority");
@@ -1786,19 +1797,21 @@ bool managed_paths_valid(
     }
     const auto before_project =
         ProjectConfig::load_from_toml(config_before_path);
-    const auto before_definition =
+    const ProductResolution canonical_resolution{
+        product,
+        ProductResolutionKind::CanonicalSlug,
+        product,
+        ProjectConfig::normalize_product_selector(product),
+        product,
+    };
+    const auto resolved_source =
         before_project
-            ? before_project->get_product(product)
+            ? before_project->resolve_backlog_root(
+                  canonical_resolution, config)
             : std::nullopt;
-    if (!before_definition) {
+    if (!resolved_source) {
         return false;
     }
-    const auto configured_source =
-        std::filesystem::path(before_definition->backlog_root);
-    const auto resolved_source = normalized_absolute(
-        configured_source.is_absolute()
-            ? configured_source
-            : config_root / configured_source);
     std::string expected_after;
     try {
         expected_after = rewrite_product_root(
@@ -1809,7 +1822,7 @@ bool managed_paths_valid(
     return !product.empty() &&
            config == config_root / ".kano" / "backlog_config.toml" &&
            destination == config_root / "products" / product &&
-           source == resolved_source &&
+           source == normalized_absolute(*resolved_source) &&
            source != destination &&
            stage == stage_root(destination, plan_hash) &&
            retired == retired_root(source, plan_hash) &&
@@ -1945,8 +1958,16 @@ bool config_resolves_destination(
         !project->find_prefix_collisions(config_path).empty()) {
         return false;
     }
+    const ProductResolution canonical_resolution{
+        product,
+        ProductResolutionKind::CanonicalSlug,
+        product,
+        ProjectConfig::normalize_product_selector(product),
+        product,
+    };
     const auto root =
-        project->resolve_backlog_root(product, config_path);
+        project->resolve_backlog_root(
+            canonical_resolution, config_path);
     return root &&
            normalized_absolute(*root) ==
                normalized_absolute(destination);

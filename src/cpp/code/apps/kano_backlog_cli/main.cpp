@@ -654,7 +654,15 @@ std::filesystem::path detect_backlog_root(const std::filesystem::path& resource_
     auto project_config = ProjectConfig::load_from_toml(*config_path);
     if (project_config && !project_config->products.empty()) {
         const auto& first_product = project_config->products.begin()->first;
-        auto product_root = project_config->resolve_backlog_root(first_product, *config_path);
+        const ProductResolution canonical_resolution{
+            first_product,
+            ProductResolutionKind::CanonicalSlug,
+            first_product,
+            ProjectConfig::normalize_product_selector(first_product),
+            first_product,
+        };
+        auto product_root = project_config->resolve_backlog_root(
+            canonical_resolution, *config_path);
         if (product_root) {
             if (product_root->parent_path().filename() == "products" &&
                 product_root->parent_path().parent_path().filename() == "backlog") {
@@ -1324,6 +1332,50 @@ std::string relative_or_string(const std::filesystem::path& path, const std::fil
     return path.generic_string();
 }
 
+BacklogContext resolve_product_context(
+    const std::filesystem::path& resource_path,
+    const std::string& requested_product,
+    const std::string& sandbox_name = {},
+    const std::string& explicit_backlog_root_arg = {}
+) {
+    const auto product_selector = requested_product.empty()
+        ? std::nullopt
+        : std::optional<std::string>(requested_product);
+    const auto sandbox_selector = sandbox_name.empty()
+        ? std::nullopt
+        : std::optional<std::string>(sandbox_name);
+    if (explicit_backlog_root_arg.empty()) {
+        return BacklogContext::resolve(resource_path, product_selector, sandbox_selector);
+    }
+
+    const auto explicit_backlog_root = normalized_absolute_path(
+        expand_user_path(explicit_backlog_root_arg));
+    const auto explicit_product_selector = requested_product.empty()
+        ? std::string("kano-agent-backlog-skill")
+        : requested_product;
+
+    for (const auto& registry_resource : std::array<std::filesystem::path, 2>{
+             explicit_backlog_root,
+             explicit_backlog_root.parent_path().parent_path()}) {
+        if (ConfigLoader::find_project_config(registry_resource)) {
+            return BacklogContext::resolve(
+                registry_resource,
+                std::optional<std::string>(explicit_product_selector),
+                sandbox_selector);
+        }
+    }
+
+    BacklogContext ctx;
+    ctx.backlog_root = explicit_backlog_root;
+    ctx.project_root = normalized_absolute_path(ctx.backlog_root.parent_path().parent_path());
+    ctx.product_name = explicit_product_selector;
+    ctx.product_root = ctx.backlog_root / "products" / ctx.product_name;
+    ctx.product_def.name = ctx.product_name;
+    ctx.product_def.prefix = "KABS";
+    ctx.product_def.backlog_root = relative_or_string(ctx.product_root, ctx.project_root);
+    return ctx;
+}
+
 void write_text_file(const std::filesystem::path& path, const std::string& content);
 
 bool path_has_component(const std::filesystem::path& path, const std::string& component) {
@@ -1965,6 +2017,7 @@ std::string rewrite_wikilinks_in_line(
 LinkFixResultNative fix_links_native(
     const std::filesystem::path& product_root,
     const std::filesystem::path& backlog_root,
+    const std::string& product_name,
     bool include_views,
     const std::vector<std::string>& ignore_targets,
     const std::vector<std::pair<std::string, std::string>>& remap_roots,
@@ -1974,7 +2027,7 @@ LinkFixResultNative fix_links_native(
     const auto project_root = normalized_absolute_path(backlog_root.parent_path().parent_path());
     const auto index = build_link_index(product_root, include_views);
     LinkFixResultNative result;
-    result.product = product_root.filename().string();
+    result.product = product_name;
 
     for (const auto& path : list_link_markdown_paths(product_root, include_views)) {
         std::ifstream input(path, std::ios::binary);
@@ -2727,13 +2780,14 @@ std::optional<std::string> git_show_file(const std::filesystem::path& repo_root,
 LinkRestoreResultNative restore_links_from_vcs_native(
     const std::filesystem::path& product_root,
     const std::filesystem::path& backlog_root,
+    const std::string& product_name,
     bool include_views,
     const std::vector<std::string>& ignore_targets,
     const std::vector<std::pair<std::string, std::string>>& remap_roots,
     bool apply
 ) {
     LinkRestoreResultNative result;
-    result.product = product_root.filename().string();
+    result.product = product_name;
 
     int checked_files = 0;
     const auto issues = collect_link_issues_native(product_root, backlog_root, include_views, ignore_targets, &checked_files);
@@ -3473,6 +3527,12 @@ Json::Value effective_config_json_for_context(const BacklogContext& ctx) {
     context["backlog_root"] = ctx.backlog_root.string();
     context["product_root"] = ctx.product_root.string();
     context["product_name"] = ctx.product_name;
+    context["requested_product"] = ctx.product_resolution.requested_selector;
+    context["canonical_product"] = ctx.product_resolution.canonical_slug;
+    context["resolution_kind"] = kano::backlog_core::to_string(
+        ctx.product_resolution.resolution_kind);
+    context["normalized_selector"] = ctx.product_resolution.normalized_selector;
+    context["matched_selector"] = ctx.product_resolution.matched_selector;
     context["is_sandbox"] = ctx.is_sandbox;
     if (ctx.sandbox_root) {
         context["sandbox_root"] = ctx.sandbox_root->string();
@@ -3486,6 +3546,8 @@ Json::Value effective_config_json_for_context(const BacklogContext& ctx) {
     product["name"] = ctx.product_def.name.empty() ? ctx.product_name : ctx.product_def.name;
     product["prefix"] = ctx.product_def.prefix;
     product["backlog_root"] = ctx.product_def.backlog_root;
+    product["aliases"] = string_array_json(ctx.product_def.aliases);
+    product["repo_bindings"] = string_array_json(ctx.product_def.repo_bindings);
     product["default_assignee"] = optional_text(ctx.product_def.default_assignee);
     product["default_bug_reviewer"] = optional_text(ctx.product_def.default_bug_reviewer);
     product["topics_date_prefix_policy"] = ctx.product_def.topics_date_prefix_policy.empty()
@@ -3517,6 +3579,69 @@ Json::Value effective_config_json_for_context(const BacklogContext& ctx) {
 
     root["config"] = config;
     return root;
+}
+
+void append_multiline_config_diagnostic(
+    std::vector<std::string>& errors,
+    const std::string& diagnostic
+) {
+    std::istringstream lines(diagnostic);
+    std::string line;
+    while (std::getline(lines, line)) {
+        if (!line.empty()) {
+            errors.push_back(line);
+        }
+    }
+}
+
+void append_project_config_validation_errors(
+    const std::filesystem::path& resource_path,
+    std::vector<std::string>& errors
+) {
+    const auto lookup_path = resource_path.empty()
+        ? std::filesystem::path(".")
+        : resource_path;
+    const auto config_path = ConfigLoader::find_project_config(lookup_path);
+    if (!config_path) {
+        errors.push_back("Project config file not found");
+        return;
+    }
+
+    const auto project_config = ProjectConfig::load_from_toml(*config_path);
+    if (!project_config) {
+        errors.push_back("Failed to parse project config at " + config_path->string());
+        return;
+    }
+
+    const auto collisions = project_config->find_selector_collisions();
+    if (!collisions.empty()) {
+        append_multiline_config_diagnostic(
+            errors,
+            ProjectConfig::describe_selector_collisions(collisions));
+    }
+}
+
+void append_required_product_config_errors(
+    const BacklogContext& ctx,
+    std::vector<std::string>& errors
+) {
+    if (ctx.product_def.name.empty()) {
+        errors.push_back("[product].name is required and must be a non-empty string");
+    }
+    if (ctx.product_def.prefix.empty()) {
+        errors.push_back("[product].prefix is required and must be a non-empty string");
+    }
+}
+
+void throw_if_config_validation_failed(const std::vector<std::string>& errors) {
+    if (errors.empty()) {
+        return;
+    }
+    std::cout << "Validation failed:\n";
+    for (const auto& error : errors) {
+        std::cout << "- " << error << "\n";
+    }
+    throw std::runtime_error("Config validation failed");
 }
 
 std::string canonical_chunks_schema_sql() {
@@ -5505,12 +5630,12 @@ struct SandboxInitNativeResult {
 
 SandboxInitNativeResult init_native_sandbox(
     const std::filesystem::path& backlog_root,
+    const std::filesystem::path& product_root,
     const std::string& name,
     const std::string& product,
     const std::string& agent,
     bool force
 ) {
-    const auto product_root = backlog_root / "products" / product;
     if (!std::filesystem::exists(product_root)) {
         throw std::runtime_error("Source product not initialized: " + product_root.string());
     }
@@ -5719,6 +5844,7 @@ NativeReleaseReport run_native_release_phase1(const std::filesystem::path& repo_
 NativeReleaseReport run_native_release_phase2(
     const std::filesystem::path& repo_root,
     const std::filesystem::path& backlog_root,
+    const std::filesystem::path& product_root,
     const std::string& version,
     const std::string& product,
     const std::string& sandbox_name,
@@ -5731,7 +5857,13 @@ NativeReleaseReport run_native_release_phase2(
     append_release_check(report, "native:quick-test-contract", true, "release phase uses native C++ smoke tests, not Python pytest");
 
     try {
-        auto sandbox = init_native_sandbox(backlog_root, sandbox_name, product, agent, true);
+        auto sandbox = init_native_sandbox(
+            backlog_root,
+            product_root,
+            sandbox_name,
+            product,
+            agent,
+            true);
         std::ostringstream artifact;
         artifact << "sandbox=" << sandbox.sandbox_root.string() << "\n";
         artifact << "created_paths=" << sandbox.created_paths << "\n";
@@ -5792,6 +5924,8 @@ Json::Value admin_init_result_to_json(const OrchestrationOps::InitResult& result
     payload["product"] = result.product;
     payload["product_name"] = result.product_name;
     payload["prefix"] = result.prefix;
+    payload["aliases"] = string_array_json(result.aliases);
+    payload["repo_bindings"] = string_array_json(result.repo_bindings);
     payload["prefix_source"] = result.prefix_source;
     Json::Value prefix_candidates(Json::arrayValue);
     for (const auto& candidate : result.prefix_candidates) {
@@ -5854,6 +5988,8 @@ std::optional<int> try_run_admin_init_fast_path(int argc, char** argv) {
     std::string init_backlog_root;
     std::string init_product_name;
     std::string init_prefix;
+    std::vector<std::string> init_aliases;
+    std::vector<std::string> init_repo_bindings;
     bool init_force = false;
     bool init_dry_run = false;
 
@@ -5899,6 +6035,10 @@ std::optional<int> try_run_admin_init_fast_path(int argc, char** argv) {
             init_product_name = *value;
         } else if (auto value = option_value(i, "--prefix")) {
             init_prefix = *value;
+        } else if (auto value = option_value(i, "--alias")) {
+            init_aliases.push_back(*value);
+        } else if (auto value = option_value(i, "--repo-binding")) {
+            init_repo_bindings.push_back(*value);
         } else if (arg == "--force") {
             init_force = true;
         } else if (arg == "--dry-run") {
@@ -5920,6 +6060,8 @@ std::optional<int> try_run_admin_init_fast_path(int argc, char** argv) {
     options.start_path = path_str;
     options.product = effective_product;
     options.agent = init_agent;
+    options.aliases = init_aliases;
+    options.repo_bindings = init_repo_bindings;
     options.force = init_force;
     options.dry_run = init_dry_run;
     if (!init_backlog_root.empty()) {
@@ -7089,23 +7231,12 @@ std::optional<int> try_run_workitem_attach_artifact_fast_path(int argc, char** a
         throw std::runtime_error("format must be plain or json");
     }
 
-    BacklogContext ctx;
     const std::string effective_product = !product.empty() ? product : global_product;
-    if (backlog_root_override.empty()) {
-        ctx = BacklogContext::resolve(
-            path_str,
-            effective_product.empty() ? std::nullopt : std::optional<std::string>(effective_product),
-            sandbox.empty() ? std::nullopt : std::optional<std::string>(sandbox)
-        );
-    } else {
-        ctx.backlog_root = normalized_absolute_path(expand_user_path(backlog_root_override));
-        ctx.project_root = normalized_absolute_path(ctx.backlog_root.parent_path().parent_path());
-        ctx.product_name = effective_product.empty() ? std::string("kano-agent-backlog-skill") : effective_product;
-        ctx.product_root = ctx.backlog_root / "products" / ctx.product_name;
-        ctx.product_def.name = ctx.product_name;
-        ctx.product_def.prefix = "KABS";
-        ctx.product_def.backlog_root = relative_or_string(ctx.product_root, ctx.project_root);
-    }
+    auto ctx = resolve_product_context(
+        path_str,
+        effective_product,
+        sandbox,
+        backlog_root_override);
 
     const auto source = normalized_absolute_path(expand_user_path(artifact_path));
     if (!std::filesystem::exists(source) || !std::filesystem::is_regular_file(source)) {
@@ -7308,22 +7439,18 @@ std::optional<int> try_run_links_fix_fast_path(int argc, char** argv) {
     }
 
     const std::string selected_product = !product.empty() ? product : global_product;
-    std::filesystem::path backlog_root;
-    if (!backlog_root_str.empty()) {
-        backlog_root = normalized_absolute_path(expand_user_path(backlog_root_str));
-    } else {
-        auto ctx = BacklogContext::resolve(
-            path_str,
-            selected_product.empty() ? std::nullopt : std::optional<std::string>(selected_product),
-            sandbox.empty() ? std::nullopt : std::optional<std::string>(sandbox)
-        );
-        backlog_root = ctx.backlog_root;
-    }
-
     std::vector<std::filesystem::path> roots;
+    std::filesystem::path backlog_root;
+    std::optional<std::string> canonical_product;
     if (!selected_product.empty()) {
-        roots.push_back(backlog_root / "products" / selected_product);
+        auto ctx = resolve_product_context(path_str, selected_product, sandbox, backlog_root_str);
+        backlog_root = ctx.backlog_root;
+        roots.push_back(ctx.product_root);
+        canonical_product = ctx.product_name;
     } else {
+        backlog_root = backlog_root_str.empty()
+            ? detect_backlog_root(path_str)
+            : normalized_absolute_path(expand_user_path(backlog_root_str));
         roots = list_product_roots(backlog_root);
     }
     roots.erase(
@@ -7341,6 +7468,7 @@ std::optional<int> try_run_links_fix_fast_path(int argc, char** argv) {
         results.push_back(fix_links_native(
             product_root,
             backlog_root,
+            canonical_product.value_or(product_root.filename().string()),
             include_views,
             ignore_targets,
             remap_roots,
@@ -7755,22 +7883,18 @@ std::optional<int> try_run_links_restore_from_vcs_fast_path(int argc, char** arg
     }
 
     const std::string selected_product = !product.empty() ? product : global_product;
-    std::filesystem::path backlog_root;
-    if (!backlog_root_str.empty()) {
-        backlog_root = normalized_absolute_path(expand_user_path(backlog_root_str));
-    } else {
-        auto ctx = BacklogContext::resolve(
-            path_str,
-            selected_product.empty() ? std::nullopt : std::optional<std::string>(selected_product),
-            sandbox.empty() ? std::nullopt : std::optional<std::string>(sandbox)
-        );
-        backlog_root = ctx.backlog_root;
-    }
-
     std::vector<std::filesystem::path> roots;
+    std::filesystem::path backlog_root;
+    std::optional<std::string> canonical_product;
     if (!selected_product.empty()) {
-        roots.push_back(backlog_root / "products" / selected_product);
+        auto ctx = resolve_product_context(path_str, selected_product, sandbox, backlog_root_str);
+        backlog_root = ctx.backlog_root;
+        roots.push_back(ctx.product_root);
+        canonical_product = ctx.product_name;
     } else {
+        backlog_root = backlog_root_str.empty()
+            ? detect_backlog_root(path_str)
+            : normalized_absolute_path(expand_user_path(backlog_root_str));
         roots = list_product_roots(backlog_root);
     }
     roots.erase(
@@ -7788,6 +7912,7 @@ std::optional<int> try_run_links_restore_from_vcs_fast_path(int argc, char** arg
         results.push_back(restore_links_from_vcs_native(
             product_root,
             backlog_root,
+            canonical_product.value_or(product_root.filename().string()),
             include_views,
             ignore_targets,
             remap_roots,
@@ -7840,6 +7965,9 @@ std::optional<int> try_run_links_remap_ref_fast_path(int argc, char** argv) {
 
     std::string ref_path;
     std::string prefix = "ADR";
+    std::string path_str = ".";
+    std::string global_product;
+    std::string sandbox;
     std::string product;
     std::string backlog_root_str;
     std::string format = "markdown";
@@ -7860,15 +7988,38 @@ std::optional<int> try_run_links_remap_ref_fast_path(int argc, char** argv) {
         return std::nullopt;
     };
 
-    for (int i = 1; i < links_index; ++i) {
-        const std::string arg = argv[i];
-        if (arg == "-p" || arg == "--path" || arg == "-P" || arg == "--product" || arg == "-s" || arg == "--sandbox") {
-            if (i + 1 < links_index) {
-                ++i;
-                continue;
-            }
+    const auto parse_context_option = [&](int& index) -> bool {
+        if (auto value = option_value(index, "-p")) {
+            path_str = *value;
+            return true;
         }
-        return std::nullopt;
+        if (auto value = option_value(index, "--path")) {
+            path_str = *value;
+            return true;
+        }
+        if (auto value = option_value(index, "-P")) {
+            global_product = *value;
+            return true;
+        }
+        if (auto value = option_value(index, "--product")) {
+            global_product = *value;
+            return true;
+        }
+        if (auto value = option_value(index, "-s")) {
+            sandbox = *value;
+            return true;
+        }
+        if (auto value = option_value(index, "--sandbox")) {
+            sandbox = *value;
+            return true;
+        }
+        return false;
+    };
+
+    for (int i = 1; i < links_index; ++i) {
+        if (!parse_context_option(i)) {
+            return std::nullopt;
+        }
     }
 
     for (int i = links_index + 2; i < argc; ++i) {
@@ -7923,14 +8074,20 @@ std::optional<int> try_run_links_remap_ref_fast_path(int argc, char** argv) {
         throw std::runtime_error("format must be one of: markdown, json");
     }
 
+    const auto selected_product = !product.empty() ? product : global_product;
+    std::string canonical_product = selected_product;
     std::optional<std::filesystem::path> backlog_root;
-    if (!backlog_root_str.empty()) {
+    if (!selected_product.empty()) {
+        auto ctx = resolve_product_context(path_str, selected_product, sandbox, backlog_root_str);
+        backlog_root = ctx.backlog_root;
+        canonical_product = ctx.product_name;
+    } else if (!backlog_root_str.empty()) {
         backlog_root = normalized_absolute_path(expand_user_path(backlog_root_str));
     }
     const auto result = remap_reference_id_native(
         expand_user_path(ref_path),
         backlog_root,
-        product,
+        canonical_product,
         trim_copy(prefix).empty() ? std::string("ADR") : prefix,
         update_refs,
         apply
@@ -8093,28 +8250,8 @@ std::optional<int> try_run_admin_items_fast_path(int argc, char** argv) {
         throw std::runtime_error("format must be one of: markdown, json");
     }
 
-    const auto resolve_context = [&]() {
-        const std::string effective_product = !product.empty() ? product : global_product;
-        if (backlog_root.empty()) {
-            return BacklogContext::resolve(
-                path_str,
-                effective_product.empty() ? std::nullopt : std::optional<std::string>(effective_product),
-                sandbox.empty() ? std::nullopt : std::optional<std::string>(sandbox)
-            );
-        }
-
-        BacklogContext ctx;
-        ctx.backlog_root = normalized_absolute_path(expand_user_path(backlog_root));
-        ctx.project_root = normalized_absolute_path(ctx.backlog_root.parent_path().parent_path());
-        ctx.product_name = effective_product.empty() ? std::string("kano-agent-backlog-skill") : effective_product;
-        ctx.product_root = ctx.backlog_root / "products" / ctx.product_name;
-        ctx.product_def.name = ctx.product_name;
-        ctx.product_def.prefix = "KABS";
-        ctx.product_def.backlog_root = relative_or_string(ctx.product_root, ctx.project_root);
-        return ctx;
-    };
-
-    auto ctx = resolve_context();
+    const std::string effective_product = !product.empty() ? product : global_product;
+    auto ctx = resolve_product_context(path_str, effective_product, sandbox, backlog_root);
     BacklogIndex index(ctx.backlog_root / ".cache" / "index" / "backlog.db");
     index.initialize();
 
@@ -8318,18 +8455,7 @@ std::optional<int> try_run_meta_ticketing_fast_path(int argc, char** argv) {
         throw std::runtime_error("format must be one of: markdown, json");
     }
 
-    BacklogContext ctx;
-    if (backlog_root.empty()) {
-        ctx = BacklogContext::resolve(path_str, product, std::nullopt);
-    } else {
-        ctx.backlog_root = normalized_absolute_path(expand_user_path(backlog_root));
-        ctx.project_root = normalized_absolute_path(ctx.backlog_root.parent_path().parent_path());
-        ctx.product_name = product;
-        ctx.product_root = ctx.backlog_root / "products" / ctx.product_name;
-        ctx.product_def.name = ctx.product_name;
-        ctx.product_def.prefix = "KABS";
-        ctx.product_def.backlog_root = relative_or_string(ctx.product_root, ctx.project_root);
-    }
+    auto ctx = resolve_product_context(path_str, product, {}, backlog_root);
 
     auto conventions_path = ctx.product_root / "_meta" / "conventions.md";
     if (!std::filesystem::exists(conventions_path)) {
@@ -8379,7 +8505,7 @@ std::optional<int> try_run_meta_ticketing_fast_path(int argc, char** argv) {
 
     if (format_norm == "json") {
         Json::Value payload(Json::objectValue);
-        payload["product"] = product;
+        payload["product"] = ctx.product_name;
         payload["status"] = status;
         payload["path"] = conventions_path.string();
         std::cout << json_to_string(payload, true) << "\n";
@@ -8747,21 +8873,13 @@ std::optional<int> try_run_config_smoke_fast_path(int argc, char** argv) {
     }
 
     if (command == "validate") {
-        auto ctx = resolve_context();
         std::vector<std::string> errors;
-        if (ctx.product_def.name.empty()) {
-            errors.push_back("[product].name is required and must be a non-empty string");
+        append_project_config_validation_errors(path_str, errors);
+        if (errors.empty()) {
+            const auto ctx = resolve_context();
+            append_required_product_config_errors(ctx, errors);
         }
-        if (ctx.product_def.prefix.empty()) {
-            errors.push_back("[product].prefix is required and must be a non-empty string");
-        }
-        if (!errors.empty()) {
-            std::cout << "Validation failed:\n";
-            for (const auto& error : errors) {
-                std::cout << "- " << error << "\n";
-            }
-            throw std::runtime_error("Config validation failed");
-        }
+        throw_if_config_validation_failed(errors);
         std::cout << "Config is valid\n";
         return 0;
     }
@@ -9097,66 +9215,75 @@ int main(int InArgc, char* InArgv[]) {
     app.fallthrough();
 
     auto resolve_ctx = [&]() {
-        return BacklogContext::resolve(path_str,
-            product_name_opt.empty() ? std::nullopt : std::optional<std::string>(product_name_opt),
-            sandbox_name_opt.empty() ? std::nullopt : std::optional<std::string>(sandbox_name_opt)
-        );
+        return resolve_product_context(path_str, product_name_opt, sandbox_name_opt);
     };
 
     auto resolve_backlog_root_arg = [&](const std::string& backlog_root_arg) {
         if (!backlog_root_arg.empty()) {
-            return normalized_absolute_path(std::filesystem::path(backlog_root_arg));
+            return normalized_absolute_path(expand_user_path(backlog_root_arg));
         }
         return detect_backlog_root(path_str);
     };
 
     auto resolve_ctx_for_product_arg = [&](const std::string& command_product) {
-        return BacklogContext::resolve(
+        return resolve_product_context(
             path_str,
-            command_product.empty()
-                ? (product_name_opt.empty() ? std::nullopt : std::optional<std::string>(product_name_opt))
-                : std::optional<std::string>(command_product),
-            sandbox_name_opt.empty() ? std::nullopt : std::optional<std::string>(sandbox_name_opt)
-        );
+            command_product.empty() ? product_name_opt : command_product,
+            sandbox_name_opt);
     };
 
     auto resolve_ctx_for_product_and_backlog = [&](const std::string& command_product, const std::string& backlog_root_arg) {
-        if (backlog_root_arg.empty()) {
-            return resolve_ctx_for_product_arg(command_product);
+        return resolve_product_context(
+            path_str,
+            command_product.empty() ? product_name_opt : command_product,
+            sandbox_name_opt,
+            backlog_root_arg);
+    };
+
+    struct CliProductRootSelection {
+        struct Entry {
+            std::string product_name;
+            std::filesystem::path product_root;
+            std::optional<std::string> configured_prefix;
+        };
+
+        std::filesystem::path backlog_root;
+        std::vector<Entry> entries;
+    };
+
+    auto resolve_cli_product_roots = [&](const std::string& command_product, const std::string& backlog_root_arg) {
+        CliProductRootSelection selection;
+        const auto selected_product = command_product.empty() ? product_name_opt : command_product;
+        if (!selected_product.empty()) {
+            const auto ctx = resolve_ctx_for_product_and_backlog(command_product, backlog_root_arg);
+            selection.backlog_root = backlog_root_arg.empty()
+                ? ctx.backlog_root
+                : resolve_backlog_root_arg(backlog_root_arg);
+            selection.entries.push_back(CliProductRootSelection::Entry{
+                ctx.product_name,
+                ctx.product_root,
+                trim_copy(ctx.product_def.prefix)});
+            return selection;
         }
 
-        const auto explicit_backlog_root =
-            normalized_absolute_path(std::filesystem::path(backlog_root_arg));
-        const auto requested_product = !command_product.empty()
-            ? command_product
-            : (!product_name_opt.empty() ? product_name_opt : std::string("kano-agent-backlog-skill"));
-        std::filesystem::path registry_resource;
-        for (const auto& candidate : std::vector<std::filesystem::path>{
-                 explicit_backlog_root,
-                 explicit_backlog_root.parent_path().parent_path()}) {
-            if (ConfigLoader::find_project_config(candidate)) {
-                registry_resource = candidate;
-                break;
+        selection.backlog_root = resolve_backlog_root_arg(backlog_root_arg);
+        const auto products_dir = selection.backlog_root / "products";
+        if (!std::filesystem::exists(products_dir)) {
+            return selection;
+        }
+        for (const auto& entry : std::filesystem::directory_iterator(products_dir)) {
+            if (!entry.is_directory()) {
+                continue;
             }
+            selection.entries.push_back(CliProductRootSelection::Entry{
+                entry.path().filename().string(),
+                entry.path(),
+                std::nullopt});
         }
-        if (!registry_resource.empty()) {
-            return BacklogContext::resolve(
-                registry_resource,
-                std::optional<std::string>(requested_product),
-                sandbox_name_opt.empty()
-                    ? std::nullopt
-                    : std::optional<std::string>(sandbox_name_opt));
-        }
-
-        BacklogContext ctx;
-        ctx.backlog_root = explicit_backlog_root;
-        ctx.project_root = normalized_absolute_path(ctx.backlog_root.parent_path().parent_path());
-        ctx.product_name = requested_product;
-        ctx.product_root = ctx.backlog_root / "products" / ctx.product_name;
-        ctx.product_def.name = ctx.product_name;
-        ctx.product_def.prefix = "KABS";
-        ctx.product_def.backlog_root = relative_or_string(ctx.product_root, ctx.project_root);
-        return ctx;
+        std::sort(selection.entries.begin(), selection.entries.end(), [](const auto& lhs, const auto& rhs) {
+            return lhs.product_root < rhs.product_root;
+        });
+        return selection;
     };
 
     try {
@@ -10287,6 +10414,7 @@ int main(int InArgc, char* InArgv[]) {
                         diagnostics["index_status"] = result.diagnostics.index_status;
                         diagnostics["index_revision"] = result.diagnostics.index_revision;
                         diagnostics["canonical_revision"] = result.diagnostics.canonical_revision;
+                        diagnostics["product_revision"] = result.diagnostics.product_revision;
                         diagnostics["fallback_scan"] = result.diagnostics.fallback_scan;
                         diagnostics["scanned_count"] = static_cast<Json::UInt64>(
                             result.diagnostics.scanned_count);
@@ -10618,56 +10746,19 @@ int main(int InArgc, char* InArgv[]) {
             validateConfigCmd->add_option("--workset", validate_workset, "Workset item id");
             validateConfigCmd->callback([&]() {
                 std::vector<std::string> errors;
-
                 const auto resolved_path = config_command_path(validate_path);
-                const auto config_path = ConfigLoader::find_project_config(
-                    resolved_path.empty() ? std::filesystem::path(".") : std::filesystem::path(resolved_path)
-                );
-                if (!config_path) {
-                    errors.push_back("Project config file not found");
-                } else if (const auto project_config = ProjectConfig::load_from_toml(*config_path)) {
-                    const auto collisions = project_config->find_prefix_collisions(*config_path);
-                    if (!collisions.empty()) {
-                        std::istringstream collision_lines(ProjectConfig::describe_prefix_collisions(collisions));
-                        std::string line;
-                        while (std::getline(collision_lines, line)) {
-                            if (!line.empty()) {
-                                errors.push_back(line);
-                            }
-                        }
-                    }
-                } else {
-                    errors.push_back("Failed to parse project config at " + config_path->string());
+                append_project_config_validation_errors(resolved_path, errors);
+                if (errors.empty()) {
+                    const auto ctx = BacklogContext::resolve(
+                        resolved_path,
+                        validate_product.empty()
+                            ? (product_name_opt.empty() ? std::nullopt : std::optional<std::string>(product_name_opt))
+                            : std::optional<std::string>(validate_product),
+                        validate_sandbox.empty() ? std::nullopt : std::optional<std::string>(validate_sandbox)
+                    );
+                    append_required_product_config_errors(ctx, errors);
                 }
-
-                if (!errors.empty()) {
-                    std::cout << "Validation failed:\n";
-                    for (const auto& error : errors) {
-                        std::cout << "- " << error << "\n";
-                    }
-                    throw std::runtime_error("Config validation failed");
-                }
-
-                auto ctx = BacklogContext::resolve(
-                    resolved_path,
-                    validate_product.empty()
-                        ? (product_name_opt.empty() ? std::nullopt : std::optional<std::string>(product_name_opt))
-                        : std::optional<std::string>(validate_product),
-                    validate_sandbox.empty() ? std::nullopt : std::optional<std::string>(validate_sandbox)
-                );
-                if (ctx.product_def.name.empty()) {
-                    errors.push_back("[product].name is required and must be a non-empty string");
-                }
-                if (ctx.product_def.prefix.empty()) {
-                    errors.push_back("[product].prefix is required and must be a non-empty string");
-                }
-                if (!errors.empty()) {
-                    std::cout << "Validation failed:\n";
-                    for (const auto& error : errors) {
-                        std::cout << "- " << error << "\n";
-                    }
-                    throw std::runtime_error("Config validation failed");
-                }
+                throw_if_config_validation_failed(errors);
                 std::cout << "Config is valid\n";
             });
 
@@ -11427,6 +11518,8 @@ int main(int InArgc, char* InArgv[]) {
                 std::string product;
                 std::string product_name;
                 std::string prefix;
+                std::vector<std::string> aliases;
+                std::vector<std::string> repo_bindings;
                 std::string external_root;
                 std::string backlog_root;
                 std::string plan_hash;
@@ -11442,6 +11535,9 @@ int main(int InArgc, char* InArgv[]) {
                     request.request.product_name =
                         registration->product_name;
                     request.request.prefix = registration->prefix;
+                    request.request.aliases = registration->aliases;
+                    request.request.repo_bindings =
+                        registration->repo_bindings;
                     request.request.external_root = std::filesystem::path(
                         registration->external_root);
                     return request;
@@ -11463,6 +11559,12 @@ int main(int InArgc, char* InArgv[]) {
             registration_plan_cmd->add_option(
                 "--prefix", registration_plan_options->prefix,
                 "Canonical uppercase product prefix")->required();
+            registration_plan_cmd->add_option(
+                "--alias", registration_plan_options->aliases,
+                "Additional product selector alias; repeatable")->expected(-1);
+            registration_plan_cmd->add_option(
+                "--repo-binding", registration_plan_options->repo_bindings,
+                "Repository selector binding; repeatable")->expected(-1);
             registration_plan_cmd->add_option(
                 "--external-root", registration_plan_options->external_root,
                 "Absolute existing external product root")->required();
@@ -11499,6 +11601,12 @@ int main(int InArgc, char* InArgv[]) {
             registration_apply_cmd->add_option(
                 "--prefix", registration_apply_options->prefix,
                 "Canonical uppercase product prefix")->required();
+            registration_apply_cmd->add_option(
+                "--alias", registration_apply_options->aliases,
+                "Additional product selector alias; repeatable")->expected(-1);
+            registration_apply_cmd->add_option(
+                "--repo-binding", registration_apply_options->repo_bindings,
+                "Repository selector binding; repeatable")->expected(-1);
             registration_apply_cmd->add_option(
                 "--external-root", registration_apply_options->external_root,
                 "Absolute existing external product root")->required();
@@ -11781,6 +11889,8 @@ int main(int InArgc, char* InArgv[]) {
             auto& init_backlog_root = cli11_state.keep<std::string>();
             auto& init_product_name = cli11_state.keep<std::string>();
             auto& init_prefix = cli11_state.keep<std::string>();
+            auto& init_aliases = cli11_state.keep<std::vector<std::string>>();
+            auto& init_repo_bindings = cli11_state.keep<std::vector<std::string>>();
             auto& init_force = cli11_state.keep<bool>(false);
             auto& init_dry_run = cli11_state.keep<bool>(false);
             initCmd->add_option("--agent", init_agent, "Agent ID")->required();
@@ -11788,6 +11898,12 @@ int main(int InArgc, char* InArgv[]) {
             initCmd->add_option("--backlog-root", init_backlog_root, "Backlog root path");
             initCmd->add_option("--product-name", init_product_name, "Display product name");
             initCmd->add_option("--prefix", init_prefix, "Display ID prefix");
+            initCmd->add_option(
+                "--alias", init_aliases,
+                "Additional product selector alias; repeatable")->expected(-1);
+            initCmd->add_option(
+                "--repo-binding", init_repo_bindings,
+                "Repository selector binding; repeatable")->expected(-1);
             initCmd->add_flag("--force", init_force, "Update an existing product scaffold/config block");
             initCmd->add_flag("--dry-run", init_dry_run, "Plan backlog initialization without writing files");
             initCmd->callback([&]() {
@@ -11800,6 +11916,8 @@ int main(int InArgc, char* InArgv[]) {
                 options.start_path = path_str;
                 options.product = effective_product;
                 options.agent = init_agent;
+                options.aliases = init_aliases;
+                options.repo_bindings = init_repo_bindings;
                 options.force = init_force;
                 options.dry_run = init_dry_run;
                 if (!init_backlog_root.empty()) {
@@ -12033,13 +12151,11 @@ int main(int InArgc, char* InArgv[]) {
         std::string topic_backlog_root_override;
 
         auto resolve_topic_ctx = [&]() {
-            auto ctx = resolve_ctx();
-            if (!topic_backlog_root_override.empty()) {
-                ctx.backlog_root = normalized_absolute_path(expand_user_path(topic_backlog_root_override));
-                ctx.project_root = normalized_absolute_path(ctx.backlog_root.parent_path().parent_path());
-                ctx.product_root = ctx.backlog_root / "products" / ctx.product_name;
-            }
-            return ctx;
+            return resolve_product_context(
+                path_str,
+                product_name_opt,
+                sandbox_name_opt,
+                topic_backlog_root_override);
         };
 
         auto topic_path_for = [](const std::filesystem::path& backlog_root, const std::string& topic_name) {
@@ -15344,50 +15460,12 @@ int main(int InArgc, char* InArgv[]) {
                 throw std::runtime_error("format must be one of: markdown, json");
             }
 
-            const auto resolve_chunks_ctx = [&]() {
-                const auto effective_product = !command_product.empty() ? command_product : local_product;
-                if (!backlog_root.empty()) {
-                    const auto explicit_backlog_root =
-                        normalized_absolute_path(std::filesystem::path(backlog_root));
-                    const auto requested_product = !effective_product.empty()
-                        ? effective_product
-                        : std::string("kano-agent-backlog-skill");
-                    std::filesystem::path registry_resource;
-                    for (const auto& candidate : std::vector<std::filesystem::path>{
-                             explicit_backlog_root,
-                             explicit_backlog_root.parent_path().parent_path()}) {
-                        if (ConfigLoader::find_project_config(candidate)) {
-                            registry_resource = candidate;
-                            break;
-                        }
-                    }
-                    if (!registry_resource.empty()) {
-                        return BacklogContext::resolve(
-                            registry_resource,
-                            std::optional<std::string>(requested_product),
-                            local_sandbox.empty()
-                                ? std::nullopt
-                                : std::optional<std::string>(local_sandbox));
-                    }
-
-                    BacklogContext ctx;
-                    ctx.backlog_root = explicit_backlog_root;
-                    ctx.project_root = normalized_absolute_path(ctx.backlog_root.parent_path().parent_path());
-                    ctx.product_name = requested_product;
-                    ctx.product_root = ctx.backlog_root / "products" / ctx.product_name;
-                    ctx.product_def.name = ctx.product_name;
-                    ctx.product_def.prefix = "KABS";
-                    ctx.product_def.backlog_root = relative_or_string(ctx.product_root, ctx.project_root);
-                    return ctx;
-                }
-                return BacklogContext::resolve(
-                    local_path,
-                    effective_product.empty() ? std::nullopt : std::optional<std::string>(effective_product),
-                    local_sandbox.empty() ? std::nullopt : std::optional<std::string>(local_sandbox)
-                );
-            };
-
-            auto ctx = resolve_chunks_ctx();
+            const auto effective_product = !command_product.empty() ? command_product : local_product;
+            auto ctx = resolve_product_context(
+                local_path,
+                effective_product,
+                local_sandbox,
+                backlog_root);
             if (action == "build") {
                 auto result = build_native_backlog_chunks_db(ctx, force, cache_root);
                 if (format_norm == "json") {
@@ -15606,27 +15684,12 @@ int main(int InArgc, char* InArgv[]) {
                 throw std::runtime_error("format must be one of: markdown, json");
             }
 
-            const auto resolve_embedding_ctx = [&]() {
-                const auto effective_product = !command_product.empty() ? command_product : local_product;
-                if (!backlog_root.empty()) {
-                    BacklogContext ctx;
-                    ctx.backlog_root = normalized_absolute_path(std::filesystem::path(backlog_root));
-                    ctx.project_root = normalized_absolute_path(ctx.backlog_root.parent_path().parent_path());
-                    ctx.product_name = !effective_product.empty() ? effective_product : std::string("kano-agent-backlog-skill");
-                    ctx.product_root = ctx.backlog_root / "products" / ctx.product_name;
-                    ctx.product_def.name = ctx.product_name;
-                    ctx.product_def.prefix = "KABS";
-                    ctx.product_def.backlog_root = relative_or_string(ctx.product_root, ctx.project_root);
-                    return ctx;
-                }
-                return BacklogContext::resolve(
-                    local_path,
-                    effective_product.empty() ? std::nullopt : std::optional<std::string>(effective_product),
-                    local_sandbox.empty() ? std::nullopt : std::optional<std::string>(local_sandbox)
-                );
-            };
-
-            auto ctx = resolve_embedding_ctx();
+            const auto effective_product = !command_product.empty() ? command_product : local_product;
+            auto ctx = resolve_product_context(
+                local_path,
+                effective_product,
+                local_sandbox,
+                backlog_root);
             if (action == "status") {
                 const auto db_path = native_backlog_chunks_db_path(ctx, cache_root);
                 if (format_norm == "json") {
@@ -15859,11 +15922,9 @@ int main(int InArgc, char* InArgv[]) {
                 throw std::runtime_error("format must be one of: markdown, json");
             }
 
-            std::filesystem::path backlog_root;
-            if (!inspect_backlog_root.empty()) {
-                backlog_root = normalized_absolute_path(std::filesystem::path(inspect_backlog_root));
-            } else {
-                backlog_root = detect_backlog_root(local_path);
+            std::string selection_backlog_root = inspect_backlog_root;
+            if (selection_backlog_root.empty()) {
+                selection_backlog_root = detect_backlog_root(local_path).string();
                 if (!local_product.empty() || !local_sandbox.empty()) {
                     (void)BacklogContext::resolve(
                         local_path,
@@ -15872,10 +15933,13 @@ int main(int InArgc, char* InArgv[]) {
                     );
                 }
             }
+            const auto selection = resolve_cli_product_roots(local_product, selection_backlog_root);
+            const auto& backlog_root = selection.backlog_root;
 
             std::vector<ResolvedBacklogItem> items;
             std::vector<ResolvedBacklogItem> all_items;
-            for (const auto& product_root : list_product_roots(backlog_root)) {
+            for (const auto& product_entry : selection.entries) {
+                const auto& product_root = product_entry.product_root;
                 CanonicalStore store(product_root);
                 for (const auto& path : list_item_markdown_paths(product_root)) {
                     try {
@@ -19608,7 +19672,13 @@ int main(int InArgc, char* InArgv[]) {
                 sandboxInitCmd->add_flag("--force", sandbox_force, "Recreate sandbox if it exists");
                 sandboxInitCmd->callback([&]() {
                     auto ctx = resolve_ctx_for_product_and_backlog(sandbox_product, sandbox_backlog_root);
-                    auto result = init_native_sandbox(ctx.backlog_root, sandbox_name, sandbox_product, sandbox_agent, sandbox_force);
+                    auto result = init_native_sandbox(
+                        ctx.backlog_root,
+                        ctx.product_root,
+                        sandbox_name,
+                        ctx.product_name,
+                        sandbox_agent,
+                        sandbox_force);
                     std::cout << "Initialized sandbox: " << result.sandbox_root.filename().string() << "\n";
                     std::cout << "  Location: " << result.sandbox_root.string() << "\n";
                     std::cout << "  Created " << result.created_paths << " directories/files\n";
@@ -19631,7 +19701,7 @@ int main(int InArgc, char* InArgv[]) {
                 summaryCmd->add_option("-o,--output", summary_output, "Override output path");
                 summaryCmd->callback([&]() {
                     auto ctx = resolve_ctx_for_product_and_backlog(summary_product, summary_backlog_root);
-                    auto result = generate_native_persona_summary(ctx.product_root, summary_product, summary_agent, summary_output);
+                    auto result = generate_native_persona_summary(ctx.product_root, ctx.product_name, summary_agent, summary_output);
                     std::cout << "Generated persona summary: " << result.artifact_path.filename().string() << "\n";
                     std::cout << "  Items analyzed: " << result.items_analyzed << "\n";
                     std::cout << "  Worklog entries: " << result.worklog_entries << "\n";
@@ -19649,7 +19719,7 @@ int main(int InArgc, char* InArgv[]) {
                 reportCmd->add_option("-o,--output", report_output, "Override output path");
                 reportCmd->callback([&]() {
                     auto ctx = resolve_ctx_for_product_and_backlog(report_product, report_backlog_root);
-                    auto result = generate_native_persona_report(ctx.product_root, report_product, report_agent, report_output);
+                    auto result = generate_native_persona_report(ctx.product_root, ctx.product_name, report_agent, report_output);
                     std::cout << "Generated persona report: " << result.artifact_path.filename().string() << "\n";
                     std::cout << "  Total items: " << result.total_items << "\n";
                     std::cout << "  States:\n";
@@ -19711,11 +19781,17 @@ int main(int InArgc, char* InArgv[]) {
                         all_passed = all_passed && report.all_passed();
                     }
                     if (phase_norm == "phase2" || phase_norm == "all") {
+                        const auto release_ctx = resolve_product_context(
+                            repo_root,
+                            release_product,
+                            {},
+                            backlog_root.string());
                         auto report = run_native_release_phase2(
                             repo_root,
-                            backlog_root,
+                            release_ctx.backlog_root,
+                            release_ctx.product_root,
                             release_version,
-                            release_product,
+                            release_ctx.product_name,
                             release_sandbox_name,
                             release_agent,
                             publish_dir
@@ -20604,21 +20680,25 @@ int main(int InArgc, char* InArgv[]) {
 
             auto* healthCmd = inspectCmd->add_subcommand("health", "Run the health review inspector");
             struct InspectHealthCommandState {
+                std::string product;
                 std::string item;
                 std::string backlog_root;
                 std::string output;
                 std::string format = "markdown";
             };
             const auto healthState = cli11_state.make_shared<InspectHealthCommandState>();
+            healthCmd->add_option("--product", healthState->product, "Product name");
             healthCmd->add_option("--item", healthState->item, "Specific item reference to scan");
             healthCmd->add_option("--backlog-root", healthState->backlog_root, "Path to _kano/backlog");
             healthCmd->add_option("-o,--output", healthState->output, "Output file path");
             healthCmd->add_option("--format", healthState->format, "Output format: markdown|json");
             healthCmd->callback([&, healthState]() {
-                const auto backlog_root = resolve_backlog_root_arg(healthState->backlog_root);
+                const auto selection = resolve_cli_product_roots(healthState->product, healthState->backlog_root);
+                const auto& backlog_root = selection.backlog_root;
                 std::vector<ResolvedBacklogItem> items;
                 std::vector<ResolvedBacklogItem> all_items;
-                for (const auto& product_root : list_product_roots(backlog_root)) {
+                for (const auto& product_entry : selection.entries) {
+                    const auto& product_root = product_entry.product_root;
                     CanonicalStore store(product_root);
                     for (const auto& path : list_item_markdown_paths(product_root)) {
                         try {
@@ -22128,7 +22208,8 @@ int main(int InArgc, char* InArgv[]) {
                 checkCmd->add_option("--product", state->product, "Product name (check all if omitted)");
                 checkCmd->add_option("--backlog-root", state->backlog_root, "Backlog root path");
                 checkCmd->callback([&, state]() {
-                    const auto backlog_root = resolve_backlog_root_arg(state->backlog_root);
+                    const auto selection = resolve_cli_product_roots(state->product, state->backlog_root);
+                    const auto& backlog_root = selection.backlog_root;
 
                     std::optional<ProjectConfig> project_config;
                     if (const auto config_path = ConfigLoader::find_project_config(backlog_root)) {
@@ -22138,32 +22219,29 @@ int main(int InArgc, char* InArgv[]) {
                     int total_checked = 0;
                     int total_issues = 0;
 
-                    // For each product under backlog_root/products
-                    auto products_dir = backlog_root / "products";
-                    if (!std::filesystem::exists(products_dir)) {
+                    if (selection.entries.empty()) {
                         std::cout << "No products directory found.\n";
                         return;
                     }
 
-                    for (const auto& entry : std::filesystem::directory_iterator(products_dir)) {
-                        if (!entry.is_directory()) continue;
-                        std::string product_name = entry.path().filename().string();
-                        if (!state->product.empty() && state->product != product_name) continue;
-
-                        auto product_root = entry.path();
+                    for (const auto& entry : selection.entries) {
+                        const auto& product_name = entry.product_name;
+                        const auto& product_root = entry.product_root;
                         CanonicalStore store(product_root);
                         auto item_paths = store.list_items();
-                        std::optional<std::string> expected_prefix;
-                        if (project_config) {
+                        auto expected_prefix = entry.configured_prefix;
+                        if ((!expected_prefix || expected_prefix->empty()) && project_config) {
                             if (const auto definition = project_config->get_product(product_name)) {
                                 expected_prefix = trim_copy(definition->prefix);
-                                std::transform(
-                                    expected_prefix->begin(),
-                                    expected_prefix->end(),
-                                    expected_prefix->begin(),
-                                    [](unsigned char ch) { return static_cast<char>(std::toupper(ch)); }
-                                );
                             }
+                        }
+                        if (expected_prefix) {
+                            std::transform(
+                                expected_prefix->begin(),
+                                expected_prefix->end(),
+                                expected_prefix->begin(),
+                                [](unsigned char ch) { return static_cast<char>(std::toupper(ch)); }
+                            );
                         }
                         int product_checked = 0;
                         int product_issues = 0;
@@ -22230,24 +22308,21 @@ int main(int InArgc, char* InArgv[]) {
                 fixCmd->add_option("--model", state->model, "Model name for worklog");
                 fixCmd->add_flag("--apply", state->apply, "Apply fixes (dry-run by default)");
                 fixCmd->callback([&, state]() {
-                    const auto backlog_root = resolve_backlog_root_arg(state->backlog_root);
+                    const auto selection = resolve_cli_product_roots(state->product, state->backlog_root);
+                    const auto& backlog_root = selection.backlog_root;
 
                     int total_checked = 0;
                     int total_issues = 0;
                     int total_fixed = 0;
 
-                    auto products_dir = backlog_root / "products";
-                    if (!std::filesystem::exists(products_dir)) {
+                    if (selection.entries.empty()) {
                         std::cout << "No products directory found.\n";
                         return;
                     }
 
-                    for (const auto& entry : std::filesystem::directory_iterator(products_dir)) {
-                        if (!entry.is_directory()) continue;
-                        std::string product_name = entry.path().filename().string();
-                        if (!state->product.empty() && state->product != product_name) continue;
-
-                        auto product_root = entry.path();
+                    for (const auto& entry : selection.entries) {
+                        const auto& product_name = entry.product_name;
+                        const auto& product_root = entry.product_root;
                         CanonicalStore store(product_root);
                         auto item_paths = store.list_items();
                         int product_checked = 0;
@@ -22343,7 +22418,7 @@ int main(int InArgc, char* InArgv[]) {
                     if (state->apply && trim_copy(state->agent).empty()) {
                         throw std::runtime_error("--agent is required with --fix --apply");
                     }
-                    const auto backlog_root = resolve_backlog_root_arg(state->backlog_root);
+                    const auto selection = resolve_cli_product_roots(state->product, state->backlog_root);
 
                     int total_checked = 0;
                     int total_violations = 0;
@@ -22352,21 +22427,14 @@ int main(int InArgc, char* InArgv[]) {
                     int total_repair_failures = 0;
                     std::map<std::string, std::string> seen_uids;
 
-                    auto products_dir = backlog_root / "products";
-                    if (!std::filesystem::exists(products_dir)) {
+                    if (selection.entries.empty()) {
                         std::cout << "No products directory found.\n";
                         return;
                     }
 
-                    std::vector<std::filesystem::path> product_roots;
-                    for (const auto& entry : std::filesystem::directory_iterator(products_dir)) {
-                        if (entry.is_directory()) product_roots.push_back(entry.path());
-                    }
-                    std::sort(product_roots.begin(), product_roots.end());
-
-                    for (const auto& product_root : product_roots) {
-                        std::string product_name = product_root.filename().string();
-                        if (!state->product.empty() && state->product != product_name) continue;
+                    for (const auto& entry : selection.entries) {
+                        const auto& product_name = entry.product_name;
+                        const auto& product_root = entry.product_root;
 
                         auto items_root = product_root / "items";
                         std::vector<std::filesystem::path> item_paths;
@@ -22566,18 +22634,27 @@ int main(int InArgc, char* InArgv[]) {
                 linksCmd->add_option("--backlog-root", state->backlog_root, "Backlog root path");
                 linksCmd->add_flag("--include-views", state->include_views, "Scan custom views/ Markdown");
                 linksCmd->callback([&, state]() {
-                    const auto backlog_root = resolve_backlog_root_arg(state->backlog_root);
+                    const auto selection = resolve_cli_product_roots(state->product, state->backlog_root);
+                    const auto& backlog_root = selection.backlog_root;
 
                     int total_checked = 0;
                     int total_issues = 0;
 
-                    auto products_dir = backlog_root / "products";
-                    if (!std::filesystem::exists(products_dir)) {
+                    if (selection.entries.empty()) {
                         std::cout << "No products directory found.\n";
                         return;
                     }
 
-                    const auto all_product_roots = list_product_roots(backlog_root);
+                    auto all_product_roots = list_product_roots(backlog_root);
+                    for (const auto& selected_entry : selection.entries) {
+                        if (std::find(
+                                all_product_roots.begin(),
+                                all_product_roots.end(),
+                                selected_entry.product_root) == all_product_roots.end()) {
+                            all_product_roots.push_back(selected_entry.product_root);
+                        }
+                    }
+                    std::sort(all_product_roots.begin(), all_product_roots.end());
                     std::map<std::string, int> global_id_counts;
                     std::map<std::string, int> global_uid_counts;
                     std::map<std::string, int> global_adr_counts;
@@ -22610,12 +22687,9 @@ int main(int InArgc, char* InArgv[]) {
                         }
                     }
 
-                    for (const auto& entry : std::filesystem::directory_iterator(products_dir)) {
-                        if (!entry.is_directory()) continue;
-                        std::string product_name = entry.path().filename().string();
-                        if (!state->product.empty() && state->product != product_name) continue;
-
-                        auto product_root = entry.path();
+                    for (const auto& entry : selection.entries) {
+                        const auto& product_name = entry.product_name;
+                        const auto& product_root = entry.product_root;
                         CanonicalStore store(product_root);
                         auto item_paths = store.list_items();
                         int product_issues = 0;
@@ -22715,19 +22789,17 @@ int main(int InArgc, char* InArgv[]) {
             };
 
             auto resolve_link_product_roots = [&](const std::string& command_product, const std::string& backlog_root_arg) {
-                std::filesystem::path backlog_root;
-                if (!backlog_root_arg.empty()) {
-                    backlog_root = normalized_absolute_path(std::filesystem::path(backlog_root_arg));
-                } else {
-                    auto ctx = resolve_ctx_for_product_arg(command_product);
-                    backlog_root = ctx.backlog_root;
-                }
-
                 const auto selected_product = !command_product.empty() ? command_product : product_name_opt;
                 std::vector<std::filesystem::path> roots;
+                std::filesystem::path backlog_root;
+                std::optional<std::string> canonical_product;
                 if (!selected_product.empty()) {
-                    roots.push_back(backlog_root / "products" / selected_product);
+                    auto ctx = resolve_ctx_for_product_and_backlog(command_product, backlog_root_arg);
+                    backlog_root = ctx.backlog_root;
+                    roots.push_back(ctx.product_root);
+                    canonical_product = ctx.product_name;
                 } else {
+                    backlog_root = resolve_backlog_root_arg(backlog_root_arg);
                     roots = list_product_roots(backlog_root);
                 }
                 roots.erase(
@@ -22739,7 +22811,7 @@ int main(int InArgc, char* InArgv[]) {
                 if (roots.empty()) {
                     throw std::runtime_error("No product roots found for links command under: " + backlog_root.string());
                 }
-                return std::make_pair(backlog_root, roots);
+                return std::make_tuple(backlog_root, roots, canonical_product);
             };
 
             // links fix
@@ -22767,12 +22839,13 @@ int main(int InArgc, char* InArgv[]) {
                         throw std::runtime_error("format must be one of: markdown, json");
                     }
                     const auto remap_roots = parse_remap_roots(lf_remap_roots);
-                    const auto [backlog_root, roots] = resolve_link_product_roots(lf_product, lf_backlog_root_str);
+                    const auto [backlog_root, roots, canonical_product] = resolve_link_product_roots(lf_product, lf_backlog_root_str);
                     std::vector<LinkFixResultNative> results;
                     for (const auto& product_root : roots) {
                         results.push_back(fix_links_native(
                             product_root,
                             backlog_root,
+                            canonical_product.value_or(product_root.filename().string()),
                             lf_include_views,
                             lf_ignore_targets,
                             remap_roots,
@@ -22879,14 +22952,20 @@ int main(int InArgc, char* InArgv[]) {
                     if (format_norm != "markdown" && format_norm != "json") {
                         throw std::runtime_error("format must be one of: markdown, json");
                     }
+                    const auto selected_product = rr_product.empty() ? product_name_opt : rr_product;
+                    std::string canonical_product = selected_product;
                     std::optional<std::filesystem::path> backlog_root;
-                    if (!rr_backlog_root_str.empty()) {
-                        backlog_root = normalized_absolute_path(std::filesystem::path(rr_backlog_root_str));
+                    if (!selected_product.empty()) {
+                        auto ctx = resolve_ctx_for_product_and_backlog(rr_product, rr_backlog_root_str);
+                        backlog_root = ctx.backlog_root;
+                        canonical_product = ctx.product_name;
+                    } else if (!rr_backlog_root_str.empty()) {
+                        backlog_root = normalized_absolute_path(expand_user_path(rr_backlog_root_str));
                     }
                     const auto result = remap_reference_id_native(
                         expand_user_path(rr_path),
                         backlog_root,
-                        rr_product,
+                        canonical_product,
                         trim_copy(rr_prefix).empty() ? std::string("ADR") : rr_prefix,
                         rr_update_refs,
                         rr_apply
@@ -22920,21 +22999,9 @@ int main(int InArgc, char* InArgv[]) {
                 normCmd->add_option("--agent", norm_agent, "Agent identifier")->required();
                 normCmd->add_flag("--apply", norm_apply, "Apply fixes");
                 normCmd->callback([&]() {
-                    std::filesystem::path backlog_root;
-                    if (!norm_backlog_root_str.empty()) {
-                        backlog_root = std::filesystem::path(norm_backlog_root_str);
-                    } else {
-                        auto ctx = resolve_ctx();
-                        backlog_root = ctx.backlog_root;
-                    }
-
-                    std::string product_name = norm_product;
-                    if (product_name.empty()) {
-                        auto ctx = resolve_ctx();
-                        product_name = ctx.product_name;
-                    }
-
-                    auto product_root = backlog_root / "products" / product_name;
+                    auto ctx = resolve_ctx_for_product_and_backlog(norm_product, norm_backlog_root_str);
+                    const auto& backlog_root = ctx.backlog_root;
+                    const auto& product_root = ctx.product_root;
                     BacklogIndex index(backlog_root / ".cache" / "index" / "backlog.db");
                     index.initialize();
 
@@ -23103,12 +23170,13 @@ int main(int InArgc, char* InArgv[]) {
                         throw std::runtime_error("format must be one of: markdown, json");
                     }
                     const auto remap_roots = parse_remap_roots(rfv_remap_roots);
-                    const auto [backlog_root, roots] = resolve_link_product_roots(rfv_product, rfv_backlog_root_str);
+                    const auto [backlog_root, roots, canonical_product] = resolve_link_product_roots(rfv_product, rfv_backlog_root_str);
                     std::vector<LinkRestoreResultNative> results;
                     for (const auto& product_root : roots) {
                         results.push_back(restore_links_from_vcs_native(
                             product_root,
                             backlog_root,
+                            canonical_product.value_or(product_root.filename().string()),
                             rfv_include_views,
                             rfv_ignore_targets,
                             remap_roots,
@@ -23161,15 +23229,8 @@ int main(int InArgc, char* InArgv[]) {
                 createCmd->add_option("--status", adr_status, "Initial ADR status");
                 createCmd->add_option("--backlog-root", adr_backlog_root_str, "Backlog root path");
                 createCmd->callback([&]() {
-                    std::filesystem::path backlog_root;
-                    if (!adr_backlog_root_str.empty()) {
-                        backlog_root = std::filesystem::path(adr_backlog_root_str);
-                    } else {
-                        auto ctx = resolve_ctx();
-                        backlog_root = ctx.backlog_root;
-                    }
-
-                    auto decisions_dir = backlog_root / "products" / adr_product / "decisions";
+                    auto ctx = resolve_ctx_for_product_and_backlog(adr_product, adr_backlog_root_str);
+                    auto decisions_dir = ctx.product_root / "decisions";
                     if (!std::filesystem::exists(decisions_dir)) {
                         std::filesystem::create_directories(decisions_dir);
                     }
@@ -23234,30 +23295,13 @@ int main(int InArgc, char* InArgv[]) {
                 fixUidsCmd->add_option("--agent", fu_agent, "Agent identifier")->required();
                 fixUidsCmd->add_flag("--apply", fu_apply, "Apply fixes (dry-run by default)");
                 fixUidsCmd->callback([&]() {
-                    std::filesystem::path backlog_root;
-                    if (!fu_backlog_root_str.empty()) {
-                        backlog_root = std::filesystem::path(fu_backlog_root_str);
-                    } else {
-                        auto ctx = resolve_ctx();
-                        backlog_root = ctx.backlog_root;
-                    }
-
-                    std::vector<std::filesystem::path> product_roots;
-                    if (!fu_product.empty()) {
-                        product_roots.push_back(backlog_root / "products" / fu_product);
-                    } else {
-                        auto products_dir = backlog_root / "products";
-                        if (std::filesystem::exists(products_dir)) {
-                            for (const auto& entry : std::filesystem::directory_iterator(products_dir)) {
-                                if (entry.is_directory()) product_roots.push_back(entry.path());
-                            }
-                        }
-                    }
+                    const auto selection = resolve_cli_product_roots(fu_product, fu_backlog_root_str);
 
                     int total_checked = 0;
                     int total_updated = 0;
 
-                    for (const auto& prod_root : product_roots) {
+                    for (const auto& product_entry : selection.entries) {
+                        const auto& prod_root = product_entry.product_root;
                         auto decisions_dir = prod_root / "decisions";
                         if (!std::filesystem::exists(decisions_dir)) continue;
 
@@ -23314,7 +23358,7 @@ int main(int InArgc, char* InArgv[]) {
 
                         total_checked += checked;
                         total_updated += updated;
-                        std::cout << prod_root.filename().string() << ": checked=" << checked << " updated=" << updated << "\n";
+                        std::cout << product_entry.product_name << ": checked=" << checked << " updated=" << updated << "\n";
                     }
 
                     std::cout << "\nTotal: checked=" << total_checked << " updated=" << total_updated << "\n";
@@ -23345,13 +23389,7 @@ int main(int InArgc, char* InArgv[]) {
                 genCmd->add_option("-o,--output", cg_output_str, "Output file (default: stdout)");
                 genCmd->add_option("--date", cg_date_str, "Release date (YYYY-MM-DD, default: today)");
                 genCmd->callback([&]() {
-                    std::filesystem::path backlog_root;
-                    if (!cg_backlog_root_str.empty()) {
-                        backlog_root = std::filesystem::path(cg_backlog_root_str);
-                    } else {
-                        auto ctx = resolve_ctx();
-                        backlog_root = ctx.backlog_root;
-                    }
+                    const auto selection = resolve_cli_product_roots(cg_product, cg_backlog_root_str);
 
                     std::string date_str = cg_date_str;
                     if (date_str.empty()) {
@@ -23364,22 +23402,15 @@ int main(int InArgc, char* InArgv[]) {
 
                     // Collect Done items from products
                     std::vector<BacklogItem> done_items;
-                    auto products_dir = backlog_root / "products";
-                    if (std::filesystem::exists(products_dir)) {
-                        for (const auto& entry : std::filesystem::directory_iterator(products_dir)) {
-                            if (!entry.is_directory()) continue;
-                            std::string product_name = entry.path().filename().string();
-                            if (!cg_product.empty() && cg_product != product_name) continue;
-
-                            CanonicalStore store(entry.path());
-                            for (const auto& item_path : store.list_items()) {
-                                try {
-                                    auto item = store.read(item_path);
-                                    if (item.state == ItemState::Done) {
-                                        done_items.push_back(item);
-                                    }
-                                } catch (...) {}
-                            }
+                    for (const auto& product_entry : selection.entries) {
+                        CanonicalStore store(product_entry.product_root);
+                        for (const auto& item_path : store.list_items()) {
+                            try {
+                                auto item = store.read(item_path);
+                                if (item.state == ItemState::Done) {
+                                    done_items.push_back(item);
+                                }
+                            } catch (...) {}
                         }
                     }
 
@@ -23562,10 +23593,10 @@ int main(int InArgc, char* InArgv[]) {
             seedCmd->add_flag("--force", seed_force, "Recreate demo items if they exist");
 
             seedCmd->callback([&]() {
-                auto ctx = resolve_ctx();
-                auto product_root = ctx.backlog_root / "products" / seed_product;
+                auto ctx = resolve_ctx_for_product_arg(seed_product);
+                const auto& product_root = ctx.product_root;
                 if (!std::filesystem::exists(product_root)) {
-                    throw std::runtime_error("Product not initialized: " + seed_product);
+                    throw std::runtime_error("Product not initialized: " + ctx.product_name);
                 }
 
                 auto items_root = product_root / "items";
@@ -23583,7 +23614,7 @@ int main(int InArgc, char* InArgv[]) {
                 }
 
                 if (!existing_demo.empty() && !seed_force) {
-                    throw std::runtime_error("Demo items already exist in " + seed_product +
+                    throw std::runtime_error("Demo items already exist in " + ctx.product_name +
                         " (found " + std::to_string(existing_demo.size()) + " items). Use --force to recreate.");
                 }
 
@@ -23620,7 +23651,7 @@ int main(int InArgc, char* InArgv[]) {
                     std::cout << "Created " << task_result.id << " (" << task_result.path.filename().string() << ")\n";
                 }
 
-                std::cout << "\nSeeded demo data in " << seed_product << "\n";
+                std::cout << "\nSeeded demo data in " << ctx.product_name << "\n";
                 std::cout << "Created " << (2 + task_count) << " items:\n";
                 std::cout << "  Epic: " << epic_result.id << "\n";
                 std::cout << "  Feature: " << feature_result.id << "\n";

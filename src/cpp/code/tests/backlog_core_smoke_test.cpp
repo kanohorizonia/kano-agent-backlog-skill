@@ -5,6 +5,7 @@
 #include <optional>
 #include <sstream>
 #include <stdexcept>
+#include <vector>
 
 #include "kano/backlog_core/config/config.hpp"
 #include "kano/backlog_core/frontmatter/canonical_store.hpp"
@@ -61,6 +62,28 @@ private:
     std::filesystem::path path_;
 };
 
+void expect_product_resolution(
+    const kano::backlog_core::ProjectConfig& config,
+    const std::string& selector,
+    const std::string& expected_canonical_slug,
+    kano::backlog_core::ProductResolutionKind expected_resolution_kind,
+    const std::string& expected_matched_selector
+) {
+    const auto resolution = config.resolve_product(selector);
+    expect(resolution.has_value(), "product selector should resolve: " + selector);
+    expect(resolution->canonical_slug == expected_canonical_slug,
+        "product selector resolved the wrong canonical product: " + selector);
+    expect(resolution->resolution_kind == expected_resolution_kind,
+        "product selector resolved with the wrong precedence kind: " + selector);
+    expect(resolution->requested_selector == selector,
+        "product resolution should preserve the requested selector: " + selector);
+    expect(resolution->normalized_selector ==
+            kano::backlog_core::ProjectConfig::normalize_product_selector(selector),
+        "product resolution should preserve the normalized selector: " + selector);
+    expect(resolution->matched_selector == expected_matched_selector,
+        "product resolution should preserve the matched configured selector: " + selector);
+}
+
 } // namespace
 
 int main() {
@@ -74,6 +97,7 @@ int main() {
     using kano::backlog_core::ItemState;
     using kano::backlog_core::ItemType;
     using kano::backlog_core::ProjectConfig;
+    using kano::backlog_core::ProductResolutionKind;
     using kano::backlog_core::RefParser;
     using kano::backlog_core::RefResolver;
     using kano::backlog_core::StateAction;
@@ -469,48 +493,411 @@ int main() {
         expect(!incomplete_initiative_ready, "initiative missing Goal should fail ready gate");
         expect(!incomplete_initiative_gaps.empty(), "initiative missing Goal should report a gap");
 
-        const auto config_root = std::filesystem::temp_directory_path() / "kano-backlog-core-config-defaults-smoke";
-        std::filesystem::remove_all(config_root);
-        write_text(
-            config_root / ".kano" / "backlog_config.toml",
-            "[products.demo]\n"
-            "name = \"demo\"\n"
-            "prefix = \"DEM\"\n"
-            "backlog_root = \"_kano/backlog/products/demo\"\n"
-            "default_assignee = \"agent-default\"\n"
-            "default_bug_reviewer = \"review-default\"\n");
-        write_text(
-            config_root / "_kano" / "backlog" / "products" / "demo" / "_config" / "config.toml",
-            "[product]\n"
-            "name = \"demo\"\n"
-            "prefix = \"DEM\"\n"
-            "default_assignee = \"koa\"\n"
-            "default_bug_reviewer = \"reviewer-koa\"\n");
+        expect(to_string(ProductResolutionKind::CanonicalSlug) == "canonical_slug",
+            "canonical product resolution kind string must remain stable");
+        expect(to_string(ProductResolutionKind::Prefix) == "prefix",
+            "prefix product resolution kind string must remain stable");
+        expect(to_string(ProductResolutionKind::DisplayName) == "display_name",
+            "display-name product resolution kind string must remain stable");
+        expect(to_string(ProductResolutionKind::RepoBinding) == "repo_binding",
+            "repo-binding product resolution kind string must remain stable");
+        expect(to_string(ProductResolutionKind::ExplicitAlias) == "explicit_alias",
+            "explicit-alias product resolution kind string must remain stable");
+        const std::string utf8_upper_a_umlaut = "\xC3\x84" "BC";
+        expect(ProjectConfig::normalize_product_selector(" \t" + utf8_upper_a_umlaut + "\r ") ==
+                "\xC3\x84" "bc",
+            "selector normalization should lowercase ASCII while preserving non-ASCII UTF-8 bytes");
+        expect(ProjectConfig::normalize_product_selector(utf8_upper_a_umlaut) != "\xC3\xA4" "bc",
+            "selector normalization must not perform Unicode case folding");
 
-        auto project_config = ProjectConfig::load_from_toml(config_root / ".kano" / "backlog_config.toml");
-        expect(project_config.has_value(), "project config should parse");
-        expect(project_config->products.at("demo").default_assignee.value_or("") == "agent-default",
-               "project config should parse default_assignee");
-        expect(project_config->products.at("demo").default_bug_reviewer.value_or("") == "review-default",
-               "project config should parse default_bug_reviewer");
-        expect(project_config->resolve_product_name("demo").value_or("") == "demo",
-               "project config should resolve the canonical product name");
-        expect(project_config->resolve_product_name(" dem ").value_or("") == "demo",
-               "project config should resolve a normalized product prefix");
+        {
+            const DisposableDirectory resolver_fixtures(
+                std::filesystem::temp_directory_path() / "kano-backlog-core-product-resolver-smoke");
+            const auto config_path = resolver_fixtures.path() / ".kano" / "backlog_config.toml";
+            write_text(
+                config_path,
+                "[products.horizon-rpg]\n"
+                "name = \"HorizonRPG\"\n"
+                "prefix = \"HRR\"\n"
+                "backlog_root = \"_kano/backlog/products/horizon-rpg\"\n"
+                "aliases = [\"horizon\", \"HorizonRPG\", \"HRR\", \"horizon-rpg\", \"shared-selector\"]\n"
+                "repo_bindings = [\"horizon-rpg-plugin\", \"HorizonRPG\", \"HRR\", \"shared-selector\"]\n"
+                "default_assignee = \"agent-default\"\n"
+                "default_bug_reviewer = \"review-default\"\n\n"
+                "[products.tooling]\n"
+                "name = \"Tooling\"\n"
+                "prefix = \"TLG\"\n"
+                "backlog_root = \"_kano/backlog/products/tooling\"\n");
+            write_text(
+                resolver_fixtures.path() / "_kano" / "backlog" / "products" /
+                    "horizon-rpg" / "_config" / "config.toml",
+                "[product]\n"
+                "aliases = [\"local-horizon\"]\n"
+                "repo_bindings = [\"local-horizon-repo\"]\n"
+                "default_assignee = \"koa\"\n"
+                "default_bug_reviewer = \"reviewer-koa\"\n");
 
-        auto resolved_context = BacklogContext::resolve(config_root, std::optional<std::string>("demo"), std::nullopt);
-        expect(resolved_context.product_def.default_assignee.value_or("") == "koa",
-               "product-local config should override default_assignee");
-        expect(resolved_context.product_def.default_bug_reviewer.value_or("") == "reviewer-koa",
-               "product-local config should override default_bug_reviewer");
-        auto prefix_context = BacklogContext::resolve(config_root, std::optional<std::string>("dem"), std::nullopt);
-        expect(prefix_context.product_name == "demo",
-               "product prefix should resolve to the canonical product name");
-        expect(prefix_context.product_root == resolved_context.product_root,
-               "product prefix should resolve to the canonical product root");
-        expect(prefix_context.product_def.prefix == "DEM",
-               "product prefix context should load the canonical product definition");
-        std::filesystem::remove_all(config_root);
+            const auto project_config = ProjectConfig::load_from_toml(config_path);
+            expect(project_config.has_value(), "rich project config should parse");
+            const auto& horizon = project_config->products.at("horizon-rpg");
+            expect(horizon.aliases.size() == 5,
+                "project config should preserve every explicit product alias");
+            expect(horizon.repo_bindings.size() == 4,
+                "project config should preserve every product repo binding");
+            expect(project_config->products.at("tooling").aliases.empty() &&
+                    project_config->products.at("tooling").repo_bindings.empty(),
+                "missing selector arrays must remain empty");
+
+            expect_product_resolution(*project_config, "horizon-rpg", "horizon-rpg",
+                ProductResolutionKind::CanonicalSlug, "horizon-rpg");
+            expect_product_resolution(*project_config, " \tHoRiZoN-RpG\r ", "horizon-rpg",
+                ProductResolutionKind::CanonicalSlug, "horizon-rpg");
+            expect_product_resolution(*project_config, "HorizonRPG", "horizon-rpg",
+                ProductResolutionKind::DisplayName, "HorizonRPG");
+            expect_product_resolution(*project_config, "\tHoRiZoNrPg\r", "horizon-rpg",
+                ProductResolutionKind::DisplayName, "HorizonRPG");
+            expect_product_resolution(*project_config, "HRR", "horizon-rpg",
+                ProductResolutionKind::Prefix, "HRR");
+            expect_product_resolution(*project_config, "\v hrr \f", "horizon-rpg",
+                ProductResolutionKind::Prefix, "HRR");
+            expect_product_resolution(*project_config, "horizon-rpg-plugin", "horizon-rpg",
+                ProductResolutionKind::RepoBinding, "horizon-rpg-plugin");
+            expect_product_resolution(*project_config, "shared-selector", "horizon-rpg",
+                ProductResolutionKind::RepoBinding, "shared-selector");
+            expect_product_resolution(*project_config, "\vHoRiZoN\f", "horizon-rpg",
+                ProductResolutionKind::ExplicitAlias, "horizon");
+            expect(project_config->resolve_product_name(" horizon ").value_or("") == "horizon-rpg",
+                "resolve_product_name should project the rich resolution to the canonical slug");
+            expect(!project_config->resolve_product("horizonrpgplugin").has_value(),
+                "selector normalization must not remove separators");
+
+            const auto claims = project_config->selector_claims();
+            const auto hrr_claim = std::find_if(claims.begin(), claims.end(), [](const auto& claim) {
+                return claim.canonical_slug == "horizon-rpg" && claim.normalized_selector == "hrr";
+            });
+            expect(hrr_claim != claims.end() &&
+                    hrr_claim->resolution_kind == ProductResolutionKind::Prefix &&
+                    hrr_claim->selector == "HRR",
+                "prefix must win over same-product repo and explicit-alias claims");
+            const auto display_claim = std::find_if(claims.begin(), claims.end(), [](const auto& claim) {
+                return claim.canonical_slug == "horizon-rpg" && claim.normalized_selector == "horizonrpg";
+            });
+            expect(display_claim != claims.end() &&
+                    display_claim->resolution_kind == ProductResolutionKind::DisplayName,
+                "display name must win over same-product repo and explicit-alias claims");
+            const auto shared_claim = std::find_if(claims.begin(), claims.end(), [](const auto& claim) {
+                return claim.canonical_slug == "horizon-rpg" &&
+                    claim.normalized_selector == "shared-selector";
+            });
+            expect(shared_claim != claims.end() &&
+                    shared_claim->resolution_kind == ProductResolutionKind::RepoBinding,
+                "repo binding must win over a same-product explicit alias claim");
+            expect(project_config->find_selector_collisions().empty(),
+                "same-product selector overlap should collapse by precedence instead of colliding");
+
+            const auto canonical_root = project_config->resolve_backlog_root("horizon-rpg", config_path);
+            const auto alias_root = project_config->resolve_backlog_root("horizon", config_path);
+            expect(canonical_root.has_value() && alias_root == canonical_root,
+                "resolve_backlog_root should delegate aliases through rich product resolution");
+
+            const std::string requested_alias = "\tHORIZON\r";
+            const auto alias_context = BacklogContext::resolve(
+                resolver_fixtures.path(), requested_alias, std::nullopt);
+            expect(alias_context.product_name == "horizon-rpg",
+                "BacklogContext should preserve the canonical product slug");
+            expect(alias_context.product_resolution.canonical_slug == alias_context.product_name &&
+                    alias_context.product_resolution.resolution_kind == ProductResolutionKind::ExplicitAlias &&
+                    alias_context.product_resolution.requested_selector == requested_alias &&
+                    alias_context.product_resolution.normalized_selector == "horizon" &&
+                    alias_context.product_resolution.matched_selector == "horizon",
+                "BacklogContext should retain complete product resolution metadata");
+            expect(alias_context.product_def.default_assignee.value_or("") == "koa" &&
+                    alias_context.product_def.default_bug_reviewer.value_or("") == "reviewer-koa",
+                "product-local config should preserve ordinary field overrides");
+            expect(alias_context.product_def.aliases == horizon.aliases &&
+                    alias_context.product_def.repo_bindings == horizon.repo_bindings,
+                "product-local config must not override project selector arrays");
+
+            std::string local_selector_diagnostic;
+            try {
+                static_cast<void>(BacklogContext::resolve(
+                    resolver_fixtures.path(), std::string("local-horizon"), std::nullopt));
+            } catch (const kano::backlog_core::ConfigError& error) {
+                local_selector_diagnostic = error.what();
+            }
+            expect(local_selector_diagnostic.find("not found") != std::string::npos,
+                "product-local selector arrays must not join the project resolver surface");
+        }
+
+        {
+            const DisposableDirectory malformed_fixtures(
+                std::filesystem::temp_directory_path() / "kano-backlog-core-malformed-selector-arrays-smoke");
+            const std::vector<std::string> malformed_values = {
+                "aliases = [horizon]\n",
+                "repo_bindings = [\"horizon-rpg-plugin\",]\n",
+                "aliases = [\n  \"horizon\"\n]\n",
+                "aliases = [\"bad\\qescape\"]\n",
+            };
+            for (std::size_t index = 0; index < malformed_values.size(); ++index) {
+                const auto config_path = malformed_fixtures.path() /
+                    ("malformed-" + std::to_string(index) + ".toml");
+                write_text(
+                    config_path,
+                    "[products.horizon-rpg]\n"
+                    "name = \"HorizonRPG\"\n"
+                    "prefix = \"HRR\"\n"
+                    "backlog_root = \"_kano/backlog/products/horizon-rpg\"\n" +
+                    malformed_values[index]);
+                std::string diagnostic;
+                try {
+                    static_cast<void>(ProjectConfig::load_from_toml(config_path));
+                } catch (const kano::backlog_core::ConfigError& error) {
+                    diagnostic = error.what();
+                }
+                expect(diagnostic.find("Invalid TOML string array") != std::string::npos,
+                    "malformed project selector arrays must fail closed");
+            }
+        }
+
+        {
+            const DisposableDirectory empty_key_fixtures(
+                std::filesystem::temp_directory_path() / "kano-backlog-core-empty-product-key-smoke");
+            const std::vector<std::string> product_sections = {
+                "[products.\"\"]\n",
+                "[products.\"   \"]\n",
+            };
+            for (std::size_t index = 0; index < product_sections.size(); ++index) {
+                const auto config_path = empty_key_fixtures.path() /
+                    ("empty-product-key-" + std::to_string(index) + ".toml");
+                write_text(config_path,
+                    product_sections[index] +
+                    "name = \"Invalid Product\"\n"
+                    "prefix = \"INV\"\n"
+                    "backlog_root = \"_kano/backlog/products/invalid\"\n");
+                std::string diagnostic;
+                try {
+                    static_cast<void>(ProjectConfig::load_from_toml(config_path));
+                } catch (const kano::backlog_core::ConfigError& error) {
+                    diagnostic = error.what();
+                }
+                expect(diagnostic == "Canonical product selector cannot normalize to empty",
+                    "empty and whitespace canonical product keys must fail with a stable diagnostic");
+            }
+        }
+
+        {
+            const DisposableDirectory collision_fixtures(
+                std::filesystem::temp_directory_path() / "kano-backlog-core-selector-collision-smoke");
+            const auto config_path = collision_fixtures.path() / ".kano" / "backlog_config.toml";
+            write_text(
+                config_path,
+                 "[products.horizon-rpg]\n"
+                 "name = \"HorizonRPG\"\n"
+                 "prefix = \"ALP\"\n"
+                 "backlog_root = \"_kano/backlog/products/horizon-rpg\"\n"
+                 "aliases = [\"horizon\"]\n"
+                 "repo_bindings = [\"horizon-rpg-plugin\"]\n\n"
+                 "[products.alp]\n"
+                 "name = \"Registry Repair\"\n"
+                 "prefix = \"RPR\"\n"
+                 "backlog_root = \"_kano/backlog/products/alp\"\n"
+                 "aliases = [\"horizon-rpg-plugin\"]\n\n"
+                "[products.safe-tools]\n"
+                "name = \"Safe Tools\"\n"
+                "prefix = \"SAFE\"\n"
+                "backlog_root = \"_kano/backlog/products/safe-tools\"\n");
+
+            const auto collision_config = ProjectConfig::load_from_toml(config_path);
+            expect(collision_config.has_value(), "selector collision config should parse");
+            const auto collisions = collision_config->find_selector_collisions();
+            expect(collisions.size() == 2,
+                "cross-product claims should report every collided normalized selector");
+             const auto alp_collision = std::find_if(
+                 collisions.begin(), collisions.end(), [](const auto& collision) {
+                     return collision.normalized_selector == "alp";
+                 });
+            const auto repo_collision = std::find_if(
+                collisions.begin(), collisions.end(), [](const auto& collision) {
+                    return collision.normalized_selector == "horizon-rpg-plugin";
+                });
+             expect(alp_collision != collisions.end() && alp_collision->claims.size() == 2,
+                 "a canonical slug colliding with another product prefix should be diagnosed");
+            expect(repo_collision != collisions.end() && repo_collision->claims.size() == 2,
+                "repo-binding and explicit-alias ownership should collide across products");
+
+            const auto collision_diagnostic = ProjectConfig::describe_selector_collisions(collisions);
+            expect(collision_diagnostic == ProjectConfig::describe_selector_collisions(collisions),
+                "selector collision diagnostics should be deterministic");
+             expect(collision_diagnostic.find("horizon-rpg") != std::string::npos &&
+                     collision_diagnostic.find("alp") != std::string::npos &&
+                     collision_diagnostic.find("repo_binding") != std::string::npos &&
+                    collision_diagnostic.find("explicit_alias") != std::string::npos,
+                "selector collision diagnostics should identify canonical owners and stable claim kinds");
+
+            expect_product_resolution(*collision_config, "horizon-rpg", "horizon-rpg",
+                ProductResolutionKind::CanonicalSlug, "horizon-rpg");
+            for (const std::string selector : {"alp", "ALP", " alp ", "horizon-rpg-plugin"}) {
+                std::string diagnostic;
+                try {
+                    static_cast<void>(collision_config->resolve_product(selector));
+                } catch (const kano::backlog_core::ConfigError& error) {
+                    diagnostic = error.what();
+                }
+                expect(diagnostic.find("Product selector collision") != std::string::npos,
+                    "cross-product selector collisions must fail closed for every input casing");
+            }
+
+            const auto exact_context = BacklogContext::resolve(
+                collision_fixtures.path(), std::string("horizon-rpg"), std::nullopt);
+            expect(exact_context.product_name == "horizon-rpg" &&
+                    exact_context.product_resolution.resolution_kind ==
+                        ProductResolutionKind::CanonicalSlug,
+                "BacklogContext must preserve unambiguous canonical lookup");
+
+            std::string context_collision_diagnostic;
+            try {
+                static_cast<void>(BacklogContext::resolve(
+                    collision_fixtures.path(), std::string("alp"), std::nullopt));
+            } catch (const kano::backlog_core::ConfigError& error) {
+                context_collision_diagnostic = error.what();
+            }
+            expect(context_collision_diagnostic.find("Product selector collision") != std::string::npos,
+                "BacklogContext must reject an exact canonical token that is ambiguous after normalization");
+
+            const auto repair_context = BacklogContext::resolve(
+                collision_fixtures.path(), std::string("safe-tools"), std::nullopt);
+            expect(repair_context.product_name == "safe-tools" &&
+                    repair_context.product_resolution.canonical_slug == "safe-tools" &&
+                    repair_context.product_resolution.resolution_kind == ProductResolutionKind::CanonicalSlug,
+                "an unrelated canonical product must remain available for registry repair");
+            expect_product_resolution(*collision_config, "RPR", "alp",
+                ProductResolutionKind::Prefix, "RPR");
+            const auto collided_product_repair_context = BacklogContext::resolve(
+                collision_fixtures.path(), std::string("RPR"), std::nullopt);
+            expect(collided_product_repair_context.product_name == "alp" &&
+                    collided_product_repair_context.product_resolution.resolution_kind ==
+                        ProductResolutionKind::Prefix,
+                "a collided product must remain reachable through another unique configured selector");
+        }
+
+        {
+            const DisposableDirectory reload_fixtures(
+                std::filesystem::temp_directory_path() / "kano-backlog-core-selector-reload-smoke");
+            const auto config_path = reload_fixtures.path() / ".kano" / "backlog_config.toml";
+            write_text(
+                config_path,
+                "[products.horizon-rpg]\n"
+                "name = \"HorizonRPG\"\n"
+                "prefix = \"HRR\"\n"
+                "backlog_root = \"_kano/backlog/products/horizon-rpg\"\n"
+                "aliases = [\"horizon-old\"]\n");
+            const auto original_config = ProjectConfig::load_from_toml(config_path);
+            expect(original_config.has_value(), "original reload fixture should parse");
+            expect_product_resolution(*original_config, "horizon-old", "horizon-rpg",
+                ProductResolutionKind::ExplicitAlias, "horizon-old");
+
+            write_text(
+                config_path,
+                "[products.horizon-rpg]\n"
+                "name = \"Horizon Reloaded\"\n"
+                "prefix = \"HR2\"\n"
+                "backlog_root = \"_kano/backlog/products/horizon-rpg\"\n"
+                "aliases = [\"horizon-new\"]\n");
+            expect(original_config->resolve_product("horizon-new") == std::nullopt &&
+                    original_config->resolve_product("horizon-old").has_value(),
+                "an already loaded config snapshot should not drift after the file changes");
+
+            const auto reloaded_config = ProjectConfig::load_from_toml(config_path);
+            expect(reloaded_config.has_value() &&
+                    !reloaded_config->resolve_product("horizon-old").has_value(),
+                "reloading should replace removed selector claims instead of accumulating them");
+            expect_product_resolution(*reloaded_config, "horizon-new", "horizon-rpg",
+                ProductResolutionKind::ExplicitAlias, "horizon-new");
+            expect_product_resolution(*reloaded_config, "horizon-rpg", "horizon-rpg",
+                ProductResolutionKind::CanonicalSlug, "horizon-rpg");
+
+            const auto reloaded_context = BacklogContext::resolve(
+                reload_fixtures.path(), std::string("horizon-new"), std::nullopt);
+            expect(reloaded_context.product_name == "horizon-rpg" &&
+                    reloaded_context.product_resolution.canonical_slug == "horizon-rpg" &&
+                    reloaded_context.product_resolution.matched_selector == "horizon-new",
+                "BacklogContext should reload selector metadata while preserving the canonical slug");
+        }
+
+        {
+            const DisposableDirectory prefix_collision_fixtures(
+                std::filesystem::temp_directory_path() /
+                    "kano-backlog-core-prefix-canonical-owner-smoke");
+            const auto config_path =
+                prefix_collision_fixtures.path() / ".kano" / "backlog_config.toml";
+            write_text(
+                config_path,
+                "[products.canonical-owner]\n"
+                "name = \"Canonical Owner\"\n"
+                "prefix = \"DUP\"\n"
+                "backlog_root = \"_kano/backlog/products/canonical-owner\"\n\n"
+                "[products.peer]\n"
+                "name = \"Peer\"\n"
+                "prefix = \"DUP\"\n"
+                "backlog_root = \"_kano/backlog/products/peer\"\n"
+                "aliases = [\"canonical-owner\"]\n");
+
+            const auto config = ProjectConfig::load_from_toml(config_path);
+            expect(config.has_value(), "prefix collision canonical-owner fixture should parse");
+            const auto prefix_collisions = config->find_prefix_collisions(config_path);
+            expect(prefix_collisions.size() == 1,
+                "prefix collision discovery should not publicly re-resolve canonical map keys");
+            expect(prefix_collisions.front().left_product == "canonical-owner" &&
+                    prefix_collisions.front().right_product == "peer" &&
+                    prefix_collisions.front().left_backlog_root.find("canonical-owner") !=
+                        std::string::npos &&
+                    prefix_collisions.front().right_backlog_root.find("peer") !=
+                        std::string::npos,
+                "prefix collision diagnostics should retain roots for colliding canonical owners");
+        }
+
+        {
+            const DisposableDirectory legacy_fixtures(
+                std::filesystem::temp_directory_path() / "kano-backlog-core-legacy-config-smoke");
+            const auto config_path = legacy_fixtures.path() / ".kano" / "backlog_config.toml";
+            write_text(
+                config_path,
+                "[products.legacy]\n"
+                "name = \"Legacy Product\"\n"
+                "prefix = \"LEG\"\n"
+                "backlog_root = \"_kano/backlog/products/legacy\"\n"
+                "default_assignee = \"legacy-default\"\n");
+            write_text(
+                legacy_fixtures.path() / "_kano" / "backlog" / "products" /
+                    "legacy" / "_config" / "config.toml",
+                "[product]\n"
+                "default_assignee = \"legacy-local\"\n");
+
+            const auto legacy_config = ProjectConfig::load_from_toml(config_path);
+            expect(legacy_config.has_value(), "legacy config without selector arrays should parse");
+            expect(legacy_config->products.at("legacy").aliases.empty() &&
+                    legacy_config->products.at("legacy").repo_bindings.empty(),
+                "legacy configs should default missing selector arrays to empty");
+            expect_product_resolution(*legacy_config, " Legacy Product ", "legacy",
+                ProductResolutionKind::DisplayName, "Legacy Product");
+            expect_product_resolution(*legacy_config, " LEG ", "legacy",
+                ProductResolutionKind::Prefix, "LEG");
+
+            const auto legacy_context = BacklogContext::resolve(
+                legacy_fixtures.path(), std::string(" LEG "), std::nullopt);
+            expect(legacy_context.product_name == "legacy" &&
+                    legacy_context.product_resolution.resolution_kind == ProductResolutionKind::Prefix &&
+                    legacy_context.product_def.default_assignee.value_or("") == "legacy-local",
+                "legacy configs should retain prefix resolution and product-local field overrides");
+            const auto implicit_legacy_context = BacklogContext::resolve(
+                legacy_fixtures.path(), std::nullopt, std::nullopt);
+            expect(implicit_legacy_context.product_name == "legacy" &&
+                    implicit_legacy_context.product_resolution.resolution_kind ==
+                        ProductResolutionKind::CanonicalSlug &&
+                    implicit_legacy_context.product_resolution.requested_selector == "legacy" &&
+                    implicit_legacy_context.product_resolution.matched_selector == "legacy",
+                "single-product context should construct canonical resolution without public parsing");
+        }
 
         std::cout << "backlog_core_smoke_test: PASS\n";
         return 0;

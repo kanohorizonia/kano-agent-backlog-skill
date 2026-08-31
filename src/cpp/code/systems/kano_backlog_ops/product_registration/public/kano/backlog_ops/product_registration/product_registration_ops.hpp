@@ -33,6 +33,8 @@ struct ProductRegistrationRequest {
     std::string product;
     std::string product_name;
     std::string prefix;
+    std::vector<std::string> aliases;
+    std::vector<std::string> repo_bindings;
     std::filesystem::path external_root;
 };
 
@@ -64,6 +66,8 @@ struct ProductRegistrationPlan {
     std::string product;
     std::string product_name;
     std::string prefix;
+    std::vector<std::string> aliases;
+    std::vector<std::string> repo_bindings;
     std::string config_ref;
     std::string source_root_ref;
     std::string canonical_destination_ref;

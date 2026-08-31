@@ -2,6 +2,7 @@
 
 #include "kano/backlog_core/config/config.hpp"
 #include "kano/backlog_core/frontmatter/canonical_store.hpp"
+#include "kano/backlog_core/models/errors.hpp"
 #include "kano/backlog_ops/index/backlog_index.hpp"
 
 #include <json/json.h>
@@ -26,7 +27,10 @@ namespace {
 using kano::backlog_core::BacklogItem;
 using kano::backlog_core::CanonicalStore;
 using kano::backlog_core::ConfigLoader;
+using kano::backlog_core::ConfigError;
 using kano::backlog_core::ItemType;
+using kano::backlog_core::ProductResolution;
+using kano::backlog_core::ProductResolutionKind;
 using kano::backlog_core::ProjectConfig;
 using kano::backlog_ops::MigrationArtifactMapping;
 using kano::backlog_ops::MigrationItemMapping;
@@ -557,6 +561,16 @@ std::filesystem::path resolve_backlog_root(
     return normalized_absolute(*project_root / "_kano" / "backlog");
 }
 
+ProductResolution canonical_product_resolution(const std::string& canonical_slug) {
+    return ProductResolution{
+        canonical_slug,
+        ProductResolutionKind::CanonicalSlug,
+        canonical_slug,
+        ProjectConfig::normalize_product_selector(canonical_slug),
+        canonical_slug,
+    };
+}
+
 void sort_unique(std::vector<std::string>& values) {
     std::sort(values.begin(), values.end());
     values.erase(std::unique(values.begin(), values.end()), values.end());
@@ -885,13 +899,6 @@ MigrationPlan MigrationOps::plan(const PlanOptions& options) {
             return plan;
         }
         const auto config_path = normalized_absolute(*config_path_opt);
-        const auto backlog_root = resolve_backlog_root(options, config_path);
-        if (!std::filesystem::exists(backlog_root)) {
-            plan.blockers.push_back("backlog_root_not_found");
-            plan.plan_hash = sha256_hex(json_string(plan_json(plan, false), false));
-            return plan;
-        }
-
         const auto config_opt = ProjectConfig::load_from_toml(config_path);
         if (!config_opt) {
             plan.blockers.push_back("project_config_invalid");
@@ -899,8 +906,45 @@ MigrationPlan MigrationOps::plan(const PlanOptions& options) {
             return plan;
         }
         const auto& config = *config_opt;
-        const auto source_def = config.get_product(options.request.source_product);
-        const auto target_def = config.get_product(options.request.target_product);
+        const auto resolve_endpoint = [&](const std::string& selector, const std::string& endpoint)
+            -> std::optional<ProductResolution> {
+            try {
+                const auto resolution = config.resolve_product(selector);
+                if (!resolution) {
+                    plan.blockers.push_back(endpoint + "_product_not_registered");
+                }
+                return resolution;
+            } catch (const ConfigError& error) {
+                plan.blockers.push_back(
+                    endpoint + "_product_resolution_failed:" + std::string(error.what()));
+                return std::nullopt;
+            }
+        };
+        const auto source_resolution = resolve_endpoint(plan.request.source_product, "source");
+        const auto target_resolution = resolve_endpoint(plan.request.target_product, "target");
+        if (!source_resolution || !target_resolution) {
+            sort_unique(plan.blockers);
+            plan.plan_hash = sha256_hex(json_string(plan_json(plan, false), false));
+            return plan;
+        }
+
+        plan.request.source_product = source_resolution->canonical_slug;
+        plan.request.target_product = target_resolution->canonical_slug;
+        if (plan.request.source_product == plan.request.target_product) {
+            plan.blockers.push_back("source_and_target_product_must_differ");
+            plan.plan_hash = sha256_hex(json_string(plan_json(plan, false), false));
+            return plan;
+        }
+
+        const auto backlog_root = resolve_backlog_root(options, config_path);
+        if (!std::filesystem::exists(backlog_root)) {
+            plan.blockers.push_back("backlog_root_not_found");
+            plan.plan_hash = sha256_hex(json_string(plan_json(plan, false), false));
+            return plan;
+        }
+
+        const auto source_def = config.get_product(plan.request.source_product);
+        const auto target_def = config.get_product(plan.request.target_product);
         if (!source_def) {
             plan.blockers.push_back("source_product_not_registered");
         }
@@ -912,8 +956,8 @@ MigrationPlan MigrationOps::plan(const PlanOptions& options) {
             return plan;
         }
 
-        const auto source_root_opt = config.resolve_backlog_root(options.request.source_product, config_path);
-        const auto target_root_opt = config.resolve_backlog_root(options.request.target_product, config_path);
+        const auto source_root_opt = config.resolve_backlog_root(*source_resolution, config_path);
+        const auto target_root_opt = config.resolve_backlog_root(*target_resolution, config_path);
         if (!source_root_opt || !std::filesystem::exists(*source_root_opt)) {
             plan.blockers.push_back("source_product_root_not_found");
         }
@@ -942,7 +986,7 @@ MigrationPlan MigrationOps::plan(const PlanOptions& options) {
         }
         const auto prefix_collisions = config.find_prefix_collisions(config_path);
         for (const auto& collision : prefix_collisions) {
-            if (collision.left_product == options.request.target_product || collision.right_product == options.request.target_product) {
+            if (collision.left_product == plan.request.target_product || collision.right_product == plan.request.target_product) {
                 plan.blockers.push_back("target_prefix_collision");
             }
         }
@@ -1456,8 +1500,33 @@ MigrationResult MigrationOps::apply(const ApplyOptions& options) {
             result.operation_receipts.push_back("project_config_invalid");
             return result;
         }
-        const auto target_root_opt = config->resolve_backlog_root(current_plan.request.target_product, *config_path);
-        const auto source_root_opt = config->resolve_backlog_root(current_plan.request.source_product, *config_path);
+        const auto resolve_endpoint = [&](
+            const std::string& selector,
+            const std::string& canonical_slug,
+            const std::string& endpoint
+        ) -> std::optional<ProductResolution> {
+            try {
+                const auto resolution = config->resolve_product(selector);
+                if (!resolution || resolution->canonical_slug != canonical_slug) {
+                    result.operation_receipts.push_back(endpoint + "_product_resolution_drift");
+                    return std::nullopt;
+                }
+                return resolution;
+            } catch (const ConfigError&) {
+                result.operation_receipts.push_back(endpoint + "_product_resolution_drift");
+                return std::nullopt;
+            }
+        };
+        const auto source_resolution = resolve_endpoint(
+            options.plan.request.source_product, current_plan.request.source_product, "source");
+        const auto target_resolution = resolve_endpoint(
+            options.plan.request.target_product, current_plan.request.target_product, "target");
+        if (!source_resolution || !target_resolution) {
+            sort_unique(result.operation_receipts);
+            return result;
+        }
+        const auto target_root_opt = config->resolve_backlog_root(*target_resolution, *config_path);
+        const auto source_root_opt = config->resolve_backlog_root(*source_resolution, *config_path);
         if (!target_root_opt || !source_root_opt) {
             result.operation_receipts.push_back("source_or_target_product_root_not_found");
             return result;
@@ -1578,7 +1647,8 @@ MigrationResult MigrationOps::apply(const ApplyOptions& options) {
                 std::uintmax_t index_inventory_bytes = 0;
                 for (const auto& product_entry : config->products) {
                     const auto& product_name = product_entry.first;
-                    const auto product_root = config->resolve_backlog_root(product_name, *config_path);
+                    const auto product_resolution = canonical_product_resolution(product_name);
+                    const auto product_root = config->resolve_backlog_root(product_resolution, *config_path);
                     if (!product_root || !std::filesystem::exists(*product_root)) {
                         throw std::runtime_error("registered_product_root_missing_during_index_build:" + product_name);
                     }
@@ -1894,7 +1964,8 @@ MigrationVerification MigrationOps::verify(const RecoveryOptions& options) {
             verification.failures.push_back("project_config_not_found");
         } else if (const auto config = ProjectConfig::load_from_toml(*config_path)) {
             const auto target_product = plan_value["request"]["target_product"].asString();
-            const auto target_root = config->resolve_backlog_root(target_product, *config_path);
+            const auto target_resolution = canonical_product_resolution(target_product);
+            const auto target_root = config->resolve_backlog_root(target_resolution, *config_path);
             if (!target_root) {
                 verification.failures.push_back("target_product_root_not_found");
             } else {

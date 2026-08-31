@@ -584,6 +584,9 @@ int main(int argc, char** argv) {
                  "--product", "HorizonQuestDemo",
                  "--product-name", "Horizon Quest Demo",
                  "--prefix", "HQST",
+                 "--alias", " Quest ",
+                 "--alias", "Horizon Quest",
+                 "--repo-binding", " Repo/HorizonQuestDemo ",
                 "--external-root", registration_external.string(),
                 "--backlog-root", registration_shared.string()
             }, registration_plan_output),
@@ -597,6 +600,13 @@ int main(int argc, char** argv) {
                     "kob.product_registration.plan.v1" &&
                 registration_plan["status"].asString() == "ready" &&
                 registration_plan_hash.size() == 64 &&
+                registration_plan["aliases"].size() == 2 &&
+                json_array_contains_string(registration_plan["aliases"], "horizon quest") &&
+                json_array_contains_string(registration_plan["aliases"], "quest") &&
+                registration_plan["repo_bindings"].size() == 1 &&
+                json_array_contains_string(
+                    registration_plan["repo_bindings"],
+                    "repo/horizonquestdemo") &&
                 !registration_plan.isMember("apply_agent"),
             "register-product plan should emit the actorless v1 contract");
         const auto registration_plan_text =
@@ -615,6 +625,9 @@ int main(int argc, char** argv) {
              "--product", "HorizonQuestDemo",
              "--product-name", "Horizon Quest Demo",
              "--prefix", "HQST",
+             "--alias", " Quest ",
+             "--alias", "Horizon Quest",
+             "--repo-binding", " Repo/HorizonQuestDemo ",
             "--external-root", registration_external.string(),
             "--backlog-root", registration_shared.string(),
             "--plan-hash", registration_plan_hash,
@@ -635,6 +648,9 @@ int main(int argc, char** argv) {
              "--product", "HorizonQuestDemo",
              "--product-name", "Horizon Quest Demo",
              "--prefix", "HQST",
+             "--alias", " Quest ",
+             "--alias", "Horizon Quest",
+             "--repo-binding", " Repo/HorizonQuestDemo ",
             "--external-root", registration_external.string(),
             "--backlog-root", registration_shared.string(),
             "--plan-hash", registration_plan_hash,
@@ -656,6 +672,9 @@ int main(int argc, char** argv) {
                  "--product", "HorizonQuestDemo",
                  "--product-name", "Horizon Quest Demo",
                  "--prefix", "HQST",
+                 "--alias", " Quest ",
+                 "--alias", "Horizon Quest",
+                 "--repo-binding", " Repo/HorizonQuestDemo ",
                 "--external-root", registration_external.string(),
                 "--backlog-root", registration_shared.string(),
                 "--plan-hash", registration_plan_hash,
@@ -717,6 +736,12 @@ int main(int argc, char** argv) {
                  count_occurrences(
                      read_text(registration_config),
                      "[products.HorizonQuestDemo]") == 1 &&
+                read_text(registration_config).find(
+                    "aliases = [\"horizon quest\", \"quest\"]") !=
+                    std::string::npos &&
+                read_text(registration_config).find(
+                    "repo_bindings = [\"repo/horizonquestdemo\"]") !=
+                    std::string::npos &&
                 read_text(registration_local_config) ==
                     registration_local_config_before &&
                 read_text(registration_item) == registration_item_before &&
@@ -2856,6 +2881,19 @@ int main(int argc, char** argv) {
                 !migpf_rollback["rollback_attempted_at"].asString().empty() &&
                 !migpf_rollback["rolled_back_at"].asString().empty(),
             "manual rollback should emit apply and rollback provenance");
+
+        const auto migpf_index_status_output =
+            temp_root / "migpf-index-status-after-rollback.json";
+        expect_command_capture_success(
+            run_command_capture(binary, {
+                "-P", "quick-smoke-product", "index", "status", "--format", "json"
+            }, migpf_index_status_output),
+            migpf_index_status_output,
+            "metadata index status after prefix rollback failed");
+        const auto migpf_index_status = read_json(migpf_index_status_output);
+        expect(migpf_index_status["indexes"].size() == 1 &&
+                   migpf_index_status["indexes"][0]["status"].asString() == "ready",
+            "successful prefix rollback must re-establish authoritative index proof");
 
         const std::string embedded_quote_title =
             "CLI embedded \"quoted\" title";

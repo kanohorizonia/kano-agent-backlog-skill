@@ -1,0 +1,667 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentskill-backlog.kanohorizonia.com/references/koa-metadata-index-consumer.schema.json",
+  "title": "KOB KOA Metadata Index Consumer Fixture",
+  "type": "object",
+  "required": [
+    "schema",
+    "consumer_schema",
+    "upstream_schemas",
+    "limits",
+    "ordering",
+    "scenarios"
+  ],
+  "properties": {
+    "schema": {
+      "const": "kob.koa-metadata-index-consumer-fixture.v1"
+    },
+    "consumer_schema": {
+      "const": "kob.koa-metadata-index-consumer.v1"
+    },
+    "upstream_schemas": {
+      "type": "object",
+      "required": ["query", "snapshot", "status"],
+      "properties": {
+        "query": {
+          "const": "kob.metadata-index-query.v1"
+        },
+        "snapshot": {
+          "const": "kob.metadata-index-snapshot.v2"
+        },
+        "status": {
+          "const": "kob.metadata-index-status.v2"
+        }
+      },
+      "additionalProperties": false
+    },
+    "limits": {
+      "type": "object",
+      "required": [
+        "query_bytes",
+        "query_tokens",
+        "result_count",
+        "exact_ref_bytes",
+        "revision_bytes",
+        "requested_status_budget_ms"
+      ],
+      "properties": {
+        "query_bytes": { "const": 512 },
+        "query_tokens": { "const": 16 },
+        "result_count": { "const": 20000 },
+        "exact_ref_bytes": { "const": 160 },
+        "revision_bytes": { "const": 96 },
+        "requested_status_budget_ms": { "const": 80 }
+      },
+      "additionalProperties": false
+    },
+    "ordering": {
+      "const": ["updated_desc", "item_id_asc"]
+    },
+    "scenarios": {
+      "type": "array",
+      "minItems": 9,
+      "maxItems": 16,
+      "items": {
+        "$ref": "#/$defs/scenario"
+      }
+    }
+  },
+  "$defs": {
+    "request": {
+      "type": "object",
+      "required": ["consumer_schema", "operation", "product"],
+      "properties": {
+        "consumer_schema": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "operation": {
+          "enum": ["item_search", "status_overview"]
+        },
+        "product": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "exact_ref": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "query": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "state": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "type": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20000
+        },
+        "case_sensitive": {
+          "type": "boolean"
+        },
+        "requested_revision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^kob-pr-v1:"
+        }
+      },
+      "additionalProperties": false
+    },
+    "diagnostics": {
+      "type": "object",
+      "required": [
+        "index_used",
+        "index_status",
+        "index_revision",
+        "canonical_revision",
+        "product_revision",
+        "fallback_scan",
+        "scanned_count",
+        "matched_count",
+        "revision_check_ms",
+        "elapsed_ms",
+        "stale_reason",
+        "recovery"
+      ],
+      "properties": {
+        "index_used": { "type": "boolean" },
+        "index_status": {
+          "enum": ["ready", "stale", "missing", "corrupt"]
+        },
+        "index_revision": {
+          "type": "string",
+          "maxLength": 96
+        },
+        "canonical_revision": {
+          "type": "string",
+          "maxLength": 96
+        },
+        "product_revision": {
+          "type": "string",
+          "maxLength": 96
+        },
+        "fallback_scan": { "type": "boolean" },
+        "scanned_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 20000
+        },
+        "matched_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 20000
+        },
+        "revision_check_ms": {
+          "type": "number",
+          "minimum": 0
+        },
+        "elapsed_ms": {
+          "type": "number",
+          "minimum": 0
+        },
+        "stale_reason": {
+          "type": ["string", "null"],
+          "maxLength": 128
+        },
+        "recovery": {
+          "type": "string",
+          "maxLength": 128
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": ["index_status"],
+            "properties": {
+              "index_status": { "const": "ready" }
+            }
+          },
+          "then": {
+            "properties": {
+              "index_used": { "const": true },
+              "fallback_scan": { "const": false },
+              "stale_reason": { "type": "null" }
+            }
+          },
+          "else": {
+            "properties": {
+              "index_used": { "const": false },
+              "fallback_scan": { "const": true },
+              "stale_reason": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              }
+            }
+          }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "item": {
+      "type": "object",
+      "required": [
+        "id",
+        "uid",
+        "product",
+        "type",
+        "state",
+        "title",
+        "parent",
+        "updated"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "product": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "type": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "state": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "priority": {
+          "type": ["string", "null"],
+          "maxLength": 32
+        },
+        "slug": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "parent": {
+          "type": ["string", "null"],
+          "maxLength": 160
+        },
+        "updated": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "source_ref": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "source_hash": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "estimated_tokens": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "consumer_item": {
+      "type": "object",
+      "required": [
+        "id",
+        "uid",
+        "product",
+        "type",
+        "state",
+        "title",
+        "parent",
+        "updated"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "product": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "type": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "state": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "parent": {
+          "type": ["string", "null"],
+          "maxLength": 160
+        },
+        "updated": {
+          "type": "string",
+          "maxLength": 64
+        }
+      },
+      "additionalProperties": false
+    },
+    "query_response": {
+      "type": "object",
+      "required": [
+        "schema",
+        "snapshot_schema",
+        "product",
+        "diagnostics",
+        "items"
+      ],
+      "properties": {
+        "schema": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "snapshot_schema": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "product": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "diagnostics": {
+          "$ref": "#/$defs/diagnostics"
+        },
+        "items": {
+          "type": "array",
+          "maxItems": 20000,
+          "items": {
+            "$ref": "#/$defs/item"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "status_entry": {
+      "type": "object",
+      "required": [
+        "product",
+        "status",
+        "item_count",
+        "index_revision",
+        "product_revision",
+        "requested_revision",
+        "unchanged",
+        "fallback_scan",
+        "scanned_count",
+        "elapsed_ms",
+        "stale_reason"
+      ],
+      "properties": {
+        "product": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "index_ref": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "exists": { "type": "boolean" },
+        "status": {
+          "enum": ["ready", "unchanged", "stale", "missing", "corrupt"]
+        },
+        "item_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 20000
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "schema_version": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "snapshot_schema_version": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "index_revision": {
+          "type": "string",
+          "maxLength": 96
+        },
+        "canonical_revision": {
+          "type": "string",
+          "maxLength": 96
+        },
+        "product_revision": {
+          "type": "string",
+          "maxLength": 96
+        },
+        "requested_revision": {
+          "type": ["string", "null"],
+          "maxLength": 96
+        },
+        "unchanged": { "type": "boolean" },
+        "fallback_scan": { "const": false },
+        "scanned_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 20000
+        },
+        "proof_records_read": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "proof_bytes_read": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "proof_usn_span": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "proof_checkpoint_required": { "type": "boolean" },
+        "proof_checkpoint_persisted": { "type": "boolean" },
+        "revision_check_ms": {
+          "type": "number",
+          "minimum": 0
+        },
+        "elapsed_ms": {
+          "type": "number",
+          "minimum": 0
+        },
+        "stale_reason": {
+          "type": ["string", "null"],
+          "maxLength": 128
+        },
+        "recovery": {
+          "type": "string",
+          "maxLength": 128
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": ["status"],
+            "properties": {
+              "status": { "const": "unchanged" }
+            }
+          },
+          "then": {
+            "properties": {
+              "unchanged": { "const": true },
+              "scanned_count": { "const": 0 },
+              "requested_revision": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 96
+              },
+              "stale_reason": { "type": "null" }
+            }
+          },
+          "else": {
+            "if": {
+              "required": ["status"],
+              "properties": {
+                "status": { "const": "ready" }
+              }
+            },
+            "then": {
+              "properties": {
+                "unchanged": { "const": false },
+                "stale_reason": { "type": "null" }
+              }
+            },
+            "else": {
+              "properties": {
+                "unchanged": { "const": false },
+                "stale_reason": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                }
+              }
+            }
+          }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "status_response": {
+      "type": "object",
+      "required": ["schema", "indexes"],
+      "properties": {
+        "schema": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "indexes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "items": {
+            "$ref": "#/$defs/status_entry"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "expected_response": {
+      "type": "object",
+      "required": [
+        "schema",
+        "ok",
+        "status",
+        "operation",
+        "product",
+        "error_code",
+        "items",
+        "matched_count",
+        "returned_count",
+        "scanned_count",
+        "elapsed_ms",
+        "cache_status",
+        "fallback_scan",
+        "unchanged"
+      ],
+      "properties": {
+        "schema": {
+          "const": "kob.koa-metadata-index-adapter.v1"
+        },
+        "ok": { "type": "boolean" },
+        "status": {
+          "enum": [
+            "ok",
+            "error",
+            "ready",
+            "unchanged",
+            "stale",
+            "missing",
+            "corrupt"
+          ]
+        },
+        "operation": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "product": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "error_code": {
+          "type": ["string", "null"],
+          "maxLength": 64
+        },
+        "items": {
+          "type": "array",
+          "maxItems": 20000,
+          "items": {
+            "$ref": "#/$defs/consumer_item"
+          }
+        },
+        "matched_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 20000
+        },
+        "returned_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 20000
+        },
+        "scanned_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 20000
+        },
+        "elapsed_ms": {
+          "type": "number",
+          "minimum": 0
+        },
+        "cache_status": {
+          "enum": [
+            "ready",
+            "unchanged",
+            "stale",
+            "missing",
+            "corrupt",
+            "unavailable"
+          ]
+        },
+        "fallback_scan": { "type": "boolean" },
+        "unchanged": { "type": "boolean" },
+        "product_revision": {
+          "type": "string",
+          "maxLength": 96
+        },
+        "index_revision": {
+          "type": "string",
+          "maxLength": 96
+        },
+        "requested_revision": {
+          "type": ["string", "null"],
+          "maxLength": 96
+        },
+        "stale_reason": {
+          "type": ["string", "null"],
+          "maxLength": 128
+        }
+      },
+      "additionalProperties": false
+    },
+    "scenario": {
+      "type": "object",
+      "required": ["id", "request", "upstream", "expected"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "request": {
+          "$ref": "#/$defs/request"
+        },
+        "upstream": {
+          "oneOf": [
+            { "$ref": "#/$defs/query_response" },
+            { "$ref": "#/$defs/status_response" },
+            { "type": "null" }
+          ]
+        },
+        "expected": {
+          "$ref": "#/$defs/expected_response"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

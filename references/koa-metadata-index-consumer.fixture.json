@@ -1,0 +1,578 @@
+{
+  "schema": "kob.koa-metadata-index-consumer-fixture.v1",
+  "consumer_schema": "kob.koa-metadata-index-consumer.v1",
+  "upstream_schemas": {
+    "query": "kob.metadata-index-query.v1",
+    "snapshot": "kob.metadata-index-snapshot.v2",
+    "status": "kob.metadata-index-status.v2"
+  },
+  "limits": {
+    "query_bytes": 512,
+    "query_tokens": 16,
+    "result_count": 20000,
+    "exact_ref_bytes": 160,
+    "revision_bytes": 96,
+    "requested_status_budget_ms": 80
+  },
+  "ordering": ["updated_desc", "item_id_asc"],
+  "scenarios": [
+    {
+      "id": "exact-indexed",
+      "request": {
+        "consumer_schema": "kob.koa-metadata-index-consumer.v1",
+        "operation": "item_search",
+        "product": "kano-agent-backlog-skill",
+        "exact_ref": "KOB-TSK-0143",
+        "limit": 1
+      },
+      "upstream": {
+        "schema": "kob.metadata-index-query.v1",
+        "snapshot_schema": "kob.metadata-index-snapshot.v2",
+        "product": "kano-agent-backlog-skill",
+        "diagnostics": {
+          "index_used": true,
+          "index_status": "ready",
+          "index_revision": "fnv1a64:fixture-index-1",
+          "canonical_revision": "fnv1a64:fixture-canonical-1",
+          "product_revision": "kob-pr-v1:fixture-1",
+          "fallback_scan": false,
+          "scanned_count": 1,
+          "matched_count": 1,
+          "revision_check_ms": 0.4,
+          "elapsed_ms": 1.2,
+          "stale_reason": null,
+          "recovery": ""
+        },
+        "items": [
+          {
+            "id": "KOB-TSK-0143",
+            "uid": "01a03e05-8817-7003-86b6-444aa81d4ce0",
+            "product": "kano-agent-backlog-skill",
+            "type": "Task",
+            "state": "InProgress",
+            "title": "Define KOA metadata-index consumer contract and adapter fixture",
+            "parent": "KOB-FTR-0035",
+            "updated": "2026-08-31",
+            "source_ref": "items/task/0100/KOB-TSK-0143.md",
+            "source_hash": "fnv1a64:fixture-source-0143"
+          }
+        ]
+      },
+      "expected": {
+        "schema": "kob.koa-metadata-index-adapter.v1",
+        "ok": true,
+        "status": "ok",
+        "operation": "item_search",
+        "product": "kano-agent-backlog-skill",
+        "error_code": null,
+        "items": [
+          {
+            "id": "KOB-TSK-0143",
+            "uid": "01a03e05-8817-7003-86b6-444aa81d4ce0",
+            "product": "kano-agent-backlog-skill",
+            "type": "Task",
+            "state": "InProgress",
+            "title": "Define KOA metadata-index consumer contract and adapter fixture",
+            "parent": "KOB-FTR-0035",
+            "updated": "2026-08-31"
+          }
+        ],
+        "matched_count": 1,
+        "returned_count": 1,
+        "scanned_count": 1,
+        "elapsed_ms": 1.2,
+        "cache_status": "ready",
+        "fallback_scan": false,
+        "unchanged": false,
+        "product_revision": "kob-pr-v1:fixture-1",
+        "index_revision": "fnv1a64:fixture-index-1",
+        "stale_reason": null
+      }
+    },
+    {
+      "id": "metadata-filtered",
+      "request": {
+        "consumer_schema": "kob.koa-metadata-index-consumer.v1",
+        "operation": "item_search",
+        "product": "kano-agent-backlog-skill",
+        "state": "Review",
+        "type": "Task",
+        "limit": 2
+      },
+      "upstream": {
+        "schema": "kob.metadata-index-query.v1",
+        "snapshot_schema": "kob.metadata-index-snapshot.v2",
+        "product": "kano-agent-backlog-skill",
+        "diagnostics": {
+          "index_used": true,
+          "index_status": "ready",
+          "index_revision": "fnv1a64:fixture-index-1",
+          "canonical_revision": "fnv1a64:fixture-canonical-1",
+          "product_revision": "kob-pr-v1:fixture-1",
+          "fallback_scan": false,
+          "scanned_count": 2,
+          "matched_count": 2,
+          "revision_check_ms": 0.5,
+          "elapsed_ms": 1.5,
+          "stale_reason": null,
+          "recovery": ""
+        },
+        "items": [
+          {
+            "id": "KOB-TSK-0142",
+            "uid": "01a03e05-4f30-700f-b36a-0adf0a99aabc",
+            "product": "kano-agent-backlog-skill",
+            "type": "Task",
+            "state": "Review",
+            "title": "Add authoritative product revision and unchanged-status fast path",
+            "parent": "KOB-FTR-0035",
+            "updated": "2026-08-31"
+          },
+          {
+            "id": "KOB-TSK-0118",
+            "uid": "019f5c9d-4df0-7000-8000-000000000118",
+            "product": "kano-agent-backlog-skill",
+            "type": "Task",
+            "state": "Review",
+            "title": "Implement invalidatable metadata index",
+            "parent": "KOB-FTR-0035",
+            "updated": "2026-08-26"
+          }
+        ]
+      },
+      "expected": {
+        "schema": "kob.koa-metadata-index-adapter.v1",
+        "ok": true,
+        "status": "ok",
+        "operation": "item_search",
+        "product": "kano-agent-backlog-skill",
+        "error_code": null,
+        "items": [
+          {
+            "id": "KOB-TSK-0142",
+            "uid": "01a03e05-4f30-700f-b36a-0adf0a99aabc",
+            "product": "kano-agent-backlog-skill",
+            "type": "Task",
+            "state": "Review",
+            "title": "Add authoritative product revision and unchanged-status fast path",
+            "parent": "KOB-FTR-0035",
+            "updated": "2026-08-31"
+          },
+          {
+            "id": "KOB-TSK-0118",
+            "uid": "019f5c9d-4df0-7000-8000-000000000118",
+            "product": "kano-agent-backlog-skill",
+            "type": "Task",
+            "state": "Review",
+            "title": "Implement invalidatable metadata index",
+            "parent": "KOB-FTR-0035",
+            "updated": "2026-08-26"
+          }
+        ],
+        "matched_count": 2,
+        "returned_count": 2,
+        "scanned_count": 2,
+        "elapsed_ms": 1.5,
+        "cache_status": "ready",
+        "fallback_scan": false,
+        "unchanged": false
+      }
+    },
+    {
+      "id": "token-query",
+      "request": {
+        "consumer_schema": "kob.koa-metadata-index-consumer.v1",
+        "operation": "item_search",
+        "product": "kano-agent-backlog-skill",
+        "query": "metadata consumer",
+        "case_sensitive": false,
+        "limit": 10
+      },
+      "upstream": {
+        "schema": "kob.metadata-index-query.v1",
+        "snapshot_schema": "kob.metadata-index-snapshot.v2",
+        "product": "kano-agent-backlog-skill",
+        "diagnostics": {
+          "index_used": true,
+          "index_status": "ready",
+          "index_revision": "fnv1a64:fixture-index-1",
+          "canonical_revision": "fnv1a64:fixture-canonical-1",
+          "product_revision": "kob-pr-v1:fixture-1",
+          "fallback_scan": false,
+          "scanned_count": 2,
+          "matched_count": 1,
+          "revision_check_ms": 0.5,
+          "elapsed_ms": 1.7,
+          "stale_reason": null,
+          "recovery": ""
+        },
+        "items": [
+          {
+            "id": "KOB-TSK-0143",
+            "uid": "01a03e05-8817-7003-86b6-444aa81d4ce0",
+            "product": "kano-agent-backlog-skill",
+            "type": "Task",
+            "state": "InProgress",
+            "title": "Define KOA metadata-index consumer contract and adapter fixture",
+            "parent": "KOB-FTR-0035",
+            "updated": "2026-08-31"
+          }
+        ]
+      },
+      "expected": {
+        "schema": "kob.koa-metadata-index-adapter.v1",
+        "ok": true,
+        "status": "ok",
+        "operation": "item_search",
+        "product": "kano-agent-backlog-skill",
+        "error_code": null,
+        "items": [
+          {
+            "id": "KOB-TSK-0143",
+            "uid": "01a03e05-8817-7003-86b6-444aa81d4ce0",
+            "product": "kano-agent-backlog-skill",
+            "type": "Task",
+            "state": "InProgress",
+            "title": "Define KOA metadata-index consumer contract and adapter fixture",
+            "parent": "KOB-FTR-0035",
+            "updated": "2026-08-31"
+          }
+        ],
+        "matched_count": 1,
+        "returned_count": 1,
+        "scanned_count": 2,
+        "elapsed_ms": 1.7,
+        "cache_status": "ready",
+        "fallback_scan": false,
+        "unchanged": false
+      }
+    },
+    {
+      "id": "unchanged-status",
+      "request": {
+        "consumer_schema": "kob.koa-metadata-index-consumer.v1",
+        "operation": "status_overview",
+        "product": "kano-agent-backlog-skill",
+        "requested_revision": "kob-pr-v1:fixture-1"
+      },
+      "upstream": {
+        "schema": "kob.metadata-index-status.v2",
+        "indexes": [
+          {
+            "product": "kano-agent-backlog-skill",
+            "status": "unchanged",
+            "item_count": 2,
+            "index_revision": "fnv1a64:fixture-index-1",
+            "product_revision": "kob-pr-v1:fixture-1",
+            "requested_revision": "kob-pr-v1:fixture-1",
+            "unchanged": true,
+            "fallback_scan": false,
+            "scanned_count": 0,
+            "elapsed_ms": 0.6,
+            "stale_reason": null
+          }
+        ]
+      },
+      "expected": {
+        "schema": "kob.koa-metadata-index-adapter.v1",
+        "ok": true,
+        "status": "unchanged",
+        "operation": "status_overview",
+        "product": "kano-agent-backlog-skill",
+        "error_code": null,
+        "items": [],
+        "matched_count": 2,
+        "returned_count": 0,
+        "scanned_count": 0,
+        "elapsed_ms": 0.6,
+        "cache_status": "unchanged",
+        "fallback_scan": false,
+        "unchanged": true,
+        "product_revision": "kob-pr-v1:fixture-1",
+        "index_revision": "fnv1a64:fixture-index-1",
+        "requested_revision": "kob-pr-v1:fixture-1",
+        "stale_reason": null
+      }
+    },
+    {
+      "id": "stale-fallback",
+      "request": {
+        "consumer_schema": "kob.koa-metadata-index-consumer.v1",
+        "operation": "item_search",
+        "product": "kano-agent-backlog-skill",
+        "query": "consumer",
+        "limit": 10
+      },
+      "upstream": {
+        "schema": "kob.metadata-index-query.v1",
+        "snapshot_schema": "kob.metadata-index-snapshot.v2",
+        "product": "kano-agent-backlog-skill",
+        "diagnostics": {
+          "index_used": false,
+          "index_status": "stale",
+          "index_revision": "fnv1a64:fixture-index-old",
+          "canonical_revision": "fnv1a64:fixture-canonical-2",
+          "product_revision": "kob-pr-v1:fixture-2",
+          "fallback_scan": true,
+          "scanned_count": 2,
+          "matched_count": 1,
+          "revision_check_ms": 0.7,
+          "elapsed_ms": 14.0,
+          "stale_reason": "source_hash_mismatch",
+          "recovery": "kob index rebuild --product kano-agent-backlog-skill"
+        },
+        "items": [
+          {
+            "id": "KOB-TSK-0143",
+            "uid": "01a03e05-8817-7003-86b6-444aa81d4ce0",
+            "product": "kano-agent-backlog-skill",
+            "type": "Task",
+            "state": "InProgress",
+            "title": "Define KOA metadata-index consumer contract and adapter fixture",
+            "parent": "KOB-FTR-0035",
+            "updated": "2026-08-31"
+          }
+        ]
+      },
+      "expected": {
+        "schema": "kob.koa-metadata-index-adapter.v1",
+        "ok": true,
+        "status": "ok",
+        "operation": "item_search",
+        "product": "kano-agent-backlog-skill",
+        "error_code": null,
+        "items": [
+          {
+            "id": "KOB-TSK-0143",
+            "uid": "01a03e05-8817-7003-86b6-444aa81d4ce0",
+            "product": "kano-agent-backlog-skill",
+            "type": "Task",
+            "state": "InProgress",
+            "title": "Define KOA metadata-index consumer contract and adapter fixture",
+            "parent": "KOB-FTR-0035",
+            "updated": "2026-08-31"
+          }
+        ],
+        "matched_count": 1,
+        "returned_count": 1,
+        "scanned_count": 2,
+        "elapsed_ms": 14.0,
+        "cache_status": "stale",
+        "fallback_scan": true,
+        "unchanged": false,
+        "stale_reason": "source_hash_mismatch"
+      }
+    },
+    {
+      "id": "corrupt-fallback",
+      "request": {
+        "consumer_schema": "kob.koa-metadata-index-consumer.v1",
+        "operation": "item_search",
+        "product": "kano-agent-backlog-skill",
+        "query": "revision",
+        "limit": 10
+      },
+      "upstream": {
+        "schema": "kob.metadata-index-query.v1",
+        "snapshot_schema": "kob.metadata-index-snapshot.v2",
+        "product": "kano-agent-backlog-skill",
+        "diagnostics": {
+          "index_used": false,
+          "index_status": "corrupt",
+          "index_revision": "",
+          "canonical_revision": "fnv1a64:fixture-canonical-2",
+          "product_revision": "kob-pr-v1:fixture-2",
+          "fallback_scan": true,
+          "scanned_count": 2,
+          "matched_count": 1,
+          "revision_check_ms": 0.9,
+          "elapsed_ms": 16.0,
+          "stale_reason": "invalid_index_rows",
+          "recovery": "kob index rebuild --product kano-agent-backlog-skill"
+        },
+        "items": [
+          {
+            "id": "KOB-TSK-0142",
+            "uid": "01a03e05-4f30-700f-b36a-0adf0a99aabc",
+            "product": "kano-agent-backlog-skill",
+            "type": "Task",
+            "state": "Review",
+            "title": "Add authoritative product revision and unchanged-status fast path",
+            "parent": "KOB-FTR-0035",
+            "updated": "2026-08-31"
+          }
+        ]
+      },
+      "expected": {
+        "schema": "kob.koa-metadata-index-adapter.v1",
+        "ok": true,
+        "status": "ok",
+        "operation": "item_search",
+        "product": "kano-agent-backlog-skill",
+        "error_code": null,
+        "items": [
+          {
+            "id": "KOB-TSK-0142",
+            "uid": "01a03e05-4f30-700f-b36a-0adf0a99aabc",
+            "product": "kano-agent-backlog-skill",
+            "type": "Task",
+            "state": "Review",
+            "title": "Add authoritative product revision and unchanged-status fast path",
+            "parent": "KOB-FTR-0035",
+            "updated": "2026-08-31"
+          }
+        ],
+        "matched_count": 1,
+        "returned_count": 1,
+        "scanned_count": 2,
+        "elapsed_ms": 16.0,
+        "cache_status": "corrupt",
+        "fallback_scan": true,
+        "unchanged": false,
+        "stale_reason": "invalid_index_rows"
+      }
+    },
+    {
+      "id": "missing-index-fallback",
+      "request": {
+        "consumer_schema": "kob.koa-metadata-index-consumer.v1",
+        "operation": "item_search",
+        "product": "kano-agent-backlog-skill",
+        "query": "metadata",
+        "limit": 10
+      },
+      "upstream": {
+        "schema": "kob.metadata-index-query.v1",
+        "snapshot_schema": "kob.metadata-index-snapshot.v2",
+        "product": "kano-agent-backlog-skill",
+        "diagnostics": {
+          "index_used": false,
+          "index_status": "missing",
+          "index_revision": "",
+          "canonical_revision": "fnv1a64:fixture-canonical-2",
+          "product_revision": "kob-pr-v1:fixture-2",
+          "fallback_scan": true,
+          "scanned_count": 2,
+          "matched_count": 1,
+          "revision_check_ms": 0.3,
+          "elapsed_ms": 13.0,
+          "stale_reason": "index_missing",
+          "recovery": "kob index rebuild --product kano-agent-backlog-skill"
+        },
+        "items": [
+          {
+            "id": "KOB-FTR-0035",
+            "uid": "019f5c9d-06a3-7002-8308-9db0fdc09e0c",
+            "product": "kano-agent-backlog-skill",
+            "type": "Feature",
+            "state": "InProgress",
+            "title": "Add invalidatable backlog metadata index for search and status snapshots",
+            "parent": "KOB-EPIC-0001",
+            "updated": "2026-08-26"
+          }
+        ]
+      },
+      "expected": {
+        "schema": "kob.koa-metadata-index-adapter.v1",
+        "ok": true,
+        "status": "ok",
+        "operation": "item_search",
+        "product": "kano-agent-backlog-skill",
+        "error_code": null,
+        "items": [
+          {
+            "id": "KOB-FTR-0035",
+            "uid": "019f5c9d-06a3-7002-8308-9db0fdc09e0c",
+            "product": "kano-agent-backlog-skill",
+            "type": "Feature",
+            "state": "InProgress",
+            "title": "Add invalidatable backlog metadata index for search and status snapshots",
+            "parent": "KOB-EPIC-0001",
+            "updated": "2026-08-26"
+          }
+        ],
+        "matched_count": 1,
+        "returned_count": 1,
+        "scanned_count": 2,
+        "elapsed_ms": 13.0,
+        "cache_status": "missing",
+        "fallback_scan": true,
+        "unchanged": false,
+        "stale_reason": "index_missing"
+      }
+    },
+    {
+      "id": "unsupported-consumer-version",
+      "request": {
+        "consumer_schema": "kob.koa-metadata-index-consumer.v2",
+        "operation": "item_search",
+        "product": "kano-agent-backlog-skill",
+        "query": "metadata",
+        "limit": 10
+      },
+      "upstream": null,
+      "expected": {
+        "schema": "kob.koa-metadata-index-adapter.v1",
+        "ok": false,
+        "status": "error",
+        "operation": "item_search",
+        "product": "kano-agent-backlog-skill",
+        "error_code": "unsupported_consumer_contract",
+        "items": [],
+        "matched_count": 0,
+        "returned_count": 0,
+        "scanned_count": 0,
+        "elapsed_ms": 0.0,
+        "cache_status": "unavailable",
+        "fallback_scan": false,
+        "unchanged": false
+      }
+    },
+    {
+      "id": "unsupported-upstream-version",
+      "request": {
+        "consumer_schema": "kob.koa-metadata-index-consumer.v1",
+        "operation": "item_search",
+        "product": "kano-agent-backlog-skill",
+        "query": "metadata",
+        "limit": 10
+      },
+      "upstream": {
+        "schema": "kob.metadata-index-query.v999",
+        "snapshot_schema": "kob.metadata-index-snapshot.v2",
+        "product": "kano-agent-backlog-skill",
+        "diagnostics": {
+          "index_used": false,
+          "index_status": "stale",
+          "index_revision": "",
+          "canonical_revision": "",
+          "product_revision": "",
+          "fallback_scan": false,
+          "scanned_count": 0,
+          "matched_count": 0,
+          "revision_check_ms": 0.0,
+          "elapsed_ms": 0.0,
+          "stale_reason": "unsupported_schema_version",
+          "recovery": ""
+        },
+        "items": []
+      },
+      "expected": {
+        "schema": "kob.koa-metadata-index-adapter.v1",
+        "ok": false,
+        "status": "error",
+        "operation": "item_search",
+        "product": "kano-agent-backlog-skill",
+        "error_code": "unsupported_upstream_schema",
+        "items": [],
+        "matched_count": 0,
+        "returned_count": 0,
+        "scanned_count": 0,
+        "elapsed_ms": 0.0,
+        "cache_status": "unavailable",
+        "fallback_scan": false,
+        "unchanged": false
+      }
+    }
+  ]
+}

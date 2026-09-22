@@ -85,6 +85,10 @@ public:
         std::function<void()> after_change_watch_capture;
     };
 
+    struct QueryMetadataTestHooks {
+        std::function<void()> after_change_proof_verification;
+    };
+
     struct SyncSequencesResult {
         std::vector<std::string> synced_pairs;
         int max_number_found;
@@ -145,7 +149,8 @@ public:
     IndexQueryResult query_metadata(
         const std::filesystem::path& product_root,
         const std::string& product,
-        const IndexQuery& query = {}
+        const IndexQuery& query = {},
+        const QueryMetadataTestHooks& test_hooks = {}
     );
 
     IndexDoctorResult doctor_metadata(
@@ -262,7 +267,8 @@ IndexQueryResult query_metadata_index(
     const std::filesystem::path& index_path,
     const std::filesystem::path& product_root,
     const std::string& product,
-    const IndexQuery& query = {}
+    const IndexQuery& query = {},
+    const BacklogIndex::QueryMetadataTestHooks& test_hooks = {}
 );
 
 IndexDoctorResult doctor_metadata_index(

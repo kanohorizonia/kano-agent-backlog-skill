@@ -1518,13 +1518,28 @@ PreparedPrefixMigration build_prepared(
             "existing_registry_collision:" + collision.prefix + ":" +
                 collision.left_product + ":" + collision.right_product);
     }
-    for (const auto& [name, definition] : project->products) {
-        if (name != product_name &&
-            upper_copy(definition.prefix) == upper_copy(options.request.to_prefix)) {
+    auto prospective = *project;
+    prospective.products.at(product_name).prefix = options.request.to_prefix;
+    const auto normalized_target =
+        ProjectConfig::normalize_product_selector(options.request.to_prefix);
+    for (const auto& collision : prospective.find_selector_collisions()) {
+        if (collision.normalized_selector != normalized_target) {
+            continue;
+        }
+        const bool involves_product = std::any_of(
+            collision.claims.begin(), collision.claims.end(),
+            [&](const auto& claim) { return claim.canonical_slug == product_name; });
+        const bool involves_other_product = std::any_of(
+            collision.claims.begin(), collision.claims.end(),
+            [&](const auto& claim) { return claim.canonical_slug != product_name; });
+        if (involves_product && involves_other_product) {
             add_blocker(
                 prepared.plan,
-                "target_prefix_collision:" + options.request.to_prefix + ":" + name);
+                "target_selector_collision:" + collision.normalized_selector);
+            break;
         }
+    }
+    for (const auto& [name, definition] : project->products) {
         if (name != product_name &&
             (upper_copy(definition.prefix).starts_with(upper_copy(options.request.to_prefix)) ||
              upper_copy(options.request.to_prefix).starts_with(upper_copy(definition.prefix)))) {

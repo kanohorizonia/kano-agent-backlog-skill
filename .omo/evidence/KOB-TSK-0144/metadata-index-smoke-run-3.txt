@@ -1,0 +1,5 @@
+KOB-TSK-0144 focused Release smoke run 3
+Quiet-workstation gate: PASS after a 10-second quiet window
+Command: src/cpp/out/bin/windows-ninja-msvc/release/metadata_index_smoke_test.exe
+Exit code: 0
+Output: metadata_index_smoke_test: PASS exact_p95_ms=16.4516 metadata_p95_ms=162.915 token_p95_ms=151.718 revision_p95_ms=9.2803 unchanged_status_p95_ms=6.0453

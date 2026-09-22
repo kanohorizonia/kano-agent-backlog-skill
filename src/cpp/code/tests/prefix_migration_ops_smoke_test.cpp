@@ -210,7 +210,7 @@ int main() {
             "name = \"Quick source canonical shadow\"\n"
             "prefix = \"QSS\"\n"
             "backlog_root = \"products/quick-source-shadow\"\n"
-            "aliases = [\"quick-source\"]\n\n"
+            "aliases = [\"quick-source\", \"newqsalias\"]\n\n"
             "[products.parametric]\n"
             "name = \"Parametric\"\n"
             "prefix = \"NEWQSEO\"\n"
@@ -218,7 +218,8 @@ int main() {
             "[products.observer]\n"
             "name = \"Observer\"\n"
             "prefix = \"OBS\"\n"
-            "backlog_root = \"products/observer\"\n";
+            "backlog_root = \"products/observer\"\n"
+            "repo_bindings = [\"NewQsRepo\"]\n";
         write_text(root / ".kano" / "backlog_config.toml", config);
 
         const auto source_root = root / "products" / "quick-source";
@@ -305,6 +306,58 @@ int main() {
         const auto observer_before = read_text(*observer.file_path);
         const auto config_before = read_text(
             root / ".kano" / "backlog_config.toml");
+
+        const auto prefix_migration_cache_root =
+            root / ".kano" / "cache" / "prefix-migrations";
+        options.request.to_prefix = "NEWQSALIAS";
+        const auto alias_collision_plan = PrefixMigrationOps::plan(options);
+        const auto alias_collision_config_after =
+            read_text(root / ".kano" / "backlog_config.toml");
+        const bool alias_collision_cache_exists =
+            std::filesystem::exists(prefix_migration_cache_root);
+        options.request.to_prefix = "NEWQSREPO";
+        const auto repo_collision_plan = PrefixMigrationOps::plan(options);
+        const auto repo_collision_config_after =
+            read_text(root / ".kano" / "backlog_config.toml");
+        const bool repo_collision_cache_exists =
+            std::filesystem::exists(prefix_migration_cache_root);
+        options.request.to_prefix = "NEWQS";
+
+        expect(
+            !alias_collision_plan.ready(),
+            "alias collision plan should fail closed before ready");
+        expect(
+            alias_collision_plan.status == "blocked",
+            "alias collision plan should report blocked status");
+        expect(
+            alias_collision_plan.blockers.size() == 1 &&
+                alias_collision_plan.blockers[0] ==
+                    "target_selector_collision:newqsalias",
+            "alias collision should produce exactly one target_selector_collision blocker for newqsalias");
+        expect(
+            alias_collision_config_after == config_before,
+            "alias collision plan must not mutate the shared backlog config");
+        expect(
+            !alias_collision_cache_exists,
+            "alias collision plan must not create the prefix-migration cache root");
+
+        expect(
+            !repo_collision_plan.ready(),
+            "repo binding collision plan should fail closed before ready");
+        expect(
+            repo_collision_plan.status == "blocked",
+            "repo binding collision plan should report blocked status");
+        expect(
+            repo_collision_plan.blockers.size() == 1 &&
+                repo_collision_plan.blockers[0] ==
+                    "target_selector_collision:newqsrepo",
+            "repo binding collision should produce exactly one target_selector_collision blocker for newqsrepo");
+        expect(
+            repo_collision_config_after == config_before,
+            "repo binding collision plan must not mutate the shared backlog config");
+        expect(
+            !repo_collision_cache_exists,
+            "repo binding collision plan must not create the prefix-migration cache root");
 
         const auto first = PrefixMigrationOps::plan(options);
         const auto second = PrefixMigrationOps::plan(options);

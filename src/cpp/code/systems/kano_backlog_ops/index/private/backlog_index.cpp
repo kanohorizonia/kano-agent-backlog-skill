@@ -47,9 +47,24 @@ constexpr std::size_t kMaximumPersistedReasonBytes = 512;
 constexpr std::string_view kProductRevisionPrefix = "kob-pr-v1:";
 constexpr std::string_view kFNV1a64RevisionPrefix = "fnv1a64:";
 constexpr std::chrono::milliseconds kRequestedRevisionVerificationBudget{80};
+constexpr std::chrono::milliseconds kCheckpointPersistenceBusyWait{10};
 
 bool deadline_expired(const std::chrono::steady_clock::time_point deadline) {
     return std::chrono::steady_clock::now() >= deadline;
+}
+
+int checkpoint_busy_wait_ms(const std::chrono::steady_clock::time_point deadline) {
+    if (deadline == std::chrono::steady_clock::time_point::max()) {
+        return static_cast<int>(kCheckpointPersistenceBusyWait.count());
+    }
+    const auto now = std::chrono::steady_clock::now();
+    if (now >= deadline) {
+        return 0;
+    }
+    const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+        deadline - now);
+    return static_cast<int>(
+        std::min(remaining, kCheckpointPersistenceBusyWait).count());
 }
 
 bool ascii_alphanumeric(const unsigned char ch) {
@@ -632,6 +647,32 @@ struct Snapshot {
     std::optional<std::string> reason;
 };
 
+bool same_snapshot_publication_identity(
+    const Snapshot& lhs,
+    const Snapshot& rhs
+) {
+    return lhs.exists == rhs.exists &&
+        lhs.persisted_fields_valid == rhs.persisted_fields_valid &&
+        lhs.schema_version == rhs.schema_version &&
+        lhs.snapshot_schema_version == rhs.snapshot_schema_version &&
+        lhs.status == rhs.status &&
+        lhs.index_revision == rhs.index_revision &&
+        lhs.content_revision == rhs.content_revision &&
+        lhs.revision_epoch == rhs.revision_epoch &&
+        lhs.product_revision == rhs.product_revision &&
+        lhs.canonical_write_revision == rhs.canonical_write_revision &&
+        lhs.proof_kind == rhs.proof_kind &&
+        lhs.proof_status == rhs.proof_status &&
+        lhs.proof_root_volume_serial == rhs.proof_root_volume_serial &&
+        lhs.proof_root_file_id == rhs.proof_root_file_id &&
+        lhs.proof_journal_id == rhs.proof_journal_id &&
+        lhs.proof_verified_usn == rhs.proof_verified_usn &&
+        lhs.proof.has_value() == rhs.proof.has_value() &&
+        lhs.item_count == rhs.item_count &&
+        lhs.generation == rhs.generation &&
+        lhs.reason == rhs.reason;
+}
+
 Snapshot read_snapshot(sqlite3* db, const std::string& product) {
     Statement statement(
         db,
@@ -964,6 +1005,59 @@ void write_snapshot(
     statement.step_done();
 }
 
+void invalidate_stale_query_snapshot(
+    sqlite3* db,
+    const std::string& product,
+    const Snapshot& observed_snapshot,
+    const std::optional<CanonicalWriteRevision>& observed_write_revision,
+    const std::string& reason
+) {
+    const auto execute_transaction = [&](const char* sql, const std::string& context) {
+        const int rc = sqlite3_exec(db, sql, nullptr, nullptr, nullptr);
+        if (rc != SQLITE_OK) {
+            throw_sqlite(db, context, rc);
+        }
+    };
+
+    bool transaction_open = false;
+    try {
+        execute_transaction("BEGIN IMMEDIATE", "begin stale metadata invalidation");
+        transaction_open = true;
+        const auto current = read_snapshot(db, product);
+        const bool contiguous_publication = observed_write_revision &&
+            observed_write_revision->previous &&
+            *observed_write_revision->previous ==
+                observed_snapshot.canonical_write_revision;
+        const bool observed_snapshot_current =
+            same_snapshot_publication_identity(current, observed_snapshot);
+        const bool publication_pending = observed_snapshot_current &&
+            contiguous_publication &&
+            reason == "canonical_write_revision_changed" &&
+            snapshot_structurally_ready(current);
+        if (observed_snapshot_current && !publication_pending) {
+            write_snapshot(
+                db,
+                product,
+                "stale",
+                current.index_revision,
+                current.content_revision,
+                current.revision_epoch,
+                current.product_revision,
+                current.canonical_write_revision,
+                current.item_count,
+                current.generation,
+                reason);
+        }
+        execute_transaction("COMMIT", "commit stale metadata invalidation");
+        transaction_open = false;
+    } catch (...) {
+        if (transaction_open) {
+            sqlite3_exec(db, "ROLLBACK", nullptr, nullptr, nullptr);
+        }
+        throw;
+    }
+}
+
 std::optional<std::vector<change_probe::WatchEntry>> read_change_watch(
     sqlite3* db,
     const std::string& product,
@@ -1161,7 +1255,11 @@ CheckpointPersistenceResult compare_and_swap_verified_checkpoint(
     const change_probe::Checkpoint& endpoint,
     const std::chrono::steady_clock::time_point deadline
 ) {
-    if (!expected.proof || deadline_expired(deadline)) {
+    if (!expected.proof ||
+        endpoint.proof_kind != expected.proof->proof_kind ||
+        endpoint.root != expected.proof->root ||
+        endpoint.journal_id != expected.proof->journal_id ||
+        endpoint.usn < expected.proof->usn || deadline_expired(deadline)) {
         return {};
     }
 
@@ -1182,7 +1280,7 @@ CheckpointPersistenceResult compare_and_swap_verified_checkpoint(
         return {};
     }
     try {
-        if (sqlite3_busy_timeout(db, 0) != SQLITE_OK) {
+        if (sqlite3_busy_timeout(db, checkpoint_busy_wait_ms(deadline)) != SQLITE_OK) {
             sqlite3_close(db);
             return {};
         }
@@ -1195,26 +1293,27 @@ CheckpointPersistenceResult compare_and_swap_verified_checkpoint(
         {
             Statement statement(
                 db,
-                "UPDATE metadata_snapshots SET proof_root_volume_serial = ?, "
-                "proof_root_file_id = ?, proof_journal_id = ?, proof_verified_usn = ? "
-                "WHERE product = ? AND status = 'ready' AND product_revision = ? "
+                "UPDATE metadata_snapshots SET proof_verified_usn = "
+                "MAX(proof_verified_usn, ?) WHERE product = ? "
+                "AND schema_version = ? AND snapshot_schema_version = ? "
+                "AND status = 'ready' AND product_revision = ? "
                 "AND canonical_write_revision = ? AND proof_kind = ? "
-                "AND proof_root_volume_serial = ? AND proof_root_file_id = ? "
-                "AND proof_journal_id = ? AND proof_verified_usn = ?",
+                "AND proof_status = 'verified' AND proof_root_volume_serial = ? "
+                "AND proof_root_file_id = ? AND proof_journal_id = ? "
+                "AND proof_verified_usn >= ?",
                 "advance verified metadata change checkpoint");
             if (!deadline_expired(deadline)) {
-                statement.bind_text(1, std::to_string(endpoint.root.volume_serial));
-                statement.bind_text(2, std::to_string(endpoint.root.file_id));
-                statement.bind_text(3, std::to_string(endpoint.journal_id));
-                statement.bind_int64(4, endpoint.usn);
-                statement.bind_text(5, product);
-                statement.bind_text(6, expected.product_revision);
-                statement.bind_text(7, expected.canonical_write_revision);
-                statement.bind_text(8, expected.proof->proof_kind);
-                statement.bind_text(9, std::to_string(expected.proof->root.volume_serial));
-                statement.bind_text(10, std::to_string(expected.proof->root.file_id));
-                statement.bind_text(11, std::to_string(expected.proof->journal_id));
-                statement.bind_int64(12, expected.proof->usn);
+                statement.bind_int64(1, endpoint.usn);
+                statement.bind_text(2, product);
+                statement.bind_int(3, kMetadataIndexSchemaVersion);
+                statement.bind_int(4, kMetadataSnapshotSchemaVersion);
+                statement.bind_text(5, expected.product_revision);
+                statement.bind_text(6, expected.canonical_write_revision);
+                statement.bind_text(7, expected.proof->proof_kind);
+                statement.bind_text(8, std::to_string(expected.proof->root.volume_serial));
+                statement.bind_text(9, std::to_string(expected.proof->root.file_id));
+                statement.bind_text(10, std::to_string(expected.proof->journal_id));
+                statement.bind_int64(11, expected.proof->usn);
                 if (!deadline_expired(deadline)) {
                     attempted = true;
                     statement.step_done();
@@ -1241,7 +1340,10 @@ bool advance_verified_checkpoint(
     const Snapshot& expected,
     const change_probe::Checkpoint& endpoint
 ) {
-    if (!expected.proof) {
+    if (!expected.proof || endpoint.proof_kind != expected.proof->proof_kind ||
+        endpoint.root != expected.proof->root ||
+        endpoint.journal_id != expected.proof->journal_id ||
+        endpoint.usn < expected.proof->usn) {
         return false;
     }
     if (expected.proof->usn == endpoint.usn) {
@@ -2453,7 +2555,8 @@ void BacklogIndex::rebuild_metadata(
 IndexQueryResult BacklogIndex::query_metadata(
     const std::filesystem::path& product_root,
     const std::string& product,
-    const IndexQuery& query
+    const IndexQuery& query,
+    const QueryMetadataTestHooks& test_hooks
 ) {
     const auto start = std::chrono::steady_clock::now();
     validate_query(query);
@@ -2490,6 +2593,9 @@ IndexQueryResult BacklogIndex::query_metadata(
                write_revision->current == snapshot.canonical_write_revision &&
                !change_watch_rows_empty(db_, product)) {
         change_proof_failure = "change_proof_watch_invalid";
+    }
+    if (test_hooks.after_change_proof_verification) {
+        test_hooks.after_change_proof_verification();
     }
 
     const bool snapshot_ready = readiness != SnapshotReadinessMode::Invalid &&
@@ -2588,7 +2694,8 @@ IndexQueryResult BacklogIndex::query_metadata(
     if (!stale_reason.empty()) {
         if (snapshot.exists && snapshot.status == "ready") {
             try {
-                invalidate_metadata(product, stale_reason);
+                invalidate_stale_query_snapshot(
+                    db_, product, snapshot, write_revision, stale_reason);
             } catch (...) {
             }
         }
@@ -2614,7 +2721,8 @@ IndexQueryResult BacklogIndex::query_metadata(
     auto items = read_index_rows(db_, product, query, invalid_rows);
     if (invalid_rows != 0) {
         try {
-            invalidate_metadata(product, "invalid_index_rows");
+            invalidate_stale_query_snapshot(
+                db_, product, snapshot, write_revision, "invalid_index_rows");
         } catch (...) {
         }
         auto canonical = query_canonical(product_root, product, inventory, query);
@@ -2640,7 +2748,12 @@ IndexQueryResult BacklogIndex::query_metadata(
         const bool index_omitted_canonical_match = !canonical.items.empty();
         if (index_omitted_canonical_match) {
             try {
-                invalidate_metadata(product, "exact_ref_missing_from_index");
+                invalidate_stale_query_snapshot(
+                    db_,
+                    product,
+                    snapshot,
+                    write_revision,
+                    "exact_ref_missing_from_index");
             } catch (...) {
             }
         }
@@ -2693,7 +2806,8 @@ IndexQueryResult BacklogIndex::query_metadata(
 
     if (!content_stale_reason.empty()) {
         try {
-            invalidate_metadata(product, content_stale_reason);
+            invalidate_stale_query_snapshot(
+                db_, product, snapshot, write_revision, content_stale_reason);
         } catch (...) {
         }
         auto canonical = query_canonical(product_root, product, inventory, query);
@@ -3269,7 +3383,8 @@ IndexQueryResult query_metadata_index(
     const std::filesystem::path& index_path,
     const std::filesystem::path& product_root,
     const std::string& product,
-    const IndexQuery& query
+    const IndexQuery& query,
+    const BacklogIndex::QueryMetadataTestHooks& test_hooks
 ) {
     const auto start = std::chrono::steady_clock::now();
     validate_query(query);
@@ -3280,7 +3395,7 @@ IndexQueryResult query_metadata_index(
     }
     try {
         BacklogIndex index(index_path, product, product_root);
-        return index.query_metadata(product_root, product, query);
+        return index.query_metadata(product_root, product, query, test_hooks);
     } catch (const std::exception&) {
         return fallback_query(
             product_root,

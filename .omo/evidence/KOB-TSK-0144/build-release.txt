@@ -1,0 +1,11 @@
+KOB-TSK-0144 canonical Release build
+Captured: 2026-08-31T22:46:44+08:00
+Command: pixi run build-release
+Exit code: 0
+
+Observed terminal result:
+-- Configuring done (17.8s)
+-- Generating done (1.7s)
+-- Build files have been written to: C:/Users/dorgon.chang/.agents/skills/kano/kano-agent-backlog-skill/src/cpp/out/obj/windows-ninja-msvc
+[3/5] Building CXX object code/tests/CMakeFiles/metadata_index_smoke_test.dir/Release/metadata_index_smoke_test.cpp.obj
+[4/5] Linking CXX executable C:/Users/dorgon.chang/.agents/skills/kano/kano-agent-backlog-skill/src/cpp/out/bin/windows-ninja-msvc/release/metadata_index_smoke_test.exe

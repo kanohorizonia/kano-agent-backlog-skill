@@ -1,17 +1,22 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstdint>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <initializer_list>
 #include <iostream>
+#include <limits>
 #include <map>
+#include <mutex>
 #include <optional>
 #include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <json/json.h>
@@ -927,6 +932,154 @@ private:
     sqlite3* database_ = nullptr;
 };
 
+class ThreadJoinGuard {
+public:
+    explicit ThreadJoinGuard(std::vector<std::thread>& threads)
+        : threads_(threads) {}
+
+    ~ThreadJoinGuard() {
+        join();
+    }
+
+    ThreadJoinGuard(const ThreadJoinGuard&) = delete;
+    ThreadJoinGuard& operator=(const ThreadJoinGuard&) = delete;
+
+    void join() noexcept {
+        if (joined_) {
+            return;
+        }
+        for (auto& thread : threads_) {
+            if (thread.joinable()) {
+                thread.join();
+            }
+        }
+        joined_ = true;
+    }
+
+private:
+    std::vector<std::thread>& threads_;
+    bool joined_ = false;
+};
+
+class BoundedThreadCoordination {
+public:
+    BoundedThreadCoordination(std::size_t expected, std::string label)
+        : expected_(expected),
+          label_(std::move(label)),
+          deadline_(std::chrono::steady_clock::now() + std::chrono::seconds(5)) {
+        expect(expected_ > 0, label_ + " must have at least one worker");
+    }
+
+    BoundedThreadCoordination(const BoundedThreadCoordination&) = delete;
+    BoundedThreadCoordination& operator=(const BoundedThreadCoordination&) = delete;
+
+    void arrive_and_wait() {
+        std::unique_lock<std::mutex> lock(mutex_);
+        if (cancelled_) {
+            throw_cancelled(lock, "arrival");
+        }
+        ++arrived_;
+        condition_.notify_all();
+        if (!condition_.wait_until(lock, deadline_, [&] {
+                return released_ || cancelled_;
+            })) {
+            throw_timeout(lock, "release");
+        }
+        if (cancelled_) {
+            throw_cancelled(lock, "release");
+        }
+    }
+
+    void wait_until_arrived() {
+        std::unique_lock<std::mutex> lock(mutex_);
+        if (!condition_.wait_until(lock, deadline_, [&] {
+                return arrived_ == expected_ || cancelled_;
+            })) {
+            throw_timeout(lock, "worker arrival");
+        }
+        if (cancelled_) {
+            throw_cancelled(lock, "worker arrival");
+        }
+    }
+
+    void release() {
+        std::unique_lock<std::mutex> lock(mutex_);
+        if (cancelled_) {
+            throw_cancelled(lock, "release");
+        }
+        released_ = true;
+        condition_.notify_all();
+    }
+
+    void complete(const std::exception_ptr& error) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (error && !first_error_) {
+            first_error_ = error;
+        }
+        if (error) {
+            cancelled_ = true;
+        }
+        ++completed_;
+        condition_.notify_all();
+    }
+
+    void wait_until_complete() {
+        std::unique_lock<std::mutex> lock(mutex_);
+        if (!condition_.wait_until(lock, deadline_, [&] {
+                return completed_ == expected_;
+            })) {
+            throw_timeout(lock, "worker completion");
+        }
+        if (first_error_) {
+            const auto error = first_error_;
+            lock.unlock();
+            std::rethrow_exception(error);
+        }
+    }
+
+    void cancel() noexcept {
+        std::lock_guard<std::mutex> lock(mutex_);
+        cancelled_ = true;
+        condition_.notify_all();
+    }
+
+private:
+    [[noreturn]] void throw_cancelled(
+        std::unique_lock<std::mutex>& lock,
+        const std::string& phase
+    ) const {
+        const auto error = first_error_;
+        const auto message = label_ + " cancelled during " + phase;
+        lock.unlock();
+        if (error) {
+            std::rethrow_exception(error);
+        }
+        throw std::runtime_error(message);
+    }
+
+    [[noreturn]] void throw_timeout(
+        std::unique_lock<std::mutex>& lock,
+        const std::string& phase
+    ) {
+        cancelled_ = true;
+        condition_.notify_all();
+        const auto message = label_ + " timed out waiting for " + phase;
+        lock.unlock();
+        throw std::runtime_error(message);
+    }
+
+    std::size_t expected_ = 0;
+    std::string label_;
+    std::chrono::steady_clock::time_point deadline_;
+    std::mutex mutex_;
+    std::condition_variable condition_;
+    std::size_t arrived_ = 0;
+    std::size_t completed_ = 0;
+    bool released_ = false;
+    bool cancelled_ = false;
+    std::exception_ptr first_error_;
+};
+
 void set_ready_fields(BacklogItem& item) {
     item.context = "Exercise a derived metadata index mutation.";
     item.goal = "Keep canonical item metadata authoritative.";
@@ -961,6 +1114,45 @@ void expect_exact(
     expect(result.items.front().title == title, "exact metadata query returned a stale title");
 }
 
+void expect_canonical_item_equal(
+    const kano::backlog_ops::IndexItem& actual,
+    const kano::backlog_ops::IndexItem& expected,
+    const std::string& context
+) {
+    expect(actual.id == expected.id, context + " must preserve id");
+    expect(actual.uid == expected.uid, context + " must preserve uid");
+    expect(actual.product == expected.product, context + " must preserve product");
+    expect(actual.type == expected.type, context + " must preserve type");
+    expect(actual.state == expected.state, context + " must preserve state");
+    expect(actual.title == expected.title, context + " must preserve title");
+    expect(actual.priority == expected.priority, context + " must preserve priority");
+    expect(actual.parent == expected.parent, context + " must preserve parent");
+    expect(actual.duplicate_of == expected.duplicate_of,
+        context + " must preserve duplicate_of");
+    expect(actual.slug == expected.slug, context + " must preserve slug");
+    expect(actual.source_ref == expected.source_ref,
+        context + " must preserve source_ref");
+    expect(actual.source_size == expected.source_size,
+        context + " must preserve source_size");
+    expect(actual.source_mtime_ns == expected.source_mtime_ns,
+        context + " must preserve source_mtime_ns");
+    expect(actual.estimated_tokens == expected.estimated_tokens,
+        context + " must preserve estimated_tokens");
+    expect(actual.updated == expected.updated, context + " must preserve updated");
+}
+
+void expect_canonical_result_equal(
+    const std::vector<kano::backlog_ops::IndexItem>& actual,
+    const std::vector<kano::backlog_ops::IndexItem>& expected,
+    const std::string& context
+) {
+    expect(actual.size() == expected.size(), context + " must preserve result count");
+    for (std::size_t index = 0; index < expected.size(); ++index) {
+        expect_canonical_item_equal(
+            actual[index], expected[index],
+            context + " result " + std::to_string(index));
+    }
+}
 std::map<std::string, std::pair<ItemState, std::string>> canonical_projection(
     const std::filesystem::path& product_root
 ) {
@@ -1270,7 +1462,7 @@ int main() {
                            "change_proof_checkpoint_commit_failed" &&
                        status.indexes.front().elapsed_ms < 100.0,
                 dimension +
-                    " equality must require zero-wait checkpoint persistence and fail closed");
+                    " equality must require bounded checkpoint persistence and fail closed");
         };
 
         kano::backlog_ops::GetIndexStatusTestHooks record_cap_hooks;
@@ -1356,11 +1548,51 @@ int main() {
                    committed_checkpoint_status.indexes.front().unchanged &&
                    committed_checkpoint_status.indexes.front()
                        .proof_checkpoint_required &&
-                   committed_checkpoint_status.indexes.front()
-                       .proof_checkpoint_persisted,
+                    committed_checkpoint_status.indexes.front()
+                        .proof_checkpoint_persisted,
             "cap crossing must persist the verified checkpoint before unchanged");
-        expect(read_verified_usn(index_path, product) > durable_usn_before,
+        const auto committed_checkpoint_usn = read_verified_usn(index_path, product);
+        expect(committed_checkpoint_usn > durable_usn_before,
             "successful mandatory checkpoint CAS must advance durable proof state");
+
+        const auto covered_checkpoint_usn =
+            std::numeric_limits<std::int64_t>::max() - 1;
+        kano::backlog_ops::GetIndexStatusTestHooks covered_endpoint_hooks;
+        covered_endpoint_hooks.checkpoint_record_cap = 1;
+        covered_endpoint_hooks.proof_records_read_override = 1;
+        covered_endpoint_hooks.after_revision_state_read = [&]() {
+            execute_sql(
+                index_path,
+                "BEGIN IMMEDIATE;"
+                "UPDATE metadata_snapshots SET proof_verified_usn = " +
+                    std::to_string(covered_checkpoint_usn) +
+                    " WHERE product = '" + product + "';"
+                "COMMIT;");
+        };
+        const auto covered_endpoint_status = kano::backlog_ops::get_index_status(
+            backlog_root,
+            product,
+            product_root,
+            baseline_product_revision,
+            covered_endpoint_hooks);
+        expect(covered_endpoint_status.indexes.size() == 1 &&
+                   covered_endpoint_status.indexes.front().status == "unchanged" &&
+                   covered_endpoint_status.indexes.front().unchanged &&
+                   !covered_endpoint_status.indexes.front().fallback_scan &&
+                   covered_endpoint_status.indexes.front().scanned_count == 0 &&
+                   covered_endpoint_status.indexes.front().proof_checkpoint_required &&
+                   covered_endpoint_status.indexes.front().proof_checkpoint_persisted &&
+                   covered_endpoint_status.indexes.front().elapsed_ms < 100.0,
+            "an already-covered endpoint must remain unchanged within the bounded deadline");
+        expect(read_verified_usn(index_path, product) == covered_checkpoint_usn,
+            "an already-covered endpoint must not regress the larger durable USN");
+        execute_sql(
+            index_path,
+            "BEGIN IMMEDIATE;"
+            "UPDATE metadata_snapshots SET proof_verified_usn = " +
+                std::to_string(committed_checkpoint_usn) +
+                " WHERE product = '" + product + "';"
+            "COMMIT;");
         std::filesystem::remove_all(unrelated_churn_root);
 
         std::vector<double> unchanged_status_samples;
@@ -1490,6 +1722,10 @@ int main() {
             metadata_samples.push_back(timed_ms([&]() {
                 const auto result = kano::backlog_ops::query_metadata_index(
                     index_path, product_root, product, metadata_query);
+                expect(result.diagnostics.index_used &&
+                           result.diagnostics.index_status == "ready" &&
+                           !result.diagnostics.fallback_scan,
+                    "metadata benchmark must remain on the ready indexed path");
                 expect(result.items.size() == 650,
                     "metadata filter must preserve canonical parity");
             }));
@@ -2277,11 +2513,12 @@ int main() {
         const std::string second_product = "metadata-product-two";
         const auto second_root = backlog_root / "products" / second_product;
         CanonicalStore second_store(second_root);
+        const auto primary_overlap_item = store.read(*target.file_path);
         auto second_item = second_store.create(
-            "MDT", ItemType::Task, "Second product isolated item", 1);
+            "MDI", ItemType::Task, primary_overlap_item.title, 650);
         second_store.write(second_item);
         auto second_removed_item = second_store.create(
-            "MDT", ItemType::Task, "Second product removable item", 2);
+            "MDI", ItemType::Task, "Second product removable item", 651);
         second_store.write(second_removed_item);
         const auto second_build = kano::backlog_ops::build_index(
             second_root, index_path, true, second_product);
@@ -2305,6 +2542,311 @@ int main() {
             current_product_revision,
             "unrelated product rebuild");
 
+        const auto canonical_oracle_path =
+            backlog_root / ".cache" / "index" / "canonical-parity-oracle.db";
+        const auto expect_query_parity = [&](const IndexQueryResult& actual,
+                                             const std::filesystem::path& query_root,
+                                             const std::string& query_product,
+                                             const IndexQuery& query,
+                                             const std::string& context) {
+            const auto oracle = kano::backlog_ops::query_metadata_index(
+                canonical_oracle_path, query_root, query_product, query);
+            expect(!oracle.diagnostics.index_used && oracle.diagnostics.fallback_scan,
+                context + " oracle must use canonical fallback");
+            expect_canonical_result_equal(actual.items, oracle.items,
+                context + " must match canonical fallback");
+        };
+        const auto run_reader_batch = [&](const std::filesystem::path& query_root,
+                                           const std::string& query_product,
+                                           const IndexQuery& query) {
+            constexpr std::size_t kReaderCount = 6;
+            BoundedThreadCoordination coordination(
+                kReaderCount, "concurrent metadata reader batch");
+            std::vector<IndexQueryResult> results(kReaderCount);
+            std::vector<std::exception_ptr> errors(kReaderCount);
+            std::vector<std::thread> readers;
+            readers.reserve(kReaderCount);
+            ThreadJoinGuard join_guard(readers);
+            try {
+                for (std::size_t reader = 0; reader < kReaderCount; ++reader) {
+                    readers.emplace_back([&, reader] {
+                        try {
+                            IndexQuery reader_query = query;
+                            coordination.arrive_and_wait();
+                            results[reader] = kano::backlog_ops::query_metadata_index(
+                                index_path, query_root, query_product, reader_query);
+                        } catch (...) {
+                            errors[reader] = std::current_exception();
+                        }
+                        coordination.complete(errors[reader]);
+                    });
+                }
+                coordination.wait_until_arrived();
+                coordination.release();
+                coordination.wait_until_complete();
+            } catch (...) {
+                coordination.cancel();
+                throw;
+            }
+            join_guard.join();
+            for (const auto& error : errors) {
+                if (error) {
+                    std::rethrow_exception(error);
+                }
+            }
+            return results;
+        };
+        const auto query_all_products = [&](const std::filesystem::path& database_path,
+                                            const IndexQuery& query) {
+            std::vector<kano::backlog_ops::IndexItem> results;
+            const auto first = kano::backlog_ops::query_metadata_index(
+                database_path, product_root, product, query);
+            const auto second = kano::backlog_ops::query_metadata_index(
+                database_path, second_root, second_product, query);
+            results.insert(results.end(), first.items.begin(), first.items.end());
+            results.insert(results.end(), second.items.begin(), second.items.end());
+            return results;
+        };
+
+        expect(second_item.id == primary_overlap_item.id &&
+                   second_item.title == primary_overlap_item.title &&
+                   second_item.type == primary_overlap_item.type &&
+                   second_item.state == primary_overlap_item.state,
+            "cross-product fixture must overlap ID title state and type");
+
+        IndexQuery metadata_filtered;
+        metadata_filtered.type = primary_overlap_item.type;
+        metadata_filtered.state = primary_overlap_item.state;
+        IndexQuery token_query;
+        token_query.text = "canonical source hash marker";
+        IndexQuery second_all;
+        second_all.limit = 20;
+
+        expect_query_parity(incomplete, product_root, product, exact_query,
+            "incomplete-index canonical parity");
+        expect_query_parity(corrupt, product_root, product, all_query,
+            "corrupt-index canonical parity");
+        expect_query_parity(first_result, product_root, product, exact_query,
+            "first-product exact query");
+        expect_query_parity(second_result, second_root, second_product, second_exact,
+            "second-product exact query");
+        const auto first_filtered = kano::backlog_ops::query_metadata_index(
+            index_path, product_root, product, metadata_filtered);
+        const auto second_filtered = kano::backlog_ops::query_metadata_index(
+            index_path, second_root, second_product, metadata_filtered);
+        expect_query_parity(first_filtered, product_root, product, metadata_filtered,
+            "first-product metadata-filtered query");
+        expect_query_parity(second_filtered, second_root, second_product, metadata_filtered,
+            "second-product metadata-filtered query");
+        const auto first_token = kano::backlog_ops::query_metadata_index(
+            index_path, product_root, product, token_query);
+        const auto second_token = kano::backlog_ops::query_metadata_index(
+            index_path, second_root, second_product, token_query);
+        expect_query_parity(first_token, product_root, product, token_query,
+            "first-product token query");
+        expect_query_parity(second_token, second_root, second_product, token_query,
+            "second-product token query");
+        const auto first_all = kano::backlog_ops::query_metadata_index(
+            index_path, product_root, product, all_query);
+        const auto second_all_result = kano::backlog_ops::query_metadata_index(
+            index_path, second_root, second_product, second_all);
+        expect_query_parity(first_all, product_root, product, all_query,
+            "first-product all query");
+        expect_query_parity(second_all_result, second_root, second_product, second_all,
+            "second-product all query");
+        expect_canonical_result_equal(
+            query_all_products(index_path, second_all),
+            query_all_products(canonical_oracle_path, second_all),
+            "orchestrated all-product query");
+
+        const auto old_snapshot_revision = second_result.diagnostics.product_revision;
+        expect(second_result.diagnostics.index_used &&
+                   second_result.diagnostics.index_status == "ready" &&
+                   !old_snapshot_revision.empty(),
+            "second-product baseline must be a ready revision");
+        const auto ready_readers = run_reader_batch(second_root, second_product, second_all);
+        for (std::size_t reader = 0; reader < ready_readers.size(); ++reader) {
+            const auto& result = ready_readers[reader];
+            expect(result.diagnostics.index_used &&
+                       result.diagnostics.index_status == "ready" &&
+                       !result.diagnostics.fallback_scan,
+                "simultaneous ready reader must remain ready without fallback: reader=" +
+                    std::to_string(reader) + " status=" +
+                    result.diagnostics.index_status + " reason=" +
+                    result.diagnostics.stale_reason.value_or("none"));
+            expect(result.diagnostics.product_revision == old_snapshot_revision,
+                "simultaneous ready reader must preserve product revision identity");
+            expect(result.diagnostics.index_revision ==
+                       second_result.diagnostics.index_revision,
+                "simultaneous ready reader must preserve index revision identity");
+            expect(result.diagnostics.canonical_revision ==
+                       second_result.diagnostics.canonical_revision,
+                "simultaneous ready reader must preserve canonical revision identity");
+            expect_query_parity(result, second_root, second_product, second_all,
+                "simultaneous ready reader " + std::to_string(reader));
+        }
+
+        BacklogIndex concurrent_index(index_path, second_product, second_root);
+        BoundedThreadCoordination rebuild_coordination(
+            1, "rebuild publication coordination");
+        BacklogIndex::RebuildMetadataTestHooks concurrent_rebuild_hooks;
+        concurrent_rebuild_hooks.after_change_watch_capture = [&] {
+            rebuild_coordination.arrive_and_wait();
+        };
+        std::exception_ptr rebuild_error;
+        std::vector<std::thread> rebuild_threads;
+        ThreadJoinGuard rebuild_join_guard(rebuild_threads);
+        try {
+            rebuild_threads.emplace_back([&] {
+                try {
+                    concurrent_index.rebuild_metadata(
+                        second_root, second_product, concurrent_rebuild_hooks);
+                } catch (...) {
+                    rebuild_error = std::current_exception();
+                }
+                rebuild_coordination.complete(rebuild_error);
+            });
+            rebuild_coordination.wait_until_arrived();
+            const auto old_snapshot_readers = run_reader_batch(
+                second_root, second_product, second_all);
+            for (std::size_t reader = 0; reader < old_snapshot_readers.size(); ++reader) {
+                const auto& result = old_snapshot_readers[reader];
+                expect(result.diagnostics.index_used &&
+                           result.diagnostics.index_status == "ready" &&
+                           !result.diagnostics.fallback_scan &&
+                           result.diagnostics.product_revision == old_snapshot_revision,
+                    "readers paused before rebuild publication must retain the old ready snapshot");
+                expect_query_parity(result, second_root, second_product, second_all,
+                    "old-snapshot rebuild reader " + std::to_string(reader));
+            }
+            rebuild_coordination.release();
+            rebuild_coordination.wait_until_complete();
+        } catch (...) {
+            rebuild_coordination.cancel();
+            throw;
+        }
+        rebuild_join_guard.join();
+        if (rebuild_error) {
+            std::rethrow_exception(rebuild_error);
+        }
+        const auto rebuilt_result = kano::backlog_ops::query_metadata_index(
+            index_path, second_root, second_product, second_all);
+        expect(rebuilt_result.diagnostics.index_used &&
+                   rebuilt_result.diagnostics.index_status == "ready" &&
+                   !rebuilt_result.diagnostics.fallback_scan &&
+                   rebuilt_result.diagnostics.product_revision != old_snapshot_revision,
+            "rebuild publication must expose a fresh ready revision");
+        expect_query_parity(rebuilt_result, second_root, second_product, second_all,
+            "fresh rebuild query");
+
+        second_item = second_store.read(*second_item.file_path);
+        second_item.title = "Second product concurrent update";
+        second_store.write(second_item);
+        const auto stale_readers = run_reader_batch(second_root, second_product, second_exact);
+        for (std::size_t reader = 0; reader < stale_readers.size(); ++reader) {
+            const auto& result = stale_readers[reader];
+            expect(!result.diagnostics.index_used &&
+                       result.diagnostics.index_status == "stale" &&
+                       result.diagnostics.fallback_scan,
+                "canonical update before index publication must use stale fallback");
+            expect_query_parity(result, second_root, second_product, second_exact,
+                "stale canonical-update reader " + std::to_string(reader));
+        }
+
+        constexpr std::size_t kPublishReaderCount = 6;
+        BoundedThreadCoordination publication_coordination(
+            kPublishReaderCount, "metadata publication reader coordination");
+        BacklogIndex::QueryMetadataTestHooks publication_query_hooks;
+        publication_query_hooks.after_change_proof_verification = [&] {
+            publication_coordination.arrive_and_wait();
+        };
+        std::vector<IndexQueryResult> publish_race_results(kPublishReaderCount);
+        std::vector<std::exception_ptr> publish_race_errors(kPublishReaderCount);
+        std::vector<std::thread> publish_readers;
+        publish_readers.reserve(kPublishReaderCount);
+        ThreadJoinGuard publish_join_guard(publish_readers);
+        IndexQueryResult first_published_result;
+        try {
+            for (std::size_t reader = 0; reader < kPublishReaderCount; ++reader) {
+                publish_readers.emplace_back([&, reader] {
+                    try {
+                        IndexQuery reader_query = second_exact;
+                        publish_race_results[reader] =
+                            kano::backlog_ops::query_metadata_index(
+                                index_path,
+                                second_root,
+                                second_product,
+                                reader_query,
+                                publication_query_hooks);
+                    } catch (...) {
+                        publish_race_errors[reader] = std::current_exception();
+                    }
+                    publication_coordination.complete(
+                        publish_race_errors[reader]);
+                });
+            }
+            publication_coordination.wait_until_arrived();
+            concurrent_index.index_item(second_item);
+            first_published_result = kano::backlog_ops::query_metadata_index(
+                index_path, second_root, second_product, second_exact);
+            expect_exact(
+                first_published_result, second_item.id, second_item.title);
+            expect(first_published_result.diagnostics.index_used &&
+                       first_published_result.diagnostics.index_status == "ready" &&
+                       !first_published_result.diagnostics.fallback_scan &&
+                       first_published_result.diagnostics.product_revision !=
+                           rebuilt_result.diagnostics.product_revision,
+                "first concurrent update must publish a new ready snapshot");
+
+            second_item = second_store.read(*second_item.file_path);
+            second_item.title = "Second product replacement update";
+            second_store.write(second_item);
+            concurrent_index.index_item(second_item);
+            publication_coordination.release();
+            publication_coordination.wait_until_complete();
+        } catch (...) {
+            publication_coordination.cancel();
+            throw;
+        }
+        publish_join_guard.join();
+        for (const auto& error : publish_race_errors) {
+            if (error) {
+                std::rethrow_exception(error);
+            }
+        }
+        for (std::size_t reader = 0; reader < publish_race_results.size(); ++reader) {
+            const auto& result = publish_race_results[reader];
+            const bool coherent_ready = result.diagnostics.index_used &&
+                result.diagnostics.index_status == "ready" &&
+                !result.diagnostics.fallback_scan;
+            const bool coherent_fallback = !result.diagnostics.index_used &&
+                result.diagnostics.index_status == "stale" &&
+                result.diagnostics.fallback_scan;
+            expect(coherent_ready || coherent_fallback,
+                "reader concurrent with index publication must return a coherent ready or fallback result");
+            expect(coherent_fallback &&
+                       result.diagnostics.product_revision ==
+                           rebuilt_result.diagnostics.product_revision &&
+                       result.diagnostics.index_revision ==
+                           rebuilt_result.diagnostics.index_revision,
+                "hook-paused publication reader must retain the old snapshot and use canonical fallback");
+            expect_query_parity(result, second_root, second_product, second_exact,
+                "publication-race reader " + std::to_string(reader));
+        }
+        const auto updated_result = kano::backlog_ops::query_metadata_index(
+            index_path, second_root, second_product, second_exact);
+        expect_exact(updated_result, second_item.id, second_item.title);
+        expect(updated_result.diagnostics.index_used &&
+                   updated_result.diagnostics.index_status == "ready" &&
+                   !updated_result.diagnostics.fallback_scan,
+            "supported index_item update must publish ready output: status=" +
+                updated_result.diagnostics.index_status + " reason=" +
+                updated_result.diagnostics.stale_reason.value_or("none"));
+        expect(updated_result.diagnostics.product_revision !=
+                   first_published_result.diagnostics.product_revision,
+            "replacement index_item update must advance beyond the first publication");
+        expect_query_parity(updated_result, second_root, second_product, second_exact,
+            "final supported update query");
 #ifdef _WIN32
         execute_sql(
             index_path,
@@ -2336,7 +2878,7 @@ int main() {
             backlog_root,
             second_product,
             second_root,
-            second_build.product_revision);
+            updated_result.diagnostics.product_revision);
         expect(portable_equal_revision.indexes.size() == 1 &&
                    portable_equal_revision.indexes.front().status == "stale" &&
                    !portable_equal_revision.indexes.front().unchanged &&
@@ -2371,6 +2913,8 @@ int main() {
         expect(portable_after_delete.diagnostics.index_used &&
                    portable_after_delete.items.size() == 1,
             "portable tracked delete must preserve one coherent ready row");
+        expect_query_parity(portable_after_delete, second_root, second_product,
+            portable_all, "portable tracked delete parity");
         expect_portable_proof_state(
             index_path, second_product, "portable tracked delete");
 
@@ -2391,6 +2935,8 @@ int main() {
             index_path, second_root, second_product, second_exact);
         expect_exact(
             portable_raw_query, second_item.id, "Portable source marker B");
+        expect_query_parity(portable_raw_query, second_root, second_product,
+            second_exact, "portable out-of-band parity");
         expect(!portable_raw_query.diagnostics.index_used &&
                    portable_raw_query.diagnostics.index_status == "stale" &&
                    portable_raw_query.diagnostics.fallback_scan &&

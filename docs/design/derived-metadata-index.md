@@ -74,11 +74,29 @@ KOB validates a ready snapshot before using its rows.
   supported proof inspection, and any mandatory checkpoint compare-and-swap.
   Tokens over 96 bytes are rejected before character traversal. Snapshot and
   watch rows are read in one transaction. The requested-revision path does not
-  run doctor, retry a contended write, sleep, or scan canonical Markdown.
+  run doctor, perform an application retry or sleep, or scan canonical Markdown.
+  Read-only revision-state acquisition remains zero-wait. A mandatory checkpoint
+  write is the only step with a SQLite contention wait: one wait capped at 10 ms
+  inside the same 80 ms deadline.
 - Clean proof below all lazy checkpoint caps returns unchanged without writing.
   Crossing any cap (`records >= 8192`, returned bytes `>= 1 MiB`, or USN span
-  `>= 1 MiB`) requires a successful zero-wait checkpoint compare-and-swap before
+  `>= 1 MiB`) requires a successful bounded checkpoint compare-and-swap before
   returning unchanged. Contention or any other persistence failure fails closed.
+- Checkpoint advancement is monotonic and idempotent for one immutable snapshot.
+  Concurrent readers may verify different clean endpoints; an endpoint already
+  covered by another reader is successful only when product revision, canonical
+  write revision, proof kind and root identity, and journal identity still match.
+  The durable USN never regresses. This adds no application-level retry or sleep
+  and never accepts a replaced snapshot.
+- A reader inside the canonical-write-to-index-publish window returns explicit
+  canonical fallback without rewriting the previously ready snapshot when the
+  observed mutation receipt is contiguous. Stale cleanup may persist invalidation
+  only when its `BEGIN IMMEDIATE` reread still matches the complete observed
+  snapshot identity, including schema, state, revisions, proof publication,
+  item-count, generation, and reason fields. Any changed or replacement snapshot
+  makes cleanup a no-op while the current reader still fails closed through
+  canonical fallback. Every other stale condition on the exact observed snapshot
+  retains fail-closed invalidation.
 - Before returning an unchanged result without a checkpoint write, KOB confirms
   that the snapshot used by the proof is still current. Concurrent snapshot or
   watch replacement therefore fails closed instead of mixing revisions.
@@ -179,13 +197,26 @@ reconciliation replaces only derived tables and leaves sequence state intact.
 `metadata_index_smoke_test` creates more than 600 canonical items and enforces:
 
 - exact lookup p95 below 100 ms
-- metadata query p95 below 500 ms
+- 12-sample metadata query p95 below 500 ms while every sample remains on the
+  ready indexed path without fallback
 - bounded token query p95 below 2 seconds
 - canonical revision check p95 below 100 ms
 - matching requested-revision comparison p95 below 100 ms with zero canonical
   items scanned when a supported Windows witness is available
-- mandatory checkpoint contention and concurrent snapshot replacement below
-  100 ms, both failing closed without a canonical scan
+- deterministic already-covered checkpoint acceptance below 100 ms without
+  regressing the larger durable USN
+- mandatory checkpoint contention and changed snapshot identity below 100 ms,
+  both failing closed without a canonical scan
+- six bounded condition-variable-coordinated ready readers using independent
+  SQLite connections, with timeout cancellation, exception propagation, and
+  guaranteed joins
+- readers held against the old coherent snapshot while refresh captures and then
+  atomically publishes a new revision
+- hook-paused canonical fallback from an old snapshot while a first contiguous
+  update and then a replacement update publish deterministically, followed by
+  the newest ready snapshot with full cross-product shared query-field and order
+  parity. The index-only source hash is intentionally absent from canonical
+  fallback results and is verified by the dedicated integrity checks instead.
 
 The fixture also covers cold startup, explicit invalidation, tracked and
 out-of-band mutations, create/reparent/state/decision lifecycle, deletion,

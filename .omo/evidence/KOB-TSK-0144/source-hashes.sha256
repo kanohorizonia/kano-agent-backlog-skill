@@ -1,0 +1,5 @@
+7168fed216f688df2d230472ada67ab8ceab7324fcc156b1bbbfae306cde2064 *docs/design/derived-metadata-index.md
+495f28c84e1fd08a470474cece8648a71fff21d047c6a136018c5bc0cccef876 *src/cpp/code/systems/kano_backlog_ops/index/private/backlog_index.cpp
+dc686797e71b2049b6e7a4b48deb017a1db2ee2202ee13abec4a8317d470bf87 *src/cpp/code/systems/kano_backlog_ops/index/public/kano/backlog_ops/index/backlog_index.hpp
+004982e76ab7b1456b570d9fd6292f921d9ca83110a9e574c8265328d6a7db8e *src/cpp/code/tests/metadata_index_smoke_test.cpp
+6f3ab1227e483e4beb31ade343fb3fa1d54ec92183ccb61203e4a3d493704afd *src/cpp/out/bin/windows-ninja-msvc/release/metadata_index_smoke_test.exe

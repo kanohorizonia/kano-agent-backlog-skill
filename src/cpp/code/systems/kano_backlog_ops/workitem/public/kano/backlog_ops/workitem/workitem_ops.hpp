@@ -77,7 +77,8 @@ public:
         std::optional<std::string> reviewer = std::nullopt,
         std::string owner_source = "",
         std::string reviewer_source = "",
-        DuplicateAdmissionEvidence duplicate_admission = {}
+        DuplicateAdmissionEvidence duplicate_admission = {},
+        std::optional<std::string> idempotency_key = std::nullopt
     );
 
     /**

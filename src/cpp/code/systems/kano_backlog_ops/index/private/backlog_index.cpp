@@ -1937,6 +1937,20 @@ void BacklogIndex::initialize() {
         "  PRIMARY KEY (prefix, type_code, number)"
         ")"
     );
+    execute(
+        "CREATE TABLE IF NOT EXISTS id_request_keys ("
+        "  prefix TEXT NOT NULL,"
+        "  type_code TEXT NOT NULL,"
+        "  request_key TEXT NOT NULL,"
+        "  number INTEGER NOT NULL,"
+        "  request_payload TEXT NOT NULL,"
+        "  canonical_uid TEXT,"
+        "  PRIMARY KEY (request_key)"
+        ")"
+    );
+    if (!table_columns(db_, "id_request_keys").contains("canonical_uid")) {
+        execute("ALTER TABLE id_request_keys ADD COLUMN canonical_uid TEXT");
+    }
     initialized_ = true;
 }
 
@@ -3045,9 +3059,57 @@ int BacklogIndex::reserve_next_number(
     const std::string& type_code,
     const std::string& owner
 ) {
+    return reserve_next_number_for_request(prefix, type_code, owner, "", "").number;
+}
+
+BacklogIndex::IdReservationResult BacklogIndex::reserve_next_number_for_request(
+    const std::string& prefix,
+    const std::string& type_code,
+    const std::string& owner,
+    const std::string& request_key,
+    const std::string& request_payload
+) {
     initialize();
+    if (request_key.size() > 256) {
+        throw std::runtime_error("reserved_id_request_key_too_long");
+    }
     execute("BEGIN IMMEDIATE");
     try {
+        if (!request_key.empty()) {
+            Statement existing(
+                db_,
+                "SELECT k.prefix, k.type_code, k.number, k.request_payload, "
+                "r.number, r.committed_at, k.canonical_uid FROM id_request_keys AS k "
+                "LEFT JOIN id_reservations AS r ON "
+                "r.prefix = k.prefix AND r.type_code = k.type_code AND r.number = k.number "
+                "WHERE k.request_key = ?",
+                "read reserved request key");
+            existing.bind_text(1, request_key);
+            if (existing.step() == SQLITE_ROW) {
+                const auto* recorded_prefix = reinterpret_cast<const char*>(
+                    sqlite3_column_text(existing.get(), 0));
+                const auto* recorded_type = reinterpret_cast<const char*>(
+                    sqlite3_column_text(existing.get(), 1));
+                const int number = sqlite3_column_int(existing.get(), 2);
+                const auto* recorded_payload = reinterpret_cast<const char*>(
+                    sqlite3_column_text(existing.get(), 3));
+                if (recorded_prefix == nullptr || recorded_type == nullptr ||
+                    recorded_payload == nullptr || prefix != recorded_prefix ||
+                    type_code != recorded_type || request_payload != recorded_payload) {
+                    throw std::runtime_error("reserved_id_request_payload_conflict");
+                }
+                if (sqlite3_column_type(existing.get(), 4) == SQLITE_NULL) {
+                    throw std::runtime_error("reserved_id_request_reservation_missing");
+                }
+                const bool committed =
+                    sqlite3_column_type(existing.get(), 5) != SQLITE_NULL;
+                const auto* uid = reinterpret_cast<const char*>(
+                    sqlite3_column_text(existing.get(), 6));
+                execute("COMMIT");
+                return {number, true, committed, uid == nullptr ? "" : uid};
+            }
+        }
+
         Statement advance(
             db_,
             "INSERT INTO id_sequences (prefix, type_code, next_number) VALUES (?, ?, 1) "
@@ -3077,8 +3139,120 @@ int BacklogIndex::reserve_next_number(
         reservation.bind_int(3, number);
         reservation.bind_text(4, owner.substr(0, 160));
         reservation.step_done();
+        if (!request_key.empty()) {
+            Statement request(
+                db_,
+                "INSERT INTO id_request_keys (prefix, type_code, request_key, number, request_payload) "
+                "VALUES (?, ?, ?, ?, ?)",
+                "record reserved request key");
+            request.bind_text(1, prefix);
+            request.bind_text(2, type_code);
+            request.bind_text(3, request_key);
+            request.bind_int(4, number);
+            request.bind_text(5, request_payload);
+            request.step_done();
+        }
         execute("COMMIT");
-        return number;
+        return {number, false, false, ""};
+    } catch (...) {
+        try {
+            execute("ROLLBACK");
+        } catch (...) {
+        }
+        throw;
+    }
+}
+
+std::optional<BacklogIndex::IdReservationResult> BacklogIndex::find_request_reservation(
+    const std::string& prefix,
+    const std::string& type_code,
+    const std::string& request_key,
+    const std::string& request_payload
+) {
+    initialize();
+    Statement existing(
+        db_,
+        "SELECT k.prefix, k.type_code, k.number, k.request_payload, "
+        "r.number, r.committed_at, k.canonical_uid FROM id_request_keys AS k "
+        "LEFT JOIN id_reservations AS r ON "
+        "r.prefix = k.prefix AND r.type_code = k.type_code AND r.number = k.number "
+        "WHERE k.request_key = ?",
+        "read request reservation");
+    existing.bind_text(1, request_key);
+    if (existing.step() != SQLITE_ROW) {
+        return std::nullopt;
+    }
+    const auto* recorded_prefix = reinterpret_cast<const char*>(
+        sqlite3_column_text(existing.get(), 0));
+    const auto* recorded_type = reinterpret_cast<const char*>(
+        sqlite3_column_text(existing.get(), 1));
+    const auto* recorded_payload = reinterpret_cast<const char*>(
+        sqlite3_column_text(existing.get(), 3));
+    if (recorded_prefix == nullptr || recorded_type == nullptr ||
+        recorded_payload == nullptr || prefix != recorded_prefix ||
+        type_code != recorded_type || request_payload != recorded_payload) {
+        throw std::runtime_error("reserved_id_request_payload_conflict");
+    }
+    if (sqlite3_column_type(existing.get(), 4) == SQLITE_NULL) {
+        throw std::runtime_error("reserved_id_request_reservation_missing");
+    }
+    const auto* uid = reinterpret_cast<const char*>(
+        sqlite3_column_text(existing.get(), 6));
+    return IdReservationResult{
+        sqlite3_column_int(existing.get(), 2), true,
+        sqlite3_column_type(existing.get(), 5) != SQLITE_NULL,
+        uid == nullptr ? "" : uid};
+}
+
+std::string BacklogIndex::bind_request_uid(
+    const std::string& prefix,
+    const std::string& type_code,
+    const std::string& request_key,
+    int number,
+    const std::string& proposed_uid
+) {
+    initialize();
+    if (request_key.empty() || proposed_uid.empty()) {
+        throw std::runtime_error("reserved_id_request_uid_invalid");
+    }
+    execute("BEGIN IMMEDIATE");
+    try {
+        Statement existing(
+            db_,
+            "SELECT canonical_uid FROM id_request_keys "
+            "WHERE request_key = ? AND prefix = ? AND type_code = ? AND number = ?",
+            "read reserved request uid");
+        existing.bind_text(1, request_key);
+        existing.bind_text(2, prefix);
+        existing.bind_text(3, type_code);
+        existing.bind_int(4, number);
+        if (existing.step() != SQLITE_ROW) {
+            throw std::runtime_error("reserved_id_request_identity_missing");
+        }
+        const auto* recorded_uid = reinterpret_cast<const char*>(
+            sqlite3_column_text(existing.get(), 0));
+        if (recorded_uid != nullptr && recorded_uid[0] != '\0') {
+            const std::string result = recorded_uid;
+            execute("COMMIT");
+            return result;
+        }
+        Statement bind(
+            db_,
+            "UPDATE id_request_keys SET canonical_uid = ? WHERE request_key = ? "
+            "AND prefix = ? AND type_code = ? AND number = ? "
+            "AND canonical_uid IS NULL",
+            "bind reserved request uid");
+        bind.bind_text(1, proposed_uid);
+        bind.bind_text(2, request_key);
+        bind.bind_text(3, prefix);
+        bind.bind_text(4, type_code);
+        bind.bind_int(5, number);
+        bind.step_done();
+        if (sqlite3_changes(db_) != 1) {
+            throw std::runtime_error("reserved_id_request_uid_binding_failed");
+        }
+        execute("COMMIT");
+        return proposed_uid;
     } catch (...) {
         try {
             execute("ROLLBACK");

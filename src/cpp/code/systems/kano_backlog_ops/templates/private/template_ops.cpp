@@ -138,7 +138,9 @@ std::string TemplateOps::render_frontmatter(const BacklogItem& item) {
         if (key == "azure_id" || key == "jira_key") {
             continue;
         }
-        ss << "  " << key << ": " << value << "\n";
+        ss << "  " << key << ": "
+           << (key == "create_request_payload" ? render_yaml_scalar(value) : value)
+           << "\n";
     }
     
     ss << "links:\n";

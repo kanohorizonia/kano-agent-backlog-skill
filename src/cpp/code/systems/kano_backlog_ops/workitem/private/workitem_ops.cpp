@@ -14,14 +14,100 @@
 #include <cctype>
 #include <set>
 #include <array>
+#include <cerrno>
+#include <cstdint>
 #include <regex>
 #include <string_view>
+#include <thread>
+#include <json/json.h>
+
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <Windows.h>
+#else
+#include <fcntl.h>
+#include <sys/file.h>
+#include <unistd.h>
+#endif
 
 namespace kano::backlog_ops {
 
 using namespace kano::backlog_core;
 
 namespace {
+
+// The common-dir reservation record survives a crash. This process lock only
+// serializes active creators; the OS releases it on process termination.
+class CreateRequestLock {
+public:
+    explicit CreateRequestLock(const std::filesystem::path& path) {
+        std::filesystem::create_directories(path.parent_path());
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+#ifdef _WIN32
+        while (handle_ == INVALID_HANDLE_VALUE) {
+            handle_ = CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE, 0,
+                nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (handle_ != INVALID_HANDLE_VALUE) {
+                break;
+            }
+            const auto error = GetLastError();
+            if (error != ERROR_SHARING_VIOLATION && error != ERROR_LOCK_VIOLATION) {
+                throw std::runtime_error("item_create.request_lock_failed");
+            }
+            if (std::chrono::steady_clock::now() >= deadline) {
+                throw std::runtime_error("item_create.active_writer_timeout");
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+#else
+        descriptor_ = ::open(path.c_str(), O_CREAT | O_RDWR, 0600);
+        if (descriptor_ < 0) {
+            throw std::runtime_error("item_create.request_lock_failed");
+        }
+        while (::flock(descriptor_, LOCK_EX | LOCK_NB) != 0) {
+            if (errno != EWOULDBLOCK && errno != EAGAIN) {
+                ::close(descriptor_);
+                descriptor_ = -1;
+                throw std::runtime_error("item_create.request_lock_failed");
+            }
+            if (std::chrono::steady_clock::now() >= deadline) {
+                ::close(descriptor_);
+                descriptor_ = -1;
+                throw std::runtime_error("item_create.active_writer_timeout");
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+#endif
+    }
+
+    ~CreateRequestLock() {
+#ifdef _WIN32
+        if (handle_ != INVALID_HANDLE_VALUE) {
+            CloseHandle(handle_);
+        }
+#else
+        if (descriptor_ >= 0) {
+            ::flock(descriptor_, LOCK_UN);
+            ::close(descriptor_);
+        }
+#endif
+    }
+
+    CreateRequestLock(const CreateRequestLock&) = delete;
+    CreateRequestLock& operator=(const CreateRequestLock&) = delete;
+
+private:
+#ifdef _WIN32
+    HANDLE handle_ = INVALID_HANDLE_VALUE;
+#else
+    int descriptor_ = -1;
+#endif
+};
 
 std::string trim_text(std::string value);
 
@@ -682,7 +768,8 @@ std::string duplicate_admission_worklog(const DuplicateAdmissionEvidence& eviden
 void write_duplicate_admission_receipt(
     const std::filesystem::path& product_root,
     const BacklogItem& item,
-    const DuplicateAdmissionEvidence& evidence
+    const DuplicateAdmissionEvidence& evidence,
+    const std::optional<std::string>& idempotency_key
 ) {
     const auto canonical_product_root = std::filesystem::weakly_canonical(product_root);
     const auto receipt_dir = std::filesystem::weakly_canonical(product_root / "_meta") / "duplicate-admission";
@@ -705,6 +792,8 @@ void write_duplicate_admission_receipt(
     out << "{\n"
         << "  \"item_id\": \"" << json_escape(item.id) << "\",\n"
         << "  \"item_uid\": \"" << json_escape(item.uid) << "\",\n"
+        << "  \"idempotency_key\": "
+        << (idempotency_key ? "\"" + json_escape(*idempotency_key) + "\"" : "null") << ",\n"
         << "  \"recorded_at\": \"" << current_utc_timestamp() << "\",\n"
         << "  \"search_query\": \"" << json_escape(evidence.search_query) << "\",\n"
         << "  \"search_scope\": \"" << json_escape(evidence.search_scope) << "\",\n"
@@ -1190,6 +1279,60 @@ bool is_allowed_parent_type(ItemType child_type, ItemType parent_type) {
     return std::find(allowed.begin(), allowed.end(), parent_type) != allowed.end();
 }
 
+std::optional<BacklogItem> find_created_request(
+    const std::vector<std::filesystem::path>& product_roots,
+    const std::filesystem::path& active_root,
+    const std::string& request_key,
+    const std::string& request_payload,
+    const std::optional<std::string>& reserved_id = std::nullopt,
+    const std::optional<std::string>& reserved_uid = std::nullopt
+) {
+    std::optional<BacklogItem> found;
+    for (const auto& root : product_roots) {
+        CanonicalStore candidate_store(root);
+        for (const auto& path : candidate_store.list_items()) {
+            if (path.filename().string().ends_with(".index.md")) {
+                continue;
+            }
+            BacklogItem candidate;
+            try {
+                candidate = candidate_store.read(path);
+            } catch (const std::exception&) {
+                throw std::runtime_error(
+                    "item_create.request_scan_unreadable: cannot verify active item at " +
+                    path_for_diagnostic(path, root));
+            }
+            const auto key = candidate.external.find("create_request_key");
+            if (key == candidate.external.end() || key->second != request_key) {
+                continue;
+            }
+            const auto signature = candidate.external.find("create_request_payload");
+            if (signature == candidate.external.end() || signature->second != request_payload) {
+                throw std::runtime_error(
+                    "item_create.idempotency_conflict: request key already belongs to a different create request at " +
+                    path_for_diagnostic(path, root));
+            }
+            if (reserved_id && candidate.id != *reserved_id) {
+                throw std::runtime_error(
+                    "item_create.reservation_identity_conflict: request key maps to " +
+                    *reserved_id + " but canonical item is " + candidate.id);
+            }
+            if (reserved_uid && candidate.uid != *reserved_uid) {
+                throw std::runtime_error(
+                    "item_create.reservation_identity_conflict: canonical UID differs from the reserved request UID");
+            }
+            if (found && (found->id != candidate.id || found->uid != candidate.uid)) {
+                throw std::runtime_error(
+                    "item_create.request_identity_conflict: request key matches different canonical item UIDs");
+            }
+            if (!found || normalize_path(root) == normalize_path(active_root)) {
+                found = std::move(candidate);
+            }
+        }
+    }
+    return found;
+}
+
 bool same_item_identity(const BacklogItem& left, const BacklogItem& right) {
     if (!left.id.empty() && left.id == right.id) {
         return true;
@@ -1257,12 +1400,45 @@ CreateItemResult WorkitemOps::create_item(
     std::optional<std::string> reviewer,
     std::string owner_source,
     std::string reviewer_source,
-    DuplicateAdmissionEvidence duplicate_admission
+    DuplicateAdmissionEvidence duplicate_admission,
+    std::optional<std::string> idempotency_key
 ) {
     diagnostics::ScopedMutationSpan total_span("workitem.create_item.total", title);
     CanonicalStore store(backlog_root);
     auto normalized_duplicate_admission = normalize_duplicate_admission(std::move(duplicate_admission));
     validate_duplicate_admission(normalized_duplicate_admission);
+    if (idempotency_key) {
+        if (idempotency_key->empty() || idempotency_key->size() > 120 ||
+            !std::all_of(idempotency_key->begin(), idempotency_key->end(), [](unsigned char ch) {
+                return (ch >= 'a' && ch <= 'z') ||
+                    (ch >= 'A' && ch <= 'Z') ||
+                    (ch >= '0' && ch <= '9') ||
+                    ch == '_' || ch == '-' || ch == '.' || ch == ':';
+            })) {
+            throw std::runtime_error(
+                "item_create.idempotency_key_invalid: use 1..120 ASCII letters, digits, underscore, dash, dot, or colon");
+        }
+    }
+
+    if (!is_inside_root(backlog_root / "_meta" / "duplicate-admission", backlog_root)) {
+        throw std::runtime_error(
+            "duplicate_admission.receipt_path_escape: duplicate admission receipt path escaped active product root");
+    }
+
+    std::optional<BacklogItem> parent_identity;
+    if (parent && !is_empty_parent_ref(*parent)) {
+        parent_identity = resolve_parent_by_identity(store, backlog_root, *parent, false, "");
+        const auto parent_by_id = resolve_parent_by_identity(
+            store, backlog_root, parent_identity->id, false, "");
+        if (parent_by_id.uid != parent_identity->uid) {
+            throw std::runtime_error("hierarchy.parent_identity_conflict: parent ID and UID resolve differently");
+        }
+        BacklogItem child_proposal;
+        child_proposal.type = type;
+        RefResolver resolver(store);
+        validate_parent_relationship(resolver, child_proposal, *parent_identity);
+        parent = parent_identity->id;
+    }
     
     // 1. Generate ID and UID
     std::string type_code;
@@ -1276,18 +1452,140 @@ CreateItemResult WorkitemOps::create_item(
         case ItemType::Bug: type_code = "BUG"; break;
         case ItemType::Issue: type_code = "ISS"; break;
     }
+
+    const auto reservation_context = find_shared_id_reservation_context(backlog_root);
+    const auto request_roots = reservation_context
+        ? registered_product_roots(*reservation_context)
+        : std::vector<std::filesystem::path>{backlog_root};
+    std::optional<BacklogIndex> shared_reservations;
+    if (reservation_context) {
+        const auto reservation_db = reservation_context->git_common_dir /
+            "kano" / "backlog-id-reservations.db";
+        shared_reservations.emplace(reservation_db);
+        shared_reservations->initialize();
+    }
+    std::optional<CreateRequestLock> request_lock;
+    if (idempotency_key) {
+        const auto lock_path = reservation_context
+            ? reservation_context->git_common_dir / "kano" / "backlog-id-reservations.create.lock"
+            : backlog_root / ".cache" / "id-create.lock";
+        if (!reservation_context && !is_inside_root(lock_path, backlog_root)) {
+            throw std::runtime_error("item_create.request_lock_path_escape");
+        }
+        request_lock.emplace(lock_path);
+    }
+    const auto replay_result = [&](const BacklogItem& existing) -> CreateItemResult {
+        if (!existing.file_path) {
+            throw std::runtime_error("item_create.request_readback_missing_path");
+        }
+        for (const auto& root : request_roots) {
+            if (!is_inside_root(*existing.file_path, root)) {
+                continue;
+            }
+            const auto receipt = root / "_meta" / "duplicate-admission" / (existing.id + ".json");
+            if (!is_inside_root(receipt, root)) {
+                throw std::runtime_error("duplicate_admission.receipt_path_escape");
+            }
+            if (!std::filesystem::exists(receipt)) {
+                if (normalize_path(root) != normalize_path(backlog_root)) {
+                    throw std::runtime_error("item_create.request_receipt_missing_in_other_checkout");
+                }
+                write_duplicate_admission_receipt(
+                    root, existing, normalized_duplicate_admission, idempotency_key);
+            }
+            std::ifstream receipt_input(receipt);
+            Json::Value receipt_json;
+            Json::CharReaderBuilder reader;
+            std::string parse_errors;
+            if (!receipt_input || !Json::parseFromStream(
+                    reader, receipt_input, &receipt_json, &parse_errors) ||
+                receipt_json["item_id"].asString() != existing.id ||
+                receipt_json["item_uid"].asString() != existing.uid ||
+                receipt_json["idempotency_key"].asString() != *idempotency_key) {
+                throw std::runtime_error("item_create.request_receipt_identity_mismatch");
+            }
+            const auto confirmed = CanonicalStore(root).read(*existing.file_path);
+            if (confirmed.id != existing.id || confirmed.uid != existing.uid ||
+                confirmed.type != existing.type) {
+                throw std::runtime_error("item_create.request_readback_mismatch");
+            }
+            return {confirmed.id, confirmed.uid, *confirmed.file_path,
+                confirmed.type, true, true, true, true};
+        }
+        throw std::runtime_error("item_create.request_path_outside_registered_roots");
+    };
+    std::string request_payload;
+    std::string scoped_request_key;
+    if (idempotency_key) {
+        std::string signature_input;
+        const auto append = [&](const std::string& value) {
+            signature_input += std::to_string(value.size()) + ":" + value;
+        };
+        for (const auto& value : {prefix, type_code, title, agent,
+                 parent.value_or(""), priority, area, iteration,
+                 owner.value_or(""), reviewer.value_or(""),
+                 owner_source, reviewer_source,
+                 normalized_duplicate_admission.search_query,
+                 normalized_duplicate_admission.search_scope,
+                 normalized_duplicate_admission.decision,
+                 normalized_duplicate_admission.rationale}) {
+            append(value);
+        }
+        append(normalized_duplicate_admission.override_requested ? "true" : "false");
+        append(std::to_string(normalized_duplicate_admission.candidates.size()));
+        for (const auto& candidate : normalized_duplicate_admission.candidates) {
+            append(candidate);
+        }
+        append(std::to_string(normalized_duplicate_admission.candidates_read.size()));
+        for (const auto& candidate : normalized_duplicate_admission.candidates_read) {
+            append(candidate);
+        }
+        append(std::to_string(tags.size()));
+        for (const auto& tag : tags) {
+            append(tag);
+        }
+        request_payload = std::move(signature_input);
+        if (reservation_context) {
+            const auto product_ref =
+                reservation_context->product_relative_path.generic_string();
+            scoped_request_key = std::to_string(product_ref.size()) + ":" +
+                product_ref + *idempotency_key;
+        } else {
+            scoped_request_key = *idempotency_key;
+        }
+        if (scoped_request_key.size() > 256) {
+            throw std::runtime_error("item_create.idempotency_scope_too_long");
+        }
+        if (const auto existing = find_created_request(
+                request_roots, backlog_root, *idempotency_key, request_payload)) {
+            const auto authority = shared_reservations
+                ? shared_reservations->find_request_reservation(
+                    prefix, type_code, scoped_request_key, request_payload)
+                : index.find_request_reservation(
+                    prefix, type_code, scoped_request_key, request_payload);
+            if (!authority) {
+                throw std::runtime_error(
+                    "item_create.request_marker_without_reservation: canonical marker has no durable request authority");
+            }
+            std::ostringstream reserved_id;
+            reserved_id << prefix << '-' << type_code << '-'
+                        << std::setfill('0') << std::setw(4) << authority->number;
+            if (existing->id != reserved_id.str() || authority->uid.empty() ||
+                existing->uid != authority->uid) {
+                throw std::runtime_error(
+                    "item_create.reservation_identity_conflict: canonical marker differs from the durable reserved ID or UID");
+            }
+            return replay_result(*existing);
+        }
+    }
     
     if (!index.has_sequence(prefix, type_code)) {
         diagnostics::ScopedMutationSpan span("workitem.create_item.seed_sequence", prefix + "-" + type_code);
         index.ensure_sequence_at_least(prefix, type_code, store.get_max_id_number(prefix, type));
     }
 
-    std::optional<BacklogIndex> shared_reservations;
-    if (const auto reservation_context = find_shared_id_reservation_context(backlog_root)) {
+    if (reservation_context) {
         diagnostics::ScopedMutationSpan span("workitem.create_item.seed_shared_reservation", prefix + "-" + type_code);
-        const auto reservation_db = reservation_context->git_common_dir / "kano" / "backlog-id-reservations.db";
-        shared_reservations.emplace(reservation_db);
-        shared_reservations->initialize();
         int registered_max = 0;
         for (const auto& product_root : registered_product_roots(*reservation_context)) {
             registered_max = std::max(
@@ -1301,11 +1599,26 @@ CreateItemResult WorkitemOps::create_item(
     int reserved_number = 0;
     for (int attempt = 0; attempt < 2; ++attempt) {
         int number = 0;
+        bool existing_request = false;
+        bool committed_request = false;
+        std::string reserved_uid;
         {
             diagnostics::ScopedMutationSpan span("workitem.create_item.next_number", prefix + "-" + type_code);
-            number = shared_reservations
-                ? shared_reservations->reserve_next_number(prefix, type_code, agent)
-                : index.get_next_number(prefix, type_code);
+            if (idempotency_key) {
+                const auto reservation = shared_reservations
+                    ? shared_reservations->reserve_next_number_for_request(
+                        prefix, type_code, agent, scoped_request_key, request_payload)
+                    : index.reserve_next_number_for_request(
+                        prefix, type_code, agent, scoped_request_key, request_payload);
+                number = reservation.number;
+                existing_request = reservation.existing_request;
+                committed_request = reservation.committed_request;
+                reserved_uid = reservation.uid;
+            } else {
+                number = shared_reservations
+                    ? shared_reservations->reserve_next_number(prefix, type_code, agent)
+                    : index.get_next_number(prefix, type_code);
+            }
             reserved_number = number;
             index.ensure_sequence_at_least(prefix, type_code, number);
         }
@@ -1316,15 +1629,38 @@ CreateItemResult WorkitemOps::create_item(
         if (!item.file_path) {
             throw std::runtime_error("duplicate_item_id.path_missing: generated item has no target file path");
         }
+        if (existing_request) {
+            if (const auto existing = find_created_request(
+                    request_roots, backlog_root, *idempotency_key,
+                    request_payload, item.id,
+                    reserved_uid.empty() ? std::nullopt
+                                         : std::optional<std::string>{reserved_uid})) {
+                if (reserved_uid.empty()) {
+                    throw std::runtime_error(
+                        "item_create.reservation_uid_unbound: canonical marker cannot prove the reserved request UID");
+                }
+                return replay_result(*existing);
+            }
+            if (committed_request) {
+                throw std::runtime_error(
+                    "item_create.request_committed_item_missing: preserve the reserved ID and recover the original canonical UID before retrying");
+            }
+            // The process-scoped request lock proves no previous creator remains
+            // active. Recover its durable reservation without allocating a new ID.
+        }
 
         diagnostics::ScopedMutationSpan span("workitem.create_item.collision_check", item.id);
-        const auto existing_paths = store.find_item_paths_by_id(item.id);
+        std::vector<std::filesystem::path> existing_paths;
+        for (const auto& root : request_roots) {
+            const auto matches = CanonicalStore(root).find_item_paths_by_id(item.id);
+            existing_paths.insert(existing_paths.end(), matches.begin(), matches.end());
+        }
         std::error_code exists_error;
         const bool path_exists = std::filesystem::exists(*item.file_path, exists_error);
         if (existing_paths.empty() && !path_exists) {
             break;
         }
-        if (attempt == 0) {
+        if (attempt == 0 && !idempotency_key) {
             const int canonical_max = store.get_max_id_number(prefix, type);
             index.ensure_sequence_at_least(prefix, type_code, canonical_max);
             if (shared_reservations) {
@@ -1343,6 +1679,13 @@ CreateItemResult WorkitemOps::create_item(
             "duplicate_item_id.path_collision: generated item path already exists: " +
             path_for_diagnostic(*item.file_path, backlog_root));
     }
+    if (idempotency_key) {
+        item.uid = shared_reservations
+            ? shared_reservations->bind_request_uid(
+                prefix, type_code, scoped_request_key, reserved_number, item.uid)
+            : index.bind_request_uid(
+                prefix, type_code, scoped_request_key, reserved_number, item.uid);
+    }
     item.state = ItemState::Proposed;
     item.priority = priority;
     item.area = area;
@@ -1360,6 +1703,10 @@ CreateItemResult WorkitemOps::create_item(
             item.external["reviewer_source"] = reviewer_source;
         }
     }
+    if (idempotency_key) {
+        item.external["create_request_key"] = *idempotency_key;
+        item.external["create_request_payload"] = request_payload;
+    }
     
     // 3. Render content using templates
     std::string content;
@@ -1372,16 +1719,31 @@ CreateItemResult WorkitemOps::create_item(
     // Note: CanonicalStore should have a way to calculate path without internal knowledge
     // For now we'll use a hack or implement it in store.
     std::filesystem::path item_path = *item.file_path;
+    if (!is_inside_root(item_path, backlog_root)) {
+        throw std::runtime_error("item_create.target_path_escape: generated item path escaped active product root");
+    }
+    if (parent_identity) {
+        const auto live_parent = resolve_parent_by_identity(
+            store, backlog_root, parent_identity->id, false, "");
+        if (live_parent.uid != parent_identity->uid ||
+            live_parent.file_path != parent_identity->file_path) {
+            throw std::runtime_error(
+                "hierarchy.parent_identity_changed: parent changed during item create admission");
+        }
+    }
     {
         diagnostics::ScopedMutationSpan span("workitem.create_item.write_file", item.id);
         store.write_materialized(item_path, content);
     }
     if (shared_reservations) {
         shared_reservations->commit_reservation(prefix, type_code, reserved_number);
+    } else if (idempotency_key) {
+        index.commit_reservation(prefix, type_code, reserved_number);
     }
     {
         diagnostics::ScopedMutationSpan span("workitem.create_item.duplicate_admission_receipt", item.id);
-        write_duplicate_admission_receipt(backlog_root, item, normalized_duplicate_admission);
+        write_duplicate_admission_receipt(
+            backlog_root, item, normalized_duplicate_admission, idempotency_key);
     }
     
     // 5. Update index
@@ -1390,8 +1752,13 @@ CreateItemResult WorkitemOps::create_item(
         diagnostics::ScopedMutationSpan span("workitem.create_item.index_item", item.id);
         index.index_item(item);
     }
-    
-    return {item.id, item.uid, item_path, type};
+
+    const auto confirmed = store.read(item_path);
+    if (confirmed.id != item.id || confirmed.uid != item.uid ||
+        confirmed.type != item.type || confirmed.parent != item.parent) {
+        throw std::runtime_error("item_create.read_after_write_mismatch");
+    }
+    return {item.id, item.uid, item_path, type, true, true, true, false};
 }
 
 BacklogItem WorkitemOps::transition_state_action(

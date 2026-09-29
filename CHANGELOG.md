@@ -7,7 +7,7 @@ This project uses Git tags as releases: `vX.Y.Z`.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-Current development target: `0.0.5`.
+Current development target: `0.0.6`.
 Current public release target: `0.0.4`.
 Latest released OSS version: `0.0.2`.
 
@@ -16,6 +16,21 @@ historical release-readiness notes. The native C++ executable contract is
 targeted for `0.0.4`.
 
 `0.1.0` references below are future planning only unless called out elsewhere as internal or experimental.
+
+## [0.0.6] - Unreleased
+
+### Overview
+
+`0.0.6` is a development marker for local-first item creation. It is not a
+public release.
+
+### Changed
+
+- Scope-valid local item creation no longer requires unrelated staged changes
+  or divergent Git history to be reconciled before allocation.
+- `workitem create` supports an optional non-secret idempotency key, durable
+  same-ID/UID retry, and JSON output that distinguishes local commit from
+  pending backlog publication.
 
 ## [0.0.5] - Unreleased
 

@@ -118,6 +118,10 @@ struct CreateItemResult {
     std::string uid;
     std::filesystem::path path;
     ItemType type;
+    bool mutation_committed = false;
+    bool read_after_write = false;
+    bool backlog_git_sync_pending = false;
+    bool idempotent_replay = false;
 };
 
 struct UpdateStateResult {

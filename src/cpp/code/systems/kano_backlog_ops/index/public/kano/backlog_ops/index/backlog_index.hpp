@@ -81,6 +81,13 @@ struct IndexDoctorResult {
 
 class BacklogIndex {
 public:
+    struct IdReservationResult {
+        int number = 0;
+        bool existing_request = false;
+        bool committed_request = false;
+        std::string uid;
+    };
+
     struct RebuildMetadataTestHooks {
         std::function<void()> after_change_watch_capture;
     };
@@ -126,6 +133,26 @@ public:
         const std::string& prefix,
         const std::string& type_code,
         const std::string& owner
+    );
+    IdReservationResult reserve_next_number_for_request(
+        const std::string& prefix,
+        const std::string& type_code,
+        const std::string& owner,
+        const std::string& request_key,
+        const std::string& request_payload
+    );
+    std::optional<IdReservationResult> find_request_reservation(
+        const std::string& prefix,
+        const std::string& type_code,
+        const std::string& request_key,
+        const std::string& request_payload
+    );
+    std::string bind_request_uid(
+        const std::string& prefix,
+        const std::string& type_code,
+        const std::string& request_key,
+        int number,
+        const std::string& proposed_uid
     );
     void commit_reservation(const std::string& prefix, const std::string& type_code, int number);
     std::vector<std::string> stale_reservation_diagnostics(

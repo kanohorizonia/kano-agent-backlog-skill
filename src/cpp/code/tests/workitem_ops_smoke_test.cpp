@@ -1,6 +1,7 @@
 #include <filesystem>
 #include <fstream>
 #include <future>
+#include <iomanip>
 #include <iostream>
 #include <optional>
 #include <random>
@@ -14,6 +15,17 @@
 #include "kano/backlog_core/validation/validator.hpp"
 #include "kano/backlog_ops/index/backlog_index.hpp"
 #include "kano/backlog_ops/workitem/workitem_ops.hpp"
+
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <Windows.h>
+#else
+#include <fcntl.h>
+#include <sys/file.h>
+#include <unistd.h>
+#endif
 
 namespace {
 
@@ -186,6 +198,216 @@ int main() {
             BacklogIndex index(root / ".cache" / "index" / "backlog.db");
             index.initialize();
 
+            // Simulate process termination after the durable request/ID reserve
+            // but before the canonical item write. The retry must reuse that ID.
+            const std::string crash_title = "Crash retry smoke";
+            std::string crash_payload;
+            for (const auto& field : {"CRH", "TSK", crash_title.c_str(), "opencode", "", "P2",
+                     "general", "backlog", "", "", "", "", crash_title.c_str(),
+                     "test-product", "create", "", "false", "0", "0", "0"}) {
+                const std::string value = field;
+                crash_payload += std::to_string(value.size()) + ":" + value;
+            }
+            const auto crash_reservation = index.reserve_next_number_for_request(
+                "CRH", "TSK", "opencode", "crash-key", crash_payload);
+            expect(!crash_reservation.existing_request, "crash fixture must reserve a new request");
+            expect_throws_contains([&] {
+                (void)index.reserve_next_number_for_request(
+                    "CRH", "EPIC", "opencode", "crash-key", crash_payload);
+            }, "reserved_id_request_payload_conflict",
+                "a changed item type must not bypass a crash-era request key");
+            expect_throws_contains([&] {
+                (void)index.reserve_next_number_for_request(
+                    "OTHER", "TSK", "opencode", "crash-key", crash_payload);
+            }, "reserved_id_request_payload_conflict",
+                "a changed prefix must not bypass a crash-era request key");
+            const auto crash_created = WorkitemOps::create_item(
+                index, root, "CRH", ItemType::Task, crash_title, "opencode",
+                std::nullopt, "P2", {}, "general", "backlog", std::nullopt,
+                std::nullopt, "", "", duplicate_admission(crash_title), "crash-key");
+            std::ostringstream crash_expected_id;
+            crash_expected_id << "CRH-TSK-" << std::setw(4) << std::setfill('0')
+                              << crash_reservation.number;
+            expect(crash_created.id == crash_expected_id.str(),
+                "crash retry must reuse the durable reserved ID");
+            const auto crash_receipt = root / "_meta" / "duplicate-admission" /
+                (crash_created.id + ".json");
+            const auto receipt_before_replay = read_text(crash_receipt);
+            const auto crash_replayed = WorkitemOps::create_item(
+                index, root, "CRH", ItemType::Task, crash_title, "opencode",
+                std::nullopt, "P2", {}, "general", "backlog", std::nullopt,
+                std::nullopt, "", "", duplicate_admission(crash_title), "crash-key");
+            expect(crash_replayed.id == crash_created.id &&
+                crash_replayed.uid == crash_created.uid && crash_replayed.idempotent_replay,
+                "same-key replay must return the same canonical UID");
+            expect(read_text(crash_receipt) == receipt_before_replay,
+                "same-key replay must preserve the original admission receipt bytes");
+            expect(std::filesystem::remove(crash_receipt),
+                "crash fixture must remove only its own receipt");
+            const auto receipt_recovered = WorkitemOps::create_item(
+                index, root, "CRH", ItemType::Task, crash_title, "opencode",
+                std::nullopt, "P2", {}, "general", "backlog", std::nullopt,
+                std::nullopt, "", "", duplicate_admission(crash_title), "crash-key");
+            expect(receipt_recovered.uid == crash_created.uid &&
+                std::filesystem::exists(crash_receipt),
+                "retry must restore a missing receipt without allocating another UID");
+            expect_throws_contains([&] {
+                (void)WorkitemOps::create_item(index, root, "CRH", ItemType::Task,
+                    "Different request", "opencode", std::nullopt, "P2", {},
+                    "general", "backlog", std::nullopt, std::nullopt, "", "",
+                    duplicate_admission("Different request"), "crash-key");
+            }, "idempotency_conflict", "same key with changed request must fail closed");
+
+            auto first_evidence = duplicate_admission("a; scope=b");
+            first_evidence.search_scope = "c";
+            auto ambiguous_created = WorkitemOps::create_item(
+                index, root, "AMB", ItemType::Task, "Evidence tuple smoke", "opencode",
+                std::nullopt, "P2", {}, "general", "backlog", std::nullopt,
+                std::nullopt, "", "", first_evidence, "ambiguous-key");
+            auto second_evidence = duplicate_admission("a");
+            second_evidence.search_scope = "b; scope=c";
+            expect_throws_contains([&] {
+                (void)WorkitemOps::create_item(
+                    index, root, "AMB", ItemType::Task, "Evidence tuple smoke", "opencode",
+                    std::nullopt, "P2", {}, "general", "backlog", std::nullopt,
+                    std::nullopt, "", "", second_evidence, "ambiguous-key");
+            }, "idempotency_conflict",
+                "distinct evidence tuples with identical display worklogs must not replay");
+            expect(CanonicalStore(root).read(ambiguous_created.path).uid == ambiguous_created.uid,
+                "ambiguous evidence rejection must preserve the first canonical UID");
+
+            const auto request_lock_path = root / ".cache" / "id-create.lock";
+#ifdef _WIN32
+            HANDLE held_request_lock = CreateFileW(request_lock_path.c_str(),
+                GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_ALWAYS,
+                FILE_ATTRIBUTE_NORMAL, nullptr);
+            expect(held_request_lock != INVALID_HANDLE_VALUE,
+                "active-writer fixture must acquire the KOB request lock");
+#else
+            const int held_request_lock = ::open(request_lock_path.c_str(),
+                O_CREAT | O_RDWR, 0600);
+            expect(held_request_lock >= 0 &&
+                ::flock(held_request_lock, LOCK_EX) == 0,
+                "active-writer fixture must acquire the KOB request lock");
+#endif
+            try {
+                expect_throws_contains([&] {
+                    (void)WorkitemOps::create_item(index, root, "LCK", ItemType::Task,
+                        "Active writer smoke", "opencode", std::nullopt, "P2",
+                        {}, "general", "backlog", std::nullopt, std::nullopt,
+                        "", "", duplicate_admission("Active writer smoke"),
+                        "active-writer-key");
+                }, "active_writer_timeout",
+                    "an active KOB writer must fail closed before allocation");
+            } catch (...) {
+#ifdef _WIN32
+                CloseHandle(held_request_lock);
+#else
+                ::flock(held_request_lock, LOCK_UN);
+                ::close(held_request_lock);
+#endif
+                throw;
+            }
+#ifdef _WIN32
+            CloseHandle(held_request_lock);
+#else
+            ::flock(held_request_lock, LOCK_UN);
+            ::close(held_request_lock);
+#endif
+            const auto after_writer = WorkitemOps::create_item(
+                index, root, "LCK", ItemType::Task, "Active writer smoke", "opencode",
+                std::nullopt, "P2", {}, "general", "backlog", std::nullopt,
+                std::nullopt, "", "", duplicate_admission("Active writer smoke"),
+                "active-writer-key");
+            expect(after_writer.id == "LCK-TSK-0001",
+                "active-writer failure must not advance the ID sequence");
+
+            const auto missing_committed_root = root / "missing-committed-fixture";
+            std::filesystem::create_directories(missing_committed_root / "items");
+            std::filesystem::create_directories(missing_committed_root / "_meta");
+            BacklogIndex missing_committed_index(
+                missing_committed_root / ".cache" / "index" / "backlog.db");
+            missing_committed_index.initialize();
+            const auto missing_committed_item = WorkitemOps::create_item(
+                missing_committed_index, missing_committed_root, "MIS", ItemType::Task,
+                "Committed item relocation smoke", "opencode", std::nullopt,
+                "P2", {}, "general", "backlog", std::nullopt, std::nullopt,
+                "", "", duplicate_admission("Committed item relocation smoke"),
+                "committed-missing-key");
+            const auto preserved_item = missing_committed_root / "preserved" /
+                missing_committed_item.path.filename();
+            std::filesystem::create_directories(preserved_item.parent_path());
+            std::filesystem::rename(missing_committed_item.path, preserved_item);
+            expect_throws_contains([&] {
+                (void)WorkitemOps::create_item(
+                    missing_committed_index, missing_committed_root, "MIS", ItemType::Task,
+                    "Committed item relocation smoke", "opencode", std::nullopt,
+                    "P2", {}, "general", "backlog", std::nullopt, std::nullopt,
+                    "", "", duplicate_admission("Committed item relocation smoke"),
+                    "committed-missing-key");
+            }, "request_committed_item_missing",
+                "committed missing canonical item must not mint a replacement UID");
+            expect(read_text(preserved_item).find(missing_committed_item.uid) !=
+                std::string::npos,
+                "committed missing-item failure must preserve recoverable original bytes");
+
+            // A marker imported from an independent clone is not the durable
+            // reservation authority, even if its request payload matches.
+            const auto marker_root = root / "marker-authority-fixture";
+            std::filesystem::create_directories(marker_root / "items");
+            std::filesystem::create_directories(marker_root / "_meta");
+            BacklogIndex marker_index(marker_root / ".cache" / "index" / "backlog.db");
+            marker_index.initialize();
+            CanonicalStore marker_store(marker_root);
+            const auto reserved_marker = WorkitemOps::create_item(
+                marker_index, marker_root, "AUT", ItemType::Task,
+                "Marker authority smoke", "opencode", std::nullopt,
+                "P2", {}, "general", "backlog", std::nullopt, std::nullopt,
+                "", "", duplicate_admission("Marker authority smoke"),
+                "marker-authority-key");
+            const auto original_marker = marker_store.read(reserved_marker.path);
+            const auto preserved_marker = marker_root / "preserved" /
+                reserved_marker.path.filename();
+            std::filesystem::create_directories(preserved_marker.parent_path());
+            std::filesystem::rename(reserved_marker.path, preserved_marker);
+            auto foreign_marker = marker_store.create(
+                "AUT", ItemType::Task, "Marker authority smoke", 777);
+            foreign_marker.external = original_marker.external;
+            marker_store.write(foreign_marker);
+            expect_throws_contains([&] {
+                (void)WorkitemOps::create_item(
+                    marker_index, marker_root, "AUT", ItemType::Task,
+                    "Marker authority smoke", "opencode", std::nullopt,
+                    "P2", {}, "general", "backlog", std::nullopt,
+                    std::nullopt, "", "",
+                    duplicate_admission("Marker authority smoke"),
+                    "marker-authority-key");
+            }, "reservation_identity_conflict",
+                "matching imported marker must not override the reserved ID");
+            expect(std::filesystem::remove(*foreign_marker.file_path),
+                "marker fixture must remove only its own imported item");
+            foreign_marker = original_marker;
+            foreign_marker.uid = marker_store.create(
+                "AUT", ItemType::Task, "Foreign UID", 778).uid;
+            marker_store.write(foreign_marker);
+            expect(std::filesystem::remove(
+                marker_root / "_meta" / "duplicate-admission" /
+                    (reserved_marker.id + ".json")),
+                "marker fixture must remove only its own receipt");
+            expect_throws_contains([&] {
+                (void)WorkitemOps::create_item(
+                    marker_index, marker_root, "AUT", ItemType::Task,
+                    "Marker authority smoke", "opencode", std::nullopt,
+                    "P2", {}, "general", "backlog", std::nullopt,
+                    std::nullopt, "", "",
+                    duplicate_admission("Marker authority smoke"),
+                    "marker-authority-key");
+            }, "reservation_identity_conflict",
+                "matching imported marker must not override the reserved UID");
+            expect(read_text(preserved_marker).find(reserved_marker.uid) !=
+                std::string::npos,
+                "foreign marker failure must preserve the original UID bytes");
+
             auto created = create_item_with_admission(index, root, "TST", ItemType::Task, "Native workitem smoke", "opencode");
             expect(created.id.rfind("TST-TSK-", 0) == 0, "created id should use task prefix");
 
@@ -277,6 +499,15 @@ int main() {
 
             auto subtask_created = create_item_with_admission(index, root, "TST", ItemType::SubTask, "Native subtask smoke", "opencode", created.id);
             expect(subtask_created.id.rfind("TST-SUBTSK-", 0) == 0, "created subtask should use SUBTSK prefix");
+            expect_throws_contains(
+                [&]() {
+                    (void)create_item_with_admission(
+                        index, root, "TST", ItemType::SubTask,
+                        "Missing parent must reject before allocation", "opencode",
+                        "TST-TSK-9999");
+                },
+                "Parent item not found",
+                "item create must reject a missing parent before reserving an id");
             expect(
                 subtask_created.path.parent_path().parent_path().filename().string() == "subtask",
                 "created subtask should be stored under items/subtask");
@@ -652,20 +883,33 @@ int main() {
                 index,
                 root,
                 "TST",
-                ItemType::Task,
+                ItemType::Epic,
                 "Initiative child admission smoke",
                 "opencode",
                 initiative_created.id);
-            auto initiative_child = store.read(initiative_child_created.path);
+            auto initiative_ready_task_created = create_item_with_admission(
+                index,
+                root,
+                "TST",
+                ItemType::Task,
+                "Initiative ready task admission smoke",
+                "opencode",
+                initiative_child_created.id);
+            auto initiative_child = store.read(initiative_ready_task_created.path);
             set_ready_fields(initiative_child);
             initiative_child.state = ItemState::Ready;
             store.write(initiative_child);
             index.index_item(initiative_child);
             auto initiative_implementation_admission = WorkitemOps::evaluate_work_order_admission(root, initiative_created.id, std::string("implementation"));
             expect(!initiative_implementation_admission.admitted, "initiative implementation admission should be blocked");
-            expect(initiative_implementation_admission.reason_code == "parent_implementation_blocked_ready_child", "initiative implementation should route to ready child work");
-            expect(admission_has_child_recommendation(initiative_implementation_admission, initiative_child_created.id, "route_ready_child"),
-                "initiative implementation admission should list ready child route recommendation");
+            expect(initiative_implementation_admission.reason_code == "parent_implementation_blocked_candidate_children",
+                "initiative implementation should route through its Epic child");
+            expect(admission_has_child_recommendation(initiative_implementation_admission, initiative_child_created.id, "consider_child"),
+                "initiative implementation admission should list the Epic child");
+            auto initiative_epic_admission = WorkitemOps::evaluate_work_order_admission(root, initiative_child_created.id, std::string("implementation"));
+            expect(initiative_epic_admission.reason_code == "parent_implementation_blocked_ready_child" &&
+                admission_has_child_recommendation(initiative_epic_admission, initiative_ready_task_created.id, "route_ready_child"),
+                "Epic implementation should route to its Ready Task child");
 
             auto issue_created = create_item_with_admission(
                 index,
@@ -1614,16 +1858,17 @@ int main() {
                 external_parent_after_stale_index.state == ItemState::Proposed,
                 "existing outside-root indexed file should not be read or mutated");
 
-            auto path_parent_child_created = create_item_with_admission(
-                index,
-                root,
-                "TST",
-                ItemType::Task,
-                "Path parent must be rejected",
-                "opencode",
+            expect_throws_contains([&] {
+                (void)create_item_with_admission(index, root, "TST", ItemType::Task,
+                    "Path parent must be rejected", "opencode",
+                    external_created.path.string());
+            }, "path-like parent ref redacted",
+                "create must reject an external path parent before reserving an ID");
+            auto path_parent_child = store.create("TST", ItemType::Task,
+                "Path parent must be rejected", index.get_next_number("TST", "TSK"),
                 external_created.path.string());
-            auto path_parent_child = store.read(path_parent_child_created.path);
             set_ready_fields(path_parent_child);
+            path_parent_child.state = ItemState::Proposed;
             store.write(path_parent_child);
             index.index_item(path_parent_child);
 
@@ -1633,7 +1878,7 @@ int main() {
                 (void)WorkitemOps::update_state(
                     index,
                     root,
-                    path_parent_child_created.id,
+                    path_parent_child.id,
                     ItemState::InProgress,
                     "opencode");
             } catch (const std::exception& ex) {
@@ -1654,7 +1899,7 @@ int main() {
             auto unchanged_external_parent = external_store.read(external_created.path);
             expect(unchanged_external_parent.state == ItemState::Proposed, "external parent should not be mutated");
 
-            auto rejected_child = store.read(path_parent_child_created.path);
+            auto rejected_child = store.read(*path_parent_child.file_path);
             expect(rejected_child.state == ItemState::Proposed, "child with rejected path parent should not be updated");
 
             auto stale_missing_parent_ref = std::string("TST-FTR-9998");
@@ -1669,16 +1914,17 @@ int main() {
             index.index_item(stale_missing_parent_index);
             std::filesystem::remove(*stale_missing_parent_index.file_path);
 
-            auto stale_missing_child_created = create_item_with_admission(
-                index,
-                root,
-                "TST",
-                ItemType::Task,
+            expect_throws_contains([&] {
+                (void)create_item_with_admission(index, root, "TST", ItemType::Task,
+                    "Stale indexed missing parent child smoke", "opencode",
+                    stale_missing_parent_ref);
+            }, "Parent item not found",
+                "create must reject a stale indexed parent before reserving an ID");
+            auto stale_missing_child = store.create("TST", ItemType::Task,
                 "Stale indexed missing parent child smoke",
-                "opencode",
-                stale_missing_parent_ref);
-            auto stale_missing_child = store.read(stale_missing_child_created.path);
+                index.get_next_number("TST", "TSK"), stale_missing_parent_ref);
             set_ready_fields(stale_missing_child);
+            stale_missing_child.state = ItemState::Proposed;
             store.write(stale_missing_child);
             index.index_item(stale_missing_child);
 
@@ -1688,7 +1934,7 @@ int main() {
                 (void)WorkitemOps::update_state(
                     index,
                     root,
-                    stale_missing_child_created.id,
+                    stale_missing_child.id,
                     ItemState::InProgress,
                     "opencode");
             } catch (const std::exception& ex) {
@@ -1771,16 +2017,16 @@ int main() {
             // 4. Truly missing parent: no indexed path, no identity match. The
             //    diagnostic must explicitly identify the parent as missing.
             auto missing_parent_ref = std::string("TST-FTR-9999");
-            auto missing_parent_child_created = create_item_with_admission(
-                index,
-                root,
-                "TST",
-                ItemType::Task,
-                "Missing parent child smoke",
-                "opencode",
+            expect_throws_contains([&] {
+                (void)create_item_with_admission(index, root, "TST", ItemType::Task,
+                    "Missing parent child smoke", "opencode", missing_parent_ref);
+            }, "Parent item not found in active product root",
+                "create must reject a missing parent before reserving an ID");
+            auto missing_parent_child = store.create("TST", ItemType::Task,
+                "Missing parent child smoke", index.get_next_number("TST", "TSK"),
                 missing_parent_ref);
-            auto missing_parent_child = store.read(missing_parent_child_created.path);
             set_ready_fields(missing_parent_child);
+            missing_parent_child.state = ItemState::Proposed;
             store.write(missing_parent_child);
             index.index_item(missing_parent_child);
 
@@ -1790,7 +2036,7 @@ int main() {
                 (void)WorkitemOps::update_state(
                     index,
                     root,
-                    missing_parent_child_created.id,
+                    missing_parent_child.id,
                     ItemState::InProgress,
                     "opencode");
             } catch (const std::exception& ex) {
@@ -1805,7 +2051,7 @@ int main() {
                 missing_parent_diagnostic.find(missing_parent_ref) != std::string::npos,
                 "missing-parent diagnostic should reference the unresolved parent ref");
 
-            auto unchanged_missing_parent_child = store.read(missing_parent_child_created.path);
+            auto unchanged_missing_parent_child = store.read(*missing_parent_child.file_path);
             expect(
                 unchanged_missing_parent_child.state == ItemState::Proposed,
                 "child with truly missing parent should not be updated");

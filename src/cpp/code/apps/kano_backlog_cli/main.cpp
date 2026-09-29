@@ -287,6 +287,35 @@ std::string json_to_string(const Json::Value& value, bool pretty = true) {
     return Json::writeString(builder, value);
 }
 
+void validate_create_item_format(const std::string& format) {
+    if (format != "plain" && format != "json") {
+        throw std::runtime_error("format must be plain or json");
+    }
+}
+
+void print_create_item_result(const CreateItemResult& result, const std::string& format) {
+    if (format == "json") {
+        Json::Value value(Json::objectValue);
+        value["schema"] = "kob.item-create.v1";
+        value["status"] = "local_committed";
+        value["id"] = result.id;
+        value["uid"] = result.uid;
+        value["path"] = result.path.string();
+        value["mutation_committed"] = result.mutation_committed;
+        value["read_after_write"] = result.read_after_write;
+        value["backlog_git_sync_pending"] = result.backlog_git_sync_pending;
+        value["idempotent_replay"] = result.idempotent_replay;
+        std::cout << json_to_string(value, true) << "\n";
+        return;
+    }
+    std::cout << "Created item: " << result.id << " (" << result.uid << ")\n";
+    std::cout << "Path: " << result.path.string() << "\n";
+    std::cout << "Mutation committed: " << (result.mutation_committed ? "true" : "false") << "\n";
+    std::cout << "Read after write: " << (result.read_after_write ? "true" : "false") << "\n";
+    std::cout << "Backlog Git sync pending: " << (result.backlog_git_sync_pending ? "true" : "false") << "\n";
+    std::cout << "Idempotent replay: " << (result.idempotent_replay ? "true" : "false") << "\n";
+}
+
 Json::Value relation_endpoint_json(const RelationEndpoint& endpoint) {
     Json::Value value(Json::objectValue);
     value["product"] = endpoint.product;
@@ -6208,6 +6237,8 @@ std::optional<int> try_run_workitem_create_fast_path(int argc, char** argv) {
     std::string parent;
     std::string owner;
     std::string reviewer;
+    std::optional<std::string> idempotency_key;
+    std::string format = "plain";
     bool profile_mutations = false;
     DuplicateAdmissionEvidence duplicate_admission;
 
@@ -6298,6 +6329,14 @@ std::optional<int> try_run_workitem_create_fast_path(int argc, char** argv) {
             reviewer = *value;
             continue;
         }
+        if (auto value = option_value(i, "--idempotency-key")) {
+            idempotency_key = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--format")) {
+            format = *value;
+            continue;
+        }
         if (auto value = option_value(i, "--duplicate-search-query")) {
             duplicate_admission.search_query = *value;
             continue;
@@ -6336,6 +6375,7 @@ std::optional<int> try_run_workitem_create_fast_path(int argc, char** argv) {
     if (type_str.empty() || title.empty() || agent.empty()) {
         return std::nullopt;
     }
+    validate_create_item_format(format);
     if (profile_mutations) {
         kano::backlog_core::diagnostics::enable_mutation_timing();
     }
@@ -6391,11 +6431,10 @@ std::optional<int> try_run_workitem_create_fast_path(int argc, char** argv) {
         effective_reviewer,
         owner_source,
         reviewer_source,
-        duplicate_admission
+        duplicate_admission,
+        idempotency_key
     );
-
-    std::cout << "Created item: " << result.id << " (" << result.uid << ")\n";
-    std::cout << "Path: " << result.path.string() << "\n";
+    print_create_item_result(result, format);
     return 0;
 }
 
@@ -9302,6 +9341,8 @@ int main(int InArgc, char* InArgv[]) {
             auto& parent = cli11_state.keep<std::string>();
             auto& owner = cli11_state.keep<std::string>();
             auto& reviewer = cli11_state.keep<std::string>();
+            auto& idempotency_key = cli11_state.keep<std::string>();
+            auto& create_format = cli11_state.keep<std::string>("plain");
             auto& profile_mutations = cli11_state.keep<bool>(false);
             auto duplicate_admission = cli11_state.make_shared<DuplicateAdmissionEvidence>();
             createCmd->add_option("-t,--type", type_str, "Item type (initiative, epic, feature, userstory, task, subtask, bug, issue)")->required();
@@ -9310,6 +9351,10 @@ int main(int InArgc, char* InArgv[]) {
             createCmd->add_option("--parent", parent, "Parent item ID");
             createCmd->add_option("--owner,--assignee", owner, "Explicit repo-visible owner/assignee alias");
             createCmd->add_option("--reviewer", reviewer, "Explicit repo-visible reviewer alias");
+            auto* idempotency_key_option = createCmd->add_option(
+                "--idempotency-key", idempotency_key,
+                "Optional non-secret request identity for same-UID retry");
+            createCmd->add_option("--format", create_format, "Output format: plain|json");
             createCmd->add_option("--duplicate-search-query", duplicate_admission->search_query, "Duplicate search query used before item creation");
             createCmd->add_option("--duplicate-search-scope", duplicate_admission->search_scope, "Duplicate search scope or product set inspected before item creation");
             createCmd->add_option("--duplicate-candidate", duplicate_admission->candidates, "Candidate duplicate item ID found before creation; repeatable")->expected(1);
@@ -9319,7 +9364,8 @@ int main(int InArgc, char* InArgv[]) {
             createCmd->add_flag("--duplicate-override", duplicate_admission->override_requested, "Allow create when duplicate candidates were found and read");
             createCmd->add_flag("--profile-mutations", profile_mutations, "Emit bounded KOB_TIMING mutation spans");
 
-            createCmd->callback([&, duplicate_admission]() {
+            createCmd->callback([&, duplicate_admission, idempotency_key_option]() {
+                validate_create_item_format(create_format);
                 if (profile_mutations) {
                     kano::backlog_core::diagnostics::enable_mutation_timing();
                 }
@@ -9368,11 +9414,12 @@ int main(int InArgc, char* InArgv[]) {
                     effective_reviewer,
                     owner_source,
                     reviewer_source,
-                    *duplicate_admission
+                    *duplicate_admission,
+                    idempotency_key_option->count() > 0
+                        ? std::optional<std::string>(idempotency_key)
+                        : std::nullopt
                 );
-
-                std::cout << "Created item: " << result.id << " (" << result.uid << ")\n";
-                std::cout << "Path: " << result.path.string() << "\n";
+                print_create_item_result(result, create_format);
             });
         }
 

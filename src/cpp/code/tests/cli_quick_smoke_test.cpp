@@ -1,7 +1,9 @@
+#include <algorithm>
 #include <cstdlib>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
@@ -357,6 +359,148 @@ std::vector<std::string> with_duplicate_admission(std::vector<std::string> args,
     args.push_back("--duplicate-decision");
     args.push_back("create");
     return args;
+}
+
+void verify_dirty_diverged_local_create(
+    const std::filesystem::path& binary,
+    const std::filesystem::path& test_root
+) {
+    const auto checkout = test_root / "diverged-checkout";
+    const auto remote = test_root / "diverged-remote.git";
+    const auto writer = test_root / "diverged-writer";
+    const auto git_output = test_root / "diverged-git-output.txt";
+    std::filesystem::create_directories(checkout);
+    const auto original_cwd = std::filesystem::current_path();
+    std::filesystem::current_path(checkout);
+    try {
+        expect(run_command(binary, {"admin", "init", "--product", "diverged-product", "--agent", "tester"}) == 0,
+            "diverged fixture admin init failed");
+    } catch (...) {
+        std::filesystem::current_path(original_cwd);
+        throw;
+    }
+    std::filesystem::current_path(original_cwd);
+
+    const auto git = [&](std::vector<std::string> args) {
+        expect_command_capture_success(
+            run_command_capture("git", args, git_output), git_output,
+            "diverged fixture Git command failed");
+    };
+    git({"init", "-b", "main", checkout.string()});
+    git({"-C", checkout.string(), "config", "user.name", "KOB fixture"});
+    git({"-C", checkout.string(), "config", "user.email", "kob-fixture@example.invalid"});
+    git({"-C", checkout.string(), "add", "."});
+    git({"-C", checkout.string(), "commit", "-m", "fixture base"});
+    git({"init", "--bare", "-b", "main", remote.string()});
+    git({"-C", checkout.string(), "remote", "add", "origin", remote.string()});
+    git({"-C", checkout.string(), "push", "-u", "origin", "main"});
+    git({"clone", remote.string(), writer.string()});
+    git({"-C", writer.string(), "config", "user.name", "KOB fixture writer"});
+    git({"-C", writer.string(), "config", "user.email", "kob-writer@example.invalid"});
+    for (int i = 0; i < 18; ++i) {
+        git({"-C", writer.string(), "commit", "--allow-empty", "-m",
+            "remote-" + std::to_string(i)});
+    }
+    git({"-C", writer.string(), "push", "origin", "main"});
+    for (int i = 0; i < 16; ++i) {
+        git({"-C", checkout.string(), "commit", "--allow-empty", "-m",
+            "local-" + std::to_string(i)});
+    }
+    git({"-C", checkout.string(), "fetch", "origin"});
+    const auto divergence_output = test_root / "diverged-counts.txt";
+    expect_command_capture_success(run_command_capture("git", {
+        "-C", checkout.string(), "rev-list", "--left-right", "--count",
+        "origin/main...HEAD"}, divergence_output), divergence_output,
+        "diverged fixture rev-list failed");
+    expect(read_text(divergence_output).find("18\t16") != std::string::npos,
+        "fixture must be exactly 18 behind and 16 ahead");
+
+    for (int i = 0; i < 10; ++i) {
+        write_text(checkout / "notes" / ("unrelated-" + std::to_string(i) + ".txt"),
+            "staged version " + std::to_string(i) + "\n");
+    }
+    git({"-C", checkout.string(), "add", "notes"});
+    const auto staged_output = test_root / "diverged-staged.txt";
+    expect_command_capture_success(run_command_capture("git", {
+        "-C", checkout.string(), "ls-files", "-s", "--", "notes"}, staged_output),
+        staged_output, "diverged fixture staged snapshot failed");
+    const auto staged_before = read_text(staged_output);
+    expect(std::count(staged_before.begin(), staged_before.end(), '\n') == 10,
+        "fixture must contain ten unrelated staged versions");
+
+    const auto index_lock = checkout / ".git" / "index.lock";
+    write_text(index_lock, "fixture-owned publication lock\n");
+    std::filesystem::current_path(checkout);
+    const auto parent_output = test_root / "diverged-parent.json";
+    const auto child_output = test_root / "diverged-child.json";
+    int parent_rc = -1;
+    int child_rc = -1;
+    try {
+        parent_rc = run_command_capture(binary, with_duplicate_admission({
+            "-P", "diverged-product", "workitem", "create", "-t", "feature",
+            "--title", "Diverged parent", "--agent", "tester",
+            "--idempotency-key", "diverged-parent", "--format", "json"},
+            "Diverged parent"), parent_output);
+        if (parent_rc == 0) {
+            const auto parent = read_json(parent_output);
+            child_rc = run_command_capture(binary, with_duplicate_admission({
+                "-P", "diverged-product", "workitem", "create", "-t", "task",
+                "--title", "Diverged child", "--agent", "tester",
+                "--parent", parent["id"].asString(),
+                "--idempotency-key", "diverged-child", "--format", "json"},
+                "Diverged child"), child_output);
+        }
+    } catch (...) {
+        std::filesystem::current_path(original_cwd);
+        throw;
+    }
+    std::filesystem::current_path(original_cwd);
+    expect_command_capture_success(parent_rc, parent_output,
+        "dirty/diverged parent create with Git index.lock failed");
+    expect_command_capture_success(child_rc, child_output,
+        "dirty/diverged child create with Git index.lock failed");
+    const auto parent = read_json(parent_output);
+    const auto child = read_json(child_output);
+    expect(parent["mutation_committed"].asBool() &&
+        child["mutation_committed"].asBool() &&
+        child["read_after_write"].asBool() &&
+        child["backlog_git_sync_pending"].asBool() &&
+        parent["uid"].asString() != child["uid"].asString(),
+        "dirty/diverged local create must commit unique parent/child UIDs while publication remains pending");
+    expect(read_text(child["path"].asString()).find(
+        "parent: " + parent["id"].asString()) != std::string::npos,
+        "dirty/diverged child readback must preserve parent identity");
+    expect(std::filesystem::remove(index_lock),
+        "fixture-owned Git index.lock should be removable after local create");
+    expect_command_capture_success(run_command_capture("git", {
+        "-C", checkout.string(), "ls-files", "-s", "--", "notes"}, staged_output),
+        staged_output, "staged versions readback failed");
+    expect(read_text(staged_output) == staged_before,
+        "local KOB create must preserve all ten unrelated staged blob identities");
+    expect(run_command_capture("git", {
+        "-C", checkout.string(), "push", "origin", "main"}, git_output) != 0,
+        "diverged fixture publication should remain blocked by non-fast-forward history");
+
+    std::filesystem::current_path(writer);
+    const auto independent_output = test_root / "independent-clone-create.json";
+    int independent_rc = -1;
+    try {
+        independent_rc = run_command_capture(binary, with_duplicate_admission({
+            "-P", "diverged-product", "workitem", "create", "-t", "feature",
+            "--title", "Independent clone parent", "--agent", "tester",
+            "--idempotency-key", "independent-parent", "--format", "json"},
+            "Independent clone parent"), independent_output);
+    } catch (...) {
+        std::filesystem::current_path(original_cwd);
+        throw;
+    }
+    std::filesystem::current_path(original_cwd);
+    expect_command_capture_success(independent_rc, independent_output,
+        "independent clone local create failed");
+    const auto independent = read_json(independent_output);
+    expect(independent["id"].asString() == parent["id"].asString() &&
+        independent["uid"].asString() != parent["uid"].asString(),
+        "independent clone must remain outside the common-dir uniqueness boundary");
 }
 
 std::filesystem::path find_binary(const std::filesystem::path& repo_root, const std::filesystem::path& executable_path) {
@@ -815,8 +959,43 @@ int main(int argc, char** argv) {
             "sync-sequences failed");
         expect(run_command(binary, {"-P", "quick-smoke-product", "workitem", "create", "-t", "task", "--title", "Missing duplicate admission", "--agent", "tester"}) != 0,
             "workitem create without duplicate admission should fail");
-        expect(run_command(binary, with_duplicate_admission({"-P", "quick-smoke-product", "workitem", "create", "-t", "task", "--title", "Quick smoke task", "--agent", "tester", "--profile-mutations"}, "Quick smoke task")) == 0,
-            "workitem create failed");
+        const auto invalid_format_output = temp_root / "invalid-create-format.txt";
+        expect(run_command_capture(binary, with_duplicate_admission({
+            "-P", "quick-smoke-product", "workitem", "create", "-t", "task",
+            "--title", "Invalid format must not create", "--agent", "tester",
+            "--idempotency-key", "invalid-format-request", "--format", "yaml"},
+            "Invalid format must not create"), invalid_format_output) != 0,
+            "unsupported create format must fail before local mutation");
+        expect(read_text(invalid_format_output).find("format must be plain or json") != std::string::npos,
+            "unsupported create format must report the format preflight failure");
+        expect(!std::filesystem::exists(
+            quick_product_root / "items" / "task" / "0000" /
+                "QS-TSK-0001_invalid-format-must-not-create.md"),
+            "invalid create format must not write a canonical item");
+        const auto first_create_output = temp_root / "quick-create-first.json";
+        const auto keyed_create_args = with_duplicate_admission({
+            "-P", "quick-smoke-product", "workitem", "create", "-t", "task",
+            "--title", "Quick smoke task", "--agent", "tester",
+            "--idempotency-key", "quick-task-request", "--format", "json"},
+            "Quick smoke task");
+        expect_command_capture_success(
+            run_command_capture(binary, keyed_create_args, first_create_output),
+            first_create_output, "workitem keyed create failed");
+        const auto first_create = read_json(first_create_output);
+        expect(first_create["mutation_committed"].asBool() &&
+                   first_create["read_after_write"].asBool() &&
+                   first_create["backlog_git_sync_pending"].asBool() &&
+                   !first_create["idempotent_replay"].asBool(),
+            "new local create must report committed/readback and pending publication");
+        const auto retry_create_output = temp_root / "quick-create-retry.json";
+        expect_command_capture_success(
+            run_command_capture(binary, keyed_create_args, retry_create_output),
+            retry_create_output, "workitem keyed create retry failed");
+        const auto retry_create = read_json(retry_create_output);
+        expect(retry_create["uid"].asString() == first_create["uid"].asString() &&
+                   retry_create["id"].asString() == first_create["id"].asString() &&
+                   retry_create["idempotent_replay"].asBool(),
+            "same-key retry must return the committed UID without creating another item");
         const auto task_receipt_path = temp_root / "_kano" / "backlog" / "products" / "quick-smoke-product" / "_meta" / "duplicate-admission" / "QS-TSK-0001.json";
         expect(std::filesystem::exists(task_receipt_path), "workitem create should write duplicate admission receipt");
         const auto task_path = temp_root / "_kano" / "backlog" / "products" / "quick-smoke-product" / "items" / "task" / "0000" / "QS-TSK-0001_quick-smoke-task.md";
@@ -855,6 +1034,27 @@ int main(int argc, char** argv) {
             "second product sync-sequences failed");
         expect(run_command(binary, with_duplicate_admission({"-P", "second-product", "workitem", "create", "-t", "task", "--title", "Cross product target", "--agent", "tester"}, "Cross product target")) == 0,
             "second product target creation failed");
+
+        expect(run_command(binary, {"admin", "init", "--product", "retry-product", "--agent", "tester"}) == 0,
+            "retry product admin init failed");
+        const auto concurrent_create_args = with_duplicate_admission({
+            "-P", "retry-product", "workitem", "create", "-t", "task",
+            "--title", "Concurrent keyed task", "--agent", "tester",
+            "--idempotency-key", "concurrent-request", "--format", "json"},
+            "Concurrent keyed task");
+        const auto concurrent_first_output = temp_root / "concurrent-create-first.json";
+        const auto concurrent_second_output = temp_root / "concurrent-create-second.json";
+        auto concurrent_first = std::async(std::launch::async, [&]() {
+            return run_command_capture(binary, concurrent_create_args, concurrent_first_output);
+        });
+        auto concurrent_second = std::async(std::launch::async, [&]() {
+            return run_command_capture(binary, concurrent_create_args, concurrent_second_output);
+        });
+        expect(concurrent_first.get() == 0 && concurrent_second.get() == 0,
+            "concurrent same-key creates must both resolve successfully");
+        expect(read_json(concurrent_first_output)["uid"].asString() ==
+                   read_json(concurrent_second_output)["uid"].asString(),
+            "concurrent same-key creates must return one UID");
 
         const auto quick_index_build_output = temp_root / "quick-index-build.json";
         expect_command_capture_success(
@@ -1669,7 +1869,7 @@ int main(int argc, char** argv) {
             "all-product UID validation should discover the shared backlog root");
         const auto uid_all_text = read_text(uid_all_output);
         expect(uid_all_text.find("OK quick-smoke-product: all 1 items have UUIDv7 UIDs") != std::string::npos &&
-               uid_all_text.find("Items checked: 2") != std::string::npos,
+               uid_all_text.find("Items checked: 3") != std::string::npos,
             "all-product UID validation should inspect a nonzero total across configured products");
 
         const auto schema_check_output = temp_root / "schema-check-product.txt";
@@ -3018,6 +3218,7 @@ int main(int argc, char** argv) {
                 corrupt_plain_text.find("proof_root_volume_serial") == std::string::npos,
             "corrupt plain status must not expose sensitive markers or raw proof identity labels");
 
+        verify_dirty_diverged_local_create(binary, temp_root);
         std::filesystem::current_path(original_cwd);
         std::filesystem::remove_all(temp_root);
         std::cout << "cli_quick_smoke_test: PASS\n";

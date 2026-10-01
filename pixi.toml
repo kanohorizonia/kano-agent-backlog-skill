@@ -26,6 +26,7 @@ bash = "*"
 # =============================================================================
 [tasks]
 env-summary = "git --version && cmake --version && ninja --version"
+create-scan-offline-build = "bash src/shell/test/create-scan-offline-build.sh"
 native-command-coverage = "bash src/shell/test/native-command-coverage.sh"
 native-runtime-gate = "bash src/shell/test/native-runtime-gate.sh"
 report-feature-detail-smoke = "bash src/shell/test/report-feature-detail-smoke.sh"

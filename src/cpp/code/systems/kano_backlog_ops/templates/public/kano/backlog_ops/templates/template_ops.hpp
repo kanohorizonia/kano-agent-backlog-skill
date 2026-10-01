@@ -31,7 +31,7 @@ public:
         const std::string& backlog_root_label = "../../.."
     );
 
-private:
+    /** Render canonical frontmatter for pre-allocation size admission. */
     static std::string render_frontmatter(const kano::backlog_core::BacklogItem& item);
 };
 

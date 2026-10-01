@@ -20,6 +20,7 @@
 #include <string_view>
 #include <thread>
 #include <json/json.h>
+#include <limits>
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -1279,27 +1280,55 @@ bool is_allowed_parent_type(ItemType child_type, ItemType parent_type) {
     return std::find(allowed.begin(), allowed.end(), parent_type) != allowed.end();
 }
 
+// Admission scans are pre-write and share these limits across recovery passes.
+// Keep canonical marker verification; never substitute a disposable index for it.
+struct CreateRequestScanBudget {
+    static constexpr std::size_t maximum_item_bytes = 64 * 1024;
+    static constexpr std::size_t maximum_total_bytes = 128 * 1024 * 1024;
+    static constexpr std::size_t maximum_files = 32768;
+    const std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
+    std::size_t files = 0;
+    std::size_t bytes = 0;
+
+    void check() const {
+        if (files >= maximum_files || bytes >= maximum_total_bytes ||
+            std::chrono::steady_clock::now() - started >= std::chrono::seconds(25)) {
+            throw std::runtime_error(
+                "item_create.request_scan_budget_exceeded: canonical request verification did not complete; no new item allocated");
+        }
+    }
+};
+
 std::optional<BacklogItem> find_created_request(
     const std::vector<std::filesystem::path>& product_roots,
     const std::filesystem::path& active_root,
     const std::string& request_key,
     const std::string& request_payload,
+    CreateRequestScanBudget& budget,
     const std::optional<std::string>& reserved_id = std::nullopt,
     const std::optional<std::string>& reserved_uid = std::nullopt
 ) {
+    diagnostics::ScopedMutationSpan span("workitem.create_item.request_scan");
     std::optional<BacklogItem> found;
     for (const auto& root : product_roots) {
+        budget.check();
         CanonicalStore candidate_store(root);
         for (const auto& path : candidate_store.list_items()) {
             if (path.filename().string().ends_with(".index.md")) {
                 continue;
             }
+            budget.check();
             BacklogItem candidate;
             try {
-                candidate = candidate_store.read(path);
+                std::size_t bytes_read = 0;
+                candidate = candidate_store.read_metadata_bounded(
+                    path, std::min(CreateRequestScanBudget::maximum_item_bytes,
+                        CreateRequestScanBudget::maximum_total_bytes - budget.bytes), &bytes_read);
+                budget.bytes += bytes_read;
+                ++budget.files;
             } catch (const std::exception&) {
                 throw std::runtime_error(
-                    "item_create.request_scan_unreadable: cannot verify active item at " +
+                    "item_create.request_scan_unreadable: cannot verify bounded canonical frontmatter at " +
                     path_for_diagnostic(path, root));
             }
             const auto key = candidate.external.find("create_request_key");
@@ -1329,6 +1358,10 @@ std::optional<BacklogItem> find_created_request(
                 found = std::move(candidate);
             }
         }
+    }
+    // A slow final read must not slip through the deadline into allocation.
+    if (std::chrono::steady_clock::now() - budget.started >= std::chrono::seconds(25)) {
+        throw std::runtime_error("item_create.request_scan_budget_exceeded: canonical request verification deadline exceeded");
     }
     return found;
 }
@@ -1516,6 +1549,7 @@ CreateItemResult WorkitemOps::create_item(
     };
     std::string request_payload;
     std::string scoped_request_key;
+    CreateRequestScanBudget request_scan_budget;
     if (idempotency_key) {
         std::string signature_input;
         const auto append = [&](const std::string& value) {
@@ -1556,8 +1590,49 @@ CreateItemResult WorkitemOps::create_item(
         if (scoped_request_key.size() > 256) {
             throw std::runtime_error("item_create.idempotency_scope_too_long");
         }
+
+    }
+
+    const auto populate_creation_metadata = [&](BacklogItem& item) {
+        item.state = ItemState::Proposed;
+        item.priority = priority;
+        item.area = area;
+        item.iteration = iteration;
+        item.tags = tags;
+        if (owner && !owner->empty()) {
+            item.owner = *owner;
+            if (!owner_source.empty()) {
+                item.external["owner_source"] = owner_source;
+            }
+        }
+        if (reviewer && !reviewer->empty()) {
+            item.external["reviewer"] = *reviewer;
+            if (!reviewer_source.empty()) {
+                item.external["reviewer_source"] = reviewer_source;
+            }
+        }
+        if (idempotency_key) {
+            item.external["create_request_key"] = *idempotency_key;
+            item.external["create_request_payload"] = request_payload;
+        }
+    };
+    // Check the exact serializer before any ID/UID reservation. The largest
+    // supported numeric ID leaves room for allocation growth; UUID/date widths
+    // are fixed. Apply this to non-idempotent creates too: they share the store.
+    auto metadata_preview = store.create(
+        prefix, type, title, std::numeric_limits<int>::max(), parent);
+    populate_creation_metadata(metadata_preview);
+    // render_item_body appends the newline completing the closing delimiter.
+    if (TemplateOps::render_frontmatter(metadata_preview).size() >=
+        CreateRequestScanBudget::maximum_item_bytes) {
+        throw std::runtime_error(
+            "item_create.generated_metadata_limit_exceeded: canonical frontmatter exceeds the " +
+            std::to_string(CreateRequestScanBudget::maximum_item_bytes) +
+            "-byte request scan limit; no ID reserved or canonical item written");
+    }
+    if (idempotency_key) {
         if (const auto existing = find_created_request(
-                request_roots, backlog_root, *idempotency_key, request_payload)) {
+                request_roots, backlog_root, *idempotency_key, request_payload, request_scan_budget)) {
             const auto authority = shared_reservations
                 ? shared_reservations->find_request_reservation(
                     prefix, type_code, scoped_request_key, request_payload)
@@ -1632,7 +1707,7 @@ CreateItemResult WorkitemOps::create_item(
         if (existing_request) {
             if (const auto existing = find_created_request(
                     request_roots, backlog_root, *idempotency_key,
-                    request_payload, item.id,
+                    request_payload, request_scan_budget, item.id,
                     reserved_uid.empty() ? std::nullopt
                                          : std::optional<std::string>{reserved_uid})) {
                 if (reserved_uid.empty()) {
@@ -1686,27 +1761,7 @@ CreateItemResult WorkitemOps::create_item(
             : index.bind_request_uid(
                 prefix, type_code, scoped_request_key, reserved_number, item.uid);
     }
-    item.state = ItemState::Proposed;
-    item.priority = priority;
-    item.area = area;
-    item.iteration = iteration;
-    item.tags = tags;
-    if (owner && !owner->empty()) {
-        item.owner = *owner;
-        if (!owner_source.empty()) {
-            item.external["owner_source"] = owner_source;
-        }
-    }
-    if (reviewer && !reviewer->empty()) {
-        item.external["reviewer"] = *reviewer;
-        if (!reviewer_source.empty()) {
-            item.external["reviewer_source"] = reviewer_source;
-        }
-    }
-    if (idempotency_key) {
-        item.external["create_request_key"] = *idempotency_key;
-        item.external["create_request_payload"] = request_payload;
-    }
+    populate_creation_metadata(item);
     
     // 3. Render content using templates
     std::string content;

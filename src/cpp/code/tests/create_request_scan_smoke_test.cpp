@@ -86,6 +86,81 @@ int main() {
     try {
         root = make_temp_root();
         {
+            // PR5 must never write metadata that its next canonical request
+            // scan cannot verify, even when the item title is short.
+            const auto product = root / "generated-metadata-admission";
+            BacklogIndex index(product / ".cache" / "index" / "backlog.db");
+            index.initialize();
+            auto oversized = duplicate_admission("Short metadata request");
+            oversized.rationale = std::string(70 * 1024, 'x');
+            const auto oversized_create = [&] {
+                (void)WorkitemOps::create_item(
+                    index, product, "OVR", ItemType::Task, "Short metadata request", "opencode",
+                    std::nullopt, "P2", {}, "general", "backlog", std::nullopt, std::nullopt,
+                    "", "", oversized, "oversize-key");
+            };
+            expect_throws_contains(oversized_create, "generated_metadata_limit_exceeded",
+                "oversized generated metadata must be rejected on first create");
+            expect_throws_contains(oversized_create, "generated_metadata_limit_exceeded",
+                "same-key retry of rejected metadata must remain a pre-allocation failure");
+            expect(!index.has_sequence("OVR", "TSK") && CanonicalStore(product).list_items().empty(),
+                "oversized first create and retry must leave no reservation or canonical item");
+            const auto bystander = WorkitemOps::create_item(
+                index, product, "OVR", ItemType::Task, "Bystander", "opencode",
+                std::nullopt, "P2", {}, "general", "backlog", std::nullopt, std::nullopt,
+                "", "", duplicate_admission("Bystander"), "bystander-key");
+            expect(bystander.id == "OVR-TSK-0001" && bystander.read_after_write,
+                "rejected metadata must not poison a bystander or consume its first allocation");
+            const auto bystander_retry = WorkitemOps::create_item(
+                index, product, "OVR", ItemType::Task, "Bystander", "opencode",
+                std::nullopt, "P2", {}, "general", "backlog", std::nullopt, std::nullopt,
+                "", "", duplicate_admission("Bystander"), "bystander-key");
+            expect(bystander_retry.idempotent_replay && bystander_retry.uid == bystander.uid,
+                "bystander must remain replayable after rejecting oversized metadata");
+
+            // YAML escaping counts toward the limit, not just raw input bytes.
+            auto expanded = duplicate_admission("Escaped metadata");
+            expanded.rationale = "x" + std::string(35 * 1024, '\t') + "x";
+            expect_throws_contains([&] {
+                (void)WorkitemOps::create_item(
+                    index, product, "ESC", ItemType::Task, "Escaped metadata", "opencode",
+                    std::nullopt, "P2", {}, "general", "backlog", std::nullopt, std::nullopt,
+                    "", "", expanded, "escaped-key");
+            }, "generated_metadata_limit_exceeded", "admission must measure serialized metadata bytes");
+            expect(!index.has_sequence("ESC", "TSK"), "escaped metadata failure must not reserve an ID");
+
+            // Plain creates must not poison subsequent idempotent admission.
+            expect_throws_contains([&] {
+                (void)WorkitemOps::create_item(
+                    index, product, "PLN", ItemType::Task, "Plain metadata", "opencode",
+                    std::nullopt, "P2", {std::string(70 * 1024, 'x')}, "general", "backlog",
+                    std::nullopt, std::nullopt, "", "", duplicate_admission("Plain metadata"));
+            }, "generated_metadata_limit_exceeded", "non-idempotent oversized metadata must also fail before allocation");
+            expect(!index.has_sequence("PLN", "TSK"), "plain metadata failure must not reserve an ID");
+
+            auto admitted = duplicate_admission("Admitted metadata");
+            admitted.rationale = std::string(60 * 1024, 'x');
+            const auto valid = WorkitemOps::create_item(
+                index, product, "VAL", ItemType::Task, "Admitted metadata", "opencode",
+                std::nullopt, "P2", {}, "general", "backlog", std::nullopt, std::nullopt,
+                "", "", admitted, "valid-key");
+            expect(CanonicalStore(product).read(valid.path).external.at("create_request_payload")
+                .find(admitted.rationale) != std::string::npos,
+                "admitted metadata must preserve the complete rationale without truncation");
+            const auto valid_retry = WorkitemOps::create_item(
+                index, product, "VAL", ItemType::Task, "Admitted metadata", "opencode",
+                std::nullopt, "P2", {}, "general", "backlog", std::nullopt, std::nullopt,
+                "", "", admitted, "valid-key");
+            expect(valid_retry.idempotent_replay && valid_retry.uid == valid.uid,
+                "large admitted metadata must remain replayable");
+            const auto after_valid = WorkitemOps::create_item(
+                index, product, "OVR", ItemType::Task, "After valid metadata", "opencode",
+                std::nullopt, "P2", {}, "general", "backlog", std::nullopt, std::nullopt,
+                "", "", duplicate_admission("After valid metadata"), "after-valid-key");
+            expect(after_valid.id == "OVR-TSK-0002" && after_valid.read_after_write,
+                "valid large metadata must not block an unrelated idempotent create");
+        }
+        {
             // KOB-BUG-0098: idempotency admission needs canonical metadata,
             // not the bodies/worklogs of every unrelated item in a large store.
             const auto scale_root = root / "request-scan-scale";
@@ -203,6 +278,7 @@ int main() {
             write_text(oversized_path,
                 "---\nid: SCL-TSK-9999\nuid: " + CanonicalStore::generate_uuid_v7() +
                 "\ntype: Task\ntitle: " + std::string(131072, 'y') + "\nstate: Proposed\n---\n");
+            const auto existing_oversized_bytes = read_text(oversized_path);
             expect_throws_contains([&] {
                 (void)WorkitemOps::create_item(
                     scale_index, scale_root, "BND", ItemType::Task, "Bounded request scan",
@@ -214,6 +290,8 @@ int main() {
                 "bounded scan failure must not advance allocation sequence");
             expect(CanonicalStore(scale_root).find_item_paths_by_id("BND-TSK-0001").empty(),
                 "bounded scan failure must not write a canonical item");
+            expect(read_text(oversized_path) == existing_oversized_bytes,
+                "oversized existing metadata must remain untouched, not truncated or repaired implicitly");
 
         }
         std::filesystem::remove_all(root);

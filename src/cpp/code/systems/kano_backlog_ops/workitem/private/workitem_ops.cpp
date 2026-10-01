@@ -20,6 +20,7 @@
 #include <string_view>
 #include <thread>
 #include <json/json.h>
+#include <limits>
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -1589,6 +1590,47 @@ CreateItemResult WorkitemOps::create_item(
         if (scoped_request_key.size() > 256) {
             throw std::runtime_error("item_create.idempotency_scope_too_long");
         }
+
+    }
+
+    const auto populate_creation_metadata = [&](BacklogItem& item) {
+        item.state = ItemState::Proposed;
+        item.priority = priority;
+        item.area = area;
+        item.iteration = iteration;
+        item.tags = tags;
+        if (owner && !owner->empty()) {
+            item.owner = *owner;
+            if (!owner_source.empty()) {
+                item.external["owner_source"] = owner_source;
+            }
+        }
+        if (reviewer && !reviewer->empty()) {
+            item.external["reviewer"] = *reviewer;
+            if (!reviewer_source.empty()) {
+                item.external["reviewer_source"] = reviewer_source;
+            }
+        }
+        if (idempotency_key) {
+            item.external["create_request_key"] = *idempotency_key;
+            item.external["create_request_payload"] = request_payload;
+        }
+    };
+    // Check the exact serializer before any ID/UID reservation. The largest
+    // supported numeric ID leaves room for allocation growth; UUID/date widths
+    // are fixed. Apply this to non-idempotent creates too: they share the store.
+    auto metadata_preview = store.create(
+        prefix, type, title, std::numeric_limits<int>::max(), parent);
+    populate_creation_metadata(metadata_preview);
+    // render_item_body appends the newline completing the closing delimiter.
+    if (TemplateOps::render_frontmatter(metadata_preview).size() >=
+        CreateRequestScanBudget::maximum_item_bytes) {
+        throw std::runtime_error(
+            "item_create.generated_metadata_limit_exceeded: canonical frontmatter exceeds the " +
+            std::to_string(CreateRequestScanBudget::maximum_item_bytes) +
+            "-byte request scan limit; no ID reserved or canonical item written");
+    }
+    if (idempotency_key) {
         if (const auto existing = find_created_request(
                 request_roots, backlog_root, *idempotency_key, request_payload, request_scan_budget)) {
             const auto authority = shared_reservations
@@ -1719,27 +1761,7 @@ CreateItemResult WorkitemOps::create_item(
             : index.bind_request_uid(
                 prefix, type_code, scoped_request_key, reserved_number, item.uid);
     }
-    item.state = ItemState::Proposed;
-    item.priority = priority;
-    item.area = area;
-    item.iteration = iteration;
-    item.tags = tags;
-    if (owner && !owner->empty()) {
-        item.owner = *owner;
-        if (!owner_source.empty()) {
-            item.external["owner_source"] = owner_source;
-        }
-    }
-    if (reviewer && !reviewer->empty()) {
-        item.external["reviewer"] = *reviewer;
-        if (!reviewer_source.empty()) {
-            item.external["reviewer_source"] = reviewer_source;
-        }
-    }
-    if (idempotency_key) {
-        item.external["create_request_key"] = *idempotency_key;
-        item.external["create_request_payload"] = request_payload;
-    }
+    populate_creation_metadata(item);
     
     // 3. Render content using templates
     std::string content;

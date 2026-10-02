@@ -1,3 +1,5 @@
+#include <kano_unattended.hpp>
+
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
@@ -406,6 +408,7 @@ LifetimeInventory audit_cli11_lifetimes(const std::filesystem::path& source_path
 } // namespace
 
 int main() {
+    kano::infra::ConfigureUnattendedExecution();
     try {
         const auto source_path = std::filesystem::path(KANO_REPO_ROOT) /
             "src/cpp/code/apps/kano_backlog_cli/main.cpp";

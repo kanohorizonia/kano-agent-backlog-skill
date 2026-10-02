@@ -11,6 +11,7 @@ export KANO_CPP_INFRA_REPO_ROOT="${KANO_CPP_INFRA_REPO_ROOT:-$REPO_ROOT}"
 
 # shellcheck disable=SC1091
 . "$INFRA_LIB_DIR/native_tool.sh"
+kano_cpp_infra_watchdog_enter "$0" "$@"
 
 SMOKE_ROOT="${KANO_REPORT_FEATURE_DETAIL_SMOKE_ROOT:-$CPP_ROOT/.kano/tmp/report-feature-detail-smoke}"
 JUNIT_XML="$SMOKE_ROOT/tests.xml"

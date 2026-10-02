@@ -9,7 +9,7 @@
 
 #include "assets/index_html.hpp"
 #include "assets/kob_ui_js.hpp"
-#include "kano/backlog_core/process/noninteractive_errors.hpp"
+#include <kano_unattended.hpp>
 #include "KanoBacklog.BacklogWebviewService.hpp"
 
 namespace {
@@ -71,7 +71,7 @@ std::string ResolveHost(int argc, char** argv) {
 }  // namespace
 
 int main(int argc, char** argv) {
-  kano::backlog_core::ConfigureNoninteractiveErrorHandling();
+  kano::infra::ConfigureUnattendedExecutionIfRequested();
 
   const auto productsRoot = ResolveProductsRoot(argc, argv);
   const auto host = ResolveHost(argc, argv);

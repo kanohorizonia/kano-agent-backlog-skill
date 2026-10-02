@@ -4,6 +4,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 
+export KANO_CPP_INFRA_CPP_ROOT="${KANO_CPP_INFRA_CPP_ROOT:-$SKILL_ROOT/src/cpp}"
+source "$SKILL_ROOT/src/cpp/shared/infra/scripts/lib/native_tool.sh"
+kano_cpp_infra_watchdog_enter "$0" "$@"
+
 export CI="${CI:-true}"
 export KANO_BACKLOG_NONINTERACTIVE=1
 export KANO_TEST_NONINTERACTIVE=1

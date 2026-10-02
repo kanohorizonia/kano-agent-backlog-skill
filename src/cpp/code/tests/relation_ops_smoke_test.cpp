@@ -9,7 +9,7 @@
 
 #include "kano/backlog_core/frontmatter/canonical_store.hpp"
 #include "kano/backlog_core/models/models.hpp"
-#include "kano/backlog_core/process/noninteractive_errors.hpp"
+#include <kano_unattended.hpp>
 #include "kano/backlog_core/refs/ref_resolver.hpp"
 #include "kano/backlog_ops/relation/relation_ops.hpp"
 
@@ -105,7 +105,7 @@ kano::backlog_ops::RelationMutationRequest request(
 } // namespace
 
 int main() {
-    kano::backlog_core::ConfigureNoninteractiveErrorHandling();
+    kano::infra::ConfigureUnattendedExecution();
     using kano::backlog_core::CanonicalStore;
     using kano::backlog_core::RefResolver;
     using kano::backlog_ops::RelationDirection;

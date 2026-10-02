@@ -1,3 +1,5 @@
+#include <kano_unattended.hpp>
+
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -41,6 +43,7 @@ void write_text(const std::filesystem::path& path, const std::string& value) {
 }
 
 int main() {
+    kano::infra::ConfigureUnattendedExecution();
     std::filesystem::path root;
     try {
         root = make_temp_root();

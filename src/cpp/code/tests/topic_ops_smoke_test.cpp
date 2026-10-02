@@ -1,3 +1,5 @@
+#include <kano_unattended.hpp>
+
 #include "kano/backlog_ops/topic/topic_ops.hpp"
 
 #include <filesystem>
@@ -80,6 +82,7 @@ bool contains(const std::vector<std::string>& values, const std::string& needle)
 } // namespace
 
 int main() {
+    kano::infra::ConfigureUnattendedExecution();
     try {
         const auto root = unique_temp_root();
         const auto backlog_root = root / "_kano" / "backlog";

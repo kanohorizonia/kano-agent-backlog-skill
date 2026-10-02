@@ -313,6 +313,21 @@ bash scripts/kob --version
 bash scripts/kob doctor
 ```
 
+Native tests configure `KanoInfra::unattended` before test work, including
+Release builds. Product CLI and Webview startup enables the shared policy with
+`KANO_UNATTENDED=1`, `KANO_AGENT_MODE=1`, or `CI=true`; `KANO_UNATTENDED=0`
+retains human debugging behavior. The shared header executes in each caller's
+CRT; KOB does not carry a separate Windows error-dialog implementation.
+
+Build, test, coverage, runtime gates, and bounded Webview smoke wrappers use the
+shared owned-tree watchdog. The whole-command default is 900000 milliseconds;
+`KANO_UNATTENDED_TIMEOUT_MS` and `KANO_UNATTENDED_CLEANUP_TIMEOUT_MS` accept finite
+positive integer overrides. An existing strict infra tool is preferred. When
+building that tool, the shared bootstrap can use an existing Python interpreter;
+it never installs one or runs an uncovered fallback. CTest keeps its per-test
+30–240 second deadlines separately. Normal Webview hosting remains a resident
+service without a lifetime deadline. Webview smoke owns only the host it starts.
+
 ## Demo repository
 
 A companion demo repo exists at

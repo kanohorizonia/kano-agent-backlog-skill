@@ -86,7 +86,10 @@ fi
 _py_files="$(
   find "$SKILL_ROOT" -type f \( -name '*.py' -o -name '*.pyi' \) \
     ! -path "$SKILL_ROOT/src/cpp/out/*" \
+    ! -path "$SKILL_ROOT/src/wix/out/*" \
     ! -path "$SKILL_ROOT/src/shell/release/post_release_verify.py" \
+    ! -path "$SKILL_ROOT/src/cpp/shared/infra/scripts/lib/watchdog-bootstrap.py" \
+    ! -path "$SKILL_ROOT/src/cpp/shared/infra/scripts/tests/watchdog_bootstrap_contract.py" \
     ! -path "$SKILL_ROOT/_ws/*" \
     ! -path "$SKILL_ROOT/.git/*" \
     ! -path "$SKILL_ROOT/.kano/*" \
@@ -95,10 +98,10 @@ _py_files="$(
     2>/dev/null || true
 )"
 if [[ -n "$_py_files" ]]; then
-  _fail "Python source or typing stub files remain outside the bounded release-only verifier:"
+  _fail "Python source remains outside the bounded release verifier and shared watchdog bootstrap:"
   printf '%s\n' "$_py_files" | while read -r _l; do printf '       %s\n' "$_l"; done
 else
-  _ok "no Python source or typing stub files remain outside the bounded release-only verifier"
+  _ok "Python source is limited to the release verifier and shared watchdog bootstrap"
 fi
 
 # ---------------------------------------------------------------------------

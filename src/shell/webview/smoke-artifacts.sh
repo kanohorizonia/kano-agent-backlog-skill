@@ -4,6 +4,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 
+export KANO_CPP_INFRA_CPP_ROOT="${KANO_CPP_INFRA_CPP_ROOT:-$SKILL_ROOT/src/cpp}"
+source "$SKILL_ROOT/src/cpp/shared/infra/scripts/lib/native_tool.sh"
+kano_cpp_infra_watchdog_enter "$0" "$@"
+
 ARTIFACT_ROOT="${KANO_WEBVIEW_SMOKE_ARTIFACT_DIR:-$SKILL_ROOT/_ws/test-output/webview-smoke}"
 PORT="${KANO_WEBVIEW_SMOKE_PORT:-${KANO_WEBVIEW_HOST_PORT:-8799}}"
 BASE_URL="${KANO_WEBVIEW_SMOKE_BASE_URL:-${KANO_WEBVIEW_BASE_URL:-}}"
@@ -57,7 +61,8 @@ summarize_and_exit_if_failed() {
 cleanup() {
   if [[ "$STARTED_HOST" -eq 1 && -n "$HOST_PID" ]]; then
     kill "$HOST_PID" >/dev/null 2>&1 || true
-    wait "$HOST_PID" >/dev/null 2>&1 || true
+    # The enclosing shared watchdog owns descendant cleanup and its deadline.
+    # Do not wait indefinitely if the disposable smoke host ignores termination.
   fi
 }
 

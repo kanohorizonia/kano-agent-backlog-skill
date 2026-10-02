@@ -9,7 +9,7 @@
 
 #include "kano/backlog_core/models/models.hpp"
 #include "kano/backlog_core/frontmatter/canonical_store.hpp"
-#include "kano/backlog_core/process/noninteractive_errors.hpp"
+#include <kano_unattended.hpp>
 #include "kano/backlog_core/state/state_machine.hpp"
 #include "kano/backlog_ops/index/backlog_index.hpp"
 #include "kano/backlog_ops/workitem/workitem_ops.hpp"
@@ -39,7 +39,7 @@ std::filesystem::path make_temp_root() {
 } // namespace
 
 int main() {
-    kano::backlog_core::ConfigureNoninteractiveErrorHandling();
+    kano::infra::ConfigureUnattendedExecution();
 
     using kano::backlog_core::BacklogItem;
     using kano::backlog_core::CanonicalStore;

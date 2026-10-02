@@ -12,7 +12,7 @@
 #include "kano/backlog_core/frontmatter/frontmatter.hpp"
 #include "kano/backlog_core/models/errors.hpp"
 #include "kano/backlog_core/models/models.hpp"
-#include "kano/backlog_core/process/noninteractive_errors.hpp"
+#include <kano_unattended.hpp>
 #include "kano/backlog_core/refs/ref_parser.hpp"
 #include "kano/backlog_core/refs/ref_resolver.hpp"
 #include "kano/backlog_core/state/state_machine.hpp"
@@ -87,7 +87,7 @@ void expect_product_resolution(
 } // namespace
 
 int main() {
-    kano::backlog_core::ConfigureNoninteractiveErrorHandling();
+    kano::infra::ConfigureUnattendedExecution();
 
     using kano::backlog_core::BacklogItem;
     using kano::backlog_core::BacklogContext;

@@ -20,7 +20,7 @@
 #include "kano/backlog_core/refs/ref_resolver.hpp"
 #include "kano/backlog_core/validation/validator.hpp"
 #include "kano/backlog_core/frontmatter/frontmatter.hpp"
-#include "kano/backlog_core/process/noninteractive_errors.hpp"
+#include <kano_unattended.hpp>
 #include <json/json.h>
 #include <sqlite3.h>
 #include <iostream>
@@ -5787,7 +5787,9 @@ std::vector<std::string> collect_repo_python_artifacts(const std::filesystem::pa
         } else if (it->is_regular_file(ec)) {
             const auto ext = path.extension().string();
             if ((ext == ".py" || ext == ".pyi") &&
-                relative != "src/shell/release/post_release_verify.py") {
+                relative != "src/shell/release/post_release_verify.py" &&
+                relative != "src/cpp/shared/infra/scripts/lib/watchdog-bootstrap.py" &&
+                relative != "src/cpp/shared/infra/scripts/tests/watchdog_bootstrap_contract.py") {
                 artifacts.push_back(relative);
                 if (artifacts.size() >= 20) {
                     break;
@@ -9114,7 +9116,7 @@ std::optional<int> FindLegacyAdminGroupIndex(int InArgc, char* InArgv[]) {
 } // namespace
 
 int main(int InArgc, char* InArgv[]) {
-    kano::backlog_core::ConfigureNoninteractiveErrorHandling();
+    kano::infra::ConfigureUnattendedExecutionIfRequested();
 
     std::vector<std::string> rewritten_args;
     if (const auto adminGroupIndex = FindLegacyAdminGroupIndex(InArgc, InArgv)) {

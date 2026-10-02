@@ -1,3 +1,5 @@
+#include <kano_unattended.hpp>
+
 #include "kano/backlog_ops/view/view_ops.hpp"
 
 #include <algorithm>
@@ -137,6 +139,7 @@ const kano::backlog_ops::CompactListGroup& find_group(
 } // namespace
 
 int main() {
+    kano::infra::ConfigureUnattendedExecution();
     try {
         const auto repo_root = std::filesystem::path(KANO_REPO_ROOT);
         const auto fixture_path =

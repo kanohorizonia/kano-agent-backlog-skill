@@ -3,6 +3,10 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+
+export KANO_CPP_INFRA_CPP_ROOT="${KANO_CPP_INFRA_CPP_ROOT:-$ROOT_DIR/src/cpp}"
+source "$ROOT_DIR/src/cpp/shared/infra/scripts/lib/native_tool.sh"
+kano_cpp_infra_watchdog_enter "$0" "$@"
 CASE_ROOT="$ROOT_DIR/.kano/tmp/kob-self-build-resolution-$$"
 
 cleanup() {
@@ -50,6 +54,11 @@ chmod +x "$CASE_ROOT/scripts/kob" "$CASE_ROOT/scripts/kano-backlog"
 printf '%s\n' '# fixture' > "$CASE_ROOT/pixi.toml"
 printf '%s\n' '# fixture' > "$CASE_ROOT/src/cpp/CMakeLists.txt"
 printf '%s\n' '# bounded release verifier fixture' > "$CASE_ROOT/src/shell/release/post_release_verify.py"
+mkdir -p "$CASE_ROOT/src/cpp/shared/infra/scripts/lib"
+printf '%s\n' '# shared watchdog bootstrap fixture' > "$CASE_ROOT/src/cpp/shared/infra/scripts/lib/watchdog-bootstrap.py"
+mkdir -p "$CASE_ROOT/src/cpp/shared/infra/scripts/tests" "$CASE_ROOT/src/wix/out/payload"
+printf '%s\n' '# shared watchdog contract fixture' > "$CASE_ROOT/src/cpp/shared/infra/scripts/tests/watchdog_bootstrap_contract.py"
+printf '%s\n' '# generated installer fixture' > "$CASE_ROOT/src/wix/out/payload/post_release_verify.py"
 printf '%s\n' '# generated workspace fixture' > "$CASE_ROOT/_ws/generated/legacy.py"
 printf '%s\n' '# third-party fixture' > "$CASE_ROOT/node_modules/vendor/tool.py"
 
@@ -69,7 +78,7 @@ output="$(cd "$CASE_ROOT" && bash src/shell/core/kano-backlog --version)"
 [[ "$output" == release* ]]
 
 doctor_output="$(cd "$CASE_ROOT" && bash src/shell/support/self-doctor.sh)"
-grep -q 'no Python source or typing stub files remain outside the bounded release-only verifier' <<< "$doctor_output"
+grep -q 'Python source is limited to the release verifier and shared watchdog bootstrap' <<< "$doctor_output"
 grep -q "native binary found: src/cpp/out/bin/$preset/release/kano-backlog" <<< "$doctor_output"
 
 echo "PASS: kob and self doctor resolve host-architecture Release binaries and bounded source exclusions"

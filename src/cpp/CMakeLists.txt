@@ -512,6 +512,7 @@ enable_testing()
 # Shared infra submodule
 # =============================================================================
 set(KB_INFRA_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/shared/infra")
+include("${KB_INFRA_SOURCE_DIR}/scripts/cmake/KanoInfraUnattended.cmake")
 if(EXISTS "${KB_INFRA_SOURCE_DIR}/CMakeLists.txt")
     add_subdirectory("${KB_INFRA_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/shared/infra")
     if(TARGET kano_infra_build_info)

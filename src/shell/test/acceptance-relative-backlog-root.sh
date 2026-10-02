@@ -2,6 +2,10 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+
+export KANO_CPP_INFRA_CPP_ROOT="${KANO_CPP_INFRA_CPP_ROOT:-$ROOT_DIR/src/cpp}"
+source "$ROOT_DIR/src/cpp/shared/infra/scripts/lib/native_tool.sh"
+kano_cpp_infra_watchdog_enter "$0" "$@"
 CASE_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/kob-relative-root.XXXXXX")"
 CASE_ROOT="$(cd "$CASE_ROOT" && pwd -P)"
 

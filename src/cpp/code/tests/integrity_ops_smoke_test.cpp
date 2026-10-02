@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-#include "kano/backlog_core/process/noninteractive_errors.hpp"
+#include <kano_unattended.hpp>
 #include "kano/backlog_ops/integrity/integrity_ops.hpp"
 
 namespace {
@@ -370,7 +370,7 @@ void create_dirty_fixture(const std::filesystem::path& root) {
 } // namespace
 
 int main() {
-    kano::backlog_core::ConfigureNoninteractiveErrorHandling();
+    kano::infra::ConfigureUnattendedExecution();
 
     try {
         const auto root = make_temp_root();

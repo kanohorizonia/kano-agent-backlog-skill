@@ -3,6 +3,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/../../.." && pwd)"
+
+export KANO_CPP_INFRA_CPP_ROOT="${KANO_CPP_INFRA_CPP_ROOT:-$REPO_ROOT/src/cpp}"
+source "$REPO_ROOT/src/cpp/shared/infra/scripts/lib/native_tool.sh"
+kano_cpp_infra_watchdog_enter "$0" "$@"
 SMOKE_ROOT="${KANO_RELEASE_INSTALL_VERIFY_SMOKE_ROOT:-$REPO_ROOT/src/cpp/.kano/tmp/release-install-verification-smoke}"
 PAYLOAD_ROOT="$SMOKE_ROOT/payload/kano-agent-backlog-skill"
 ASSET_ROOT="$SMOKE_ROOT/assets"

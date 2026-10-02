@@ -10,7 +10,7 @@
 
 #include "kano/backlog_core/frontmatter/canonical_store.hpp"
 #include "kano/backlog_core/models/models.hpp"
-#include "kano/backlog_core/process/noninteractive_errors.hpp"
+#include <kano_unattended.hpp>
 #include "kano/backlog_core/refs/ref_resolver.hpp"
 #include "kano/backlog_core/validation/validator.hpp"
 #include "kano/backlog_ops/index/backlog_index.hpp"
@@ -180,7 +180,7 @@ kano::backlog_core::CreateItemResult create_item_with_admission(
 } // namespace
 
 int main() {
-    kano::backlog_core::ConfigureNoninteractiveErrorHandling();
+    kano::infra::ConfigureUnattendedExecution();
 
     using kano::backlog_core::ItemState;
     using kano::backlog_core::ItemType;

@@ -4,6 +4,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 
+export KANO_CPP_INFRA_CPP_ROOT="${KANO_CPP_INFRA_CPP_ROOT:-$SKILL_ROOT/src/cpp}"
+source "$SKILL_ROOT/src/cpp/shared/infra/scripts/lib/native_tool.sh"
+kano_cpp_infra_watchdog_enter "$0" "$@"
+
 show_help() {
   cat <<'EOF'
 Usage: lint.sh [--help]
@@ -81,7 +85,10 @@ fi
 remaining_py="$(
   find "$SKILL_ROOT" -type f \( -name '*.py' -o -name '*.pyi' \) \
     ! -path "$SKILL_ROOT/src/cpp/out/*" \
+    ! -path "$SKILL_ROOT/src/wix/out/*" \
     ! -path "$SKILL_ROOT/src/shell/release/post_release_verify.py" \
+    ! -path "$SKILL_ROOT/src/cpp/shared/infra/scripts/lib/watchdog-bootstrap.py" \
+    ! -path "$SKILL_ROOT/src/cpp/shared/infra/scripts/tests/watchdog_bootstrap_contract.py" \
     ! -path "$SKILL_ROOT/_ws/*" \
     ! -path "$SKILL_ROOT/.git/*" \
     ! -path "$SKILL_ROOT/.kano/*" \
@@ -90,11 +97,11 @@ remaining_py="$(
     2>/dev/null || true
 )"
 if [[ -n "$remaining_py" ]]; then
-  echo "[FAIL] no Python source or typing stub files remain outside the bounded release-only verifier" >&2
+  echo "[FAIL] Python source remains outside the bounded release verifier and shared watchdog bootstrap" >&2
   printf '%s\n' "$remaining_py" >&2
   failed=1
 else
-  echo "[PASS] no Python source or typing stub files remain outside the bounded release-only verifier"
+  echo "[PASS] Python source is limited to the release verifier and shared watchdog bootstrap"
 fi
 check_absent "^[[:space:]]*\\(python\\|pip\\)[[:space:]]*=" "$SKILL_ROOT/pixi.toml" "pixi default env has no Python runtime dependency"
 check_absent "^\\[pypi-dependencies\\]\\|kano-agent-backlog-skill[[:space:]]*=[[:space:]]*{[[:space:]]*path[[:space:]]*=" "$SKILL_ROOT/pixi.toml" "pixi default env has no editable Python package"
@@ -129,18 +136,32 @@ check_present "Create ZLIB::ZLIB in KOB's directory scope before Drogon configur
 check_present "duration_cast<std::chrono::system_clock::duration>" \
   "$SKILL_ROOT/src/cpp/code/systems/kano_backlog_webview_core/private/BacklogWebviewService.cpp" \
   "Webview filesystem timestamps convert through the system clock duration"
+check_absent "noninteractive_errors.hpp\\|ConfigureNoninteractiveErrorHandling" \
+  "$SKILL_ROOT/src/cpp/code" "private unattended startup implementation is removed"
+check_present 'KanoInfra::unattended' "$SKILL_ROOT/src/cpp/code/systems/kano_backlog_core/CMakeLists.txt" \
+  "native consumers compile the shared startup policy inside their CRT"
+check_present 'kano_infra_finalize_local_test_timeouts(300)' "$SKILL_ROOT/src/cpp/code/tests/CMakeLists.txt" \
+  "CMake finalizes finite positive CTest deadlines"
+
+for source in "$SKILL_ROOT"/src/cpp/code/tests/*_smoke_test.cpp "$SKILL_ROOT"/src/cpp/tests/*_smoke_test.cpp; do
+  check_present 'kano::infra::ConfigureUnattendedExecution();' "$source" \
+    "$(basename "$source") configures unattended execution unconditionally"
+done
+for source in "$SKILL_ROOT"/src/cpp/code/apps/*/main.cpp; do
+  check_present 'kano::infra::ConfigureUnattendedExecutionIfRequested();' "$source" \
+    "$(basename "$(dirname "$source")") preserves human debugging mode"
+done
 
 windows_error_refs="$(
   grep -RInE "Set(ErrorMode|ThreadErrorMode)|_CrtSetReportMode|_set_abort_behavior|_set_invalid_parameter_handler" \
-    "$SKILL_ROOT/src/cpp/code" "$SKILL_ROOT/src/cpp/tests" 2>/dev/null |
-    grep -v "noninteractive_errors.hpp" || true
+    "$SKILL_ROOT/src/cpp/code" "$SKILL_ROOT/src/cpp/tests" 2>/dev/null || true
 )"
 if [[ -n "$windows_error_refs" ]]; then
   echo "[FAIL] Windows assert/error-dialog suppression is centralized" >&2
   printf '%s\n' "$windows_error_refs" >&2
   failed=1
 else
-  echo "[PASS] Windows assert/error-dialog suppression is centralized"
+  echo "[PASS] Windows assert/error-dialog suppression stays in shared infra"
 fi
 
 exit "$failed"

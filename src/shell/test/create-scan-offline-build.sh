@@ -4,6 +4,9 @@ set -euo pipefail
 # Reuse locally cached, pinned FetchContent sources in an isolated native lane.
 # The caller owns the checkout and provides an offline dependency snapshot.
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+export KANO_CPP_INFRA_CPP_ROOT="${KANO_CPP_INFRA_CPP_ROOT:-$repo_root/src/cpp}"
+source "$repo_root/src/cpp/shared/infra/scripts/lib/native_tool.sh"
+kano_cpp_infra_watchdog_enter "$0" "$@"
 deps_root="${KOB_OFFLINE_DEPS_ROOT:?Set KOB_OFFLINE_DEPS_ROOT to the local dependency snapshot}"
 args=()
 for dependency in cli11 tomlplusplus yaml-cpp sqlite3 jsoncpp; do

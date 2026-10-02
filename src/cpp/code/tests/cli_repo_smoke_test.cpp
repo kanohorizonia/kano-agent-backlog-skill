@@ -12,7 +12,7 @@
 #include <windows.h>
 #endif
 
-#include "kano/backlog_core/process/noninteractive_errors.hpp"
+#include <kano_unattended.hpp>
 #include "version.hpp"
 
 namespace {
@@ -227,7 +227,7 @@ void set_env_var(const std::string& name, const std::string& value) {
 } // namespace
 
 int main(int argc, char** argv) {
-    kano::backlog_core::ConfigureNoninteractiveErrorHandling();
+    kano::infra::ConfigureUnattendedExecution();
 
     try {
         const std::filesystem::path repo_root(KANO_REPO_ROOT);
@@ -2651,6 +2651,8 @@ int main(int argc, char** argv) {
             "# Changelog\n\n## [" + phase1_version + "] - Unreleased\n");
         write_text(phase1_repo / "src" / "shell" / "core" / "kano-backlog", "#!/usr/bin/env bash\n");
         write_text(phase1_repo / "src" / "shell" / "release" / "post_release_verify.py", "# bounded release-only verifier\n");
+        write_text(phase1_repo / "src" / "cpp" / "shared" / "infra" / "scripts" / "lib" / "watchdog-bootstrap.py", "# shared watchdog bootstrap\n");
+        write_text(phase1_repo / "src" / "cpp" / "shared" / "infra" / "scripts" / "tests" / "watchdog_bootstrap_contract.py", "# shared watchdog contract\n");
         write_text(phase1_repo / "_ws" / "generated.py", "# generated workspace fixture\n");
         write_text(phase1_repo / "src" / "wix" / "out" / "payload" / "generated.py", "# generated package fixture\n");
         write_text(phase1_repo / "node_modules" / "vendor.py", "# third-party fixture\n");

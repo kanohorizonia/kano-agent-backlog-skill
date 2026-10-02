@@ -7,7 +7,7 @@
 #include <stdexcept>
 #include "kano/backlog_core/frontmatter/canonical_store.hpp"
 #include "kano/backlog_core/diagnostics/mutation_timing.hpp"
-#include "kano/backlog_core/process/noninteractive_errors.hpp"
+#include <kano_unattended.hpp>
 #include "kano/backlog_ops/index/backlog_index.hpp"
 #include "kano/backlog_ops/workitem/workitem_ops.hpp"
 
@@ -77,7 +77,7 @@ kano::backlog_ops::DuplicateAdmissionEvidence duplicate_admission(
 } // namespace
 
 int main() {
-    kano::backlog_core::ConfigureNoninteractiveErrorHandling();
+    kano::infra::ConfigureUnattendedExecution();
     using kano::backlog_core::ItemType;
     using kano::backlog_core::CanonicalStore;
     using kano::backlog_ops::BacklogIndex;

@@ -1,5 +1,5 @@
 #include "kano/backlog_core/frontmatter/canonical_store.hpp"
-#include "kano/backlog_core/process/noninteractive_errors.hpp"
+#include <kano_unattended.hpp>
 #include "kano/backlog_ops/index/backlog_index.hpp"
 #include "kano/backlog_ops/migration/migration_ops.hpp"
 
@@ -96,7 +96,7 @@ bool contains_prefix(const std::vector<std::string>& values, const std::string& 
 } // namespace
 
 int main() {
-    kano::backlog_core::ConfigureNoninteractiveErrorHandling();
+    kano::infra::ConfigureUnattendedExecution();
     using kano::backlog_core::CanonicalStore;
     using kano::backlog_core::ItemType;
     using kano::backlog_ops::MigrationOps;

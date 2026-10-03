@@ -11,7 +11,7 @@
 
 #include "KanoBacklog.BacklogWebviewService.hpp"
 #include "kano/backlog_core/frontmatter/canonical_store.hpp"
-#include "kano/backlog_core/process/noninteractive_errors.hpp"
+#include <kano_unattended.hpp>
 #include "kano/backlog_ops/index/backlog_index.hpp"
 
 namespace {
@@ -406,7 +406,7 @@ void expect_context_section(const Json::Value& summary,
 } // namespace
 
 int main() {
-    kano::backlog_core::ConfigureNoninteractiveErrorHandling();
+    kano::infra::ConfigureUnattendedExecution();
 
     namespace webview = kano::backlog::webview;
     std::filesystem::path root;

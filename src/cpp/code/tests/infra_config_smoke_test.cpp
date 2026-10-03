@@ -1,3 +1,5 @@
+#include <kano_unattended.hpp>
+
 #include <kano_config.h>
 
 #include <chrono>
@@ -28,6 +30,7 @@ bool ObserveEmptyArray(const KanoConfigEntryView* entry, void* userData) {
 }  // namespace
 
 int main() {
+    kano::infra::ConfigureUnattendedExecution();
     const auto nonce = std::chrono::steady_clock::now().time_since_epoch().count();
     const std::filesystem::path configPath =
         std::filesystem::temp_directory_path() /

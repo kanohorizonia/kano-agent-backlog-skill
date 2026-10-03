@@ -1,6 +1,6 @@
 #include "kano/backlog_core/config/config.hpp"
 #include "kano/backlog_core/frontmatter/canonical_store.hpp"
-#include "kano/backlog_core/process/noninteractive_errors.hpp"
+#include <kano_unattended.hpp>
 #include "kano/backlog_ops/prefix_migration/prefix_migration_ops.hpp"
 #include <json/json.h>
 #include <algorithm>
@@ -191,7 +191,7 @@ std::string sha256_hex(const std::string& content) {
 } // namespace
 
 int main() {
-    kano::backlog_core::ConfigureNoninteractiveErrorHandling();
+    kano::infra::ConfigureUnattendedExecution();
     using kano::backlog_core::CanonicalStore;
     using kano::backlog_core::ItemType;
     using kano::backlog_core::ProjectConfig;

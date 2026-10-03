@@ -3,6 +3,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+
+export KANO_CPP_INFRA_CPP_ROOT="${KANO_CPP_INFRA_CPP_ROOT:-$SKILL_ROOT/src/cpp}"
+source "$SKILL_ROOT/src/cpp/shared/infra/scripts/lib/native_tool.sh"
+kano_cpp_infra_watchdog_enter "$0" "$@"
 EXPECTED_VERSION="$(tr -d '\r\n' < "$SKILL_ROOT/VERSION")"
 
 find_native_bin() {
@@ -65,7 +69,10 @@ fi
 remaining_py="$(
   find "$SKILL_ROOT" -type f \( -name '*.py' -o -name '*.pyi' \) \
     ! -path "$SKILL_ROOT/src/cpp/out/*" \
+    ! -path "$SKILL_ROOT/src/wix/out/*" \
     ! -path "$SKILL_ROOT/src/shell/release/post_release_verify.py" \
+    ! -path "$SKILL_ROOT/src/cpp/shared/infra/scripts/lib/watchdog-bootstrap.py" \
+    ! -path "$SKILL_ROOT/src/cpp/shared/infra/scripts/tests/watchdog_bootstrap_contract.py" \
     ! -path "$SKILL_ROOT/_ws/*" \
     ! -path "$SKILL_ROOT/.git/*" \
     ! -path "$SKILL_ROOT/.kano/*" \
@@ -74,7 +81,7 @@ remaining_py="$(
     2>/dev/null || true
 )"
 if [[ -n "$remaining_py" ]]; then
-  echo "Python source or typing stub files remain outside the bounded release-only verifier:" >&2
+  echo "Python source remains outside the bounded release verifier and shared watchdog bootstrap:" >&2
   printf '%s\n' "$remaining_py" >&2
   exit 1
 fi
@@ -93,14 +100,14 @@ fi
 
 windows_error_refs="$(
   grep -RInE "Set(ErrorMode|ThreadErrorMode)|_CrtSetReportMode|_set_abort_behavior|_set_invalid_parameter_handler" \
-    "$SKILL_ROOT/src/cpp/code" "$SKILL_ROOT/src/cpp/tests" 2>/dev/null |
-    grep -v "noninteractive_errors.hpp" || true
+    "$SKILL_ROOT/src/cpp/code" "$SKILL_ROOT/src/cpp/tests" 2>/dev/null || true
 )"
 if [[ -n "$windows_error_refs" ]]; then
-  echo "Windows assert/error-dialog suppression must stay centralized in noninteractive_errors.hpp:" >&2
+  echo "Windows assert/error-dialog suppression must stay centralized in shared infra:" >&2
   printf '%s\n' "$windows_error_refs" >&2
   exit 1
 fi
+bash "$SCRIPT_DIR/lint.sh"
 
 "$SKILL_ROOT/scripts/kob" --version >/dev/null
 "$SKILL_ROOT/scripts/kob" doctor >/dev/null

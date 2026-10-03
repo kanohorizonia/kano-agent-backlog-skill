@@ -12,7 +12,7 @@
 
 #include <json/json.h>
 
-#include "kano/backlog_core/process/noninteractive_errors.hpp"
+#include <kano_unattended.hpp>
 #include "kano_process.h"
 
 namespace {
@@ -534,7 +534,7 @@ std::filesystem::path find_binary(const std::filesystem::path& repo_root, const 
 } // namespace
 
 int main(int argc, char** argv) {
-    kano::backlog_core::ConfigureNoninteractiveErrorHandling();
+    kano::infra::ConfigureUnattendedExecution();
 
     try {
         const std::filesystem::path repo_root(KANO_REPO_ROOT);

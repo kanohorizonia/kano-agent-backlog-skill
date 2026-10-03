@@ -10321,6 +10321,49 @@ int main(int InArgc, char* InArgv[]) {
             });
         }
 
+        // Read-only canonical convergence admission; resolve no derived index.
+        {
+            auto* inspectCmd = workitemCmd->add_subcommand("inspect-incoming-identities",
+                "Reject display ID collisions against one explicitly selected incoming Git tree/ref");
+            struct InspectIncomingCommandState {
+                IncomingIdentityOptions options;
+                std::string format = "json";
+            };
+            auto state = cli11_state.make_shared<InspectIncomingCommandState>();
+            inspectCmd->add_option("--incoming-ref", state->options.incoming_ref,
+                "Required local Git tree/ref; no implicit fetch or incoming working-tree reads")->required();
+            inspectCmd->add_option("--max-items", state->options.max_items, "Item limit per side (default 16384)");
+            inspectCmd->add_option("--max-tree-entries", state->options.max_tree_entries, "Entry limit per side (default 65536)");
+            inspectCmd->add_option("--max-item-bytes", state->options.max_item_bytes, "Item byte cap (default 1 MiB)");
+            inspectCmd->add_option("--max-total-bytes", state->options.max_total_bytes, "Aggregate retained input cap (default 64 MiB)");
+            inspectCmd->add_option("--timeout-ms", state->options.timeout_ms, "Aggregate inspection deadline (default 30000 ms)");
+            inspectCmd->add_option("--format", state->format, "Output format: plain|json (default json)");
+            inspectCmd->callback([&, state]() {
+                const auto format = lower_copy(trim_copy(state->format));
+                if (format != "json" && format != "plain") throw std::runtime_error("format must be plain or json");
+                const auto ctx = resolve_ctx();
+                state->options.backlog_root = ctx.backlog_root;
+                state->options.single_product = ctx.product_name;
+                const auto report = WorkitemOps::inspect_incoming_identities(state->options);
+                if (format == "json") {
+                    std::cout << report.to_json() << "\n";
+                } else {
+                    std::cout << (report.admitted() ? "Admitted" : "Rejected: display ID identity collision")
+                              << "; incoming tree=" << report.incoming_tree << "\n";
+                    for (const auto& collision : report.collisions) {
+                        std::cout << collision.id << "\n";
+                        for (const auto& identity : collision.identities) {
+                            std::cout << "  " << identity.side << " product=" << identity.product
+                                      << " uid=" << identity.uid << " path=" << identity.path << "\n";
+                        }
+                    }
+                    std::cout << "Same UID pairs=" << report.same_uid_pairs
+                              << " (ordinary content/path drift). Human UID-selected repair only; review ambiguous backlinks.\n";
+                }
+                if (!report.admitted()) throw CLI::RuntimeError(3);
+            });
+        }
+
         // workitem remap-id
         {
             auto* remapIdCmd = workitemCmd->add_subcommand("remap-id", "Rename an item's ID and update references");

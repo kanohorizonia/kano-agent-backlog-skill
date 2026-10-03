@@ -31,6 +31,13 @@ set_tests_properties("${KB_TEST_WORKITEM_OPS}" PROPERTIES
     ENVIRONMENT "KANO_UNATTENDED=1;CI=true;KANO_BACKLOG_NONINTERACTIVE=1;KANO_TEST_NONINTERACTIVE=1;GIT_TERMINAL_PROMPT=0"
 )
 
+set(KB_TEST_INCOMING_IDENTITIES "[bdd][featured][feature:workitem-ops][scenario:KOB-BUG-0097] Incoming Git identities reject independent-clone display ID collisions without writes")
+add_test(NAME "${KB_TEST_INCOMING_IDENTITIES}" COMMAND workitem_ops_smoke_test --incoming-identities)
+set_tests_properties("${KB_TEST_INCOMING_IDENTITIES}" PROPERTIES
+    TIMEOUT 30
+    ENVIRONMENT "KANO_UNATTENDED=1;CI=true;KANO_BACKLOG_NONINTERACTIVE=1;KANO_TEST_NONINTERACTIVE=1;GIT_TERMINAL_PROMPT=0"
+)
+
 add_executable(create_request_scan_smoke_test create_request_scan_smoke_test.cpp)
 target_compile_features(create_request_scan_smoke_test PRIVATE cxx_std_23)
 target_link_libraries(create_request_scan_smoke_test PRIVATE kano::backlog_ops)

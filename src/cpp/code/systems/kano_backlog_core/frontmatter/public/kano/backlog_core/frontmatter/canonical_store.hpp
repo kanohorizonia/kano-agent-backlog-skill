@@ -43,6 +43,13 @@ public:
      */
     BacklogItem read_metadata(const std::filesystem::path& item_path) const;
 
+    /** Parse bounded Git blob metadata with the same identity parser as files. */
+    static BacklogItem parse_metadata(
+        const std::filesystem::path& item_path,
+        std::string_view content,
+        std::size_t maximum_bytes
+    );
+
     /**
      * Read frontmatter-backed metadata without retaining bytes beyond the supplied cap.
      * Body sections are intentionally skipped and bytes_read reports bounded file input.

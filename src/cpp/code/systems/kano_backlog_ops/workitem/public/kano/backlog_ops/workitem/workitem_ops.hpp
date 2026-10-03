@@ -56,8 +56,46 @@ struct DuplicateAdmissionEvidence {
     bool override_requested = false;
 };
 
+struct IncomingIdentityOptions {
+    std::filesystem::path backlog_root;
+    std::string incoming_ref;
+    std::string single_product;
+    std::size_t max_items = 16384; // per side
+    std::size_t max_tree_entries = 65536;
+    std::size_t max_item_bytes = 1024 * 1024;
+    std::size_t max_total_bytes = 64 * 1024 * 1024;
+    int timeout_ms = 30000; // aggregate inspection deadline
+};
+
+struct IncomingItemIdentity {
+    std::string side;
+    std::string id;
+    std::string uid;
+    std::string product;
+    std::string path; // repository-relative, also for uncommitted canonical items
+};
+
+struct IncomingIdentityCollision {
+    std::string id;
+    std::vector<IncomingItemIdentity> identities;
+};
+
+struct IncomingIdentityReport {
+    std::string incoming_ref;
+    std::string incoming_tree;
+    std::size_t current_items = 0;
+    std::size_t incoming_items = 0;
+    std::size_t same_uid_pairs = 0; // ordinary content/path drift is allowed
+    std::vector<IncomingIdentityCollision> collisions;
+    bool admitted() const { return collisions.empty(); }
+    std::string to_json() const;
+};
+
 class WorkitemOps {
 public:
+    /** Read-only convergence admission. Never opens an index or allocates IDs. */
+    static IncomingIdentityReport inspect_incoming_identities(const IncomingIdentityOptions& options);
+
     /**
      * Create a new backlog item.
      */

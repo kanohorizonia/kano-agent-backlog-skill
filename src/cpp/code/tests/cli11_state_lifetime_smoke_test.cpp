@@ -413,10 +413,11 @@ int main() {
         const auto source_path = std::filesystem::path(KANO_REPO_ROOT) /
             "src/cpp/code/apps/kano_backlog_cli/main.cpp";
         const auto inventory = audit_cli11_lifetimes(source_path);
-        // KOB-TSK-0148 adds two arena-retained workitem-create bindings:
-        // --idempotency-key and --format. The previous audited count was 760.
+        // KOB-BUG-0097 adds seven bindings retained by the shared command state:
+        // incoming-ref, max-items, max-tree-entries, max-item-bytes,
+        // max-total-bytes, timeout-ms and format. Previous audited count: 762.
         expect(
-            inventory.total == 762,
+            inventory.total == 769,
             "CLI11 binding inventory changed (actual " +
                 std::to_string(inventory.total) +
                 "); review every added or removed binding and update the audited baseline");

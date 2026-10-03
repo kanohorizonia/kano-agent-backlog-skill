@@ -2,6 +2,8 @@
 #include "kano/backlog_core/diagnostics/mutation_timing.hpp"
 #include "kano/backlog_core/frontmatter/canonical_store.hpp"
 #include "kano/backlog_core/refs/ref_resolver.hpp"
+#include "kano/backlog_core/refs/ref_parser.hpp"
+#include <kano_process.h>
 #include "kano/backlog_core/state/state_machine.hpp"
 #include "kano/backlog_core/validation/validator.hpp"
 #include "kano/backlog_ops/templates/template_ops.hpp"
@@ -21,6 +23,8 @@
 #include <thread>
 #include <json/json.h>
 #include <limits>
+#include <map>
+#include <tuple>
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -2410,6 +2414,285 @@ WorkOrderAdmissionResult WorkitemOps::evaluate_work_order_admission(
     result.reason_code = "item_type_not_supported";
     result.message = "Work-order admission does not support this item type.";
     return result;
+}
+
+namespace {
+
+class IncomingIdentityReader {
+public:
+    explicit IncomingIdentityReader(const IncomingIdentityOptions& options)
+        : options_(options), deadline_(std::chrono::steady_clock::now() +
+              std::chrono::milliseconds(options.timeout_ms)) {}
+
+    void check_deadline() const {
+        if (std::chrono::steady_clock::now() >= deadline_) {
+            throw std::runtime_error("incoming_identity.inspection_timeout");
+        }
+    }
+
+    std::string git(const std::filesystem::path& cwd,
+                    std::vector<std::string> args, std::size_t cap) const {
+        check_deadline();
+        const auto operation = args.front();
+        args.insert(args.begin(), {"--no-optional-locks", "--no-lazy-fetch", "--no-replace-objects", "--literal-pathspecs"});
+        std::vector<const char*> argv;
+        for (const auto& arg : args) argv.push_back(arg.c_str());
+        const auto directory = cwd.string();
+        KanoUnattendedProcessOptions process{};
+        process.executable = "git";
+        process.working_dir = directory.c_str();
+        process.argv = argv.data();
+        process.argv_count = argv.size();
+        process.mode = KANO_PROCESS_MODE_CAPTURE;
+        process.timeout_ms = static_cast<int>(std::max<std::int64_t>(1,
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                deadline_ - std::chrono::steady_clock::now()).count()));
+        process.cleanup_timeout_ms = 1000;
+        process.capture_limits = {cap, 4096};
+        KanoUnattendedProcessResult result{};
+        const bool completed = kano_process_run_unattended(&process, &result);
+        const bool truncated = result.process.stdout_truncated || result.process.stderr_truncated;
+        const int exit_code = result.process.exit_code;
+        const std::string output(result.process.stdout_data ? result.process.stdout_data : "",
+                                 result.process.stdout_size);
+        kano_process_free_unattended_result(&result);
+        if (!completed) throw std::runtime_error("incoming_identity.git_read_timeout_or_failure");
+        if (truncated) throw std::runtime_error("incoming_identity.git_output_limit_exceeded");
+        if (exit_code != 0) throw std::runtime_error("incoming_identity.git_read_failed: " + operation);
+        return output;
+    }
+
+    void consume(std::size_t bytes) {
+        check_deadline();
+        if (bytes > options_.max_total_bytes - bytes_) {
+            throw std::runtime_error("incoming_identity.total_byte_limit_exceeded");
+        }
+        bytes_ += bytes;
+    }
+
+private:
+    const IncomingIdentityOptions& options_;
+    std::chrono::steady_clock::time_point deadline_;
+    std::size_t bytes_ = 0;
+};
+
+// The canonical item layout is shared with CanonicalStore: items/**/*.md,
+// excluding adjacent .index.md views. Shared roots additionally have products.
+std::optional<std::string> incoming_item_product(
+    const std::filesystem::path& relative, const std::string& single_product
+) {
+    if (relative.is_absolute()) return std::nullopt;
+    std::vector<std::string> parts;
+    for (const auto& part : relative) {
+        const auto value = part.generic_string();
+        if (value == ".." || value == ".") return std::nullopt;
+        parts.push_back(value);
+    }
+    if (relative.extension() != ".md" ||
+        relative.filename().string().ends_with(".index.md")) return std::nullopt;
+    if (parts.size() >= 2 && parts[0] == "items") return single_product;
+    if (parts.size() >= 4 && parts[0] == "products" && parts[2] == "items") return parts[1];
+    return std::nullopt;
+}
+
+IncomingItemIdentity incoming_identity(const BacklogItem& item, const std::string& side,
+    const std::string& product, const std::string& path) {
+    const auto id = RefParser::parse_display_id(item.id);
+    const auto parsed_uid = RefParser::parse_uuid(item.uid);
+    if (!id || id->raw != item.id || !parsed_uid || parsed_uid->raw != item.uid) {
+        throw std::runtime_error("incoming_identity.invalid_item_identity: " + side + ":" + path);
+    }
+    auto uid = item.uid;
+    std::transform(uid.begin(), uid.end(), uid.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return {side, item.id, uid, product, path};
+}
+
+} // namespace
+
+IncomingIdentityReport WorkitemOps::inspect_incoming_identities(const IncomingIdentityOptions& options) {
+    if (options.incoming_ref.empty()) {
+        throw std::runtime_error("incoming_identity.incoming_ref_required");
+    }
+    if (options.incoming_ref.size() > 1024 || options.incoming_ref.front() == '-' ||
+        options.incoming_ref.find('\0') != std::string::npos ||
+        options.max_items == 0 || options.max_items > 65536 ||
+        options.max_tree_entries == 0 || options.max_tree_entries > 262144 ||
+        options.max_item_bytes == 0 || options.max_item_bytes > 16 * 1024 * 1024 ||
+        options.max_total_bytes == 0 || options.max_total_bytes > 256 * 1024 * 1024 ||
+        options.timeout_ms <= 0 || options.timeout_ms > 120000) {
+        throw std::runtime_error("incoming_identity.invalid_ref_or_scan_limits");
+    }
+    const auto root = normalize_path(options.backlog_root);
+    if (!std::filesystem::is_directory(root)) {
+        throw std::runtime_error("incoming_identity.canonical_root_missing");
+    }
+    IncomingIdentityReader reader(options);
+    const auto repo = normalize_path(std::filesystem::path(trim_text(reader.git(root,
+        {"rev-parse", "--show-toplevel"}, 8192))));
+    const auto root_relative = root.lexically_relative(repo);
+    if (root_relative.empty() || root_relative.is_absolute() ||
+        root_relative.generic_string().starts_with("..")) {
+        throw std::runtime_error("incoming_identity.canonical_root_outside_repository");
+    }
+    IncomingIdentityReport report;
+    report.incoming_ref = options.incoming_ref;
+    try {
+        report.incoming_tree = trim_text(reader.git(repo,
+            {"rev-parse", "--verify", "--end-of-options", options.incoming_ref + "^{tree}"}, 256));
+    } catch (const std::exception& error) {
+        throw std::runtime_error("incoming_identity.invalid_incoming_ref: " + std::string(error.what()));
+    }
+    if ((report.incoming_tree.size() != 40 && report.incoming_tree.size() != 64) ||
+        !std::all_of(report.incoming_tree.begin(), report.incoming_tree.end(), [](unsigned char c) {
+            return std::isxdigit(c) != 0;
+        })) throw std::runtime_error("incoming_identity.invalid_incoming_tree");
+
+    std::map<std::string, std::vector<IncomingItemIdentity>> by_id;
+    std::size_t current_entries = 0;
+    const auto single_product = options.single_product.empty() ? root.filename().string() : options.single_product;
+    auto scan_product = [&](const std::filesystem::path& product_root, const std::string& product) {
+        const auto items = product_root / "items";
+        if (!std::filesystem::exists(items)) return;
+        if (std::filesystem::is_symlink(items)) {
+            throw std::runtime_error("incoming_identity.symlink_item_root: " + items.string());
+        }
+        CanonicalStore store(product_root);
+        for (const auto& entry : std::filesystem::recursive_directory_iterator(items)) {
+            reader.check_deadline();
+            if (++current_entries > options.max_tree_entries) {
+                throw std::runtime_error("incoming_identity.current_entry_limit_exceeded");
+            }
+            if (entry.is_symlink()) {
+                throw std::runtime_error("incoming_identity.symlink_item_path: " + entry.path().string());
+            }
+            const auto relative = entry.path().lexically_relative(root);
+            if (!entry.is_regular_file() || !incoming_item_product(relative, single_product)) continue;
+            if (++report.current_items > options.max_items) {
+                throw std::runtime_error("incoming_identity.current_item_limit_exceeded");
+            }
+            if (entry.file_size() > options.max_item_bytes) {
+                throw std::runtime_error("incoming_identity.item_byte_limit_exceeded: " + relative.generic_string());
+            }
+            std::size_t bytes = 0;
+            const auto item = store.read_metadata_bounded(entry.path(), options.max_item_bytes, &bytes);
+            reader.consume(bytes);
+            const auto path = entry.path().lexically_relative(repo).generic_string();
+            by_id[item.id].push_back(incoming_identity(item, "current", product, path));
+        }
+    };
+    scan_product(root, single_product);
+    if (std::filesystem::exists(root / "products")) {
+        if (std::filesystem::is_symlink(root / "products")) {
+            throw std::runtime_error("incoming_identity.symlink_products_root");
+        }
+        for (const auto& product : std::filesystem::directory_iterator(root / "products")) {
+            reader.check_deadline();
+            if (++current_entries > options.max_tree_entries) {
+                throw std::runtime_error("incoming_identity.current_entry_limit_exceeded");
+            }
+            if (product.is_symlink()) throw std::runtime_error("incoming_identity.symlink_product_root");
+            if (product.is_directory()) scan_product(product.path(), product.path().filename().string());
+        }
+    }
+    const auto listing = reader.git(repo, {"ls-tree", "-r", "-z", "-l", "--full-tree",
+        report.incoming_tree, "--", root_relative.generic_string()},
+        std::min(options.max_total_bytes, options.max_tree_entries * std::size_t{1024}));
+    reader.consume(listing.size());
+    std::size_t incoming_entries = 0;
+    for (std::size_t begin = 0; begin < listing.size();) {
+        reader.check_deadline();
+        if (++incoming_entries > options.max_tree_entries) {
+            throw std::runtime_error("incoming_identity.incoming_entry_limit_exceeded");
+        }
+        const auto end = listing.find('\0', begin);
+        const auto tab = listing.find('\t', begin);
+        if (end == std::string::npos || tab == std::string::npos || tab >= end) {
+            throw std::runtime_error("incoming_identity.invalid_tree_listing");
+        }
+        const auto header = listing.substr(begin, tab - begin);
+        const auto path = listing.substr(tab + 1, end - tab - 1);
+        begin = end + 1;
+        const auto relative = std::filesystem::path(path).lexically_relative(root_relative);
+        const auto product = incoming_item_product(relative, single_product);
+        if (!product) continue;
+        std::istringstream metadata(header);
+        std::string mode, type, oid, size_text;
+        metadata >> mode >> type >> oid >> size_text;
+        if (type != "blob" || (mode != "100644" && mode != "100755")) {
+            throw std::runtime_error("incoming_identity.nonregular_incoming_item: " + path);
+        }
+        std::size_t size = 0;
+        try { size = std::stoull(size_text); }
+        catch (...) { throw std::runtime_error("incoming_identity.invalid_blob_size: " + path); }
+        if (size > options.max_item_bytes) {
+            throw std::runtime_error("incoming_identity.item_byte_limit_exceeded: " + path);
+        }
+        if (++report.incoming_items > options.max_items) {
+            throw std::runtime_error("incoming_identity.incoming_item_limit_exceeded");
+        }
+        reader.consume(size);
+        const auto blob = reader.git(repo, {"cat-file", "blob", oid}, options.max_item_bytes);
+        if (blob.size() != size) throw std::runtime_error("incoming_identity.blob_size_mismatch: " + path);
+        const auto item = CanonicalStore::parse_metadata(path, blob, options.max_item_bytes);
+        by_id[item.id].push_back(incoming_identity(item, "incoming", *product, path));
+    }
+    for (auto& [id, identities] : by_id) {
+        std::set<std::string> uids;
+        bool current = false, incoming = false;
+        for (const auto& identity : identities) {
+            uids.insert(identity.uid);
+            current |= identity.side == "current";
+            incoming |= identity.side == "incoming";
+        }
+        if (uids.size() > 1) {
+            std::sort(identities.begin(), identities.end(), [](const auto& a, const auto& b) {
+                return std::tie(a.side, a.product, a.path, a.uid) < std::tie(b.side, b.product, b.path, b.uid);
+            });
+            report.collisions.push_back({id, std::move(identities)});
+        } else if (current && incoming) {
+            ++report.same_uid_pairs;
+        }
+    }
+    reader.check_deadline();
+    return report;
+}
+
+std::string IncomingIdentityReport::to_json() const {
+    Json::Value result(Json::objectValue);
+    result["schema"] = "kob.incoming-identities.v1";
+    result["status"] = admitted() ? "admitted" : "rejected_identity_collision";
+    result["admitted"] = admitted();
+    result["read_only"] = true;
+    result["incoming_ref"] = incoming_ref;
+    result["incoming_tree"] = incoming_tree;
+    result["current_items"] = Json::UInt64(current_items);
+    result["incoming_items"] = Json::UInt64(incoming_items);
+    result["same_uid_pairs"] = Json::UInt64(same_uid_pairs);
+    result["same_uid_disposition"] = "ordinary_content_or_path_drift";
+    result["incoming_uncommitted_items_included"] = false;
+    result["remote_freshness_verified"] = false;
+    result["repair_guidance"] = "Human review required. Select the intended item by immutable UID; preview workitem remap-id <UID> --to <new-ID> --agent <agent> --product <product>. Do not automatically apply repair or rewrite ambiguous backlinks; preserve append-only Worklogs and rerun inspection against the selected updated tree.";
+    result["collisions"] = Json::Value(Json::arrayValue);
+    for (const auto& collision : collisions) {
+        Json::Value entry(Json::objectValue);
+        entry["id"] = collision.id;
+        entry["identities"] = Json::Value(Json::arrayValue);
+        for (const auto& identity : collision.identities) {
+            Json::Value value(Json::objectValue);
+            value["side"] = identity.side;
+            value["id"] = identity.id;
+            value["uid"] = identity.uid;
+            value["product"] = identity.product;
+            value["path"] = identity.path;
+            entry["identities"].append(value);
+        }
+        result["collisions"].append(entry);
+    }
+    Json::StreamWriterBuilder writer;
+    writer["indentation"] = "  ";
+    return Json::writeString(writer, result);
 }
 
 } // namespace kano::backlog_ops

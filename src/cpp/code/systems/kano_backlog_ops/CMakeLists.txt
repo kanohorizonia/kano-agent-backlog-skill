@@ -79,6 +79,7 @@ target_include_directories(kano_backlog_ops
 target_link_libraries(kano_backlog_ops 
     PUBLIC 
       kano::backlog_core
+      KanoInfra::process
       ${_sqlite3_target}
       ${_jsoncpp_target}
       tomlplusplus::tomlplusplus

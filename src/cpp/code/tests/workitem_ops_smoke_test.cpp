@@ -7,6 +7,9 @@
 #include <random>
 #include <sstream>
 #include <stdexcept>
+#include <string_view>
+#include <map>
+#include <kano_process.h>
 
 #include "kano/backlog_core/frontmatter/canonical_store.hpp"
 #include "kano/backlog_core/models/models.hpp"
@@ -177,9 +180,199 @@ kano::backlog_core::CreateItemResult create_item_with_admission(
     );
 }
 
+std::string fixture_git(const std::filesystem::path& cwd, std::vector<std::string> args) {
+    args.insert(args.begin(), {"-c", "user.name=Identity Fixture", "-c", "user.email=fixture@example.invalid",
+        "-c", "commit.gpgsign=false", "-c", "core.hooksPath=" + (cwd / "fixture-no-hooks").string()});
+    std::vector<const char*> argv;
+    for (const auto& arg : args) argv.push_back(arg.c_str());
+    const auto directory = cwd.string();
+    KanoUnattendedProcessOptions options{};
+    options.executable = "git";
+    options.working_dir = directory.c_str();
+    options.argv = argv.data();
+    options.argv_count = argv.size();
+    options.mode = KANO_PROCESS_MODE_CAPTURE;
+    options.timeout_ms = 15000;
+    options.cleanup_timeout_ms = 1000;
+    options.capture_limits = {1024 * 1024, 64 * 1024};
+    KanoUnattendedProcessResult result{};
+    const bool completed = kano_process_run_unattended(&options, &result);
+    const auto code = result.process.exit_code;
+    const std::string output(result.process.stdout_data ? result.process.stdout_data : "", result.process.stdout_size);
+    const std::string error(result.process.stderr_data ? result.process.stderr_data : "", result.process.stderr_size);
+    kano_process_free_unattended_result(&result);
+    expect(completed && code == 0, "disposable fixture Git command failed: " + error);
+    return output;
+}
+
+std::map<std::string, std::string> fixture_snapshot(const std::filesystem::path& root) {
+    std::map<std::string, std::string> result;
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(root)) {
+        if (entry.is_regular_file()) {
+            result[entry.path().lexically_relative(root).generic_string()] = read_text(entry.path());
+        }
+    }
+    return result;
+}
+
+void test_independent_clone_identity_admission() {
+    using kano::backlog_core::CanonicalStore;
+    using kano::backlog_core::ItemType;
+    using kano::backlog_ops::BacklogIndex;
+    using kano::backlog_ops::IncomingIdentityOptions;
+    using kano::backlog_ops::WorkitemOps;
+    const auto fixture = make_temp_root();
+    const auto seed = fixture / "seed";
+    const auto current = fixture / "current clone";
+    const auto incoming = fixture / "incoming clone";
+    const auto product_relative = std::filesystem::path("products") / "fixture-product";
+    std::filesystem::create_directories(seed / product_relative / "items");
+    fixture_git(seed, {"init", "--initial-branch=main"});
+    write_text(seed / ".gitignore", ".cache/\n*.db\n*.db-wal\n*.db-shm\n");
+    write_text(seed / product_relative / "items" / ".gitkeep", "");
+    write_text(seed / "docs" / "not-an-item.md", "unrelated markdown without identity\n");
+    fixture_git(seed, {"add", "--", ".gitignore", "products", "docs"});
+    fixture_git(seed, {"commit", "-m", "Fixture base"});
+    fixture_git(fixture, {"clone", "--no-hardlinks", seed.string(), current.string()});
+    fixture_git(fixture, {"clone", "--no-hardlinks", seed.string(), incoming.string()});
+    expect(std::filesystem::is_directory(current / ".git") && std::filesystem::is_directory(incoming / ".git"),
+        "independent clones must have distinct Git common directories");
+
+    kano::backlog_core::CreateItemResult current_item, incoming_item;
+    {
+        BacklogIndex current_index(current / product_relative / ".cache" / "index" / "backlog.db");
+        BacklogIndex incoming_index(incoming / product_relative / ".cache" / "index" / "backlog.db");
+        current_item = create_item_with_admission(current_index, current / product_relative,
+            "CLN", ItemType::Bug, "Canonical local identity", "fixture");
+        incoming_item = create_item_with_admission(incoming_index, incoming / product_relative,
+            "CLN", ItemType::Bug, "Incoming independent identity", "fixture");
+    }
+    expect(current_item.id == incoming_item.id && current_item.uid != incoming_item.uid,
+        "independent common-dir reservations must reproduce one display ID with two UIDs");
+    write_text(current / product_relative / "items" / "ignored.index.md", "derived index\n");
+    write_text(current / "ambiguous-reference.md", current_item.id + "\n");
+    fixture_git(incoming, {"add", "--", "products"});
+    fixture_git(incoming, {"commit", "-m", "Independent incoming identity"});
+    fixture_git(current, {"fetch", incoming.string(), "main:refs/remotes/fixture/incoming"});
+    IncomingIdentityOptions options;
+    options.backlog_root = current;
+    options.incoming_ref = "refs/remotes/fixture/incoming";
+    const auto before = fixture_snapshot(fixture);
+    const auto report = WorkitemOps::inspect_incoming_identities(options);
+    expect(!report.admitted() && report.collisions.size() == 1, "two-clone display ID collision must reject");
+    expect(report.current_items == 1 && report.incoming_items == 1, "ignore docs and .index.md; include local uncommitted item");
+    const auto json = report.to_json();
+    expect(json.find(current_item.uid) != std::string::npos && json.find(incoming_item.uid) != std::string::npos &&
+        json.find(current_item.path.lexically_relative(current).generic_string()) != std::string::npos &&
+        json.find(incoming_item.path.lexically_relative(incoming).generic_string()) != std::string::npos &&
+        json.find("fixture-product") != std::string::npos,
+        "collision must include both paths, UIDs and product");
+    expect(json.find("Human review required") != std::string::npos && json.find("ambiguous backlinks") != std::string::npos,
+        "repair remains explicitly human-controlled and UID-selected");
+    expect(fixture_snapshot(fixture) == before,
+        "inspection must preserve both clones, all item/backlink bytes, Git refs/index/config, sequences and reservations");
+    const auto mutable_ref_report = report.incoming_tree;
+    options.incoming_ref = mutable_ref_report;
+    expect(!WorkitemOps::inspect_incoming_identities(options).admitted(), "explicit immutable tree OID must also reject");
+    options.incoming_ref = "";
+    expect_throws_contains([&] { (void)WorkitemOps::inspect_incoming_identities(options); },
+        "incoming_ref_required", "missing ref must fail clearly");
+    options.incoming_ref = "refs/remotes/fixture/missing";
+    expect_throws_contains([&] { (void)WorkitemOps::inspect_incoming_identities(options); },
+        "invalid_incoming_ref", "invalid ref must fail clearly");
+    options.incoming_ref = "--all";
+    expect_throws_contains([&] { (void)WorkitemOps::inspect_incoming_identities(options); },
+        "invalid_ref_or_scan_limits", "option-like ref must fail closed");
+    options.incoming_ref = report.incoming_tree;
+    options.max_item_bytes = 8;
+    expect_throws_contains([&] { (void)WorkitemOps::inspect_incoming_identities(options); },
+        "item_byte_limit_exceeded", "byte cap must fail closed");
+    options.max_item_bytes = 1024 * 1024;
+    expect(fixture_snapshot(fixture) == before, "failed and repeated inspections must also be read-only");
+
+    const auto current_bytes = read_text(current_item.path);
+    for (const auto& key : {std::string("id"), std::string("uid")}) {
+        const auto value = key == "id" ? current_item.id : current_item.uid;
+        auto padded = current_bytes;
+        const auto field = key + ": " + value;
+        const auto position = padded.find(field);
+        expect(position != std::string::npos, "fixture identity field must be present");
+        padded.replace(position, field.size(), key + ": ' " + value + " '");
+        write_text(current_item.path, padded);
+        const auto invalid_before = fixture_snapshot(fixture);
+        expect_throws_contains([&] { (void)WorkitemOps::inspect_incoming_identities(options); },
+            "invalid_item_identity", "padded identity must fail closed rather than evade/create a collision");
+        expect(fixture_snapshot(fixture) == invalid_before, "invalid identity inspection must remain read-only");
+        write_text(current_item.path, current_bytes);
+    }
+
+    // Replace refs must not substitute an incoming blob's immutable identity.
+    const auto incoming_path = incoming_item.path.lexically_relative(incoming).generic_string();
+    auto blob_oid = fixture_git(current, {"rev-parse", report.incoming_tree + ":" + incoming_path});
+    auto replacement_oid = fixture_git(current, {"hash-object", "-w", current_item.path.string()});
+    blob_oid.erase(blob_oid.find_last_not_of("\r\n") + 1);
+    replacement_oid.erase(replacement_oid.find_last_not_of("\r\n") + 1);
+    fixture_git(current, {"replace", blob_oid, replacement_oid});
+    const auto replaced_before = fixture_snapshot(fixture);
+    expect(!WorkitemOps::inspect_incoming_identities(options).admitted(),
+        "Git replace refs must never substitute a collision peer's UID");
+    expect(fixture_snapshot(fixture) == replaced_before, "replace-ref inspection must remain read-only");
+
+    CanonicalStore incoming_store(incoming / product_relative);
+    auto drift = incoming_store.read(incoming_item.path);
+    drift.uid = current_item.uid;
+    drift.context = "Changed body is ordinary content drift of the same immutable identity.";
+    incoming_store.write(drift);
+    fixture_git(incoming, {"add", "--", "products"});
+    fixture_git(incoming, {"commit", "-m", "Same UID content and path drift"});
+    fixture_git(current, {"fetch", incoming.string(), "main:refs/remotes/fixture/same-uid"});
+    options.incoming_ref = "refs/remotes/fixture/same-uid";
+    const auto drift_before = fixture_snapshot(fixture);
+    const auto drift_report = WorkitemOps::inspect_incoming_identities(options);
+    expect(drift_report.admitted() && drift_report.same_uid_pairs == 1 && drift_report.collisions.empty(),
+        "same UID on both sides with different body/path is ordinary drift, not a collision");
+    expect(fixture_snapshot(fixture) == drift_before, "same-UID inspection must remain read-only");
+    const auto shared_root = options.backlog_root;
+    options.backlog_root = current / product_relative;
+    options.single_product = "fixture-product";
+    const auto nested_report = WorkitemOps::inspect_incoming_identities(options);
+    expect(nested_report.admitted() && nested_report.current_items == 1 && nested_report.incoming_items == 1 &&
+        nested_report.same_uid_pairs == 1,
+        "nested canonical root must scope Git pathspec correctly and retain single-product identity");
+    expect(fixture_snapshot(fixture) == drift_before, "nested-root inspection must remain read-only");
+    options.backlog_root = shared_root;
+
+    // Cross-product IDs share the display namespace; a new incoming product
+    // absent from the canonical working tree must still participate.
+    auto cross_product = drift;
+    cross_product.uid = CanonicalStore::generate_uuid_v7();
+    cross_product.file_path = incoming / "products" / "another-product" / "items" / "bug" / "0000" /
+        (cross_product.id + "_another-product.md");
+    CanonicalStore another_store(incoming / "products" / "another-product");
+    another_store.write(cross_product);
+    fixture_git(incoming, {"add", "--", "products"});
+    fixture_git(incoming, {"commit", "-m", "Cross-product incoming collision"});
+    fixture_git(current, {"fetch", incoming.string(), "main:refs/remotes/fixture/cross-product"});
+    options.incoming_ref = "refs/remotes/fixture/cross-product";
+    const auto cross_before = fixture_snapshot(fixture);
+    const auto cross_report = WorkitemOps::inspect_incoming_identities(options);
+    expect(!cross_report.admitted() && cross_report.to_json().find("another-product") != std::string::npos,
+        "incoming-only product must not hide a display ID collision");
+    expect(fixture_snapshot(fixture) == cross_before, "cross-product inspection must remain read-only");
+    options.max_items = 1;
+    expect_throws_contains([&] { (void)WorkitemOps::inspect_incoming_identities(options); },
+        "incoming_item_limit_exceeded", "incoming item limit must fail closed");
+    options.max_items = 16384;
+    options.max_tree_entries = 1;
+    expect_throws_contains([&] { (void)WorkitemOps::inspect_incoming_identities(options); },
+        "entry_limit_exceeded", "entry scan limit must fail closed");
+    expect(fixture_snapshot(fixture) == cross_before, "scan-limit failures must remain read-only");
+    std::filesystem::remove_all(fixture);
+}
+
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
     kano::infra::ConfigureUnattendedExecution();
 
     using kano::backlog_core::ItemState;
@@ -193,6 +386,12 @@ int main() {
     std::filesystem::path external_root;
 
     try {
+        if (argc == 2 && std::string_view(argv[1]) == "--incoming-identities") {
+            test_independent_clone_identity_admission();
+            std::cout << "incoming_identity_smoke_test: PASS\n";
+            return 0;
+        }
+        if (argc != 1) throw std::runtime_error("unknown WorkitemOps smoke test mode");
         root = make_temp_root();
         {
             BacklogIndex index(root / ".cache" / "index" / "backlog.db");

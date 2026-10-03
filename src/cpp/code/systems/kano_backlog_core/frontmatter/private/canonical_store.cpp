@@ -411,7 +411,7 @@ bool is_frontmatter_delimiter(
 }
 
 std::string read_bounded_frontmatter_yaml(
-    std::ifstream& input,
+    std::istream& input,
     const std::filesystem::path& item_path,
     std::size_t maximum_bytes,
     std::size_t& bytes_read
@@ -939,6 +939,26 @@ BacklogItem CanonicalStore::read_metadata_bounded(
         *bytes_read = bounded_bytes_read;
     }
 
+    FrontmatterContext ctx;
+    try {
+        ctx.metadata = YAML::Load(yaml);
+    } catch (const YAML::Exception&) {
+        ctx.metadata = YAML::Node(YAML::NodeType::Null);
+    }
+    return item_from_context(item_path, ctx, false);
+}
+
+BacklogItem CanonicalStore::parse_metadata(
+    const std::filesystem::path& item_path,
+    std::string_view content,
+    std::size_t maximum_bytes
+) {
+    if (content.size() > maximum_bytes) {
+        throw ParseError(item_path, "Item metadata input exceeds byte limit");
+    }
+    std::istringstream input{std::string(content)};
+    std::size_t bytes_read = 0;
+    const auto yaml = read_bounded_frontmatter_yaml(input, item_path, maximum_bytes, bytes_read);
     FrontmatterContext ctx;
     try {
         ctx.metadata = YAML::Load(yaml);

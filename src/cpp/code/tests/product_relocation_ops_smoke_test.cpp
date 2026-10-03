@@ -113,7 +113,7 @@ kano::backlog_core::BacklogItem create_item(
     return item;
 }
 
-Fixture make_fixture(bool raw_path_ref = false) {
+Fixture make_fixture(bool raw_path_ref = false, bool generated = true) {
     using kano::backlog_core::CanonicalStore;
     using kano::backlog_core::ItemType;
     using kano::backlog_ops::BacklogIndex;
@@ -212,7 +212,19 @@ Fixture make_fixture(bool raw_path_ref = false) {
             " and retains accepted/rejected evidence.\n");
     write_text(
         fixture.source / "views" / "summary.md",
-        "# Disposable derived view\n");
+        "# Hand-authored custom view\n");
+    write_text(fixture.source / "views" / "custom.base", "filters: custom-user-rule\n");
+    write_text(fixture.source / "items" / "feature" / "0000" / "custom.index.md", "# Custom index\n");
+    write_text(fixture.source / ".cache" / "stale.json", "disposable cache\n");
+    if (generated) {
+        write_text(fixture.source / "_config" / "generated-views.json",
+            "{\"schema\":\"kob.product_generated_views.v1\","
+            "\"rebuilders\":[\"canonical-item-list.v1\"]}\n");
+        write_text(fixture.source / "_views" / "canonical-items.json",
+            "{\"stale_source_root\":\"" + fixture.source.generic_string() + "\"}\n");
+    }
+    write_text(observer / "_views" / "canonical-items.json", "unrelated stale view remains exact\n");
+    write_text(observer / ".cache" / "control.json", "unrelated cache remains exact\n");
 
     const auto index_path =
         fixture.source / ".cache" / "index" / "backlog.db";
@@ -312,11 +324,16 @@ void test_plan_and_collisions() {
         expect(
             contains_prefix(
                 first.derived_surfaces,
-                "product-derived:human-rig-runtime/views/") &&
+                "target:product-derived:human-rig-runtime/_views/canonical-items.json:rebuild:") &&
                 contains_prefix(
                     first.derived_surfaces,
-                    "product-cache:human-rig-runtime/index/"),
-            "planner should classify views and index as derived");
+                    "product-cache:human-rig-runtime:disposable"),
+            "planner should report the bounded registered view and disposable cache");
+        expect(first.generated_rebuilders == std::vector<std::string>{"canonical-item-list.v1"},
+            "only the explicitly registered product rebuilder should be applicable");
+        expect(std::any_of(first.files.begin(), first.files.end(), [](const auto& file) {
+            return file.kind == "hand_authored_view" && file.ref.ends_with("views/summary.md");
+        }), "custom views must be preserved in the byte manifest");
         expect(
             first.to_json().find(fixture.root.string()) ==
                     std::string::npos &&
@@ -520,9 +537,23 @@ void test_success_verify_replay_and_rollback() {
                 std::filesystem::is_directory(fixture.destination),
             "source should retire only after target/config verification");
         expect(
-            !std::filesystem::exists(
-                fixture.destination / "views" / "summary.md"),
-            "derived views should not be copied as authority");
+            read_text(fixture.destination / "views" / "summary.md") == "# Hand-authored custom view\n" &&
+            read_text(fixture.destination / "views" / "custom.base") == "filters: custom-user-rule\n" &&
+            read_text(fixture.destination / "items" / "feature" / "0000" / "custom.index.md") == "# Custom index\n",
+            "hand-authored Markdown, Bases, and index views must remain byte exact");
+        const auto generated_path = fixture.destination / "_views" / "canonical-items.json";
+        const auto generated_bytes = read_text(generated_path);
+        expect(generated_bytes.find("stale_source_root") == std::string::npos &&
+            generated_bytes.find(fixture.source.generic_string()) == std::string::npos &&
+            generated_bytes.find("product:human-rig-runtime/items/") != std::string::npos &&
+            generated_bytes.find(fixture.uids[0]) != std::string::npos,
+            "regeneration must discard premove output and use bounded canonical refs");
+        expect(!std::filesystem::exists(fixture.destination / ".cache" / "stale.json"),
+            "disposable caches must not be copied");
+        const auto observer = fixture.shared / "products" / "observer";
+        expect(read_text(observer / "_views" / "canonical-items.json") == "unrelated stale view remains exact\n" &&
+            read_text(observer / ".cache" / "control.json") == "unrelated cache remains exact\n",
+            "relocation must not rebuild or remove another product's output/cache");
         expect(
             std::filesystem::is_regular_file(
                 fixture.destination / ".cache" / "index" /
@@ -599,13 +630,173 @@ void test_success_verify_replay_and_rollback() {
                     fixture.task_bytes &&
                 read_text(
                     fixture.source / "views" / "summary.md") ==
-                    "# Disposable derived view\n",
+                    "# Hand-authored custom view\n",
             "rollback should restore exact canonical and original derived bytes");
         cleanup(fixture);
     } catch (...) {
         cleanup(fixture);
         throw;
     }
+}
+
+
+void test_generated_view_failure_and_recovery() {
+    using kano::backlog_ops::ProductRelocationOps;
+    for (const auto& phase : {"during_generated_rebuild", "during_generated_output_stage", "generated_view_mismatch"}) {
+        auto fixture = make_fixture();
+        try {
+            const auto options = plan_options(fixture);
+            const auto plan = ProductRelocationOps::plan(options);
+            const auto stale = read_text(fixture.source / "_views" / "canonical-items.json");
+            ProductRelocationOps::ApplyOptions apply{
+                .plan = options, .expected_plan_hash = plan.plan_hash, .confirm = true,
+                .inject_failure_after = phase,
+            };
+            const auto failed = ProductRelocationOps::apply(apply);
+            expect(failed.status == "rolled_back", "rebuilder/clean oracle failures must roll back");
+            expect(read_text(fixture.config) == fixture.config_before &&
+                !std::filesystem::exists(fixture.destination) &&
+                read_text(fixture.source / "_views" / "canonical-items.json") == stale,
+                "failed rebuilding must restore config and original source view bytes");
+            const auto journal = read_text(fixture.shared / ".kano" / "cache" /
+                "product-relocations" / plan.plan_hash / "journal.json");
+            expect(journal.find("generated_view_validation") != std::string::npos &&
+                journal.find("\"status\" : \"failed\"") != std::string::npos,
+                "failure journal must retain generated-view stage/evidence after automatic rollback");
+            ProductRelocationOps::RecoveryOptions recovery;
+            recovery.backlog_root = fixture.shared;
+            recovery.plan_hash = plan.plan_hash;
+            recovery.confirm = true;
+            expect(ProductRelocationOps::rollback(recovery).status == "rolled_back",
+                "explicit recovery must be deterministic after automatic rollback");
+            cleanup(fixture);
+        } catch (...) { cleanup(fixture); throw; }
+    }
+}
+
+void test_generated_validation_interruption_and_drift() {
+    using kano::backlog_ops::ProductRelocationOps;
+    auto fixture = make_fixture();
+    try {
+        const auto options = plan_options(fixture);
+        const auto plan = ProductRelocationOps::plan(options);
+        ProductRelocationOps::ApplyOptions apply{
+            .plan = options, .expected_plan_hash = plan.plan_hash, .confirm = true,
+            .inject_failure_after = std::nullopt,
+            .inject_interruption_after = "after_generated_validation",
+        };
+        expect(ProductRelocationOps::apply(apply).status == "recovery_required" &&
+            std::filesystem::exists(fixture.source) &&
+            std::filesystem::exists(fixture.destination / "_views" / "canonical-items.json"),
+            "source retirement must wait until generated validation completes");
+        ProductRelocationOps::RecoveryOptions recovery;
+        recovery.backlog_root = fixture.shared;
+        recovery.plan_hash = plan.plan_hash;
+        recovery.confirm = true;
+        expect(ProductRelocationOps::status(recovery).stage == "after_generated_validation" &&
+            ProductRelocationOps::rollback(recovery).status == "rolled_back",
+            "validated pre-retirement interruption must expose deterministic rollback");
+        cleanup(fixture);
+    } catch (...) { cleanup(fixture); throw; }
+
+    fixture = make_fixture();
+    try {
+        const auto options = plan_options(fixture);
+        const auto plan = ProductRelocationOps::plan(options);
+        ProductRelocationOps::ApplyOptions apply{
+            .plan = options, .expected_plan_hash = plan.plan_hash, .confirm = true,
+        };
+        expect(ProductRelocationOps::apply(apply).status == "applied", "drift control should apply");
+        const auto output = fixture.destination / "_views" / "canonical-items.json";
+        const auto clean = read_text(output);
+        write_text(output, "stale generated row\n");
+        ProductRelocationOps::RecoveryOptions recovery;
+        recovery.backlog_root = fixture.shared;
+        recovery.plan_hash = plan.plan_hash;
+        expect(contains_prefix(ProductRelocationOps::verify(recovery).failures,
+            "generated_view_clean_rebuild_mismatch"), "read-only verify must detect output drift");
+        expect(read_text(output) == "stale generated row\n", "verify must not repair generated drift");
+        write_text(output, clean);
+        expect(ProductRelocationOps::verify(recovery).status == "verified", "restored output should match oracle");
+        cleanup(fixture);
+    } catch (...) { cleanup(fixture); throw; }
+}
+
+void test_generated_output_stage_recovery() {
+    using kano::backlog_ops::ProductRelocationOps;
+    for (const bool owned : {true, false}) {
+        auto fixture = make_fixture();
+        try {
+            const auto options = plan_options(fixture);
+            const auto plan = ProductRelocationOps::plan(options);
+            const auto stale = read_text(fixture.source / "_views" / "canonical-items.json");
+            ProductRelocationOps::ApplyOptions apply{
+                .plan = options, .expected_plan_hash = plan.plan_hash, .confirm = true,
+                .inject_failure_after = std::nullopt,
+                .inject_interruption_after = owned ? "during_generated_output_stage" : "after_config_publish",
+            };
+            expect(ProductRelocationOps::apply(apply).status == "recovery_required",
+                "soft interruption must leave deterministic recovery material");
+            const auto output_stage = fixture.destination / "_views" /
+                "canonical-items.json.kob-product-relocation.tmp";
+            if (!owned) {
+                write_text(output_stage, "unowned temporary output\n");
+            }
+            expect(std::filesystem::exists(fixture.source) && std::filesystem::is_regular_file(output_stage),
+                "partial generated staging must retain the source root");
+            ProductRelocationOps::RecoveryOptions recovery;
+            recovery.backlog_root = fixture.shared;
+            recovery.plan_hash = plan.plan_hash;
+            recovery.confirm = true;
+            if (owned) {
+                const auto journal = read_text(fixture.shared / ".kano" / "cache" /
+                    "product-relocations" / plan.plan_hash / "journal.json");
+                expect(journal.find("\"output_stage_owned\" : true") != std::string::npos,
+                    "registered partial-stage ownership must persist before interruption");
+            } else {
+                expect(ProductRelocationOps::rollback(recovery).status == "recovery_required" &&
+                    read_text(output_stage) == "unowned temporary output\n",
+                    "rollback must not remove another writer's temporary output");
+                std::filesystem::remove(output_stage);
+            }
+            expect(ProductRelocationOps::rollback(recovery).status == "rolled_back" &&
+                ProductRelocationOps::rollback(recovery).status == "rolled_back" &&
+                !std::filesystem::exists(fixture.destination) &&
+                read_text(fixture.config) == fixture.config_before &&
+                read_text(fixture.source / "_views" / "canonical-items.json") == stale,
+                "registered-stage recovery must preserve exact original config/source views");
+            cleanup(fixture);
+        } catch (...) { cleanup(fixture); throw; }
+    }
+}
+
+void test_no_generated_views_and_ownership_guards() {
+    using kano::backlog_ops::ProductRelocationOps;
+    auto fixture = make_fixture(false, false);
+    try {
+        const auto options = plan_options(fixture);
+        const auto plan = ProductRelocationOps::plan(options);
+        expect(plan.ready() && plan.generated_rebuilders.empty(), "unregistered products have no view hooks");
+        ProductRelocationOps::ApplyOptions apply{
+            .plan = options, .expected_plan_hash = plan.plan_hash, .confirm = true,
+        };
+        expect(ProductRelocationOps::apply(apply).status == "applied" &&
+            !std::filesystem::exists(fixture.destination / "_views"),
+            "no-generated-view products must not acquire invented views");
+        cleanup(fixture);
+    } catch (...) { cleanup(fixture); throw; }
+    fixture = make_fixture();
+    try {
+        write_text(fixture.source / "_views" / "custom.json", "ambiguous ownership\n");
+        expect(contains_prefix(ProductRelocationOps::plan(plan_options(fixture)).blockers,
+            "generated_view_ownership_ambiguous"), "unknown generated ownership must fail closed");
+        std::filesystem::remove(fixture.source / "_views" / "custom.json");
+        write_text(fixture.source / "_config" / "generated-views.json",
+            "{\"schema\":\"kob.product_generated_views.v1\",\"rebuilders\":[\"rebuild-all\"]}\n");
+        expect(contains_prefix(ProductRelocationOps::plan(plan_options(fixture)).blockers,
+            "generated_view_rebuilder_not_registered"), "unregistered rebuild-all hooks must be rejected");
+        cleanup(fixture);
+    } catch (...) { cleanup(fixture); throw; }
 }
 
 } // namespace
@@ -618,6 +809,10 @@ int main() {
         test_stale_and_automatic_rollback();
         test_recoverable_interruption();
         test_success_verify_replay_and_rollback();
+        test_generated_view_failure_and_recovery();
+        test_generated_validation_interruption_and_drift();
+        test_generated_output_stage_recovery();
+        test_no_generated_views_and_ownership_guards();
         std::cout << "product_relocation_ops_smoke_test: PASS\n";
         return 0;
     } catch (const std::exception& error) {

@@ -70,6 +70,7 @@ struct ProductRelocationPlan {
     std::vector<ProductRelocationIdentity> identities;
     std::vector<std::string> reference_checks;
     std::vector<std::string> derived_surfaces;
+    std::vector<std::string> generated_rebuilders;
     std::vector<std::string> validation_steps;
     std::vector<std::string> blockers;
     std::vector<std::string> warnings;

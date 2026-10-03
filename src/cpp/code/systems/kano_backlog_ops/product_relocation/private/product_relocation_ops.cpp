@@ -3,6 +3,7 @@
 #include "kano/backlog_core/config/config.hpp"
 #include "kano/backlog_core/frontmatter/canonical_store.hpp"
 #include "kano/backlog_ops/index/backlog_index.hpp"
+#include "kano/backlog_ops/view/view_ops.hpp"
 
 #include <json/json.h>
 #include <sqlite3.h>
@@ -474,6 +475,7 @@ Json::Value plan_json(
     value["identities"] = identities;
     value["reference_checks"] = string_array(plan.reference_checks);
     value["derived_surfaces"] = string_array(plan.derived_surfaces);
+    value["generated_rebuilders"] = string_array(plan.generated_rebuilders);
     value["validation_steps"] = string_array(plan.validation_steps);
     value["blockers"] = string_array(plan.blockers);
     value["warnings"] = string_array(plan.warnings);
@@ -503,9 +505,8 @@ std::string first_component(const std::filesystem::path& relative) {
 
 bool is_derived_relative(const std::filesystem::path& relative) {
     const auto top = first_component(relative);
-    const auto filename = relative.filename().generic_string();
-    return top == ".cache" || top == "views" || top == "_views" ||
-           filename.find(".index.md") != std::string::npos;
+    return top == ".cache" ||
+           relative.generic_string() == "_views/canonical-items.json";
 }
 
 std::string derived_ref(
@@ -525,6 +526,9 @@ std::string classify_canonical_file(
     const std::filesystem::path& relative
 ) {
     const auto top = first_component(relative);
+    if (top == "views" || relative.filename().generic_string().ends_with(".index.md")) {
+        return "hand_authored_view";
+    }
     if (top == "items" || top == "_trash") {
         return "canonical_item";
     }
@@ -1011,6 +1015,7 @@ void finalize_plan(PreparedRelocation& prepared) {
         });
     sort_unique(prepared.plan.reference_checks);
     sort_unique(prepared.plan.derived_surfaces);
+    sort_unique(prepared.plan.generated_rebuilders);
     sort_unique(prepared.plan.validation_steps);
     sort_unique(prepared.plan.blockers);
     sort_unique(prepared.plan.warnings);
@@ -1020,8 +1025,49 @@ void finalize_plan(PreparedRelocation& prepared) {
         json_string(plan_json(prepared.plan, false), false));
 }
 
+// Fixed registry: callers may select a known deterministic producer, never a
+// command, arbitrary output path, or writer that mixes generated/custom text.
+constexpr const char* kGeneratedViewDeclaration = "_config/generated-views.json";
+constexpr const char* kCanonicalListRebuilder = "canonical-item-list.v1";
+constexpr const char* kCanonicalListOutput = "_views/canonical-items.json";
+
+std::vector<std::string> registered_rebuilders(const std::filesystem::path& root) {
+    const auto declaration = root / kGeneratedViewDeclaration;
+    if (!std::filesystem::exists(declaration)) {
+        return {};
+    }
+    if (std::filesystem::is_symlink(declaration)) {
+        throw std::runtime_error("generated_view_declaration_symlink");
+    }
+    const auto value = parse_json(read_file(declaration, 16384));
+    if (!value.isObject() || value.size() != 2 ||
+        value["schema"].asString() != "kob.product_generated_views.v1" ||
+        !value["rebuilders"].isArray() || value["rebuilders"].size() > 1) {
+        throw std::runtime_error("generated_view_declaration_invalid");
+    }
+    std::vector<std::string> result;
+    for (const auto& entry : value["rebuilders"]) {
+        if (!entry.isString() || entry.asString() != kCanonicalListRebuilder) {
+            throw std::runtime_error("generated_view_rebuilder_not_registered");
+        }
+        result.push_back(entry.asString());
+    }
+    return result;
+}
+
 void inventory_source(PreparedRelocation& prepared) {
     std::uintmax_t total_bytes = 0;
+    std::size_t visited_files = 0;
+    try {
+        prepared.plan.generated_rebuilders = registered_rebuilders(prepared.source_root);
+    } catch (const std::exception& error) {
+        add_blocker(prepared.plan, bounded_error(error.what()));
+    }
+    if (!prepared.plan.generated_rebuilders.empty()) {
+        prepared.plan.derived_surfaces.push_back(
+            "target:product-derived:" + prepared.plan.product + "/" +
+            kCanonicalListOutput + ":rebuild:canonical-item-list.v1");
+    }
     std::error_code iterator_error;
     std::filesystem::recursive_directory_iterator iterator(
         prepared.source_root,
@@ -1056,6 +1102,15 @@ void inventory_source(PreparedRelocation& prepared) {
             continue;
         }
         const auto generic = relative.generic_string();
+        if (++visited_files > prepared.plan.request.max_files) {
+            add_blocker(prepared.plan, "source_file_limit_exceeded");
+            return;
+        }
+        if (first_component(relative) == "_views" &&
+            (generic != kCanonicalListOutput || prepared.plan.generated_rebuilders.empty())) {
+            add_blocker(prepared.plan, "generated_view_ownership_ambiguous");
+            continue;
+        }
         if (generic == ".cache/index/backlog.db-wal" ||
             generic == ".cache/index/backlog.db-shm") {
             add_blocker(
@@ -1063,7 +1118,9 @@ void inventory_source(PreparedRelocation& prepared) {
         }
         if (is_derived_relative(relative)) {
             prepared.plan.derived_surfaces.push_back(
-                derived_ref(prepared.plan.product, relative));
+                first_component(relative) == ".cache"
+                    ? "product-cache:" + prepared.plan.product + ":disposable"
+                    : derived_ref(prepared.plan.product, relative));
             continue;
         }
         if (prepared.manifest.size() >=
@@ -1348,6 +1405,7 @@ PreparedRelocation build_prepared(
         "canonical_byte_manifest_matches",
         "config_commit_resolves_shared_root",
         "derived_metadata_index_rebuilt_from_canonical",
+        "registered_generated_views_match_clean_canonical_rebuild",
         "display_ids_and_uids_match",
         "historical_worklog_receipt_and_artifact_bytes_match",
         "sequence_and_reservation_state_matches",
@@ -1543,7 +1601,7 @@ PreparedRelocation build_prepared(
         "target:product-cache:" + product_name +
         "/index/backlog.db:rebuild");
     prepared.plan.warnings.push_back(
-        "derived_views_are_not_copied_as_authority");
+        "generated_views_and_disposable_caches_are_not_copied_as_authority");
     prepared.plan.warnings.push_back(
         "source_root_is_retained_as_verified_rollback_material");
     finalize_plan(prepared);
@@ -1836,7 +1894,8 @@ std::vector<std::string> verify_manifest(
     const std::filesystem::path& root,
     const std::vector<ManifestEntry>& manifest,
     const std::string& product,
-    const std::string& label
+    const std::string& label,
+    bool legacy_view_exclusions = false
 ) {
     std::vector<std::string> failures;
     if (!std::filesystem::is_directory(root) ||
@@ -1888,7 +1947,9 @@ std::vector<std::string> verify_manifest(
             continue;
         }
         const auto relative = entry.path().lexically_relative(root);
-        if (is_derived_relative(relative)) {
+        if (is_derived_relative(relative) || (legacy_view_exclusions &&
+            (first_component(relative) == "views" || first_component(relative) == "_views" ||
+             relative.filename().generic_string().find(".index.md") != std::string::npos))) {
             continue;
         }
         const auto generic = relative.generic_string();
@@ -1900,6 +1961,39 @@ std::vector<std::string> verify_manifest(
     }
     sort_unique(failures);
     return failures;
+}
+
+void cleanup_owned_generated_output_stage(
+    const std::filesystem::path& destination, Json::Value& journal
+) {
+    if (!journal.isMember("generated_view_validation")) {
+        return;
+    }
+    auto& evidence = journal["generated_view_validation"];
+    if (!evidence["output_stage_owned"].asBool()) {
+        return;
+    }
+    const auto& registered = journal["plan"]["generated_rebuilders"];
+    if (!registered.isArray() || registered.size() != 1 ||
+        registered[0].asString() != kCanonicalListRebuilder ||
+        evidence["active_rebuilder"].asString() != kCanonicalListRebuilder) {
+        throw std::runtime_error("generated_view_output_stage_ownership_invalid");
+    }
+    const auto directory = destination / "_views";
+    auto output_stage = destination / kCanonicalListOutput;
+    output_stage += ".kob-product-relocation.tmp";
+    if (std::filesystem::is_symlink(directory) ||
+        std::filesystem::is_symlink(output_stage) ||
+        (std::filesystem::exists(output_stage) && !std::filesystem::is_regular_file(output_stage))) {
+        throw std::runtime_error("generated_view_output_stage_ownership_ambiguous");
+    }
+    if (std::filesystem::exists(output_stage)) {
+        std::error_code error;
+        if (!std::filesystem::remove(output_stage, error) || error) {
+            throw std::runtime_error("generated_view_output_stage_cleanup_failed");
+        }
+    }
+    evidence["output_stage_owned"] = false;
 }
 
 void copy_manifest(
@@ -2051,6 +2145,16 @@ std::vector<std::string> rollback_journal(
     const auto retired = normalized_absolute(
         std::filesystem::path(journal["retired_root"].asString()));
     const auto manifest = manifest_from_json(journal["manifest"]);
+    // Persisted pre-hook plans retain their original derived-file ownership.
+    const bool legacy_views = !journal["plan"].isMember("generated_rebuilders");
+
+    try {
+        cleanup_owned_generated_output_stage(destination, journal);
+        write_journal(transaction, journal);
+    } catch (const std::exception& error) {
+        failures.push_back(bounded_error(error.what()));
+        return restored;
+    }
 
     const bool source_exists = std::filesystem::exists(source);
     const bool retired_exists = std::filesystem::exists(retired);
@@ -2060,13 +2164,13 @@ std::vector<std::string> rollback_journal(
     }
     if (source_exists) {
         const auto source_failures =
-            verify_manifest(source, manifest, product, "source");
+            verify_manifest(source, manifest, product, "source", legacy_views);
         failures.insert(
             failures.end(),
             source_failures.begin(), source_failures.end());
     } else if (retired_exists) {
         const auto retired_failures =
-            verify_manifest(retired, manifest, product, "retired");
+            verify_manifest(retired, manifest, product, "retired", legacy_views);
         if (!retired_failures.empty()) {
             failures.insert(
                 failures.end(),
@@ -2119,7 +2223,7 @@ std::vector<std::string> rollback_journal(
             !empty_error;
         if (!untouched_preexisting_empty) {
             const auto target_failures =
-                verify_manifest(destination, manifest, product, "target");
+                verify_manifest(destination, manifest, product, "target", legacy_views);
             if (!target_failures.empty()) {
                 failures.insert(
                     failures.end(),
@@ -2198,6 +2302,172 @@ void rebuild_target_index(
         kano::backlog_ops::BacklogIndex sequence_index(
             index, prepared.plan.product, prepared.destination_root);
         sequence_index.sync_sequences(prepared.destination_root);
+    }
+}
+
+
+std::string canonical_list_bytes(
+    const std::filesystem::path& root, const std::string& product
+) {
+    Json::Value value(Json::objectValue);
+    value["schema"] = "kob.product_canonical_item_view.v1";
+    value["product"] = product;
+    value["items"] = Json::arrayValue;
+    // Use the existing canonical list producer. Product-local topic membership
+    // is not emitted: the registered surface has no shared/cached inputs.
+    CanonicalStore store(root);
+    std::unordered_map<std::string, std::filesystem::path> paths_by_id;
+    for (const auto& path : store.list_items()) {
+        if (!paths_by_id.emplace(store.read_metadata(path).id, path).second) {
+            throw std::runtime_error("generated_view_duplicate_item_id");
+        }
+    }
+    for (const auto& item : kano::backlog_ops::ViewOps::list_item_projections(root, root)) {
+        const auto path = paths_by_id.find(item.id);
+        if (path == paths_by_id.end()) {
+            throw std::runtime_error("generated_view_item_missing");
+        }
+        Json::Value row(Json::objectValue);
+        row["id"] = item.id;
+        row["uid"] = item.uid;
+        row["title"] = item.title;
+        row["type"] = kano::backlog_core::to_string(item.type);
+        row["state"] = kano::backlog_core::to_string(item.state);
+        row["updated"] = item.updated;
+        row["priority"] = item.priority ? Json::Value(*item.priority) : Json::Value();
+        row["parent"] = item.parent ? Json::Value(*item.parent) : Json::Value();
+        row["duplicate_of"] = item.duplicate_of ? Json::Value(*item.duplicate_of) : Json::Value();
+        row["tags"] = string_array(item.tags);
+        row["relates"] = string_array(item.links.relates);
+        row["blocks"] = string_array(item.links.blocks);
+        row["blocked_by"] = string_array(item.links.blocked_by);
+        row["source_ref"] = bounded_product_ref(
+            product, path->second.lexically_relative(root).generic_string());
+        value["items"].append(row);
+    }
+    return json_string(value, true) + "\n";
+}
+
+void validate_generated_views(
+    const std::filesystem::path& destination,
+    const std::filesystem::path& canonical_root,
+    const std::string& product,
+    const std::vector<std::string>& expected_rebuilders
+) {
+    if (registered_rebuilders(destination) != expected_rebuilders) {
+        throw std::runtime_error("generated_view_registration_drift");
+    }
+    const auto directory = destination / "_views";
+    if (std::filesystem::exists(directory)) {
+        if (std::filesystem::is_symlink(directory)) {
+            throw std::runtime_error("generated_view_output_symlink");
+        }
+        for (const auto& entry : std::filesystem::recursive_directory_iterator(directory)) {
+            if (entry.is_symlink() || (entry.is_regular_file() &&
+                (expected_rebuilders.empty() ||
+                 entry.path().lexically_relative(destination).generic_string() != kCanonicalListOutput))) {
+                throw std::runtime_error("generated_view_ownership_ambiguous");
+            }
+        }
+    }
+    for (const auto& rebuilder : expected_rebuilders) {
+        if (rebuilder != kCanonicalListRebuilder) {
+            throw std::runtime_error("generated_view_rebuilder_not_registered");
+        }
+        const auto output = destination / kCanonicalListOutput;
+        if (!std::filesystem::is_regular_file(output) ||
+            read_file(output) != canonical_list_bytes(canonical_root, product)) {
+            throw std::runtime_error("generated_view_clean_rebuild_mismatch:canonical-item-list.v1");
+        }
+    }
+}
+
+bool rebuild_generated_views(
+    const PreparedRelocation& prepared,
+    const std::filesystem::path& transaction,
+    Json::Value& journal,
+    const kano::backlog_ops::ProductRelocationOps::ApplyOptions& options
+) {
+    auto& evidence = journal["generated_view_validation"];
+    evidence["status"] = "rebuilding";
+    evidence["rebuilders"] = string_array(prepared.plan.generated_rebuilders);
+    write_journal(transaction, journal);
+    try {
+        if (prepared.plan.generated_rebuilders.empty()) {
+            validate_generated_views(prepared.destination_root, prepared.destination_root,
+                prepared.plan.product, {});
+            evidence["status"] = "validated";
+            evidence["oracle"] = "not_applicable_no_generated_views";
+            write_journal(transaction, journal);
+            return true;
+        }
+        if (options.inject_failure_after == "during_generated_rebuild") {
+            throw std::runtime_error("injected_generated_rebuild_failure");
+        }
+        // A fresh manifest-only root cannot contain premove output or caches.
+        // It lives inside the owned transaction; it is never used as authority.
+        const auto oracle = transaction / "derived-oracle";
+        auto oracle_prepared = prepared;
+        oracle_prepared.source_root = prepared.destination_root;
+        copy_manifest(oracle_prepared, oracle);
+        const auto publish_output = [&](const std::string& bytes) {
+            auto output_stage = prepared.destination_root / kCanonicalListOutput;
+            output_stage += ".kob-product-relocation.tmp";
+            if (std::filesystem::exists(output_stage) || std::filesystem::is_symlink(output_stage)) {
+                throw std::runtime_error("atomic_stage_already_exists");
+            }
+            // Persist ownership before the registered writer can leave a partial
+            // atomic stage. Recovery never claims a pre-existing temporary file.
+            evidence["output_stage_owned"] = true;
+            write_journal(transaction, journal);
+            if (options.inject_failure_after == "during_generated_output_stage" ||
+                options.inject_interruption_after == "during_generated_output_stage") {
+                std::filesystem::create_directories(output_stage.parent_path());
+                std::ofstream partial(output_stage, std::ios::binary | std::ios::trunc);
+                partial << "partial generated output\n";
+                partial.close();
+                if (!partial) {
+                    throw std::runtime_error("injected_generated_stage_write_failed");
+                }
+                if (options.inject_interruption_after == "during_generated_output_stage") {
+                    return false;
+                }
+                throw std::runtime_error("injected_generated_output_stage_failure");
+            }
+            write_file_atomic(prepared.destination_root / kCanonicalListOutput, bytes);
+            evidence["output_stage_owned"] = false;
+            write_journal(transaction, journal);
+            return true;
+        };
+        for (const auto& rebuilder : prepared.plan.generated_rebuilders) {
+            evidence["active_rebuilder"] = rebuilder;
+            write_journal(transaction, journal);
+            if (rebuilder != kCanonicalListRebuilder) {
+                throw std::runtime_error("generated_view_rebuilder_not_registered");
+            }
+            if (!publish_output(canonical_list_bytes(prepared.destination_root, prepared.plan.product))) {
+                return false;
+            }
+        }
+        if (options.inject_failure_after == "generated_view_mismatch") {
+            publish_output("stale output\n");
+        }
+        validate_generated_views(prepared.destination_root, oracle,
+            prepared.plan.product, prepared.plan.generated_rebuilders);
+        evidence["status"] = "validated";
+        evidence["oracle"] = "clean_canonical_manifest_rebuild";
+        evidence.removeMember("active_rebuilder");
+        write_journal(transaction, journal);
+        std::vector<std::string> failures;
+        if (!remove_exact_tree(oracle, transaction, "derived-oracle", failures, "oracle")) {
+            throw std::runtime_error("generated_view_oracle_cleanup_failed");
+        }
+        return true;
+    } catch (const std::exception& error) {
+        evidence["status"] = "failed";
+        evidence["last_error"] = bounded_error(error.what());
+        write_journal(transaction, journal);
+        throw;
     }
 }
 
@@ -2444,7 +2714,6 @@ ProductRelocationResult ProductRelocationOps::apply(
             return result;
         }
 
-        rebuild_target_index(prepared);
         const auto target_failures = verify_manifest(
             prepared.destination_root, prepared.manifest,
             prepared.plan.product, "target");
@@ -2457,7 +2726,23 @@ ProductRelocationResult ProductRelocationOps::apply(
         if (!source_failures.empty()) {
             throw std::runtime_error(source_failures.front());
         }
+        mark_stage("canonical_verified");
+        rebuild_target_index(prepared);
+        mark_stage("generated_rebuild");
+        if (!rebuild_generated_views(prepared, transaction, journal, options)) {
+            inject_interruption("during_generated_output_stage");
+            return result;
+        }
+        const auto index_health = doctor_metadata_index(
+            prepared.destination_root / ".cache/index/backlog.db",
+            prepared.destination_root, prepared.plan.product, true);
+        if (!index_health.healthy) {
+            throw std::runtime_error("derived_metadata_index_unhealthy");
+        }
         mark_stage("target_verified");
+        if (inject_interruption("after_generated_validation")) {
+            return result;
+        }
 
         std::error_code retire_error;
         std::filesystem::rename(
@@ -2499,7 +2784,12 @@ ProductRelocationResult ProductRelocationOps::apply(
             "product-cache:" + prepared.plan.product +
                 "/index/backlog.db",
         };
+        if (!prepared.plan.generated_rebuilders.empty()) {
+            result.changed_refs.push_back(derived_ref(
+                prepared.plan.product, kCanonicalListOutput));
+        }
         result.operation_receipts = {
+            "registered_generated_views_validated_against_clean_rebuild",
             "reviewed_plan_hash_matched",
             "canonical_bytes_staged_and_verified",
             "target_published_on_destination_volume",
@@ -2625,8 +2915,9 @@ ProductRelocationVerification ProductRelocationOps::verify(
                 "active_source_root_still_exists");
         }
 
+        const bool legacy_views = !embedded_plan.isMember("generated_rebuilders");
         const auto target_failures = verify_manifest(
-            destination, manifest, product, "target");
+            destination, manifest, product, "target", legacy_views);
         verification.failures.insert(
             verification.failures.end(),
             target_failures.begin(), target_failures.end());
@@ -2635,7 +2926,7 @@ ProductRelocationVerification ProductRelocationOps::verify(
                 "canonical_target_manifest_matches");
         }
         const auto retired_failures = verify_manifest(
-            retired, manifest, product, "retired");
+            retired, manifest, product, "retired", legacy_views);
         verification.failures.insert(
             verification.failures.end(),
             retired_failures.begin(), retired_failures.end());
@@ -2703,6 +2994,24 @@ ProductRelocationVerification ProductRelocationOps::verify(
             } else {
                 verification.postconditions.push_back(
                     "derived_metadata_index_rebuilt_and_healthy");
+            }
+        }
+
+        std::vector<std::string> expected_rebuilders;
+        for (const auto& entry : journal["plan"]["generated_rebuilders"]) {
+            expected_rebuilders.push_back(entry.asString());
+        }
+        if (legacy_views) {
+            verification.postconditions.push_back("legacy_plan_has_no_registered_generated_view_hooks");
+        } else if (journal["generated_view_validation"]["status"].asString() != "validated") {
+            verification.failures.push_back("generated_view_validation_not_committed");
+        } else {
+            try {
+                // Read-only clean canonical rebuild, independent of persisted views/index.
+                validate_generated_views(destination, destination, product, expected_rebuilders);
+                verification.postconditions.push_back("registered_generated_views_match_clean_canonical_rebuild");
+            } catch (const std::exception& error) {
+                verification.failures.push_back(bounded_error(error.what()));
             }
         }
 

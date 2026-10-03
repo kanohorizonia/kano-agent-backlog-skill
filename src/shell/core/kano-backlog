@@ -55,7 +55,12 @@ resolve_workspace_root() {
       return 0
     fi
 
-    start_dir="$(dirname "$start_dir")"
+    local parent_dir
+    parent_dir="$(dirname "$start_dir")"
+    if [[ "$parent_dir" == "$start_dir" || "$parent_dir" == "." ]]; then
+      break
+    fi
+    start_dir="$parent_dir"
   done
 
   printf '%s\n' "$PWD"

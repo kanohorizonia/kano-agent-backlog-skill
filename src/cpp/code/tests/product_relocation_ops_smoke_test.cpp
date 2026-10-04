@@ -5,6 +5,8 @@
 #include "kano/backlog_ops/product_relocation/product_relocation_ops.hpp"
 
 #include <algorithm>
+#include <chrono>
+#include <thread>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -770,6 +772,57 @@ void test_generated_output_stage_recovery() {
     }
 }
 
+
+void test_unregistered_view_created_after_inventory() {
+    using kano::backlog_ops::ProductRelocationOps;
+    auto fixture = make_fixture(false, false);
+    try {
+        // Keep staging observable while a separate writer adds an unowned file.
+        // The stage directory is created only after apply's fresh inventory.
+        write_text(fixture.source / "artifacts" / "large.bin",
+            std::string(8u * 1024u * 1024u, 'x'));
+        const auto options = plan_options(fixture);
+        const auto plan = ProductRelocationOps::plan(options);
+        expect(plan.ready() && plan.generated_rebuilders.empty(),
+            "race fixture must have no registered generated view");
+        const auto stage = fixture.destination.parent_path() /
+            (fixture.destination.filename().generic_string() +
+             ".kob-relocation-" + plan.plan_hash.substr(0, 16) + ".stage");
+        const auto unowned = fixture.source / "_views" / "canonical-items.json";
+        const std::string bytes = "concurrent unregistered writer owns these bytes\n";
+        bool injected = false;
+        std::exception_ptr writer_error;
+        std::jthread writer([&](std::stop_token stop) {
+            try {
+                const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+                while (!stop.stop_requested() && std::chrono::steady_clock::now() < deadline) {
+                    if (std::filesystem::is_directory(stage)) {
+                        write_text(unowned, bytes);
+                        injected = true;
+                        return;
+                    }
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                }
+            } catch (...) { writer_error = std::current_exception(); }
+        });
+        ProductRelocationOps::ApplyOptions apply{
+            .plan = options, .expected_plan_hash = plan.plan_hash, .confirm = true,
+        };
+        const auto result = ProductRelocationOps::apply(apply);
+        writer.request_stop();
+        writer.join();
+        if (writer_error) { std::rethrow_exception(writer_error); }
+        expect(injected, "concurrent writer must run after inventory during staging");
+        expect(result.status != "applied" && std::filesystem::is_directory(fixture.source),
+            "unregistered late canonical-items.json must prevent source retirement");
+        expect(read_text(unowned) == bytes,
+            "fail-closed relocation must preserve concurrent writer bytes");
+        expect(result.to_json().find("source_unexpected_file:product:human-rig-runtime/_views/canonical-items.json") != std::string::npos,
+            "manifest verification must report the unregistered late file");
+        cleanup(fixture);
+    } catch (...) { cleanup(fixture); throw; }
+}
+
 void test_no_generated_views_and_ownership_guards() {
     using kano::backlog_ops::ProductRelocationOps;
     auto fixture = make_fixture(false, false);
@@ -783,6 +836,27 @@ void test_no_generated_views_and_ownership_guards() {
         expect(ProductRelocationOps::apply(apply).status == "applied" &&
             !std::filesystem::exists(fixture.destination / "_views"),
             "no-generated-view products must not acquire invented views");
+        ProductRelocationOps::RecoveryOptions recovery;
+        recovery.backlog_root = fixture.shared;
+        recovery.plan_hash = plan.plan_hash;
+        recovery.confirm = true;
+        const auto retired = fixture.source.parent_path() /
+            (fixture.source.filename().generic_string() +
+             ".kob-relocation-" + plan.plan_hash.substr(0, 16) + ".retired");
+        for (const auto& [root, label] : std::vector<std::pair<std::filesystem::path, std::string>>{
+                 {retired, "retired"}, {fixture.destination, "target"}}) {
+            const auto unowned = root / "_views" / "canonical-items.json";
+            write_text(unowned, "unregistered post-inventory bytes\n");
+            const auto expected = label + "_unexpected_file:product:human-rig-runtime/_views/canonical-items.json";
+            expect(contains_prefix(ProductRelocationOps::verify(recovery).failures, expected),
+                "read-only verification must detect an unregistered late file");
+            expect(contains_prefix(ProductRelocationOps::rollback(recovery).failures, expected) &&
+                read_text(unowned) == "unregistered post-inventory bytes\n",
+                "rollback must refuse to discard unregistered writer bytes");
+            std::filesystem::remove(unowned);
+        }
+        expect(ProductRelocationOps::rollback(recovery).status == "rolled_back",
+            "unregistered product must recover after external drift is removed");
         cleanup(fixture);
     } catch (...) { cleanup(fixture); throw; }
     fixture = make_fixture();
@@ -804,6 +878,7 @@ void test_no_generated_views_and_ownership_guards() {
 int main() {
     kano::infra::ConfigureUnattendedExecution();
     try {
+        test_unregistered_view_created_after_inventory();
         test_plan_and_collisions();
         test_raw_path_ref_rejection();
         test_stale_and_automatic_rollback();

@@ -198,8 +198,12 @@ is terminal; repeating apply does not silently replay its failed transaction.
 The registered writer journals ownership before creating its exact atomic
 temporary output. Automatic or explicit rollback removes only that owned regular
 file; a pre-existing temporary file or symlink fails closed and is not deleted.
-Persisted plans from before this hook keep their original view exclusions during
-verification and rollback; they do not acquire retroactive generated-view hooks.
+Persisted plans from before this hook keep their original custom-view exclusions
+during verification and rollback; they do not acquire retroactive generated-view
+hooks. In every transaction, `_views/canonical-items.json` is excluded only when
+`canonical-item-list.v1` is registered in its plan. A concurrent unregistered file
+created after inventory is unexpected drift; verification and rollback fail closed
+and preserve its bytes.
 
 Disposable 29-item HRR-shaped fixtures cover successful regeneration, stale
 pre-move output, exact custom-view preservation, unrelated-product output/cache

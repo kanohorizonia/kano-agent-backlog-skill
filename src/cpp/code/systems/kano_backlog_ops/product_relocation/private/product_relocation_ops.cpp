@@ -503,10 +503,29 @@ std::string first_component(const std::filesystem::path& relative) {
         iterator->generic_string();
 }
 
-bool is_derived_relative(const std::filesystem::path& relative) {
+constexpr const char* kCanonicalListRebuilder = "canonical-item-list.v1";
+
+bool canonical_list_registered(const std::vector<std::string>& rebuilders) {
+    return std::find(
+        rebuilders.begin(), rebuilders.end(), kCanonicalListRebuilder) != rebuilders.end();
+}
+
+bool canonical_list_registered(const Json::Value& plan) {
+    const auto& rebuilders = plan["generated_rebuilders"];
+    if (!rebuilders.isArray()) {
+        return false;
+    }
+    return std::any_of(rebuilders.begin(), rebuilders.end(), [](const auto& entry) {
+        return entry.isString() && entry.asString() == kCanonicalListRebuilder;
+    });
+}
+
+bool is_derived_relative(
+    const std::filesystem::path& relative, bool canonical_list_generated
+) {
     const auto top = first_component(relative);
-    return top == ".cache" ||
-           relative.generic_string() == "_views/canonical-items.json";
+    return top == ".cache" || (canonical_list_generated &&
+           relative.generic_string() == "_views/canonical-items.json");
 }
 
 std::string derived_ref(
@@ -1028,7 +1047,6 @@ void finalize_plan(PreparedRelocation& prepared) {
 // Fixed registry: callers may select a known deterministic producer, never a
 // command, arbitrary output path, or writer that mixes generated/custom text.
 constexpr const char* kGeneratedViewDeclaration = "_config/generated-views.json";
-constexpr const char* kCanonicalListRebuilder = "canonical-item-list.v1";
 constexpr const char* kCanonicalListOutput = "_views/canonical-items.json";
 
 std::vector<std::string> registered_rebuilders(const std::filesystem::path& root) {
@@ -1116,7 +1134,8 @@ void inventory_source(PreparedRelocation& prepared) {
             add_blocker(
                 prepared.plan, "source_index_has_live_wal_or_shm");
         }
-        if (is_derived_relative(relative)) {
+        if (is_derived_relative(
+                relative, canonical_list_registered(prepared.plan.generated_rebuilders))) {
             prepared.plan.derived_surfaces.push_back(
                 first_component(relative) == ".cache"
                     ? "product-cache:" + prepared.plan.product + ":disposable"
@@ -1197,7 +1216,8 @@ void collect_source_identities(PreparedRelocation& prepared) {
     std::size_t item_count = 0;
     for (const auto& path : store.list_items()) {
         const auto relative = path.lexically_relative(prepared.source_root);
-        if (is_derived_relative(relative)) {
+        if (is_derived_relative(
+                relative, canonical_list_registered(prepared.plan.generated_rebuilders))) {
             continue;
         }
         if (++item_count > prepared.plan.request.max_items) {
@@ -1895,6 +1915,7 @@ std::vector<std::string> verify_manifest(
     const std::vector<ManifestEntry>& manifest,
     const std::string& product,
     const std::string& label,
+    bool canonical_list_generated,
     bool legacy_view_exclusions = false
 ) {
     std::vector<std::string> failures;
@@ -1947,7 +1968,8 @@ std::vector<std::string> verify_manifest(
             continue;
         }
         const auto relative = entry.path().lexically_relative(root);
-        if (is_derived_relative(relative) || (legacy_view_exclusions &&
+        if (is_derived_relative(relative, canonical_list_generated) || (legacy_view_exclusions &&
+            relative.generic_string() != "_views/canonical-items.json" &&
             (first_component(relative) == "views" || first_component(relative) == "_views" ||
              relative.filename().generic_string().find(".index.md") != std::string::npos))) {
             continue;
@@ -2036,7 +2058,8 @@ void copy_manifest(
         }
     }
     const auto failures = verify_manifest(
-        stage, prepared.manifest, prepared.plan.product, "stage");
+        stage, prepared.manifest, prepared.plan.product, "stage",
+        canonical_list_registered(prepared.plan.generated_rebuilders));
     if (!failures.empty()) {
         throw std::runtime_error(failures.front());
     }
@@ -2145,7 +2168,8 @@ std::vector<std::string> rollback_journal(
     const auto retired = normalized_absolute(
         std::filesystem::path(journal["retired_root"].asString()));
     const auto manifest = manifest_from_json(journal["manifest"]);
-    // Persisted pre-hook plans retain their original derived-file ownership.
+    // Retain legacy custom-view exclusions, but canonical list output always
+    // requires explicit transaction registration.
     const bool legacy_views = !journal["plan"].isMember("generated_rebuilders");
 
     try {
@@ -2164,13 +2188,15 @@ std::vector<std::string> rollback_journal(
     }
     if (source_exists) {
         const auto source_failures =
-            verify_manifest(source, manifest, product, "source", legacy_views);
+            verify_manifest(source, manifest, product, "source",
+                canonical_list_registered(journal["plan"]), legacy_views);
         failures.insert(
             failures.end(),
             source_failures.begin(), source_failures.end());
     } else if (retired_exists) {
         const auto retired_failures =
-            verify_manifest(retired, manifest, product, "retired", legacy_views);
+            verify_manifest(retired, manifest, product, "retired",
+                canonical_list_registered(journal["plan"]), legacy_views);
         if (!retired_failures.empty()) {
             failures.insert(
                 failures.end(),
@@ -2223,7 +2249,8 @@ std::vector<std::string> rollback_journal(
             !empty_error;
         if (!untouched_preexisting_empty) {
             const auto target_failures =
-                verify_manifest(destination, manifest, product, "target", legacy_views);
+                verify_manifest(destination, manifest, product, "target",
+                canonical_list_registered(journal["plan"]), legacy_views);
             if (!target_failures.empty()) {
                 failures.insert(
                     failures.end(),
@@ -2716,13 +2743,15 @@ ProductRelocationResult ProductRelocationOps::apply(
 
         const auto target_failures = verify_manifest(
             prepared.destination_root, prepared.manifest,
-            prepared.plan.product, "target");
+            prepared.plan.product, "target",
+            canonical_list_registered(prepared.plan.generated_rebuilders));
         if (!target_failures.empty()) {
             throw std::runtime_error(target_failures.front());
         }
         const auto source_failures = verify_manifest(
             prepared.source_root, prepared.manifest,
-            prepared.plan.product, "source");
+            prepared.plan.product, "source",
+            canonical_list_registered(prepared.plan.generated_rebuilders));
         if (!source_failures.empty()) {
             throw std::runtime_error(source_failures.front());
         }
@@ -2917,7 +2946,8 @@ ProductRelocationVerification ProductRelocationOps::verify(
 
         const bool legacy_views = !embedded_plan.isMember("generated_rebuilders");
         const auto target_failures = verify_manifest(
-            destination, manifest, product, "target", legacy_views);
+            destination, manifest, product, "target",
+                canonical_list_registered(journal["plan"]), legacy_views);
         verification.failures.insert(
             verification.failures.end(),
             target_failures.begin(), target_failures.end());
@@ -2926,7 +2956,8 @@ ProductRelocationVerification ProductRelocationOps::verify(
                 "canonical_target_manifest_matches");
         }
         const auto retired_failures = verify_manifest(
-            retired, manifest, product, "retired", legacy_views);
+            retired, manifest, product, "retired",
+                canonical_list_registered(journal["plan"]), legacy_views);
         verification.failures.insert(
             verification.failures.end(),
             retired_failures.begin(), retired_failures.end());

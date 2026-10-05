@@ -1012,6 +1012,15 @@ void invalidate_stale_query_snapshot(
     const std::optional<CanonicalWriteRevision>& observed_write_revision,
     const std::string& reason
 ) {
+    const bool contiguous_publication = observed_write_revision &&
+        observed_write_revision->previous &&
+        *observed_write_revision->previous == observed_snapshot.canonical_write_revision;
+    if (snapshot_structurally_ready(observed_snapshot) && contiguous_publication &&
+        reason == "canonical_write_revision_changed") {
+        // The matching snapshot preserves its pending publication; a replacement
+        // is protected by publication identity. Neither case requires a write.
+        return;
+    }
     const auto execute_transaction = [&](const char* sql, const std::string& context) {
         const int rc = sqlite3_exec(db, sql, nullptr, nullptr, nullptr);
         if (rc != SQLITE_OK) {
@@ -1024,10 +1033,6 @@ void invalidate_stale_query_snapshot(
         execute_transaction("BEGIN IMMEDIATE", "begin stale metadata invalidation");
         transaction_open = true;
         const auto current = read_snapshot(db, product);
-        const bool contiguous_publication = observed_write_revision &&
-            observed_write_revision->previous &&
-            *observed_write_revision->previous ==
-                observed_snapshot.canonical_write_revision;
         const bool observed_snapshot_current =
             same_snapshot_publication_identity(current, observed_snapshot);
         const bool publication_pending = observed_snapshot_current &&
@@ -2575,14 +2580,23 @@ IndexQueryResult BacklogIndex::query_metadata(
     const auto start = std::chrono::steady_clock::now();
     validate_query(query);
     initialize();
+    if (test_hooks.after_query_initialize) {
+        test_hooks.after_query_initialize();
+    }
 
     const auto revision_start = std::chrono::steady_clock::now();
     auto snapshot = read_snapshot(db_, product);
+    if (test_hooks.after_snapshot_read) {
+        test_hooks.after_snapshot_read();
+    }
     const auto readiness = snapshot_readiness_mode(snapshot);
     std::optional<CanonicalWriteRevision> write_revision;
     try {
         write_revision = CanonicalStore(product_root).read_write_revision();
     } catch (const std::exception&) {
+    }
+    if (test_hooks.after_write_revision_attempt) {
+        test_hooks.after_write_revision_attempt();
     }
     const auto watch = readiness == SnapshotReadinessMode::VerifiedNtfs
         ? read_change_watch(db_, product)
@@ -3598,6 +3612,9 @@ IndexQueryResult query_metadata_index(
     }
     try {
         BacklogIndex index(index_path, product, product_root);
+        if (test_hooks.after_index_open) {
+            test_hooks.after_index_open();
+        }
         return index.query_metadata(product_root, product, query, test_hooks);
     } catch (const std::exception&) {
         return fallback_query(

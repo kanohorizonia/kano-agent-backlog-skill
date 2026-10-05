@@ -94,6 +94,10 @@ public:
 
     struct QueryMetadataTestHooks {
         std::function<void()> after_change_proof_verification;
+        std::function<void()> after_index_open;
+        std::function<void()> after_query_initialize;
+        std::function<void()> after_snapshot_read;
+        std::function<void()> after_write_revision_attempt;
     };
 
     struct SyncSequencesResult {

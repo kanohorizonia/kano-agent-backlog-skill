@@ -14,6 +14,7 @@
 #include <iostream>
 #include <limits>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <set>
@@ -1119,6 +1120,10 @@ public:
         }
     }
 
+    std::chrono::steady_clock::time_point deadline() const noexcept {
+        return deadline_;
+    }
+
     void cancel() noexcept {
         std::lock_guard<std::mutex> lock(mutex_);
         cancelled_ = true;
@@ -1474,6 +1479,167 @@ void validate_bounded_canonical_fallback(const std::filesystem::path& fixture_ro
     expect_canonical_source_hashes(fallback.items, oracle, true, "bounded canonical fallback");
 }
 
+void validate_stale_cleanup_reservation(const std::filesystem::path& fixture_root) {
+    constexpr std::size_t kReaderCount = 6;
+    const std::string product = "stale-cleanup-reservation";
+    const auto product_root = fixture_root / "products" / product;
+    const auto index_path = fixture_root / ".cache/index/backlog.db";
+    CanonicalStore store(product_root);
+    auto target = store.create("RSV", ItemType::Task, "Reservation title A", 1);
+    auto other = store.create("RSV", ItemType::Task, "Reservation other item", 2);
+    store.write(target);
+    store.write(other);
+    BacklogIndex writer(index_path, product, product_root);
+    writer.rebuild_metadata(product_root, product);
+    IndexQuery query;
+    query.exact_ref = target.id;
+    query.limit = 1;
+    const auto revision_a = writer.query_metadata(product_root, product, query);
+    expect(revision_a.diagnostics.index_used &&
+               revision_a.diagnostics.index_status == "ready",
+        "reservation fixture must start with ready snapshot A");
+    const auto receipt_a = store.read_write_revision();
+    std::array<std::unique_ptr<BacklogIndex>, kReaderCount> indexes;
+    for (auto& index : indexes) {
+        index = std::make_unique<BacklogIndex>(index_path, product, product_root);
+        index->initialize();
+    }
+    target = store.read(*target.file_path);
+    target.title = "Reservation title B";
+    store.write(target);
+    target = store.read(*target.file_path);
+    const auto receipt_b = store.read_write_revision();
+    expect(receipt_b.current != receipt_a.current && receipt_b.previous &&
+               *receipt_b.previous == receipt_a.current && store.list_items().size() == 2,
+        "reservation fixture must expose one contiguous unpublished canonical write");
+    auto oracle = collect_canonical_items(product_root, product);
+    std::erase_if(oracle, [&](const auto& item) { return item.id != target.id; });
+    std::sort(oracle.begin(), oracle.end(), canonical_result_order);
+    const auto read_snapshot_row = [&] {
+        sqlite3* raw_database = nullptr;
+        const int opened = sqlite3_open_v2(index_path.string().c_str(), &raw_database,
+            SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX, nullptr);
+        std::unique_ptr<sqlite3, decltype(&sqlite3_close)> database(raw_database, sqlite3_close);
+        expect(opened == SQLITE_OK, "reservation fixture must read its persisted snapshot");
+        sqlite3_stmt* raw_statement = nullptr;
+        const int prepared = sqlite3_prepare_v2(database.get(),
+            "SELECT * FROM metadata_snapshots WHERE product = ?", -1, &raw_statement, nullptr);
+        std::unique_ptr<sqlite3_stmt, decltype(&sqlite3_finalize)> statement(
+            raw_statement, sqlite3_finalize);
+        expect(prepared == SQLITE_OK && sqlite3_bind_text(statement.get(), 1,
+                   product.c_str(), static_cast<int>(product.size()), SQLITE_TRANSIENT) == SQLITE_OK &&
+                   sqlite3_step(statement.get()) == SQLITE_ROW,
+            "reservation fixture must expose its snapshot row");
+        std::vector<std::optional<std::string>> row;
+        for (int column = 0; column < sqlite3_column_count(statement.get()); ++column) {
+            if (sqlite3_column_type(statement.get(), column) == SQLITE_NULL) {
+                row.emplace_back(std::nullopt);
+            } else {
+                const auto* value = sqlite3_column_text(statement.get(), column);
+                row.emplace_back(std::string(reinterpret_cast<const char*>(value),
+                    static_cast<std::size_t>(sqlite3_column_bytes(statement.get(), column))));
+            }
+        }
+        return row;
+    };
+    const auto snapshot_a = read_snapshot_row();
+    std::optional<ImmediateWriteLock> reservation;
+    reservation.emplace(index_path);
+    BoundedThreadCoordination coordination(kReaderCount, "stale cleanup reservation");
+    enum class QueryOperation {
+        CohortRelease, Entry, AfterInitialize, AfterSnapshot, AfterReceipt, AfterProof, Returned
+    };
+    std::array<std::atomic<QueryOperation>, kReaderCount> operations{};
+    std::array<std::chrono::steady_clock::time_point, kReaderCount> completed_at{};
+    std::array<IndexQueryResult, kReaderCount> results;
+    std::array<std::exception_ptr, kReaderCount> errors;
+    std::vector<std::thread> readers;
+    readers.reserve(kReaderCount);
+    ThreadJoinGuard join_guard(readers);
+    std::cout << "stale-cleanup-reservation: stage=held_writer initialized_readers="
+              << kReaderCount << " canonical_sources=2\n";
+    try {
+        for (std::size_t reader = 0; reader < kReaderCount; ++reader) {
+            readers.emplace_back([&, reader] {
+                try {
+                    coordination.arrive_and_wait();
+                    BacklogIndex::QueryMetadataTestHooks hooks;
+                    hooks.after_query_initialize = [&] {
+                        operations[reader].store(QueryOperation::AfterInitialize,
+                            std::memory_order_release);
+                    };
+                    hooks.after_snapshot_read = [&] {
+                        operations[reader].store(QueryOperation::AfterSnapshot,
+                            std::memory_order_release);
+                    };
+                    hooks.after_write_revision_attempt = [&] {
+                        operations[reader].store(QueryOperation::AfterReceipt,
+                            std::memory_order_release);
+                    };
+                    hooks.after_change_proof_verification = [&] {
+                        operations[reader].store(QueryOperation::AfterProof,
+                            std::memory_order_release);
+                    };
+                    operations[reader].store(QueryOperation::Entry, std::memory_order_release);
+                    results[reader] = indexes[reader]->query_metadata(
+                        product_root, product, query, hooks);
+                    completed_at[reader] = std::chrono::steady_clock::now();
+                    operations[reader].store(QueryOperation::Returned, std::memory_order_release);
+                } catch (...) {
+                    errors[reader] = std::current_exception();
+                }
+                coordination.complete(errors[reader]);
+            });
+        }
+        coordination.wait_until_arrived();
+        coordination.release();
+        coordination.wait_until_complete();
+        for (const auto completion : completed_at) {
+            expect(completion <= coordination.deadline(),
+                "stale readers must complete within the existing deadline while writer is held");
+        }
+        expect(read_snapshot_row() == snapshot_a,
+            "contiguous stale queries must preserve every persisted snapshot field");
+    } catch (...) {
+        coordination.cancel();
+        for (std::size_t reader = 0; reader < kReaderCount; ++reader) {
+            const auto operation = operations[reader].load(std::memory_order_acquire);
+            const char* tag = operation == QueryOperation::CohortRelease ? "cohort_release" :
+                operation == QueryOperation::Entry ? "query_metadata.entry" :
+                operation == QueryOperation::AfterInitialize ? "query_metadata.after_query_initialize" :
+                operation == QueryOperation::AfterSnapshot ? "query_metadata.after_snapshot_read" :
+                operation == QueryOperation::AfterReceipt ? "query_metadata.after_write_revision_attempt" :
+                operation == QueryOperation::AfterProof ?
+                    "query_metadata.after_change_proof_verification" : "query_metadata.returned";
+            std::cerr << "stale-cleanup-reservation: reader=" << reader
+                      << " last-operation=" << tag << " completed-iterations="
+                      << (operation == QueryOperation::Returned ? 1 : 0) << '\n';
+        }
+        reservation.reset();
+        throw;
+    }
+    reservation.reset();
+    join_guard.join();
+    for (const auto& result : results) {
+        expect(!result.diagnostics.index_used && result.diagnostics.fallback_scan &&
+                   result.diagnostics.index_status == "stale" &&
+                   result.diagnostics.stale_reason == "canonical_write_revision_changed" &&
+                   result.diagnostics.product_revision == revision_a.diagnostics.product_revision &&
+                   result.diagnostics.index_revision == revision_a.diagnostics.index_revision,
+            "held reservation readers must retain A diagnostics and return stale canonical B");
+        expect_canonical_result_equal(result.items, oracle, "held reservation canonical parity");
+        expect_canonical_source_hashes(result.items, oracle, true, "held reservation fallback");
+    }
+    writer.index_item(target);
+    const auto revision_b = writer.query_metadata(product_root, product, query);
+    expect(revision_b.diagnostics.index_used && revision_b.diagnostics.index_status == "ready" &&
+               revision_b.diagnostics.product_revision != revision_a.diagnostics.product_revision,
+        "supported publication after reservation release must publish ready B");
+    expect_canonical_result_equal(revision_b.items, oracle, "reservation publication canonical parity");
+    expect_canonical_source_hashes(revision_b.items, oracle, false, "reservation publication ready");
+    std::cout << "stale-cleanup-reservation: PASS stage=published_B\n";
+}
+
 void validate_ready_ref_publication_race(const std::filesystem::path& fixture_root) {
 #ifdef _WIN32
     const std::string product = "ready-ref-race";
@@ -1612,7 +1778,8 @@ int main(int argc, char** argv) {
     try {
         const std::string focused = argc == 2 ? argv[1] : "";
         if (argc > 2 || (!focused.empty() && focused != "--ready-ref-race" &&
-                            focused != "--bounded-fallback" && focused != "--unscoped-parity")) {
+                            focused != "--bounded-fallback" && focused != "--unscoped-parity" &&
+                            focused != "--stale-cleanup-reservation")) {
             throw std::runtime_error("unknown metadata regression fixture selector");
         }
         fixture_root = make_temp_root();
@@ -1624,6 +1791,9 @@ int main(int argc, char** argv) {
         }
         if (focused.empty() || focused == "--unscoped-parity") {
             validate_unscoped_canonical_parity(fixture_root / "unscoped-parity");
+        }
+        if (focused.empty() || focused == "--stale-cleanup-reservation") {
+            validate_stale_cleanup_reservation(fixture_root / "stale-cleanup-reservation");
         }
         if (!focused.empty()) {
             std::filesystem::remove_all(fixture_root);
@@ -2941,6 +3111,10 @@ int main(int argc, char** argv) {
                 NotStarted,
                 CohortRelease,
                 QueryMetadataIndex,
+                QueryMetadataAfterOpen,
+                QueryMetadataAfterInitialize,
+                QueryMetadataAfterSnapshot,
+                QueryMetadataAfterReceipt,
                 QueryMetadataAfterProof,
                 QueryMetadataReturned
             };
@@ -2967,6 +3141,18 @@ int main(int argc, char** argv) {
                     case ReaderOperation::QueryMetadataIndex:
                         operation = "query_metadata_index.entry";
                         break;
+                    case ReaderOperation::QueryMetadataAfterOpen:
+                        operation = "query_metadata_index.after_index_open";
+                        break;
+                    case ReaderOperation::QueryMetadataAfterInitialize:
+                        operation = "query_metadata_index.after_query_initialize";
+                        break;
+                    case ReaderOperation::QueryMetadataAfterSnapshot:
+                        operation = "query_metadata_index.after_snapshot_read";
+                        break;
+                    case ReaderOperation::QueryMetadataAfterReceipt:
+                        operation = "query_metadata_index.after_write_revision_attempt";
+                        break;
                     case ReaderOperation::QueryMetadataAfterProof:
                         operation = "query_metadata_index.after_change_proof_verification";
                         break;
@@ -2991,6 +3177,25 @@ int main(int argc, char** argv) {
                                 ReaderOperation::CohortRelease, std::memory_order_release);
                             coordination.arrive_and_wait();
                             BacklogIndex::QueryMetadataTestHooks progress_hooks;
+                            progress_hooks.after_index_open = [&] {
+                                last_operations[reader].store(
+                                    ReaderOperation::QueryMetadataAfterOpen, std::memory_order_release);
+                            };
+                            progress_hooks.after_query_initialize = [&] {
+                                last_operations[reader].store(
+                                    ReaderOperation::QueryMetadataAfterInitialize,
+                                    std::memory_order_release);
+                            };
+                            progress_hooks.after_snapshot_read = [&] {
+                                last_operations[reader].store(
+                                    ReaderOperation::QueryMetadataAfterSnapshot,
+                                    std::memory_order_release);
+                            };
+                            progress_hooks.after_write_revision_attempt = [&] {
+                                last_operations[reader].store(
+                                    ReaderOperation::QueryMetadataAfterReceipt,
+                                    std::memory_order_release);
+                            };
                             progress_hooks.after_change_proof_verification = [&] {
                                 last_operations[reader].store(
                                     ReaderOperation::QueryMetadataAfterProof,

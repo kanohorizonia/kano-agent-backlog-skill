@@ -1,4 +1,6 @@
 #include <algorithm>
+#include <array>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
@@ -18,6 +20,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -2931,23 +2934,78 @@ int main(int argc, char** argv) {
         };
         const auto run_reader_batch = [&](const std::filesystem::path& query_root,
                                            const std::string& query_product,
-                                           const IndexQuery& query) {
+                                           const IndexQuery& query,
+                                           const char* stage) {
             constexpr std::size_t kReaderCount = 6;
+            enum class ReaderOperation {
+                NotStarted,
+                CohortRelease,
+                QueryMetadataIndex,
+                QueryMetadataAfterProof,
+                QueryMetadataReturned
+            };
+            const auto batch_label =
+                std::string("concurrent metadata reader batch stage=") + stage;
+            const auto timeout_prefix = batch_label + " timed out waiting for ";
             BoundedThreadCoordination coordination(
-                kReaderCount, "concurrent metadata reader batch");
+                kReaderCount, batch_label);
+            std::array<std::atomic<ReaderOperation>, kReaderCount> last_operations{};
+            std::array<std::atomic<std::size_t>, kReaderCount> completed_iterations{};
             std::vector<IndexQueryResult> results(kReaderCount);
             std::vector<std::exception_ptr> errors(kReaderCount);
             std::vector<std::thread> readers;
             readers.reserve(kReaderCount);
             ThreadJoinGuard join_guard(readers);
+            const auto print_reader_progress = [&] {
+                for (std::size_t reader = 0; reader < kReaderCount; ++reader) {
+                    const char* operation = "not_started";
+                    switch (last_operations[reader].load(std::memory_order_acquire)) {
+                    case ReaderOperation::NotStarted: break;
+                    case ReaderOperation::CohortRelease:
+                        operation = "cohort_release";
+                        break;
+                    case ReaderOperation::QueryMetadataIndex:
+                        operation = "query_metadata_index.entry";
+                        break;
+                    case ReaderOperation::QueryMetadataAfterProof:
+                        operation = "query_metadata_index.after_change_proof_verification";
+                        break;
+                    case ReaderOperation::QueryMetadataReturned:
+                        operation = "query_metadata_index.returned";
+                        break;
+                    }
+                    std::cerr << "metadata-reader-progress stage=" << stage
+                              << " reader=" << reader
+                              << " last-operation=" << operation
+                              << " completed-iterations="
+                              << completed_iterations[reader].load(std::memory_order_relaxed)
+                              << '\n';
+                }
+            };
             try {
                 for (std::size_t reader = 0; reader < kReaderCount; ++reader) {
                     readers.emplace_back([&, reader] {
                         try {
                             IndexQuery reader_query = query;
+                            last_operations[reader].store(
+                                ReaderOperation::CohortRelease, std::memory_order_release);
                             coordination.arrive_and_wait();
+                            BacklogIndex::QueryMetadataTestHooks progress_hooks;
+                            progress_hooks.after_change_proof_verification = [&] {
+                                last_operations[reader].store(
+                                    ReaderOperation::QueryMetadataAfterProof,
+                                    std::memory_order_release);
+                            };
+                            last_operations[reader].store(
+                                ReaderOperation::QueryMetadataIndex,
+                                std::memory_order_release);
                             results[reader] = kano::backlog_ops::query_metadata_index(
-                                index_path, query_root, query_product, reader_query);
+                                index_path, query_root, query_product, reader_query,
+                                progress_hooks);
+                            completed_iterations[reader].store(1, std::memory_order_relaxed);
+                            last_operations[reader].store(
+                                ReaderOperation::QueryMetadataReturned,
+                                std::memory_order_release);
                         } catch (...) {
                             errors[reader] = std::current_exception();
                         }
@@ -2957,6 +3015,12 @@ int main(int argc, char** argv) {
                 coordination.wait_until_arrived();
                 coordination.release();
                 coordination.wait_until_complete();
+            } catch (const std::exception& error) {
+                coordination.cancel();
+                if (std::string_view(error.what()).starts_with(timeout_prefix)) {
+                    print_reader_progress();
+                }
+                throw;
             } catch (...) {
                 coordination.cancel();
                 throw;
@@ -3037,7 +3101,8 @@ int main(int argc, char** argv) {
                    second_result.diagnostics.index_status == "ready" &&
                    !old_snapshot_revision.empty(),
             "second-product baseline must be a ready revision");
-        const auto ready_readers = run_reader_batch(second_root, second_product, second_all);
+        const auto ready_readers = run_reader_batch(
+            second_root, second_product, second_all, "ready");
         for (std::size_t reader = 0; reader < ready_readers.size(); ++reader) {
             const auto& result = ready_readers[reader];
             expect(result.diagnostics.index_used &&
@@ -3081,7 +3146,7 @@ int main(int argc, char** argv) {
             });
             rebuild_coordination.wait_until_arrived();
             const auto old_snapshot_readers = run_reader_batch(
-                second_root, second_product, second_all);
+                second_root, second_product, second_all, "before_rebuild_publication");
             for (std::size_t reader = 0; reader < old_snapshot_readers.size(); ++reader) {
                 const auto& result = old_snapshot_readers[reader];
                 expect(result.diagnostics.index_used &&
@@ -3115,7 +3180,8 @@ int main(int argc, char** argv) {
         second_item = second_store.read(*second_item.file_path);
         second_item.title = "Second product concurrent update";
         second_store.write(second_item);
-        const auto stale_readers = run_reader_batch(second_root, second_product, second_exact);
+        const auto stale_readers = run_reader_batch(
+            second_root, second_product, second_exact, "stale_canonical_update");
         for (std::size_t reader = 0; reader < stale_readers.size(); ++reader) {
             const auto& result = stale_readers[reader];
             expect(!result.diagnostics.index_used &&

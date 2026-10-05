@@ -55,6 +55,7 @@ echo "  Skill root: $SKILL_ROOT"
 "$SCRIPT_DIR/native-runtime-gate.sh"
 "$SCRIPT_DIR/acceptance-portable-payload-launcher.sh"
 "$SCRIPT_DIR/acceptance-relative-backlog-root.sh"
+"$SCRIPT_DIR/acceptance-launcher-root-termination.sh"
 "$SCRIPT_DIR/acceptance-docs-portable-sed.sh"
 
 echo "Native full test suite passed."

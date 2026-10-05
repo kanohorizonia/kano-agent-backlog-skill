@@ -57,16 +57,19 @@ std::string read_text(const std::filesystem::path& path) {
         std::istreambuf_iterator<char>());
 }
 
-std::filesystem::path make_temp_root() {
+std::filesystem::path make_temp_root(std::size_t minimum_root_length = 0) {
     std::random_device source;
     std::mt19937 generator(source());
     std::uniform_int_distribution<unsigned int> distribution(
         0, 0xffffff);
     std::ostringstream suffix;
     suffix << std::hex << distribution(generator);
-    const auto root =
+    auto root =
         std::filesystem::temp_directory_path() /
         "kano-backlog-product-relocation-smoke" / suffix.str();
+    if (root.native().size() < minimum_root_length) {
+        root += std::string(minimum_root_length - root.native().size(), 'p');
+    }
     std::filesystem::create_directories(root);
     return root;
 }
@@ -115,14 +118,15 @@ kano::backlog_core::BacklogItem create_item(
     return item;
 }
 
-Fixture make_fixture(bool raw_path_ref = false, bool generated = true) {
+Fixture make_fixture(bool raw_path_ref = false, bool generated = true,
+    std::size_t minimum_root_length = 0) {
     using kano::backlog_core::CanonicalStore;
     using kano::backlog_core::ItemType;
     using kano::backlog_ops::BacklogIndex;
     using kano::backlog_ops::build_index;
 
     Fixture fixture;
-    fixture.root = make_temp_root();
+    fixture.root = make_temp_root(minimum_root_length);
     fixture.shared = fixture.root / "shared-backlog";
     fixture.source =
         fixture.root / "external-product-roots" /
@@ -260,6 +264,17 @@ kano::backlog_ops::ProductRelocationOps::PlanOptions plan_options(
     options.request.max_bytes = 16u * 1024u * 1024u;
     options.request.max_items = 1000;
     return options;
+}
+
+std::filesystem::path fixture_stage(const Fixture& fixture, const std::string& plan_hash) {
+    return fixture.destination.parent_path() /
+        (fixture.destination.filename().generic_string() +
+            ".kob-relocation-" + plan_hash.substr(0, 16) + ".stage");
+}
+
+std::filesystem::path fixture_journal(const Fixture& fixture, const std::string& plan_hash) {
+    return fixture.shared / ".kano" / "cache" /
+        "product-relocations" / plan_hash / "journal.json";
 }
 
 void cleanup(Fixture& fixture) {
@@ -507,10 +522,20 @@ void test_success_verify_replay_and_rollback() {
     using kano::backlog_core::CanonicalStore;
     using kano::backlog_core::ProjectConfig;
     using kano::backlog_ops::ProductRelocationOps;
-    auto fixture = make_fixture();
+    // Exercise the Windows regression even when the caller's TEMP is short.
+    auto fixture = make_fixture(false, true, 90);
     try {
         const auto options = plan_options(fixture);
         const auto plan = ProductRelocationOps::plan(options);
+        const auto stage = fixture_stage(fixture, plan.plan_hash);
+#ifdef _WIN32
+        const auto feature = *CanonicalStore(fixture.source).find_item_path_by_id(fixture.ids[0]);
+        const auto relative = feature.lexically_relative(fixture.source);
+        const auto old_oracle_leaf = fixture_journal(fixture, plan.plan_hash).parent_path() /
+            "derived-oracle" / relative;
+        expect(old_oracle_leaf.native().size() > 260 && (stage / relative).native().size() < 260,
+            "long-path fixture must exceed the old oracle budget while fitting the primary stage");
+#endif
         ProductRelocationOps::ApplyOptions apply{
             .plan = options,
             .expected_plan_hash = plan.plan_hash,
@@ -531,6 +556,9 @@ void test_success_verify_replay_and_rollback() {
         expect(
             applied.status == "applied",
             "confirmed relocation should apply");
+        expect(!std::filesystem::exists(stage) &&
+            read_text(fixture_journal(fixture, plan.plan_hash)).find("\"stage_owned\" : false") != std::string::npos,
+            "successful generated validation must release its owned oracle stage");
         expect(
             !std::filesystem::exists(stale_lock),
             "dead process lock should be reclaimed and released");
@@ -612,6 +640,7 @@ void test_success_verify_replay_and_rollback() {
             replay.status == "applied" &&
                 replay.idempotent_replay,
             "exact retry should verify and replay idempotently");
+        expect(!std::filesystem::exists(stage), "verify and replay must not leave oracle staging behind");
 
         recovery.confirm = true;
         const auto rolled_back =
@@ -619,6 +648,7 @@ void test_success_verify_replay_and_rollback() {
         expect(
             rolled_back.status == "rolled_back",
             "confirmed rollback should restore pre-relocation state");
+        expect(!std::filesystem::exists(stage), "successful rollback must not leave oracle staging behind");
         expect(
             read_text(fixture.config) == fixture.config_before &&
                 std::filesystem::is_directory(fixture.source) &&
@@ -656,6 +686,8 @@ void test_generated_view_failure_and_recovery() {
             };
             const auto failed = ProductRelocationOps::apply(apply);
             expect(failed.status == "rolled_back", "rebuilder/clean oracle failures must roll back");
+            expect(!std::filesystem::exists(fixture_stage(fixture, plan.plan_hash)),
+                "automatic rollback must remove only its admitted oracle stage");
             expect(read_text(fixture.config) == fixture.config_before &&
                 !std::filesystem::exists(fixture.destination) &&
                 read_text(fixture.source / "_views" / "canonical-items.json") == stale,
@@ -663,7 +695,8 @@ void test_generated_view_failure_and_recovery() {
             const auto journal = read_text(fixture.shared / ".kano" / "cache" /
                 "product-relocations" / plan.plan_hash / "journal.json");
             expect(journal.find("generated_view_validation") != std::string::npos &&
-                journal.find("\"status\" : \"failed\"") != std::string::npos,
+                journal.find("\"status\" : \"failed\"") != std::string::npos &&
+                journal.find("\"stage_owned\" : false") != std::string::npos,
                 "failure journal must retain generated-view stage/evidence after automatic rollback");
             ProductRelocationOps::RecoveryOptions recovery;
             recovery.backlog_root = fixture.shared;
@@ -689,7 +722,8 @@ void test_generated_validation_interruption_and_drift() {
         };
         expect(ProductRelocationOps::apply(apply).status == "recovery_required" &&
             std::filesystem::exists(fixture.source) &&
-            std::filesystem::exists(fixture.destination / "_views" / "canonical-items.json"),
+            std::filesystem::exists(fixture.destination / "_views" / "canonical-items.json") &&
+            !std::filesystem::exists(fixture_stage(fixture, plan.plan_hash)),
             "source retirement must wait until generated validation completes");
         ProductRelocationOps::RecoveryOptions recovery;
         recovery.backlog_root = fixture.shared;
@@ -753,7 +787,9 @@ void test_generated_output_stage_recovery() {
             if (owned) {
                 const auto journal = read_text(fixture.shared / ".kano" / "cache" /
                     "product-relocations" / plan.plan_hash / "journal.json");
-                expect(journal.find("\"output_stage_owned\" : true") != std::string::npos,
+                expect(journal.find("\"output_stage_owned\" : true") != std::string::npos &&
+                    journal.find("\"stage_owned\" : true") != std::string::npos &&
+                    std::filesystem::is_directory(fixture_stage(fixture, plan.plan_hash)),
                     "registered partial-stage ownership must persist before interruption");
             } else {
                 expect(ProductRelocationOps::rollback(recovery).status == "recovery_required" &&
@@ -764,9 +800,78 @@ void test_generated_output_stage_recovery() {
             expect(ProductRelocationOps::rollback(recovery).status == "rolled_back" &&
                 ProductRelocationOps::rollback(recovery).status == "rolled_back" &&
                 !std::filesystem::exists(fixture.destination) &&
+                !std::filesystem::exists(fixture_stage(fixture, plan.plan_hash)) &&
                 read_text(fixture.config) == fixture.config_before &&
                 read_text(fixture.source / "_views" / "canonical-items.json") == stale,
                 "registered-stage recovery must preserve exact original config/source views");
+            cleanup(fixture);
+        } catch (...) { cleanup(fixture); throw; }
+    }
+}
+
+void test_stage_ownership_recovery() {
+    using kano::backlog_ops::ProductRelocationOps;
+    auto fixture = make_fixture();
+    try {
+        const auto options = plan_options(fixture);
+        const auto plan = ProductRelocationOps::plan(options);
+        ProductRelocationOps::ApplyOptions apply{
+            .plan = options, .expected_plan_hash = plan.plan_hash, .confirm = true,
+            .inject_failure_after = "after_stage",
+        };
+        expect(ProductRelocationOps::apply(apply).status == "rolled_back" &&
+            !std::filesystem::exists(fixture_stage(fixture, plan.plan_hash)) &&
+            read_text(fixture_journal(fixture, plan.plan_hash)).find("\"stage_owned\" : false") != std::string::npos &&
+            read_text(fixture.config) == fixture.config_before,
+            "primary-stage failure must remove admitted staging and release its receipt");
+        cleanup(fixture);
+    } catch (...) { cleanup(fixture); throw; }
+
+    for (const auto& receipt : {"false", "missing", "malformed"}) {
+        fixture = make_fixture();
+        try {
+            const auto options = plan_options(fixture);
+            const auto plan = ProductRelocationOps::plan(options);
+            ProductRelocationOps::ApplyOptions apply{
+                .plan = options, .expected_plan_hash = plan.plan_hash, .confirm = true,
+                .inject_failure_after = std::nullopt,
+                .inject_interruption_after = "after_config_publish",
+            };
+            expect(ProductRelocationOps::apply(apply).status == "recovery_required",
+                "published target must expose recovery before generated rebuilding");
+            const auto stage = fixture_stage(fixture, plan.plan_hash);
+            const auto journal_path = fixture_journal(fixture, plan.plan_hash);
+            auto journal = read_text(journal_path);
+            const std::string owned_receipt = "\"stage_owned\" : false";
+            const auto offset = journal.find(owned_receipt);
+            expect(!std::filesystem::exists(stage) && offset != std::string::npos,
+                "primary publication must persist released stage ownership");
+            if (std::string(receipt) == "missing") {
+                journal.erase(offset, owned_receipt.size() + 1); // Include the field's comma.
+                write_text(journal_path, journal);
+            } else if (std::string(receipt) == "malformed") {
+                journal.replace(offset, owned_receipt.size(), "\"stage_owned\" : \"true\"");
+                write_text(journal_path, journal);
+            }
+            const auto sentinel = stage / "foreign-writer.txt";
+            const std::string foreign_bytes = "recreated staging belongs to another writer\n";
+            write_text(sentinel, foreign_bytes);
+            const auto published_config = read_text(fixture.config);
+            ProductRelocationOps::RecoveryOptions recovery;
+            recovery.backlog_root = fixture.shared;
+            recovery.plan_hash = plan.plan_hash;
+            recovery.confirm = true;
+            const auto blocked = ProductRelocationOps::rollback(recovery);
+            expect(blocked.status == "recovery_required" &&
+                contains_prefix(blocked.failures, "stage_root_not_owned") &&
+                read_text(sentinel) == foreign_bytes && read_text(fixture.config) == published_config &&
+                std::filesystem::is_directory(fixture.source) && std::filesystem::is_directory(fixture.destination),
+                "fresh rollback must preserve a recreated stage without an explicit boolean ownership receipt");
+            std::filesystem::remove(sentinel);
+            std::filesystem::remove(stage);
+            expect(ProductRelocationOps::rollback(recovery).status == "rolled_back" &&
+                read_text(fixture.config) == fixture.config_before && !std::filesystem::exists(fixture.destination),
+                "explicit removal of the test-owned conflict must permit safe recovery");
             cleanup(fixture);
         } catch (...) { cleanup(fixture); throw; }
     }
@@ -887,6 +992,7 @@ int main() {
         test_generated_view_failure_and_recovery();
         test_generated_validation_interruption_and_drift();
         test_generated_output_stage_recovery();
+        test_stage_ownership_recovery();
         test_no_generated_views_and_ownership_guards();
         std::cout << "product_relocation_ops_smoke_test: PASS\n";
         return 0;

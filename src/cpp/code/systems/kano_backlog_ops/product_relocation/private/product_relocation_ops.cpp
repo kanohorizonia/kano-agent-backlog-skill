@@ -14,6 +14,7 @@
 #include <chrono>
 #include <cstdint>
 #include <fstream>
+#include <functional>
 #include <iomanip>
 #include <limits>
 #include <optional>
@@ -2020,12 +2021,18 @@ void cleanup_owned_generated_output_stage(
 
 void copy_manifest(
     const PreparedRelocation& prepared,
-    const std::filesystem::path& stage
+    const std::filesystem::path& stage,
+    const std::function<void()>& on_admitted
 ) {
-    if (std::filesystem::exists(stage)) {
-        throw std::runtime_error("stage_root_already_exists");
+    std::filesystem::create_directories(stage.parent_path());
+    std::error_code admission_error;
+    if (!std::filesystem::create_directory(stage, admission_error)) {
+        throw std::runtime_error(admission_error
+            ? "stage_root_admission_failed" : "stage_root_already_exists");
     }
-    std::filesystem::create_directories(stage);
+    // Receipt failure leaves the admitted directory unowned for recovery.
+    // Persist ownership before the first digest or canonical byte is copied.
+    on_admitted();
     for (const auto& file : prepared.manifest) {
         const auto source = prepared.source_root / file.relative;
         const auto destination = stage / file.relative;
@@ -2108,6 +2115,7 @@ Json::Value make_journal(
     journal["destination_root"] =
         prepared.destination_root.generic_string();
     journal["stage_root"] = stage.generic_string();
+    journal["stage_owned"] = false;
     journal["retired_root"] = retired.generic_string();
     journal["destination_preexisted_empty"] =
         prepared.plan.destination_preexisted_empty;
@@ -2171,6 +2179,17 @@ std::vector<std::string> rollback_journal(
     // Retain legacy custom-view exclusions, but canonical list output always
     // requires explicit transaction registration.
     const bool legacy_views = !journal["plan"].isMember("generated_rebuilders");
+
+    if (std::filesystem::exists(stage) || std::filesystem::is_symlink(stage)) {
+        if (!journal["stage_owned"].isBool() || !journal["stage_owned"].asBool()) {
+            failures.push_back("stage_root_not_owned");
+            return restored;
+        }
+        if (!std::filesystem::is_directory(stage) || std::filesystem::is_symlink(stage)) {
+            failures.push_back("stage_root_ownership_ambiguous");
+            return restored;
+        }
+    }
 
     try {
         cleanup_owned_generated_output_stage(destination, journal);
@@ -2277,6 +2296,10 @@ std::vector<std::string> rollback_journal(
         const auto expected_name =
             destination.filename().generic_string() +
             ".kob-relocation-" + plan_hash.substr(0, 16) + ".stage";
+        // Release the receipt before the namespace. A crash can require
+        // manual recovery, but never authorizes deleting a recreated stage.
+        journal["stage_owned"] = false;
+        write_journal(transaction, journal);
         remove_exact_tree(
             stage, destination.parent_path(), expected_name,
             failures, "stage");
@@ -2431,12 +2454,16 @@ bool rebuild_generated_views(
         if (options.inject_failure_after == "during_generated_rebuild") {
             throw std::runtime_error("injected_generated_rebuild_failure");
         }
-        // A fresh manifest-only root cannot contain premove output or caches.
-        // It lives inside the owned transaction; it is never used as authority.
-        const auto oracle = transaction / "derived-oracle";
+        // Publication vacates the bounded destination-side stage namespace.
+        // Re-admit it exclusively for a fresh manifest-only oracle; it is
+        // never authority and cannot contain premove generated output/caches.
+        const auto oracle = stage_root(prepared.destination_root, prepared.plan.plan_hash);
         auto oracle_prepared = prepared;
         oracle_prepared.source_root = prepared.destination_root;
-        copy_manifest(oracle_prepared, oracle);
+        copy_manifest(oracle_prepared, oracle, [&] {
+            journal["stage_owned"] = true;
+            write_journal(transaction, journal);
+        });
         const auto publish_output = [&](const std::string& bytes) {
             auto output_stage = prepared.destination_root / kCanonicalListOutput;
             output_stage += ".kob-product-relocation.tmp";
@@ -2486,7 +2513,10 @@ bool rebuild_generated_views(
         evidence.removeMember("active_rebuilder");
         write_journal(transaction, journal);
         std::vector<std::string> failures;
-        if (!remove_exact_tree(oracle, transaction, "derived-oracle", failures, "oracle")) {
+        journal["stage_owned"] = false;
+        write_journal(transaction, journal);
+        if (!remove_exact_tree(oracle, prepared.destination_root.parent_path(),
+                oracle.filename().generic_string(), failures, "oracle")) {
             throw std::runtime_error("generated_view_oracle_cleanup_failed");
         }
         return true;
@@ -2708,13 +2738,20 @@ ProductRelocationResult ProductRelocationOps::apply(
                 return true;
             };
 
-        copy_manifest(prepared, stage);
+        copy_manifest(prepared, stage, [&] {
+            journal["stage_owned"] = true;
+            write_journal(transaction, journal);
+        });
         mark_stage("stage_verified");
         inject_failure("after_stage");
         if (inject_interruption("after_stage")) {
             return result;
         }
 
+        // Persist release before rename, so a recreated stage is never owned
+        // by a stale recovery receipt. Failed publication stays fail closed.
+        journal["stage_owned"] = false;
+        write_journal(transaction, journal);
         publish_stage(prepared, stage);
         mark_stage("target_published");
         inject_failure("after_target_publish");

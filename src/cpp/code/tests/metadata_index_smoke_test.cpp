@@ -3,9 +3,11 @@
 #include <cmath>
 #include <condition_variable>
 #include <cstdint>
+#include <cstdlib>
 #include <exception>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <initializer_list>
 #include <iostream>
 #include <limits>
@@ -19,7 +21,17 @@
 #include <thread>
 #include <vector>
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
+#include <sys/stat.h>
+#endif
+
 #include <json/json.h>
+#include <kano_process.h>
 
 #include "kano/backlog_core/frontmatter/canonical_store.hpp"
 #include "kano/backlog_core/models/models.hpp"
@@ -49,8 +61,75 @@ std::filesystem::path make_temp_root() {
     const auto nonce = std::chrono::steady_clock::now().time_since_epoch().count();
     const auto root = std::filesystem::temp_directory_path() /
         ("kano-backlog-metadata-index-" + std::to_string(nonce));
-    std::filesystem::create_directories(root);
+    expect(std::filesystem::create_directory(root),
+        "metadata fixture root must be uniquely owned");
     return root;
+}
+
+std::string run_fixture_git(
+    const std::filesystem::path& fixture_root,
+    const std::vector<std::string>& arguments
+) {
+    std::vector<const char*> argv;
+    argv.reserve(arguments.size());
+    for (const auto& argument : arguments) {
+        argv.push_back(argument.c_str());
+    }
+    const auto working_directory = fixture_root.string();
+    KanoUnattendedProcessOptions options{};
+    options.executable = "git";
+    options.working_dir = working_directory.c_str();
+    options.argv = argv.data();
+    options.argv_count = argv.size();
+    options.mode = KANO_PROCESS_MODE_CAPTURE;
+    options.timeout_ms = 5000;
+    options.cleanup_timeout_ms = 1000;
+    options.capture_limits = {4096, 4096};
+    struct OwnedResult {
+        KanoUnattendedProcessResult value{};
+        ~OwnedResult() { kano_process_free_unattended_result(&value); }
+    } result;
+    const bool completed = kano_process_run_unattended(&options, &result.value);
+    expect(completed && result.value.status == KANO_UNATTENDED_PROCESS_COMPLETED &&
+               result.value.process.exit_code == 0 && !result.value.process.timed_out &&
+               result.value.containment != KANO_PROCESS_CONTAINMENT_NONE &&
+               result.value.cleanup_complete && !result.value.process.stdout_truncated &&
+               !result.value.process.stderr_truncated,
+        "metadata fixture Git command must finish within its owned process bounds");
+    return std::string(
+        result.value.process.stdout_data ? result.value.process.stdout_data : "",
+        result.value.process.stdout_size);
+}
+
+void initialize_fixture_git_boundary(const std::filesystem::path& fixture_root) {
+    for (const char* variable : {
+             "GIT_DIR", "GIT_COMMON_DIR", "GIT_WORK_TREE", "GIT_OBJECT_DIRECTORY"}) {
+        expect(std::getenv(variable) == nullptr,
+            "metadata fixture Git initialization rejects inherited repository redirection");
+    }
+    expect(!std::filesystem::exists(fixture_root / ".git"),
+        "metadata fixture must not replace an existing Git boundary");
+    const auto empty_template = fixture_root / ".git-template";
+    expect(std::filesystem::create_directory(empty_template),
+        "metadata fixture Git template must be newly owned and empty");
+    (void)run_fixture_git(fixture_root, {
+        "init", "--quiet", "--initial-branch=metadata-fixture",
+        "--template=" + empty_template.string()});
+    auto common_directory = run_fixture_git(
+        fixture_root, {"rev-parse", "--path-format=absolute", "--git-common-dir"});
+    while (!common_directory.empty() &&
+           (common_directory.back() == '\n' || common_directory.back() == '\r')) {
+        common_directory.pop_back();
+    }
+    expect(!common_directory.empty() && common_directory.find('\0') == std::string::npos &&
+               std::filesystem::path(common_directory).is_absolute(),
+        "metadata fixture Git common directory must be an absolute bounded path");
+    const auto owned_root = std::filesystem::canonical(fixture_root);
+    const auto owned_git = std::filesystem::canonical(fixture_root / ".git");
+    const auto actual_common = std::filesystem::canonical(common_directory);
+    expect(owned_git.parent_path() == owned_root &&
+               std::filesystem::equivalent(actual_common, owned_git),
+        "metadata fixture Git common directory must remain inside its owned root");
 }
 
 std::string read_text(const std::filesystem::path& path) {
@@ -1250,15 +1329,305 @@ void expect_redacted_requested_status(
         operation + " must fail closed without exposing persisted projection state");
 }
 
+bool canonical_result_order(
+    const kano::backlog_ops::IndexItem& left,
+    const kano::backlog_ops::IndexItem& right
+) {
+    if (left.updated != right.updated) {
+        return left.updated > right.updated;
+    }
+    if (left.id != right.id) {
+        return left.id < right.id;
+    }
+    return left.product < right.product;
+}
+
+std::vector<kano::backlog_ops::IndexItem> collect_canonical_items(
+    const std::filesystem::path& product_root,
+    const std::string& product
+) {
+    CanonicalStore store(product_root);
+    std::vector<kano::backlog_ops::IndexItem> result;
+    for (const auto& path : store.list_items()) {
+        const auto canonical = store.read_metadata(path);
+        kano::backlog_ops::IndexItem item;
+        item.id = canonical.id;
+        item.uid = canonical.uid;
+        item.product = product;
+        item.type = canonical.type;
+        item.state = canonical.state;
+        item.title = canonical.title;
+        item.priority = canonical.priority;
+        item.parent = canonical.parent;
+        item.duplicate_of = canonical.duplicate_of;
+        item.slug = path.stem().string();
+        const auto prefix = item.id + "_";
+        if (item.slug.starts_with(prefix)) {
+            item.slug.erase(0, prefix.size());
+        }
+        item.source_ref = std::filesystem::relative(path, product_root).generic_string();
+        item.source_size = std::filesystem::file_size(path);
+        std::uint64_t hash = 14695981039346656037ULL;
+        for (const unsigned char byte : read_text(path)) {
+            hash ^= byte;
+            hash *= 1099511628211ULL;
+        }
+        std::ostringstream formatted_hash;
+        formatted_hash << "fnv1a64:" << std::hex << std::setfill('0') << std::setw(16) << hash;
+        item.source_hash = formatted_hash.str();
+#ifdef _WIN32
+        WIN32_FILE_ATTRIBUTE_DATA attributes{};
+        expect(GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &attributes),
+            "canonical oracle must read the source timestamp");
+        ULARGE_INTEGER modified{};
+        modified.HighPart = attributes.ftLastWriteTime.dwHighDateTime;
+        modified.LowPart = attributes.ftLastWriteTime.dwLowDateTime;
+        item.source_mtime_ns = static_cast<std::int64_t>(modified.QuadPart * 100ULL);
+#else
+        struct stat attributes {};
+        expect(::stat(path.c_str(), &attributes) == 0,
+            "canonical oracle must read the source timestamp");
+#if defined(__APPLE__)
+        item.source_mtime_ns = static_cast<std::int64_t>(attributes.st_mtimespec.tv_sec) *
+            1000000000LL + attributes.st_mtimespec.tv_nsec;
+#else
+        item.source_mtime_ns = static_cast<std::int64_t>(attributes.st_mtim.tv_sec) *
+            1000000000LL + attributes.st_mtim.tv_nsec;
+#endif
+#endif
+        item.estimated_tokens = (item.source_size + 3ULL) / 4ULL;
+        item.updated = canonical.updated;
+        result.push_back(std::move(item));
+    }
+    return result;
+}
+
+void expect_canonical_source_hashes(
+    const std::vector<kano::backlog_ops::IndexItem>& actual,
+    const std::vector<kano::backlog_ops::IndexItem>& canonical,
+    bool fallback,
+    const std::string& context
+) {
+    expect(actual.size() == canonical.size(), context + " must preserve hash result count");
+    for (std::size_t index = 0; index < actual.size(); ++index) {
+        expect(actual[index].source_hash == (fallback ? "" : canonical[index].source_hash),
+            context + " must expose the expected ready or canonical-fallback source hash");
+    }
+}
+
+BacklogItem write_ordered_fixture(
+    CanonicalStore& store,
+    int number,
+    const std::string& title,
+    const std::string& updated
+) {
+    auto item = store.create("ORD", ItemType::Task, title, number);
+    item.priority = "P1";
+    store.write(item);
+    auto content = read_text(*item.file_path);
+    const auto begin = content.find("updated:");
+    expect(begin != std::string::npos, "ordering fixture must expose updated metadata");
+    const auto end = content.find('\n', begin);
+    expect(end != std::string::npos, "ordering fixture updated field must have a newline");
+    content.replace(begin, end - begin, "updated: " + updated);
+    write_text(*item.file_path, content);
+    return store.read(*item.file_path);
+}
+
+void validate_bounded_canonical_fallback(const std::filesystem::path& fixture_root) {
+    const std::string product = "bounded-fallback";
+    const auto product_root = fixture_root / "products" / product;
+    const auto index_path = fixture_root / ".cache/index/backlog.db";
+    CanonicalStore store(product_root);
+    const auto older = write_ordered_fixture(store, 1, "A older", "2026-10-04");
+    const auto newer = write_ordered_fixture(store, 2, "B newer", "2026-10-05");
+    store.reset_write_revision();
+    auto sources = store.list_items();
+    std::sort(sources.begin(), sources.end());
+    expect(sources.size() == 2 && sources.front() == *older.file_path &&
+               older.updated < newer.updated,
+        "bounded fallback fixture must put the older source first in lexical order");
+    kano::backlog_ops::build_index(product_root, index_path, true, product);
+    IndexQuery query;
+    query.limit = 1;
+    const auto ready = kano::backlog_ops::query_metadata_index(
+        index_path, product_root, product, query);
+    expect(ready.diagnostics.index_used && ready.diagnostics.index_status == "ready",
+        "bounded fallback baseline must use ready index rows");
+    auto oracle = collect_canonical_items(product_root, product);
+    std::sort(oracle.begin(), oracle.end(), canonical_result_order);
+    oracle.resize(query.limit);
+    expect_canonical_result_equal(ready.items, oracle, "bounded ready oracle");
+    expect_canonical_source_hashes(ready.items, oracle, false, "bounded ready oracle");
+    const auto fallback = kano::backlog_ops::query_metadata_index(
+        fixture_root / ".cache/index/missing.db", product_root, product, query);
+    expect(!fallback.diagnostics.index_used && fallback.diagnostics.fallback_scan &&
+               fallback.diagnostics.index_status == "missing",
+        "bounded canonical regression must exercise missing-index fallback");
+    std::cout << "bounded-fallback: ready=" << ready.items.front().id
+              << " fallback=" << fallback.items.front().id << " limit=" << query.limit << "\n";
+    expect_canonical_result_equal(fallback.items, oracle,
+        "bounded canonical fallback must sort before limiting");
+    expect_canonical_source_hashes(fallback.items, oracle, true, "bounded canonical fallback");
+}
+
+void validate_ready_ref_publication_race(const std::filesystem::path& fixture_root) {
+#ifdef _WIN32
+    const std::string product = "ready-ref-race";
+    const auto product_root = fixture_root / "products" / product;
+    const auto index_path = fixture_root / ".cache/index/backlog.db";
+    CanonicalStore store(product_root);
+    auto item = store.create("RACE", ItemType::Task, "Ready title A", 1);
+    store.write(item);
+    BacklogIndex writer(index_path, product, product_root);
+    writer.rebuild_metadata(product_root, product);
+    IndexQuery query;
+    query.exact_ref = item.id;
+    query.limit = 1;
+    const auto revision_a = kano::backlog_ops::query_metadata_index(
+        index_path, product_root, product, query);
+    expect_exact(revision_a, item.id, item.title);
+    const auto proof = read_persisted_proof_state(index_path, product);
+    expect(proof.kind == "windows-ntfs-usn-v1" && proof.status == "verified" &&
+               revision_a.diagnostics.index_used && !revision_a.diagnostics.fallback_scan,
+        "ready-ref regression requires a verified NTFS ready snapshot A");
+    BoundedThreadCoordination coordination(1, "ready-ref publication race");
+    BacklogIndex::QueryMetadataTestHooks hooks;
+    hooks.after_change_proof_verification = [&] { coordination.arrive_and_wait(); };
+    IndexQueryResult paused_result;
+    IndexQueryResult revision_b;
+    std::exception_ptr reader_error;
+    std::vector<std::thread> readers;
+    ThreadJoinGuard join_guard(readers);
+    try {
+        readers.emplace_back([&] {
+            try {
+                paused_result = kano::backlog_ops::query_metadata_index(
+                    index_path, product_root, product, query, hooks);
+            } catch (...) {
+                reader_error = std::current_exception();
+            }
+            coordination.complete(reader_error);
+        });
+        coordination.wait_until_arrived();
+        item = store.read(*item.file_path);
+        item.title = "Ready title B";
+        store.write(item);
+        writer.index_item(item);
+        revision_b = kano::backlog_ops::query_metadata_index(
+            index_path, product_root, product, query);
+        expect_exact(revision_b, item.id, item.title);
+        expect(revision_b.diagnostics.index_used &&
+                   revision_b.diagnostics.index_status == "ready" &&
+                   !revision_b.diagnostics.fallback_scan &&
+                   revision_b.diagnostics.product_revision != revision_a.diagnostics.product_revision,
+            "ready-ref writer must publish and independently read ready revision B");
+        coordination.release();
+        coordination.wait_until_complete();
+    } catch (...) {
+        coordination.cancel();
+        throw;
+    }
+    join_guard.join();
+    if (reader_error) {
+        std::rethrow_exception(reader_error);
+    }
+    expect_exact(paused_result, item.id, item.title);
+    const bool ready = paused_result.diagnostics.index_used &&
+        paused_result.diagnostics.index_status == "ready" &&
+        !paused_result.diagnostics.fallback_scan;
+    const bool fallback = !paused_result.diagnostics.index_used &&
+        paused_result.diagnostics.fallback_scan;
+    std::cout << "ready-ref-race: revisionA=" << revision_a.diagnostics.product_revision
+              << " revisionB=" << revision_b.diagnostics.product_revision
+              << " reader=" << paused_result.diagnostics.product_revision
+              << " title=" << paused_result.items.front().title
+              << " status=" << paused_result.diagnostics.index_status << "\n";
+    expect(ready || fallback, "paused ready-ref reader must report explicit ready or fallback output");
+    expect(!ready || (paused_result.diagnostics.product_revision == revision_b.diagnostics.product_revision &&
+                         paused_result.diagnostics.index_revision == revision_b.diagnostics.index_revision &&
+                         paused_result.diagnostics.canonical_revision == revision_b.diagnostics.canonical_revision),
+        "ready exact-ref reader must not label row B with snapshot A revisions");
+    auto oracle = collect_canonical_items(product_root, product);
+    expect_canonical_result_equal(paused_result.items, oracle, "ready-ref reader canonical B");
+    expect_canonical_source_hashes(paused_result.items, oracle, fallback, "ready-ref reader canonical B");
+#else
+    std::cout << "ready-ref-race: SKIP verified NTFS schedule requires Windows\n";
+#endif
+}
+
+void validate_unscoped_canonical_parity(const std::filesystem::path& fixture_root) {
+    const auto index_path = fixture_root / ".cache/index/backlog.db";
+    const std::vector<std::string> products{"unscoped-zeta", "unscoped-alpha"};
+    std::vector<kano::backlog_ops::IndexItem> oracle;
+    for (const auto& product : products) {
+        const auto product_root = fixture_root / "products" / product;
+        CanonicalStore store(product_root);
+        write_ordered_fixture(store, 1, "Overlap older", "2026-10-04");
+        write_ordered_fixture(store, 2, "Overlap newer", "2026-10-05");
+        store.reset_write_revision();
+        kano::backlog_ops::build_index(product_root, index_path, true, product);
+        auto canonical = collect_canonical_items(product_root, product);
+        oracle.insert(oracle.end(), canonical.begin(), canonical.end());
+    }
+    std::sort(oracle.begin(), oracle.end(), canonical_result_order);
+    BacklogIndex unscoped(index_path);
+    const auto all = unscoped.query_items();
+    expect_canonical_result_equal(all, oracle,
+        "direct unscoped query_items canonical oracle");
+    expect_canonical_source_hashes(all, oracle, false, "direct unscoped canonical oracle");
+    const auto filtered = unscoped.query_items(ItemType::Task, ItemState::New);
+    expect_canonical_result_equal(filtered,
+        oracle, "direct unscoped filtered query_items canonical oracle");
+    expect_canonical_source_hashes(filtered, oracle, false, "direct unscoped filtered canonical oracle");
+    IndexQuery query;
+    query.limit = 1;
+    std::vector<kano::backlog_ops::IndexItem> global_items;
+    for (const auto& product : products) {
+        const auto result = kano::backlog_ops::query_metadata_index(
+            index_path, fixture_root / "products" / product, product, query);
+        expect(result.diagnostics.index_used && result.diagnostics.index_status == "ready" &&
+                   !result.diagnostics.product_revision.empty(),
+            "global parity query must retain a ready per-product revision");
+        global_items.insert(global_items.end(), result.items.begin(), result.items.end());
+    }
+    std::sort(global_items.begin(), global_items.end(), canonical_result_order);
+    global_items.resize(query.limit);
+    oracle.resize(query.limit);
+    expect_canonical_result_equal(global_items, oracle, "globally ordered bounded product queries");
+    expect_canonical_source_hashes(global_items, oracle, false, "globally ordered bounded product queries");
+    std::cout << "unscoped-parity: PASS global_limit=" << query.limit
+              << " first_product=" << oracle.front().product << "\n";
+}
+
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
     kano::infra::ConfigureUnattendedExecution();
 
     std::filesystem::path fixture_root;
     try {
-        validate_koa_metadata_index_consumer_fixture();
+        const std::string focused = argc == 2 ? argv[1] : "";
+        if (argc > 2 || (!focused.empty() && focused != "--ready-ref-race" &&
+                            focused != "--bounded-fallback" && focused != "--unscoped-parity")) {
+            throw std::runtime_error("unknown metadata regression fixture selector");
+        }
         fixture_root = make_temp_root();
+        if (focused.empty() || focused == "--ready-ref-race") {
+            validate_ready_ref_publication_race(fixture_root / "ready-ref-race");
+        }
+        if (focused.empty() || focused == "--bounded-fallback") {
+            validate_bounded_canonical_fallback(fixture_root / "bounded-fallback");
+        }
+        if (focused.empty() || focused == "--unscoped-parity") {
+            validate_unscoped_canonical_parity(fixture_root / "unscoped-parity");
+        }
+        if (!focused.empty()) {
+            std::filesystem::remove_all(fixture_root);
+            std::cout << "metadata_index_smoke_test: PASS " << focused << "\n";
+            return 0;
+        }
+        validate_koa_metadata_index_consumer_fixture();
         const auto backlog_root = fixture_root / "backlog";
         const std::string product = "metadata-product";
         const auto product_root = backlog_root / "products" / product;
@@ -1802,6 +2171,7 @@ int main() {
             "tracked canonical update must keep a healthy snapshot readable");
 
         index.sync_sequences(product_root);
+        initialize_fixture_git_boundary(fixture_root);
         kano::backlog_ops::DuplicateAdmissionEvidence admission;
         admission.search_query = "Lifecycle-created metadata item";
         admission.search_scope = product;
@@ -1823,6 +2193,9 @@ int main() {
             "",
             "",
             admission);
+        expect(std::filesystem::is_regular_file(
+                   fixture_root / ".git/kano/backlog-id-reservations.db"),
+            "metadata item creation must use the fixture-local Git reservation ledger");
         IndexQuery created_query;
         created_query.exact_ref = created.id;
         created_query.limit = 1;

@@ -1658,9 +1658,6 @@ CanonicalQueryResult query_canonical(
             continue;
         }
         result.items.push_back(std::move(indexed));
-        if (result.items.size() == query.limit) {
-            break;
-        }
     }
     std::sort(result.items.begin(), result.items.end(), [](const auto& left, const auto& right) {
         if (left.updated != right.updated) {
@@ -1668,6 +1665,9 @@ CanonicalQueryResult query_canonical(
         }
         return left.id < right.id;
     });
+    if (result.items.size() > query.limit) {
+        result.items.resize(query.limit);
+    }
     return result;
 }
 
@@ -2577,7 +2577,7 @@ IndexQueryResult BacklogIndex::query_metadata(
     initialize();
 
     const auto revision_start = std::chrono::steady_clock::now();
-    const auto snapshot = read_snapshot(db_, product);
+    auto snapshot = read_snapshot(db_, product);
     const auto readiness = snapshot_readiness_mode(snapshot);
     std::optional<CanonicalWriteRevision> write_revision;
     try {
@@ -2600,6 +2600,9 @@ IndexQueryResult BacklogIndex::query_metadata(
             } else if (!advance_verified_checkpoint(
                            db_path_, product, snapshot, *proof.endpoint)) {
                 change_proof_failure = "change_proof_checkpoint_commit_failed";
+            } else {
+                snapshot.proof = proof.endpoint;
+                snapshot.proof_verified_usn = proof.endpoint->usn;
             }
         }
     } else if (readiness == SnapshotReadinessMode::PortableUnsupported &&
@@ -2636,6 +2639,32 @@ IndexQueryResult BacklogIndex::query_metadata(
                     exact_source_valid = false;
                     break;
                 }
+            }
+        }
+        if (exact_source_valid) {
+            try {
+                const auto current_write_revision =
+                    CanonicalStore(product_root).read_write_revision();
+                if (current_write_revision.current != snapshot.canonical_write_revision) {
+                    change_proof_failure = "canonical_write_revision_changed";
+                    exact_source_valid = false;
+                } else {
+                    const auto current_snapshot = read_snapshot(db_, product);
+                    auto expected_snapshot = snapshot;
+                    // Clean checkpoint progress does not replace indexed rows.
+                    // Keep every publication field in the identity comparison.
+                    if (current_snapshot.proof_verified_usn >= snapshot.proof_verified_usn) {
+                        expected_snapshot.proof_verified_usn =
+                            current_snapshot.proof_verified_usn;
+                    }
+                    if (!same_snapshot_publication_identity(expected_snapshot, current_snapshot)) {
+                        change_proof_failure = "change_proof_snapshot_changed";
+                        exact_source_valid = false;
+                    }
+                }
+            } catch (const std::exception&) {
+                change_proof_failure = "canonical_write_revision_unavailable";
+                exact_source_valid = false;
             }
         }
         if (exact_source_valid) {

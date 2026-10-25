@@ -320,15 +320,15 @@ std::vector<std::string> parse_string_list(const YAML::Node& node) {
     return values;
 }
 
-std::filesystem::path normalized_absolute_path(const std::filesystem::path& path) {
+std::optional<std::filesystem::path> normalized_absolute_path(const std::filesystem::path& path) {
     std::error_code ec;
-    auto absolute = std::filesystem::absolute(path, ec);
+    const auto absolute = std::filesystem::absolute(path, ec);
     if (ec) {
-        absolute = path;
+        return std::nullopt;
     }
-    auto normalized = std::filesystem::weakly_canonical(absolute, ec);
+    const auto normalized = std::filesystem::weakly_canonical(absolute, ec);
     if (ec) {
-        normalized = absolute.lexically_normal();
+        return std::nullopt;
     }
     return normalized;
 }
@@ -336,9 +336,13 @@ std::filesystem::path normalized_absolute_path(const std::filesystem::path& path
 bool is_inside_path(const std::filesystem::path& child_path, const std::filesystem::path& parent_path) {
     const auto child = normalized_absolute_path(child_path);
     const auto parent = normalized_absolute_path(parent_path);
-    std::error_code ec;
-    auto rel = std::filesystem::relative(child, parent, ec);
-    if (ec || rel.empty() || rel.is_absolute()) {
+    if (!child || !parent) {
+        return false;
+    }
+    // Both paths have already resolved existing symlinks. Avoid resolving
+    // every ancestor again through filesystem::relative on each item read.
+    const auto rel = child->lexically_relative(*parent);
+    if (rel.empty() || rel == "." || rel.is_absolute()) {
         return false;
     }
     for (const auto& part : rel) {

@@ -1461,10 +1461,14 @@ CreateItemResult WorkitemOps::create_item(
     std::optional<BacklogItem> parent_identity;
     if (parent && !is_empty_parent_ref(*parent)) {
         parent_identity = resolve_parent_by_identity(store, backlog_root, *parent, false, "");
-        const auto parent_by_id = resolve_parent_by_identity(
-            store, backlog_root, parent_identity->id, false, "");
-        if (parent_by_id.uid != parent_identity->uid) {
-            throw std::runtime_error("hierarchy.parent_identity_conflict: parent ID and UID resolve differently");
+        // A canonical-ID lookup already checked all ID/UID matches. A UID
+        // input still needs the ID lookup to reject a duplicated display ID.
+        if (*parent != parent_identity->id) {
+            const auto parent_by_id = resolve_parent_by_identity(
+                store, backlog_root, parent_identity->id, false, "");
+            if (parent_by_id.uid != parent_identity->uid) {
+                throw std::runtime_error("hierarchy.parent_identity_conflict: parent ID and UID resolve differently");
+            }
         }
         BacklogItem child_proposal;
         child_proposal.type = type;

@@ -78,10 +78,12 @@ kano::backlog_ops::DuplicateAdmissionEvidence duplicate_admission(
 
 class MutationTimingCapture : private std::stringbuf {
 public:
-    explicit MutationTimingCapture(std::function<void()> before_parent_recheck = {})
+    explicit MutationTimingCapture(std::function<void()> before_parent_recheck = {},
+        std::string callback_span = "workitem.create_item.render_template")
         : previous_buffer_(std::cerr.rdbuf(this)),
           previous_timing_(kano::backlog_core::diagnostics::mutation_timing_forced()),
-          before_parent_recheck_(std::move(before_parent_recheck)) {
+          before_parent_recheck_(std::move(before_parent_recheck)),
+          callback_span_(std::move(callback_span)) {
         kano::backlog_core::diagnostics::mutation_timing_forced() = true;
     }
 
@@ -91,10 +93,18 @@ public:
     }
 
     std::size_t full_reads(const std::string& filename) const {
+        return reads("canonical_store.read", filename);
+    }
+
+    std::size_t metadata_reads(const std::string& filename) const {
+        return reads("canonical_store.read_metadata_bounded", filename);
+    }
+
+    std::size_t reads(const std::string& span, const std::string& filename) const {
         std::size_t count = 0;
         std::istringstream lines(str());
         for (std::string line; std::getline(lines, line);) {
-            if (line.find("\"span\":\"canonical_store.read\"") != std::string::npos &&
+            if (line.find("\"span\":\"" + span + "\"") != std::string::npos &&
                 line.find("\"detail\":\"" + filename + "\"") != std::string::npos) {
                 ++count;
             }
@@ -110,7 +120,7 @@ public:
 private:
     int sync() override {
         if (before_parent_recheck_ && !callback_invoked_ &&
-            str().find("\"span\":\"workitem.create_item.render_template\"") != std::string::npos) {
+            str().find("\"span\":\"" + callback_span_ + "\"") != std::string::npos) {
             callback_invoked_ = true;
             try {
                 before_parent_recheck_();
@@ -124,6 +134,7 @@ private:
     std::streambuf* previous_buffer_;
     bool previous_timing_;
     std::function<void()> before_parent_recheck_;
+    std::string callback_span_;
     bool callback_invoked_ = false;
     std::exception_ptr callback_error_;
 };
@@ -140,8 +151,8 @@ int main() {
     try {
         root = make_temp_root();
         {
-            // KOB-BUG-0100: canonical-ID input needs two fresh parent scans;
-            // UID input additionally proves that its display ID is unique.
+            // Keyed parent admission shares one bounded scan, still checking
+            // both input forms, unrelated identities and the final live parent.
             const std::string parent_id = "PAR-FTR-0001";
             const std::string parent_uid = CanonicalStore::generate_uuid_v7();
             const auto parent_bytes = [&](const std::string& uid) {
@@ -149,24 +160,63 @@ int main() {
                     "\ntype: Feature\ntitle: Parent identity fixture\nstate: Proposed\n"
                     "created: 2026-10-01\nupdated: 2026-10-01\nexternal: {}\n---\n";
             };
-            for (const bool use_uid : {false, true}) {
-                const auto product = root / (use_uid ? "parent-uid" : "parent-id");
+            for (const bool use_key : {false, true}) {
+              for (const bool use_uid : {false, true}) {
+                const auto product = root / ((use_uid ? std::string("parent-uid") : "parent-id") +
+                    (use_key ? "-key" : "-no-key"));
                 const auto parent_path = product / "items" / (parent_id + "_parent.md");
                 write_text(parent_path, parent_bytes(parent_uid));
+                const auto unrelated_path = product / "items" / "unrelated.md";
+                write_text(unrelated_path,
+                    "---\nid: NBR-ISS-0001\nuid: " + CanonicalStore::generate_uuid_v7() +
+                    "\ntype: Issue\ntitle: Unrelated large body\nstate: Proposed\n"
+                    "created: 2026-10-01\nupdated: 2026-10-01\nexternal: {}\n---\n" +
+                    std::string(1024 * 1024, 'x'));
                 BacklogIndex index(product / ".cache" / "index" / "backlog.db");
                 index.initialize();
                 MutationTimingCapture timing;
                 const auto child = WorkitemOps::create_item(
                     index, product, "CHD", ItemType::Task, "Parent identity child", "opencode",
                     use_uid ? parent_uid : parent_id, "P2", {}, "general", "backlog",
-                    std::nullopt, std::nullopt, "", "", duplicate_admission("Parent identity child"));
-                expect(timing.full_reads(parent_path.filename().string()) == (use_uid ? 3 : 2),
-                    "parent scans must retain initial/final checks and only the required UID-to-ID check");
+                    std::nullopt, std::nullopt, "", "", duplicate_admission("Parent identity child"),
+                    use_key ? std::optional<std::string>{"parent-key"} : std::nullopt);
+                expect(timing.full_reads(parent_path.filename().string()) == (use_key ? 2 : (use_uid ? 3 : 2)),
+                    "parent admission must retain its matched read and final fresh scan");
+                expect(timing.full_reads(unrelated_path.filename().string()) == (use_key ? 1 : (use_uid ? 3 : 2)),
+                    "keyed initial admission must not fully parse unrelated item bodies");
+                expect(timing.metadata_reads(parent_path.filename().string()) == (use_key ? 1 : 0) &&
+                    timing.metadata_reads(unrelated_path.filename().string()) == (use_key ? 1 : 0),
+                    "keyed parent and first request verification must share exactly one bounded scan");
                 expect(CanonicalStore(product).read(child.path).parent == parent_id && child.read_after_write,
                     "both parent input forms must persist the canonical parent ID and verify the child UID");
+                if (use_key) {
+                    const auto child_bytes = read_text(child.path);
+                    const auto receipt = product / "_meta" / "duplicate-admission" / (child.id + ".json");
+                    const auto receipt_bytes = read_text(receipt);
+                    const auto replay = WorkitemOps::create_item(
+                        index, product, "CHD", ItemType::Task, "Parent identity child", "opencode",
+                        use_uid ? parent_id : parent_uid, "P2", {}, "general", "backlog",
+                        std::nullopt, std::nullopt, "", "", duplicate_admission("Parent identity child"), "parent-key");
+                    expect(replay.id == child.id && replay.uid == child.uid && replay.idempotent_replay &&
+                        CanonicalStore(product).list_items().size() == 3 &&
+                        read_text(child.path) == child_bytes && read_text(receipt) == receipt_bytes,
+                        "a keyed parent replay must normalize ID/UID aliases and retain the original child");
+                    std::filesystem::remove(receipt);
+                    const auto recovered = WorkitemOps::create_item(
+                        index, product, "CHD", ItemType::Task, "Parent identity child", "opencode",
+                        parent_id, "P2", {}, "general", "backlog", std::nullopt, std::nullopt,
+                        "", "", duplicate_admission("Parent identity child"), "parent-key");
+                    expect(recovered.idempotent_replay && recovered.id == child.id && recovered.uid == child.uid &&
+                        read_text(child.path) == child_bytes && std::filesystem::exists(receipt) &&
+                        CanonicalStore(product).find_item_paths_by_id("CHD-TSK-0002").empty(),
+                        "keyed parent replay must repair only its missing receipt without a replacement child");
+                }
+              }
             }
-            for (const bool use_uid : {false, true}) {
-                const auto product = root / (use_uid ? "ambiguous-parent-uid" : "ambiguous-parent-id");
+            for (const bool use_key : {false, true}) {
+              for (const bool use_uid : {false, true}) {
+                const auto product = root / ((use_uid ? std::string("ambiguous-parent-uid") : "ambiguous-parent-id") +
+                    (use_key ? "-key" : "-no-key"));
                 write_text(product / "items" / (parent_id + "_parent.md"), parent_bytes(parent_uid));
                 write_text(product / "items" / (parent_id + "_duplicate.md"),
                     parent_bytes(CanonicalStore::generate_uuid_v7()));
@@ -176,13 +226,17 @@ int main() {
                     (void)WorkitemOps::create_item(
                         index, product, "CHD", ItemType::Task, "Ambiguous parent child", "opencode",
                         use_uid ? parent_uid : parent_id, "P2", {}, "general", "backlog",
-                        std::nullopt, std::nullopt, "", "", duplicate_admission("Ambiguous parent child"));
+                        std::nullopt, std::nullopt, "", "", duplicate_admission("Ambiguous parent child"),
+                        use_key ? std::optional<std::string>{"ambiguous-parent-key"} : std::nullopt);
                 }, "duplicate_item_id.ambiguous_ref", "both parent input forms must reject duplicate display IDs");
                 expect(!index.has_sequence("CHD", "TSK") && CanonicalStore(product).list_items().size() == 2,
                     "parent ambiguity must fail before child allocation or canonical mutation");
+              }
             }
-            for (const bool change_path : {false, true}) {
-                const auto product = root / (change_path ? "parent-path-changed" : "parent-uid-changed");
+            for (const bool use_key : {false, true}) {
+              for (const bool change_path : {false, true}) {
+                const auto product = root / ((change_path ? std::string("parent-path-changed") : "parent-uid-changed") +
+                    (use_key ? "-key" : "-no-key"));
                 const auto parent_path = product / "items" / (parent_id + "_parent.md");
                 write_text(parent_path, parent_bytes(parent_uid));
                 BacklogIndex index(product / ".cache" / "index" / "backlog.db");
@@ -198,11 +252,161 @@ int main() {
                     (void)WorkitemOps::create_item(
                         index, product, "CHD", ItemType::Task, "Changed parent child", "opencode",
                         parent_id, "P2", {}, "general", "backlog", std::nullopt, std::nullopt,
-                        "", "", duplicate_admission("Changed parent child"));
+                        "", "", duplicate_admission("Changed parent child"),
+                        use_key ? std::optional<std::string>{"changed-parent-key"} : std::nullopt);
                 }, "hierarchy.parent_identity_changed", "the final fresh scan must reject changed parent UID/path");
                 timing.verify_callback();
                 expect(CanonicalStore(product).find_item_paths_by_id("CHD-TSK-0001").empty(),
                     "a changed parent must stop creation before the child canonical write");
+              }
+            }
+            {
+                const auto product = root / "parent-changed-after-metadata";
+                const auto parent_path = product / "items" / (parent_id + "_parent.md");
+                write_text(parent_path, parent_bytes(parent_uid));
+                BacklogIndex index(product / ".cache" / "index" / "backlog.db");
+                index.initialize();
+                MutationTimingCapture timing([&] {
+                    write_text(parent_path, parent_bytes(CanonicalStore::generate_uuid_v7()));
+                }, "workitem.create_item.parent_request_scan");
+                expect_throws_contains([&] {
+                    (void)WorkitemOps::create_item(
+                        index, product, "CHD", ItemType::Task, "Changed metadata parent", "opencode",
+                        parent_id, "P2", {}, "general", "backlog", std::nullopt, std::nullopt,
+                        "", "", duplicate_admission("Changed metadata parent"), "changed-metadata-parent-key");
+                }, "hierarchy.parent_identity_changed", "the matched parent read must reject a stale metadata UID");
+                timing.verify_callback();
+                expect(!index.has_sequence("CHD", "TSK") && CanonicalStore(product).list_items().size() == 1,
+                    "metadata identity changes must fail before allocation");
+            }
+            {
+                // An arbitrary filename with a colliding UID must participate
+                // in ID admission just like a duplicate display ID.
+                const auto product = root / "parent-id-uid-collision";
+                write_text(product / "items" / "parent.md", parent_bytes(parent_uid));
+                auto collision = parent_bytes(parent_id);
+                collision.replace(collision.find("id: " + parent_id), 4 + parent_id.size(), "id: OTHER-FTR-0001");
+                write_text(product / "items" / "unexpected-name.md", collision);
+                BacklogIndex index(product / ".cache" / "index" / "backlog.db");
+                index.initialize();
+                expect_throws_contains([&] {
+                    (void)WorkitemOps::create_item(
+                        index, product, "CHD", ItemType::Task, "Colliding parent identity", "opencode",
+                        parent_id, "P2", {}, "general", "backlog", std::nullopt, std::nullopt,
+                        "", "", duplicate_admission("Colliding parent identity"), "parent-collision-key");
+                }, "duplicate_item_id.ambiguous_ref", "the inventory must check UID collisions without filename filtering");
+                expect(!index.has_sequence("CHD", "TSK") && CanonicalStore(product).list_items().size() == 2,
+                    "a parent ID/UID collision must fail before allocation");
+            }
+            {
+                const auto original = root / "parent-root-original";
+                const auto replacement = root / "parent-root-replacement";
+                const auto bound = root / "parent-root-bound";
+                write_text(original / "items" / "parent.md", parent_bytes(parent_uid));
+                write_text(replacement / "items" / "parent.md", parent_bytes(parent_uid));
+                std::error_code link_error;
+                std::filesystem::create_directory_symlink(original, bound, link_error);
+                if (!link_error) {
+                    BacklogIndex index(original / ".cache" / "index" / "backlog.db");
+                    index.initialize();
+                    MutationTimingCapture timing([&] {
+                        std::filesystem::remove(bound);
+                        std::filesystem::create_directory_symlink(replacement, bound);
+                    }, "workitem.create_item.parent_request_scan");
+                    expect_throws_contains([&] {
+                        (void)WorkitemOps::create_item(
+                            index, bound, "CHD", ItemType::Task, "Rebound parent root", "opencode",
+                            parent_id, "P2", {}, "general", "backlog", std::nullopt, std::nullopt,
+                            "", "", duplicate_admission("Rebound parent root"), "parent-root-key");
+                    }, "item_create.request_root_changed", "a root rebind must invalidate the local metadata inventory");
+                    timing.verify_callback();
+                    expect(!index.has_sequence("CHD", "TSK") &&
+                        CanonicalStore(original).list_items().size() == 1 &&
+                        CanonicalStore(replacement).list_items().size() == 1,
+                        "a rebound root must not allocate or write in either target");
+                } else {
+                    std::cout << "parent inventory symlink rebind: SKIP (platform denied symlink creation)\n";
+                }
+            }
+            for (const bool before_final_check : {false, true}) {
+                const auto repository = root / (before_final_check ? "root-replaced-before-write" : "root-replaced-after-scan");
+                const auto product = repository / "product";
+                const auto replacement = repository / "replacement";
+                const auto retired = repository / "retired";
+                // Keep the native request lock and open index outside the root
+                // being replaced, including on Windows.
+                std::filesystem::create_directories(repository / ".git");
+                write_text(product / "items" / "parent.md", parent_bytes(parent_uid));
+                write_text(replacement / "items" / "parent.md", parent_bytes(parent_uid));
+                write_text(replacement / "items" / "marker.md",
+                    "---\nid: OTH-TSK-0001\nuid: " + CanonicalStore::generate_uuid_v7() +
+                    "\ntype: Task\ntitle: Conflicting replacement marker\nstate: Proposed\n"
+                    "created: 2026-10-01\nupdated: 2026-10-01\nexternal:\n"
+                    "  create_request_key: replaced-root-key\n  create_request_payload: different-request\n---\n");
+                BacklogIndex index(repository / ".cache" / "index" / "backlog.db");
+                index.initialize();
+                MutationTimingCapture timing([&] {
+                    std::filesystem::rename(product, retired);
+                    std::filesystem::rename(replacement, product);
+                }, before_final_check ? "workitem.create_item.render_template" : "workitem.create_item.parent_request_scan");
+                expect_throws_contains([&] {
+                    (void)WorkitemOps::create_item(
+                        index, product, "CHD", ItemType::Task, "Replaced parent root", "opencode",
+                        parent_id, "P2", {}, "general", "backlog", std::nullopt, std::nullopt,
+                        "", "", duplicate_admission("Replaced parent root"), "replaced-root-key");
+                }, "item_create.request_root_changed", "same-path directory replacement must invalidate admission");
+                timing.verify_callback();
+                expect(CanonicalStore(retired).list_items().size() == 1 &&
+                    CanonicalStore(product).list_items().size() == 2 &&
+                    CanonicalStore(product).find_item_paths_by_id("CHD-TSK-0001").empty(),
+                    "same parent identity must not hide root replacement or permit a child write");
+                if (!before_final_check) {
+                    expect(!index.has_sequence("CHD", "TSK"), "early root replacement must fail before allocation");
+                }
+            }
+            {
+                const auto product = root / "parent-reservation-fresh-recovery";
+                write_text(product / "items" / "parent.md", parent_bytes(parent_uid));
+                BacklogIndex index(product / ".cache" / "index" / "backlog.db");
+                index.initialize();
+                const std::string title = "Fresh parent recovery";
+                std::string payload;
+                for (const auto& field : {"RCP", "TSK", title.c_str(), "opencode", parent_id.c_str(), "P2",
+                         "general", "backlog", "", "", "", "", title.c_str(),
+                         "test-product", "create", "", "false", "0", "0", "0"}) {
+                    const std::string value = field;
+                    payload += std::to_string(value.size()) + ":" + value;
+                }
+                const auto reservation = index.reserve_next_number_for_request(
+                    "RCP", "TSK", "opencode", "fresh-parent-key", payload);
+                const auto reserved_uid = index.bind_request_uid(
+                    "RCP", "TSK", "fresh-parent-key", reservation.number, CanonicalStore::generate_uuid_v7());
+                std::filesystem::path recovered_path;
+                std::string recovered_bytes;
+                MutationTimingCapture timing([&] {
+                    CanonicalStore store(product);
+                    auto existing = store.create("RCP", ItemType::Task, title, reservation.number, parent_id);
+                    existing.uid = reserved_uid;
+                    existing.external["create_request_key"] = "fresh-parent-key";
+                    existing.external["create_request_payload"] = payload;
+                    store.write(existing);
+                    recovered_path = *existing.file_path;
+                    recovered_bytes = read_text(recovered_path);
+                }, "workitem.create_item.next_number");
+                const auto recovered = WorkitemOps::create_item(
+                    index, product, "RCP", ItemType::Task, title, "opencode", parent_uid,
+                    "P2", {}, "general", "backlog", std::nullopt, std::nullopt, "", "",
+                    duplicate_admission(title), "fresh-parent-key");
+                timing.verify_callback();
+                expect(recovered.idempotent_replay && recovered.id == "RCP-TSK-0001" &&
+                    recovered.uid == reserved_uid && recovered.path == recovered_path &&
+                    read_text(recovered_path) == recovered_bytes &&
+                    std::filesystem::exists(product / "_meta" / "duplicate-admission" / (recovered.id + ".json")) &&
+                    CanonicalStore(product).list_items().size() == 2 &&
+                    CanonicalStore(product).find_item_paths_by_id("RCP-TSK-0002").empty(),
+                    "reserved recovery must scan fresh after the cached pass and replay only the exact bound UID");
+                expect(timing.metadata_reads("parent.md") == 2,
+                    "reserved recovery must not reuse the first parent/request inventory");
             }
         }
         {

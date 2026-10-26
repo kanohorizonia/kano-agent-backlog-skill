@@ -33,6 +33,7 @@
 #else
 #include <fcntl.h>
 #include <sys/file.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #endif
 
@@ -1141,28 +1142,14 @@ ParentIndexedRead read_indexed_item_if_active(
     return outcome;
 }
 
-BacklogItem resolve_parent_by_identity(
-    const CanonicalStore& store,
+BacklogItem require_unique_parent(
+    const std::vector<BacklogItem>& matches,
+    const std::vector<std::string>& read_failures,
     const std::filesystem::path& product_root,
     const std::string& parent_ref,
     bool saw_stale_indexed_path,
     const std::string& stale_indexed_path_reason
 ) {
-    std::vector<BacklogItem> matches;
-    std::vector<std::string> read_failures;
-    for (const auto& path : store.list_items()) {
-        try {
-            auto item = store.read(path);
-            if (item.id == parent_ref || item.uid == parent_ref) {
-                matches.push_back(item);
-            }
-        } catch (const std::exception&) {
-            read_failures.push_back(path_for_diagnostic(path, product_root) + ": read failure");
-        } catch (...) {
-            read_failures.push_back(path_for_diagnostic(path, product_root) + ": unknown read failure");
-        }
-    }
-
     if (matches.size() == 1) {
         return matches.front();
     }
@@ -1195,6 +1182,31 @@ BacklogItem resolve_parent_by_identity(
         message += ")";
     }
     throw std::runtime_error(message);
+}
+
+BacklogItem resolve_parent_by_identity(
+    const CanonicalStore& store,
+    const std::filesystem::path& product_root,
+    const std::string& parent_ref,
+    bool saw_stale_indexed_path,
+    const std::string& stale_indexed_path_reason
+) {
+    std::vector<BacklogItem> matches;
+    std::vector<std::string> read_failures;
+    for (const auto& path : store.list_items()) {
+        try {
+            auto item = store.read(path);
+            if (item.id == parent_ref || item.uid == parent_ref) {
+                matches.push_back(std::move(item));
+            }
+        } catch (const std::exception&) {
+            read_failures.push_back(path_for_diagnostic(path, product_root) + ": read failure");
+        } catch (...) {
+            read_failures.push_back(path_for_diagnostic(path, product_root) + ": unknown read failure");
+        }
+    }
+    return require_unique_parent(matches, read_failures, product_root, parent_ref,
+        saw_stale_indexed_path, stale_indexed_path_reason);
 }
 
 BacklogItem resolve_parent_item(
@@ -1299,6 +1311,99 @@ struct CreateRequestScanBudget {
     }
 };
 
+template <typename Visitor>
+void visit_create_request_metadata(
+    const std::filesystem::path& root,
+    CreateRequestScanBudget& budget,
+    Visitor&& visitor
+) {
+    budget.check();
+    CanonicalStore candidate_store(root);
+    for (const auto& path : candidate_store.list_items()) {
+        budget.check();
+        BacklogItem candidate;
+        try {
+            std::size_t bytes_read = 0;
+            candidate = candidate_store.read_metadata_bounded(
+                path, std::min(CreateRequestScanBudget::maximum_item_bytes,
+                    CreateRequestScanBudget::maximum_total_bytes - budget.bytes), &bytes_read);
+            budget.bytes += bytes_read;
+            ++budget.files;
+        } catch (const std::exception&) {
+            throw std::runtime_error(
+                "item_create.request_scan_unreadable: cannot verify bounded canonical frontmatter at " +
+                path_for_diagnostic(path, root));
+        }
+        visitor(std::move(candidate));
+    }
+    // Include a slow final read, before using its result for admission.
+    if (std::chrono::steady_clock::now() - budget.started >= std::chrono::seconds(25)) {
+        throw std::runtime_error("item_create.request_scan_budget_exceeded: canonical request verification deadline exceeded");
+    }
+}
+
+// This inventory exists only inside one locked create. It is consumed by the
+// first request scan; recovery and the final parent check always read afresh.
+struct CreateParentMetadata {
+    struct RootIdentity {
+        std::filesystem::path canonical_path;
+        std::uint64_t device;
+        std::uint64_t file;
+        bool operator==(const RootIdentity&) const = default;
+    };
+    RootIdentity root_identity;
+    std::vector<BacklogItem> items;
+
+    static RootIdentity resolve_root(const std::filesystem::path& root) {
+        std::error_code error;
+        auto resolved = std::filesystem::canonical(root, error);
+        if (error || resolved.empty()) {
+            throw std::runtime_error("item_create.request_root_unverified");
+        }
+#ifdef _WIN32
+        const auto handle = CreateFileW(resolved.c_str(), FILE_READ_ATTRIBUTES,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+            OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+        if (handle == INVALID_HANDLE_VALUE) {
+            throw std::runtime_error("item_create.request_root_unverified");
+        }
+        BY_HANDLE_FILE_INFORMATION information{};
+        const bool queried = GetFileInformationByHandle(handle, &information) != 0;
+        CloseHandle(handle);
+        if (!queried || !(information.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
+            throw std::runtime_error("item_create.request_root_unverified");
+        }
+        return {resolved, information.dwVolumeSerialNumber,
+            (static_cast<std::uint64_t>(information.nFileIndexHigh) << 32) | information.nFileIndexLow};
+#else
+        struct stat information{};
+        if (::stat(resolved.c_str(), &information) != 0 || !S_ISDIR(information.st_mode)) {
+            throw std::runtime_error("item_create.request_root_unverified");
+        }
+        return {resolved, static_cast<std::uint64_t>(information.st_dev),
+            static_cast<std::uint64_t>(information.st_ino)};
+#endif
+    }
+
+    void verify_root(const std::filesystem::path& root) const {
+        if (resolve_root(root) != root_identity) {
+            throw std::runtime_error("item_create.request_root_changed");
+        }
+    }
+
+    BacklogItem resolve_parent(
+        const std::filesystem::path& root,
+        const std::string& ref
+    ) const {
+        verify_root(root);
+        std::vector<BacklogItem> matches;
+        for (const auto& item : items) {
+            if (item.id == ref || item.uid == ref) matches.push_back(item);
+        }
+        return require_unique_parent(matches, {}, root, ref, false, "");
+    }
+};
+
 std::optional<BacklogItem> find_created_request(
     const std::vector<std::filesystem::path>& product_roots,
     const std::filesystem::path& active_root,
@@ -1306,40 +1411,23 @@ std::optional<BacklogItem> find_created_request(
     const std::string& request_payload,
     CreateRequestScanBudget& budget,
     const std::optional<std::string>& reserved_id = std::nullopt,
-    const std::optional<std::string>& reserved_uid = std::nullopt
+    const std::optional<std::string>& reserved_uid = std::nullopt,
+    const CreateParentMetadata* parent_metadata = nullptr
 ) {
     diagnostics::ScopedMutationSpan span("workitem.create_item.request_scan");
+    if (parent_metadata) parent_metadata->verify_root(active_root);
     std::optional<BacklogItem> found;
     for (const auto& root : product_roots) {
-        budget.check();
-        CanonicalStore candidate_store(root);
-        for (const auto& path : candidate_store.list_items()) {
-            if (path.filename().string().ends_with(".index.md")) {
-                continue;
-            }
-            budget.check();
-            BacklogItem candidate;
-            try {
-                std::size_t bytes_read = 0;
-                candidate = candidate_store.read_metadata_bounded(
-                    path, std::min(CreateRequestScanBudget::maximum_item_bytes,
-                        CreateRequestScanBudget::maximum_total_bytes - budget.bytes), &bytes_read);
-                budget.bytes += bytes_read;
-                ++budget.files;
-            } catch (const std::exception&) {
-                throw std::runtime_error(
-                    "item_create.request_scan_unreadable: cannot verify bounded canonical frontmatter at " +
-                    path_for_diagnostic(path, root));
-            }
+        const auto inspect = [&](const BacklogItem& candidate) {
             const auto key = candidate.external.find("create_request_key");
             if (key == candidate.external.end() || key->second != request_key) {
-                continue;
+                return;
             }
             const auto signature = candidate.external.find("create_request_payload");
             if (signature == candidate.external.end() || signature->second != request_payload) {
                 throw std::runtime_error(
                     "item_create.idempotency_conflict: request key already belongs to a different create request at " +
-                    path_for_diagnostic(path, root));
+                    path_for_diagnostic(*candidate.file_path, root));
             }
             if (reserved_id && candidate.id != *reserved_id) {
                 throw std::runtime_error(
@@ -1355,8 +1443,14 @@ std::optional<BacklogItem> find_created_request(
                     "item_create.request_identity_conflict: request key matches different canonical item UIDs");
             }
             if (!found || normalize_path(root) == normalize_path(active_root)) {
-                found = std::move(candidate);
+                found = candidate;
             }
+        };
+        if (parent_metadata && normalize_path(root) == normalize_path(active_root)) {
+            parent_metadata->verify_root(active_root);
+            for (const auto& candidate : parent_metadata->items) inspect(candidate);
+        } else {
+            visit_create_request_metadata(root, budget, inspect);
         }
     }
     // A slow final read must not slip through the deadline into allocation.
@@ -1458,17 +1552,58 @@ CreateItemResult WorkitemOps::create_item(
             "duplicate_admission.receipt_path_escape: duplicate admission receipt path escaped active product root");
     }
 
+    const auto reservation_context = find_shared_id_reservation_context(backlog_root);
+    const auto request_roots = reservation_context
+        ? registered_product_roots(*reservation_context)
+        : std::vector<std::filesystem::path>{backlog_root};
+    std::optional<CreateRequestLock> request_lock;
+    if (idempotency_key) {
+        const auto lock_path = reservation_context
+            ? reservation_context->git_common_dir / "kano" / "backlog-id-reservations.create.lock"
+            : backlog_root / ".cache" / "id-create.lock";
+        if (!reservation_context && !is_inside_root(lock_path, backlog_root)) {
+            throw std::runtime_error("item_create.request_lock_path_escape");
+        }
+        request_lock.emplace(lock_path);
+    }
+    CreateRequestScanBudget request_scan_budget;
+    std::optional<CreateParentMetadata> parent_metadata;
+    std::optional<CreateParentMetadata::RootIdentity> parent_root_identity;
+    if (idempotency_key && parent && !is_empty_parent_ref(*parent)) {
+        diagnostics::ScopedMutationSpan span("workitem.create_item.parent_request_scan");
+        parent_metadata.emplace();
+        parent_metadata->root_identity = CreateParentMetadata::resolve_root(backlog_root);
+        parent_root_identity = parent_metadata->root_identity;
+        visit_create_request_metadata(backlog_root, request_scan_budget,
+            [&](BacklogItem item) { parent_metadata->items.push_back(std::move(item)); });
+        parent_metadata->verify_root(backlog_root);
+    }
     std::optional<BacklogItem> parent_identity;
     if (parent && !is_empty_parent_ref(*parent)) {
-        parent_identity = resolve_parent_by_identity(store, backlog_root, *parent, false, "");
+        const auto resolve_initial_parent = [&](const std::string& ref) {
+            return parent_metadata ? parent_metadata->resolve_parent(backlog_root, ref)
+                : resolve_parent_by_identity(store, backlog_root, ref, false, "");
+        };
+        parent_identity = resolve_initial_parent(*parent);
         // A canonical-ID lookup already checked all ID/UID matches. A UID
         // input still needs the ID lookup to reject a duplicated display ID.
         if (*parent != parent_identity->id) {
-            const auto parent_by_id = resolve_parent_by_identity(
-                store, backlog_root, parent_identity->id, false, "");
+            const auto parent_by_id = resolve_initial_parent(parent_identity->id);
             if (parent_by_id.uid != parent_identity->uid) {
                 throw std::runtime_error("hierarchy.parent_identity_conflict: parent ID and UID resolve differently");
             }
+        }
+        if (parent_metadata) {
+            // Metadata identifies the only candidate; verify its live canonical
+            // identity and hierarchy before normalizing the request payload.
+            const auto live_parent = store.read(*parent_identity->file_path);
+            if (live_parent.id != parent_identity->id || live_parent.uid != parent_identity->uid ||
+                live_parent.type != parent_identity->type || live_parent.parent != parent_identity->parent ||
+                live_parent.external != parent_identity->external) {
+                throw std::runtime_error("hierarchy.parent_identity_changed: parent changed during metadata admission");
+            }
+            parent_identity = live_parent;
+            parent_metadata->verify_root(backlog_root);
         }
         BacklogItem child_proposal;
         child_proposal.type = type;
@@ -1490,26 +1625,12 @@ CreateItemResult WorkitemOps::create_item(
         case ItemType::Issue: type_code = "ISS"; break;
     }
 
-    const auto reservation_context = find_shared_id_reservation_context(backlog_root);
-    const auto request_roots = reservation_context
-        ? registered_product_roots(*reservation_context)
-        : std::vector<std::filesystem::path>{backlog_root};
     std::optional<BacklogIndex> shared_reservations;
     if (reservation_context) {
         const auto reservation_db = reservation_context->git_common_dir /
             "kano" / "backlog-id-reservations.db";
         shared_reservations.emplace(reservation_db);
         shared_reservations->initialize();
-    }
-    std::optional<CreateRequestLock> request_lock;
-    if (idempotency_key) {
-        const auto lock_path = reservation_context
-            ? reservation_context->git_common_dir / "kano" / "backlog-id-reservations.create.lock"
-            : backlog_root / ".cache" / "id-create.lock";
-        if (!reservation_context && !is_inside_root(lock_path, backlog_root)) {
-            throw std::runtime_error("item_create.request_lock_path_escape");
-        }
-        request_lock.emplace(lock_path);
     }
     const auto replay_result = [&](const BacklogItem& existing) -> CreateItemResult {
         if (!existing.file_path) {
@@ -1553,7 +1674,6 @@ CreateItemResult WorkitemOps::create_item(
     };
     std::string request_payload;
     std::string scoped_request_key;
-    CreateRequestScanBudget request_scan_budget;
     if (idempotency_key) {
         std::string signature_input;
         const auto append = [&](const std::string& value) {
@@ -1635,8 +1755,11 @@ CreateItemResult WorkitemOps::create_item(
             "-byte request scan limit; no ID reserved or canonical item written");
     }
     if (idempotency_key) {
-        if (const auto existing = find_created_request(
-                request_roots, backlog_root, *idempotency_key, request_payload, request_scan_budget)) {
+        const auto existing = find_created_request(
+            request_roots, backlog_root, *idempotency_key, request_payload, request_scan_budget,
+            std::nullopt, std::nullopt, parent_metadata ? &*parent_metadata : nullptr);
+        parent_metadata.reset();
+        if (existing) {
             const auto authority = shared_reservations
                 ? shared_reservations->find_request_reservation(
                     prefix, type_code, scoped_request_key, request_payload)
@@ -1789,6 +1912,10 @@ CreateItemResult WorkitemOps::create_item(
             throw std::runtime_error(
                 "hierarchy.parent_identity_changed: parent changed during item create admission");
         }
+    }
+    if (parent_root_identity &&
+        CreateParentMetadata::resolve_root(backlog_root) != *parent_root_identity) {
+        throw std::runtime_error("item_create.request_root_changed");
     }
     {
         diagnostics::ScopedMutationSpan span("workitem.create_item.write_file", item.id);

@@ -35,6 +35,18 @@ void write_text(const std::filesystem::path& path, const std::string& text) {
     output << text;
 }
 
+template <typename Fn>
+void expect_throws_contains(Fn&& fn, const std::string& needle, const std::string& message) {
+    try {
+        fn();
+    } catch (const std::exception& error) {
+        expect(std::string(error.what()).find(needle) != std::string::npos,
+            message + " (unexpected diagnostic: " + error.what() + ")");
+        return;
+    }
+    throw std::runtime_error(message + " (operation unexpectedly succeeded)");
+}
+
 class DisposableDirectory {
 public:
     explicit DisposableDirectory(const std::filesystem::path& path) : path_(path) {
@@ -253,6 +265,118 @@ int main() {
             expect(byte_limit_thrown, "unclosed bounded frontmatter should throw ParseError");
             expect(malformed_bytes_read <= kMalformedFrontmatterCap,
                 "unclosed bounded frontmatter should never report bytes beyond the cap");
+        }
+
+        {
+            const DisposableDirectory fixtures(
+                std::filesystem::temp_directory_path() / "kano-backlog-core-containment-smoke");
+            const auto product = fixtures.path() / "product";
+            const auto sibling = fixtures.path() / "product-other";
+            const auto inside = product / "items" / "GT-TSK-0001_inside.md";
+            const auto outside = sibling / "GT-TSK-0001_outside.md";
+            CanonicalStore guarded_store(product);
+            auto guarded_item = item;
+            guarded_item.file_path = inside;
+            guarded_store.write(guarded_item);
+            const auto read_bytes = [](const std::filesystem::path& path) {
+                std::ifstream input(path, std::ios::binary);
+                expect(input.is_open(), "containment fixture must be readable");
+                std::ostringstream bytes;
+                bytes << input.rdbuf();
+                return bytes.str();
+            };
+            const auto outside_bytes = read_bytes(inside);
+            write_text(outside, outside_bytes);
+            const auto revision = guarded_store.read_write_revision().current;
+
+            const auto reject_outside = [&](const std::filesystem::path& path) {
+                expect_throws_contains([&] { (void)guarded_store.read(path); },
+                    "outside active product root", "full read must reject an escaped path");
+                expect_throws_contains([&] { (void)guarded_store.read_metadata(path); },
+                    "outside active product root", "metadata read must reject an escaped path");
+                std::size_t bytes_read = 99;
+                expect_throws_contains([&] {
+                    (void)guarded_store.read_metadata_bounded(path, 4096, &bytes_read);
+                }, "outside active product root", "bounded read must reject an escaped path");
+                expect(bytes_read == 0, "escaped bounded read must consume no file bytes");
+                expect_throws_contains([&] { (void)guarded_store.write_materialized(path, "changed"); },
+                    "canonical_write_source_outside_product", "materialized write must reject an escaped path");
+                auto escaped_item = guarded_item;
+                escaped_item.file_path = path;
+                expect_throws_contains([&] { guarded_store.write(escaped_item); },
+                    "outside active product root", "item write must reject an escaped path");
+                expect_throws_contains([&] { (void)guarded_store.remove_file(path); },
+                    "canonical_delete_source_outside_product", "delete must reject an escaped path");
+                expect_throws_contains([&] { (void)guarded_store.move_file(path, inside); },
+                    "canonical_move_source_outside_product", "move must reject an escaped source");
+                expect_throws_contains([&] { (void)guarded_store.move_file(inside, path); },
+                    "canonical_move_source_outside_product", "move must reject an escaped destination");
+            };
+            reject_outside(outside);
+            reject_outside(product / ".." / "product-other" / outside.filename());
+            reject_outside(product);
+
+            const auto link_setup_ready = [](const std::error_code& error, const std::string& name) {
+                if (!error) return true;
+#ifdef _WIN32
+                if (error == std::errc::permission_denied || error == std::errc::operation_not_permitted ||
+                    error == std::errc::function_not_supported || error == std::errc::operation_not_supported) {
+                    std::cout << "canonical containment " << name << ": SKIP (" << error.message() << ")\n";
+                    return false;
+                }
+#endif
+                throw std::runtime_error("canonical containment " + name + " setup failed: " + error.message());
+            };
+            std::error_code link_error;
+            const auto leaf_link = product / "items" / "outside-link.md";
+            std::filesystem::create_symlink(outside, leaf_link, link_error);
+            if (link_setup_ready(link_error, "leaf link")) {
+                reject_outside(leaf_link);
+            }
+            const auto ancestor_link = product / "linked-directory";
+            std::filesystem::create_directory_symlink(sibling, ancestor_link, link_error);
+            if (link_setup_ready(link_error, "ancestor link")) {
+                reject_outside(ancestor_link / outside.filename());
+            }
+
+            // A loop makes weakly_canonical fail: lexical fallback must
+            // not turn a resolution error into an admitted path.
+            const auto loop = product / "loop";
+            std::filesystem::create_symlink("loop", loop, link_error);
+            if (link_setup_ready(link_error, "self-loop link")) {
+                reject_outside(loop / "item.md");
+            }
+
+            const auto alias = fixtures.path() / "active-root";
+            std::filesystem::create_directory_symlink(product, alias, link_error);
+            if (link_setup_ready(link_error, "root alias")) {
+                CanonicalStore rebound_store(alias);
+                expect(rebound_store.read(inside).uid == guarded_item.uid,
+                    "a root alias should resolve its current target");
+                const bool alias_removed = std::filesystem::remove(alias, link_error);
+                if (link_setup_ready(link_error, "root alias removal")) {
+                    expect(alias_removed, "the existing root alias must be removed before replacement");
+                    std::filesystem::create_directory_symlink(sibling, alias, link_error);
+                    if (link_setup_ready(link_error, "root alias replacement")) {
+                        expect_throws_contains([&] { (void)rebound_store.read(inside); },
+                            "outside active product root", "a replaced root must not reuse cached containment");
+                        expect(rebound_store.read(outside).id == item.id,
+                            "the replacement root target must be resolved on the next call");
+                    }
+                }
+            }
+            expect(guarded_store.read_write_revision().current == revision,
+                "rejected mutations must not advance the canonical write revision");
+            expect(guarded_store.read(inside).uid == guarded_item.uid,
+                "rejected mutations must preserve the existing canonical item");
+            expect(read_bytes(outside) == outside_bytes,
+                "rejected mutations must preserve sibling file bytes");
+            const auto moved = product / "items" / "moved" / inside.filename();
+            (void)guarded_store.move_file(inside, moved);
+            expect(guarded_store.read(moved).uid == guarded_item.uid,
+                "an admitted in-product move should retain canonical identity");
+            (void)guarded_store.remove_file(moved);
+            expect(!std::filesystem::exists(moved), "an admitted in-product delete should still succeed");
         }
 
         expect(StateMachine::can_transition(ItemState::Ready, StateAction::Start),

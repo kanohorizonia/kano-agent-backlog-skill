@@ -1,29 +1,36 @@
 {
   "projectName": "kano-agent-backlog-skill",
   "skillName": "kano-agent-backlog-skill",
-  "bootstrapAgentLabel": "lightweight",
-  "releaseAgentLabel": "pc-dorgonchang-rtx3090.local",
-  "githubActionsDispatchAgentLabel": "macbuilder.local || PC-TiffanyHo",
-  "windowsAgentLabel": "windows && lightweight",
-  "linuxAgentLabel": "linux && lightweight",
-  "macAgentLabel": "mac && lightweight",
-  "platformSharedWorkspaceRoots": {
-    "mac": "/Users/Shared/KanoHorizonia/Jenkins/workspaces/KanoAgentSkills"
-  },
   "bRunReleasePhase": false,
   "bUseReleasePlatformMatrix": true,
   "bNormalizePlatformPackages": true,
   "bRunTests": true,
   "bRunCoverage": true,
   "bAllowCoverageFailure": true,
-  "buildTasks": ["build-release"],
-  "testTasks": ["full-test"],
-  "coverageTasks": ["coverage-all"],
-  "reportTasks": ["gather-reports"],
-  "linuxBuildTasks": ["ci-linux-build"],
-  "linuxTestTasks": ["full-test"],
-  "linuxCoverageTasks": ["ci-linux-coverage-all"],
-  "linuxReportTasks": ["gather-reports"],
+  "buildTasks": [
+    "build-release"
+  ],
+  "testTasks": [
+    "full-test"
+  ],
+  "coverageTasks": [
+    "coverage-all"
+  ],
+  "reportTasks": [
+    "gather-reports"
+  ],
+  "linuxBuildTasks": [
+    "ci-linux-build"
+  ],
+  "linuxTestTasks": [
+    "full-test"
+  ],
+  "linuxCoverageTasks": [
+    "ci-linux-coverage-all"
+  ],
+  "linuxReportTasks": [
+    "gather-reports"
+  ],
   "requiredPixiTasks": [
     "build-release",
     "quick-test",
@@ -52,8 +59,7 @@
       "name": "kano-cpp-test-skill",
       "url": "https://github.com/kanohorizonia/kano-cpp-test-skill.git",
       "branch": "main",
-      "path": "_tools/kano-cpp-test-skill",
-      "credentialsId": "github-kanohorizonia-jenkins"
+      "path": "_tools/kano-cpp-test-skill"
     }
   ],
   "buildJobName": "Build_CI",
@@ -73,7 +79,6 @@
   "bPostReleaseInstallVerifyFailIfNoPass": true,
   "upstreamBuildJob": "KanoAgentSkills/kano-agent-backlog-skill/Build_CI",
   "gitUrl": "https://github.com/kanohorizonia/kano-agent-backlog-skill.git",
-  "gitCredentialsId": "github-kanohorizonia-jenkins",
   "gitBranch": "__DEFAULT_BRANCH__",
   "windowsValidateCommand": "scripts\\kob.bat repo-hygiene check --archive-safe",
   "windowsExportCommand": "scripts\\kob.bat export --single --no-validate-release-archive",
@@ -85,16 +90,12 @@
   "bRunLinuxBuild": true,
   "bRunMacBuild": true,
   "githubRepository": "kanohorizonia/kano-agent-backlog-skill",
-  "githubTokenCredentialId": "GITHUB_PAGES_TOKEN",
-  "githubTokenCredentialBinding": "string",
   "bUseGithubActionsCloudBuild": true,
   "bGithubActionsCloudBuildDryRun": false,
   "bAllowCloudBuildFallback": true,
   "githubActionsRepo": "kanohorizonia/kano-agent-backlog-skill",
   "githubActionsWorkflow": "agent-skill-cloud-build.yml",
   "githubActionsRef": "main",
-  "githubActionsCredentialId": "github-kanohorizonia-jenkins",
-  "githubActionsCredentialBinding": "usernamePassword",
   "githubActionsPollIntervalSeconds": 30,
   "githubActionsTimeoutMinutes": 90,
   "githubActionsArtifactRetentionDays": 1,
@@ -127,12 +128,8 @@
   "sitePublishCommand": "bash src/shell/docs/build-and-deploy.sh --prep-deploy --push",
   "githubPagesRepoUrl": "https://github.com/kanohorizonia/kano-agent-backlog-skill.git",
   "githubPagesBranch": "gh-pages",
-  "githubPagesCredentialId": "github-kanohorizonia-jenkins",
-  "githubPagesGitUserName": "Kano Jenkins",
-  "githubPagesGitUserEmail": "jenkins@kanohorizonia.local",
   "releasePrerequisiteCommand": "bash -lc 'if command -v npm >/dev/null 2>&1; then npm --version; elif command -v brew >/dev/null 2>&1; then brew install node; else echo \"npm is missing and Homebrew is unavailable\" >&2; exit 127; fi'",
   "releaseNotesSourceFile": "docs/releases/{version}.md",
-  "agentReleaseContentNodeLabel": "coding-agent || pc-dorgonchang-rtx3090.local || macbuilder.local",
   "agentReleaseContentOutputRoot": "Release/ai-content-prep",
   "agentReleaseContentCommitPaths": "README.md, docs, .jenkins/config/agent-skill-pipeline.json",
   "bBuildSite": true,
@@ -182,5 +179,7 @@
     "quickFilterEnabled": true,
     "listSize": "20",
     "allowedRegex": "^(main|develop|feature/.+|users/.+|personal/.+|release/.+)$"
-  }
+  },
+  "operatorProfileProject": "kano-agent-backlog-skill",
+  "operatorProfileRequired": true
 }

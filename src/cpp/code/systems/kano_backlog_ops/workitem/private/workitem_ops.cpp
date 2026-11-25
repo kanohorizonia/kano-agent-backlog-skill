@@ -16,11 +16,13 @@
 #include <array>
 #include <cerrno>
 #include <cstdint>
-#include <regex>
 #include <string_view>
 #include <thread>
 #include <json/json.h>
 #include <limits>
+#include <iterator>
+#include <map>
+#include <memory>
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -35,6 +37,12 @@
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#if defined(__linux__)
+#include <linux/magic.h>
+#include <sys/vfs.h>
+#elif defined(__APPLE__) || defined(__FreeBSD__)
+#include <sys/mount.h>
+#endif
 #endif
 
 namespace kano::backlog_ops {
@@ -113,7 +121,17 @@ private:
 
 std::string trim_text(std::string value);
 
-BacklogItem resolve_item_or_throw(const CanonicalStore& store, const std::string& item_ref) {
+BacklogItem resolve_item_or_throw(
+    const CanonicalStore& store,
+    const std::filesystem::path& root,
+    const std::string& item_ref,
+    BacklogIndex* index
+) {
+    if (index) {
+        if (auto item = index->read_item_for_mutation(root, item_ref)) {
+            return *std::move(item);
+        }
+    }
     RefResolver resolver(store);
     return resolver.resolve(item_ref);
 }
@@ -143,10 +161,129 @@ std::optional<std::string> read_first_line(const std::filesystem::path& path) {
 }
 
 struct SharedIdReservationContext {
+    std::filesystem::path git_dir;
     std::filesystem::path git_common_dir;
     std::filesystem::path repository_root;
     std::filesystem::path product_relative_path;
 };
+
+[[noreturn]] void unverified_worktree_registry() {
+    throw std::runtime_error(
+        "item_create.worktree_registry_incomplete: cannot verify the registered Git worktree scope "
+        "on this storage route; no new item ID reserved");
+}
+
+std::filesystem::file_status worktree_status(const std::filesystem::path& path) {
+    std::error_code error;
+    const auto status = std::filesystem::symlink_status(path, error);
+    if (error && error != std::errc::no_such_file_or_directory) {
+        unverified_worktree_registry();
+    }
+    return status;
+}
+
+std::filesystem::path read_worktree_pointer(
+    const std::filesystem::path& file,
+    const std::string_view prefix = {}
+) {
+    if (!std::filesystem::is_regular_file(worktree_status(file))) {
+        unverified_worktree_registry();
+    }
+    const auto line = read_first_line(file);
+    if (!line || !line->starts_with(prefix)) {
+        unverified_worktree_registry();
+    }
+    const auto text = trim_text(line->substr(prefix.size()));
+#ifndef _WIN32
+    if ((text.size() >= 2 && std::isalpha(static_cast<unsigned char>(text[0])) && text[1] == ':') ||
+        text.starts_with("\\") || text.starts_with("//")) {
+        unverified_worktree_registry();
+    }
+#endif
+    const std::filesystem::path target(text);
+    if (text.empty() || text.find('\0') != std::string::npos ||
+        (target.has_root_path() && !target.is_absolute())) {
+        unverified_worktree_registry();
+    }
+    return file.parent_path() / target;
+}
+
+std::filesystem::path canonical_worktree_directory(const std::filesystem::path& directory) {
+    std::error_code error;
+    const auto resolved = std::filesystem::canonical(directory, error);
+    if (error || !std::filesystem::is_directory(worktree_status(resolved))) {
+        unverified_worktree_registry();
+    }
+    return resolved;
+}
+
+bool local_worktree_volume(
+    const std::filesystem::path& directory,
+    const std::filesystem::path& common_git_dir
+) {
+#ifdef _WIN32
+    (void)common_git_dir;
+    std::wstring mount(32768, L'\0');
+    return GetVolumePathNameW(directory.c_str(), mount.data(), static_cast<DWORD>(mount.size())) &&
+        GetDriveTypeW(mount.c_str()) == DRIVE_FIXED;
+#else
+    struct stat parent{};
+    struct stat registry{};
+    if (::stat(directory.c_str(), &parent) != 0 || ::stat(common_git_dir.c_str(), &registry) != 0 ||
+        parent.st_dev != registry.st_dev) {
+        return false;
+    }
+#if defined(__linux__)
+    struct statfs volume{};
+    return ::statfs(directory.c_str(), &volume) == 0 &&
+        (volume.f_type == EXT4_SUPER_MAGIC || volume.f_type == XFS_SUPER_MAGIC ||
+            volume.f_type == BTRFS_SUPER_MAGIC || volume.f_type == TMPFS_MAGIC ||
+            volume.f_type == OVERLAYFS_SUPER_MAGIC);
+#elif defined(__APPLE__) || defined(__FreeBSD__)
+    struct statfs volume{};
+    return ::statfs(directory.c_str(), &volume) == 0 && (volume.f_flags & MNT_LOCAL) != 0;
+#else
+    return false;
+#endif
+#endif
+}
+
+bool missing_native_worktree(
+    const std::filesystem::path& checkout,
+    const std::filesystem::path& common_git_dir
+) {
+    auto visible = checkout.root_path();
+    if (!std::filesystem::is_directory(worktree_status(visible))) {
+        return false;
+    }
+    const auto components = checkout.relative_path();
+    for (auto component = components.begin(); component != components.end(); ++component) {
+        if (*component == ".") {
+            continue;
+        }
+        if (*component == "..") {
+            visible = visible.parent_path();
+            continue;
+        }
+        const auto next = visible / *component;
+        const auto status = worktree_status(next);
+        if (status.type() == std::filesystem::file_type::not_found) {
+            return std::find(std::next(component), components.end(), "..") == components.end() &&
+                local_worktree_volume(visible, common_git_dir);
+        }
+        if (!std::filesystem::is_directory(status)) {
+            return false;
+        }
+#ifdef _WIN32
+        const auto attributes = GetFileAttributesW(next.c_str());
+        if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_REPARSE_POINT)) {
+            return false;
+        }
+#endif
+        visible = next;
+    }
+    return false;
+}
 
 std::optional<SharedIdReservationContext> find_shared_id_reservation_context(
     const std::filesystem::path& backlog_root
@@ -154,30 +291,29 @@ std::optional<SharedIdReservationContext> find_shared_id_reservation_context(
     auto cursor = normalize_path(backlog_root);
     while (!cursor.empty()) {
         const auto dot_git = cursor / ".git";
-        std::error_code ec;
+        const auto status = worktree_status(dot_git);
         std::filesystem::path git_dir;
-        if (std::filesystem::is_directory(dot_git, ec)) {
-            git_dir = dot_git;
-        } else if (std::filesystem::is_regular_file(dot_git, ec)) {
-            const auto line = read_first_line(dot_git);
-            constexpr std::string_view prefix = "gitdir:";
-            if (!line || !line->starts_with(prefix)) {
-                return std::nullopt;
-            }
-            git_dir = normalize_path(cursor / trim_text(line->substr(prefix.size())));
+        if (std::filesystem::is_directory(status)) {
+            git_dir = canonical_worktree_directory(dot_git);
+        } else if (std::filesystem::is_regular_file(status)) {
+            git_dir = canonical_worktree_directory(read_worktree_pointer(dot_git, "gitdir:"));
+        } else if (status.type() != std::filesystem::file_type::not_found) {
+            unverified_worktree_registry();
         }
 
         if (!git_dir.empty()) {
             auto common_dir = git_dir;
-            if (const auto common = read_first_line(git_dir / "commondir")) {
-                common_dir = normalize_path(git_dir / *common);
+            const auto common_pointer = git_dir / "commondir";
+            if (std::filesystem::exists(worktree_status(common_pointer))) {
+                common_dir = canonical_worktree_directory(read_worktree_pointer(common_pointer));
             }
             std::error_code relative_error;
             auto product_relative = std::filesystem::relative(normalize_path(backlog_root), cursor, relative_error);
-            if (relative_error || product_relative.empty() || product_relative.is_absolute()) {
-                return std::nullopt;
+            if (relative_error || product_relative.empty() || product_relative.has_root_path() ||
+                std::find(product_relative.begin(), product_relative.end(), "..") != product_relative.end()) {
+                unverified_worktree_registry();
             }
-            return SharedIdReservationContext{normalize_path(common_dir), cursor, product_relative};
+            return SharedIdReservationContext{git_dir, common_dir, cursor, product_relative};
         }
 
         const auto parent = cursor.parent_path();
@@ -192,20 +328,82 @@ std::optional<SharedIdReservationContext> find_shared_id_reservation_context(
 std::vector<std::filesystem::path> registered_product_roots(const SharedIdReservationContext& context) {
     std::set<std::filesystem::path> roots{normalize_path(context.repository_root / context.product_relative_path)};
     const auto worktrees_dir = context.git_common_dir / "worktrees";
-    std::error_code ec;
-    if (!std::filesystem::is_directory(worktrees_dir, ec)) {
-        return {roots.begin(), roots.end()};
-    }
-    for (const auto& entry : std::filesystem::directory_iterator(worktrees_dir, ec)) {
-        if (ec) break;
-        const auto gitdir = read_first_line(entry.path() / "gitdir");
-        if (!gitdir) continue;
-        auto worktree_root = normalize_path(std::filesystem::path(*gitdir)).parent_path();
-        auto product_root = normalize_path(worktree_root / context.product_relative_path);
-        if (std::filesystem::is_directory(product_root, ec)) {
-            roots.insert(product_root);
+    const auto add_product = [&](const std::filesystem::path& checkout) {
+        auto product = checkout;
+        for (const auto& component : context.product_relative_path) {
+            if (component == ".") {
+                continue;
+            }
+            product /= component;
+            const auto status = worktree_status(product);
+            if (status.type() == std::filesystem::file_type::not_found) {
+                return;
+            }
+            if (!std::filesystem::is_directory(status)) {
+                unverified_worktree_registry();
+            }
         }
-        ec.clear();
+        roots.insert(product);
+    };
+    const bool active_linked = context.git_dir != context.git_common_dir;
+    if (active_linked) {
+        // This layout gives the primary checkout a physical .git directory.
+        if (context.git_dir.parent_path() != worktrees_dir ||
+            context.git_common_dir.filename() != ".git") {
+            unverified_worktree_registry();
+        }
+        add_product(context.git_common_dir.parent_path());
+    }
+    bool active_verified = !active_linked;
+    const auto registry_status = worktree_status(worktrees_dir);
+    if (std::filesystem::is_directory(registry_status)) {
+        std::error_code error;
+        std::filesystem::directory_iterator entry(worktrees_dir, error);
+        const std::filesystem::directory_iterator end;
+        for (; !error && entry != end; entry.increment(error)) {
+            const auto entry_status = entry->symlink_status(error);
+            if (!std::filesystem::is_directory(entry_status)) {
+                if (error || !std::filesystem::is_regular_file(entry_status)) {
+                    unverified_worktree_registry();
+                }
+                continue;
+            }
+            const auto git_dir = entry->path();
+            const auto marker = read_worktree_pointer(git_dir / "gitdir");
+            const auto checkout = marker.parent_path();
+            if (marker.filename() != ".git") {
+                unverified_worktree_registry();
+            }
+            const auto marker_status = worktree_status(marker);
+            if (marker_status.type() == std::filesystem::file_type::not_found &&
+                worktree_status(git_dir / "locked").type() == std::filesystem::file_type::not_found &&
+                missing_native_worktree(checkout, context.git_common_dir)) {
+                // An unlocked checkout missing on a visible local volume is prunable.
+                continue;
+            }
+            if (!std::filesystem::is_regular_file(marker_status) ||
+                canonical_worktree_directory(read_worktree_pointer(marker, "gitdir:")) != git_dir ||
+                canonical_worktree_directory(read_worktree_pointer(git_dir / "commondir")) !=
+                    context.git_common_dir) {
+                unverified_worktree_registry();
+            }
+            const auto checkout_root = canonical_worktree_directory(checkout);
+            if (git_dir == context.git_dir) {
+                if (checkout_root != context.repository_root) {
+                    unverified_worktree_registry();
+                }
+                active_verified = true;
+            }
+            add_product(checkout_root);
+        }
+        if (error) {
+            unverified_worktree_registry();
+        }
+    } else if (registry_status.type() != std::filesystem::file_type::not_found) {
+        unverified_worktree_registry();
+    }
+    if (!active_verified) {
+        unverified_worktree_registry();
     }
     return {roots.begin(), roots.end()};
 }
@@ -809,6 +1007,9 @@ void write_duplicate_admission_receipt(
         throw std::runtime_error("duplicate_admission.receipt_write_failed: " + temp_path.string());
     }
     out.close();
+    if (out.fail()) {
+        throw std::runtime_error("duplicate_admission.receipt_write_failed: " + temp_path.string());
+    }
     std::filesystem::rename(temp_path, receipt_path);
 }
 
@@ -822,8 +1023,18 @@ bool is_high_risk_item(const BacklogItem& item) {
     return text_contains_any(item.risks, {"high risk", "high-risk", "security", "data loss", "migration"});
 }
 
-std::vector<std::string> intent_transition_diagnostics(
+IntentStackResult resolve_intent_stack_from_item(
+    const CanonicalStore& store,
     const std::filesystem::path& backlog_root,
+    BacklogItem current,
+    int max_depth,
+    BacklogIndex* index
+);
+
+std::vector<std::string> intent_transition_diagnostics(
+    const CanonicalStore& store,
+    const std::filesystem::path& backlog_root,
+    BacklogIndex& index,
     const BacklogItem& item,
     ItemState old_state,
     ItemState new_state
@@ -840,7 +1051,7 @@ std::vector<std::string> intent_transition_diagnostics(
     }
 
     if (old_state == ItemState::Ready && new_state == ItemState::InProgress) {
-        const auto stack = WorkitemOps::resolve_intent_stack(backlog_root, item.id, 8);
+        const auto stack = resolve_intent_stack_from_item(store, backlog_root, item, 8, &index);
         diagnostics.push_back("Ready->InProgress intent preflight: run or review `workitem intent-template " + item.id + " --kind preflight` before implementation.");
         for (const auto& warning : stack.warnings) {
             diagnostics.push_back("Ready->InProgress intent-stack: " + warning);
@@ -1075,11 +1286,11 @@ void validate_remap_target_id(
     const std::string& new_id,
     const std::filesystem::path& product_root
 ) {
-    static const std::regex id_regex(R"(^[A-Z][A-Z0-9]{1,15}-(INIT|EPIC|FTR|USR|TSK|SUBTSK|BUG|ISS)-\d{4}$)");
-    if (!std::regex_match(new_id, id_regex)) {
+    const auto parsed = RefParser::parse_display_id(new_id);
+    if (!parsed || parsed->raw != new_id) {
         throw std::runtime_error(
             "duplicate_item_id.remap_target_invalid: new item id has invalid format: " +
-            new_id + " (expected <PREFIX>-(INIT|EPIC|FTR|USR|TSK|SUBTSK|BUG|ISS)-<NNNN>)");
+            new_id + " (expected <PREFIX>-<TYPE>-<NUMBER> with at least four digits)");
     }
     if (new_id == item.id) {
         throw std::runtime_error("duplicate_item_id.remap_target_same: new item id matches current id: " + new_id);
@@ -1189,13 +1400,16 @@ BacklogItem resolve_parent_by_identity(
     const std::filesystem::path& product_root,
     const std::string& parent_ref,
     bool saw_stale_indexed_path,
-    const std::string& stale_indexed_path_reason
+    const std::string& stale_indexed_path_reason,
+    const std::vector<std::filesystem::path>* verified_paths = nullptr
 ) {
+    diagnostics::ScopedMutationSpan span("workitem.resolve_parent_by_identity", parent_ref);
     std::vector<BacklogItem> matches;
     std::vector<std::string> read_failures;
-    for (const auto& path : store.list_items()) {
+    const auto paths = verified_paths ? *verified_paths : store.list_items();
+    for (const auto& path : paths) {
         try {
-            auto item = store.read(path);
+            auto item = store.read_metadata(path);
             if (item.id == parent_ref || item.uid == parent_ref) {
                 matches.push_back(std::move(item));
             }
@@ -1205,8 +1419,14 @@ BacklogItem resolve_parent_by_identity(
             read_failures.push_back(path_for_diagnostic(path, product_root) + ": unknown read failure");
         }
     }
-    return require_unique_parent(matches, read_failures, product_root, parent_ref,
+    const auto selected = require_unique_parent(matches, read_failures, product_root, parent_ref,
         saw_stale_indexed_path, stale_indexed_path_reason);
+    const auto live = store.read(*selected.file_path);
+    if (live.id != selected.id || live.uid != selected.uid ||
+        live.type != selected.type || live.parent != selected.parent) {
+        throw std::runtime_error("hierarchy.parent_identity_changed: parent changed during canonical revalidation");
+    }
+    return live;
 }
 
 BacklogItem resolve_parent_item(
@@ -1402,6 +1622,41 @@ struct CreateParentMetadata {
         }
         return require_unique_parent(matches, {}, root, ref, false, "");
     }
+
+    BacklogItem read_live_parent(
+        const CanonicalStore& store,
+        const std::filesystem::path& root,
+        const BacklogItem& candidate
+    ) const {
+        const auto live = store.read(*candidate.file_path);
+        if (live.id != candidate.id || live.uid != candidate.uid ||
+            live.type != candidate.type || live.parent != candidate.parent ||
+            live.external != candidate.external) {
+            throw std::runtime_error("hierarchy.parent_identity_changed: parent changed during metadata admission");
+        }
+        verify_root(root);
+        return live;
+    }
+};
+
+class CreateMutationIndexes {
+public:
+    explicit CreateMutationIndexes(BacklogIndex& active) : active_(active) {}
+
+    BacklogIndex* for_root(const std::filesystem::path& registered_root, bool active_root) {
+        if (active_root) {
+            return &active_;
+        }
+        auto [entry, inserted] = siblings_.try_emplace(registered_root);
+        if (inserted) {
+            entry->second = active_.open_sibling_mutation_index(registered_root);
+        }
+        return entry->second.get();
+    }
+
+private:
+    BacklogIndex& active_;
+    std::map<std::filesystem::path, std::unique_ptr<BacklogIndex>> siblings_;
 };
 
 std::optional<BacklogItem> find_created_request(
@@ -1410,6 +1665,7 @@ std::optional<BacklogItem> find_created_request(
     const std::string& request_key,
     const std::string& request_payload,
     CreateRequestScanBudget& budget,
+    CreateMutationIndexes& indexes,
     const std::optional<std::string>& reserved_id = std::nullopt,
     const std::optional<std::string>& reserved_uid = std::nullopt,
     const CreateParentMetadata* parent_metadata = nullptr
@@ -1446,10 +1702,28 @@ std::optional<BacklogItem> find_created_request(
                 found = candidate;
             }
         };
-        if (parent_metadata && normalize_path(root) == normalize_path(active_root)) {
+        const bool active = normalize_path(root) == normalize_path(active_root);
+        if (parent_metadata && active) {
             parent_metadata->verify_root(active_root);
             for (const auto& candidate : parent_metadata->items) inspect(candidate);
         } else {
+            auto* mutation_index = indexes.for_root(root, active);
+            const auto paths = mutation_index
+                ? mutation_index->verified_mutation_paths(root, request_key, true)
+                : std::nullopt;
+            if (paths) {
+                const CanonicalStore candidate_store(root);
+                for (const auto& path : *paths) {
+                    const auto candidate = candidate_store.read_metadata_bounded(
+                        path, CreateRequestScanBudget::maximum_item_bytes, nullptr);
+                    const auto key = candidate.external.find("create_request_key");
+                    if (key == candidate.external.end() || key->second != request_key) {
+                        throw std::runtime_error("item_create.request_projection_changed");
+                    }
+                    inspect(candidate);
+                }
+                continue;
+            }
             visit_create_request_metadata(root, budget, inspect);
         }
     }
@@ -1467,8 +1741,9 @@ bool same_item_identity(const BacklogItem& left, const BacklogItem& right) {
     return !left.uid.empty() && left.uid == right.uid;
 }
 
+template <typename ResolveAncestor>
 void validate_parent_relationship(
-    const RefResolver& resolver,
+    ResolveAncestor&& resolve_ancestor,
     const BacklogItem& item,
     const BacklogItem& parent_item
 ) {
@@ -1499,7 +1774,7 @@ void validate_parent_relationship(
         }
 
         try {
-            current = resolver.resolve(*current.parent);
+            current = resolve_ancestor(*current.parent);
         } catch (const std::exception& ex) {
             throw std::runtime_error(
                 "hierarchy.parent_cycle_unverified: cannot verify proposed parent chain at " +
@@ -1528,7 +1803,8 @@ CreateItemResult WorkitemOps::create_item(
     std::string owner_source,
     std::string reviewer_source,
     DuplicateAdmissionEvidence duplicate_admission,
-    std::optional<std::string> idempotency_key
+    std::optional<std::string> idempotency_key,
+    std::optional<std::string> request_context_sha256
 ) {
     diagnostics::ScopedMutationSpan total_span("workitem.create_item.total", title);
     CanonicalStore store(backlog_root);
@@ -1546,6 +1822,11 @@ CreateItemResult WorkitemOps::create_item(
                 "item_create.idempotency_key_invalid: use 1..120 ASCII letters, digits, underscore, dash, dot, or colon");
         }
     }
+    if (request_context_sha256 && (!idempotency_key || request_context_sha256->size() != 64U ||
+        request_context_sha256->find_first_not_of("0123456789abcdef") != std::string::npos)) {
+        throw std::runtime_error(
+            "item_create.request_context_invalid: request context requires an idempotency key and lowercase SHA-256");
+    }
 
     if (!is_inside_root(backlog_root / "_meta" / "duplicate-admission", backlog_root)) {
         throw std::runtime_error(
@@ -1553,9 +1834,6 @@ CreateItemResult WorkitemOps::create_item(
     }
 
     const auto reservation_context = find_shared_id_reservation_context(backlog_root);
-    const auto request_roots = reservation_context
-        ? registered_product_roots(*reservation_context)
-        : std::vector<std::filesystem::path>{backlog_root};
     std::optional<CreateRequestLock> request_lock;
     if (idempotency_key) {
         const auto lock_path = reservation_context
@@ -1566,14 +1844,22 @@ CreateItemResult WorkitemOps::create_item(
         }
         request_lock.emplace(lock_path);
     }
+    const auto request_roots = reservation_context
+        ? registered_product_roots(*reservation_context)
+        : std::vector<std::filesystem::path>{backlog_root};
     CreateRequestScanBudget request_scan_budget;
+    CreateMutationIndexes mutation_indexes(index);
     std::optional<CreateParentMetadata> parent_metadata;
     std::optional<CreateParentMetadata::RootIdentity> parent_root_identity;
-    if (idempotency_key && parent && !is_empty_parent_ref(*parent)) {
+    std::optional<std::vector<std::filesystem::path>> indexed_parent_paths;
+    if (parent && !is_empty_parent_ref(*parent)) {
+        parent_root_identity = CreateParentMetadata::resolve_root(backlog_root);
+        indexed_parent_paths = index.verified_mutation_paths(backlog_root, *parent);
+    }
+    if (idempotency_key && parent && !is_empty_parent_ref(*parent) && !indexed_parent_paths) {
         diagnostics::ScopedMutationSpan span("workitem.create_item.parent_request_scan");
         parent_metadata.emplace();
-        parent_metadata->root_identity = CreateParentMetadata::resolve_root(backlog_root);
-        parent_root_identity = parent_metadata->root_identity;
+        parent_metadata->root_identity = *parent_root_identity;
         visit_create_request_metadata(backlog_root, request_scan_budget,
             [&](BacklogItem item) { parent_metadata->items.push_back(std::move(item)); });
         parent_metadata->verify_root(backlog_root);
@@ -1582,12 +1868,14 @@ CreateItemResult WorkitemOps::create_item(
     if (parent && !is_empty_parent_ref(*parent)) {
         const auto resolve_initial_parent = [&](const std::string& ref) {
             return parent_metadata ? parent_metadata->resolve_parent(backlog_root, ref)
-                : resolve_parent_by_identity(store, backlog_root, ref, false, "");
+                : resolve_parent_by_identity(store, backlog_root, ref, false, "",
+                    indexed_parent_paths ? &*indexed_parent_paths : nullptr);
         };
         parent_identity = resolve_initial_parent(*parent);
         // A canonical-ID lookup already checked all ID/UID matches. A UID
         // input still needs the ID lookup to reject a duplicated display ID.
         if (*parent != parent_identity->id) {
+            indexed_parent_paths = index.verified_mutation_paths(backlog_root, parent_identity->id);
             const auto parent_by_id = resolve_initial_parent(parent_identity->id);
             if (parent_by_id.uid != parent_identity->uid) {
                 throw std::runtime_error("hierarchy.parent_identity_conflict: parent ID and UID resolve differently");
@@ -1596,19 +1884,23 @@ CreateItemResult WorkitemOps::create_item(
         if (parent_metadata) {
             // Metadata identifies the only candidate; verify its live canonical
             // identity and hierarchy before normalizing the request payload.
-            const auto live_parent = store.read(*parent_identity->file_path);
-            if (live_parent.id != parent_identity->id || live_parent.uid != parent_identity->uid ||
-                live_parent.type != parent_identity->type || live_parent.parent != parent_identity->parent ||
-                live_parent.external != parent_identity->external) {
-                throw std::runtime_error("hierarchy.parent_identity_changed: parent changed during metadata admission");
-            }
-            parent_identity = live_parent;
-            parent_metadata->verify_root(backlog_root);
+            parent_identity = parent_metadata->read_live_parent(store, backlog_root, *parent_identity);
         }
         BacklogItem child_proposal;
         child_proposal.type = type;
-        RefResolver resolver(store);
-        validate_parent_relationship(resolver, child_proposal, *parent_identity);
+        validate_parent_relationship([&](const std::string& ref) {
+            if (parent_metadata) {
+                const auto resolved = RefParser::parse(ref);
+                if (resolved && (std::holds_alternative<DisplayIdRef>(*resolved) ||
+                                 std::holds_alternative<UuidRef>(*resolved))) {
+                    const auto canonical_ref = std::holds_alternative<DisplayIdRef>(*resolved)
+                        ? std::get<DisplayIdRef>(*resolved).raw : std::get<UuidRef>(*resolved).uuid;
+                    const auto candidate = parent_metadata->resolve_parent(backlog_root, canonical_ref);
+                    return parent_metadata->read_live_parent(store, backlog_root, candidate);
+                }
+            }
+            return resolve_item_or_throw(store, backlog_root, ref, &index);
+        }, child_proposal, *parent_identity);
         parent = parent_identity->id;
     }
     
@@ -1632,7 +1924,9 @@ CreateItemResult WorkitemOps::create_item(
         shared_reservations.emplace(reservation_db);
         shared_reservations->initialize();
     }
-    const auto replay_result = [&](const BacklogItem& existing) -> CreateItemResult {
+    std::string request_payload;
+    std::string scoped_request_key;
+    const auto replay_result = [&](const BacklogItem& existing, int reserved_number) -> CreateItemResult {
         if (!existing.file_path) {
             throw std::runtime_error("item_create.request_readback_missing_path");
         }
@@ -1663,17 +1957,22 @@ CreateItemResult WorkitemOps::create_item(
                 throw std::runtime_error("item_create.request_receipt_identity_mismatch");
             }
             const auto confirmed = CanonicalStore(root).read(*existing.file_path);
+            const auto confirmed_key = confirmed.external.find("create_request_key");
+            const auto confirmed_payload = confirmed.external.find("create_request_payload");
             if (confirmed.id != existing.id || confirmed.uid != existing.uid ||
-                confirmed.type != existing.type) {
+                confirmed.type != existing.type || confirmed_key == confirmed.external.end() ||
+                confirmed_key->second != *idempotency_key ||
+                confirmed_payload == confirmed.external.end() ||
+                confirmed_payload->second != request_payload) {
                 throw std::runtime_error("item_create.request_readback_mismatch");
             }
+            auto& reservations = shared_reservations ? *shared_reservations : index;
+            reservations.commit_reservation(prefix, type_code, reserved_number);
             return {confirmed.id, confirmed.uid, *confirmed.file_path,
                 confirmed.type, true, true, true, true};
         }
         throw std::runtime_error("item_create.request_path_outside_registered_roots");
     };
-    std::string request_payload;
-    std::string scoped_request_key;
     if (idempotency_key) {
         std::string signature_input;
         const auto append = [&](const std::string& value) {
@@ -1701,6 +2000,10 @@ CreateItemResult WorkitemOps::create_item(
         append(std::to_string(tags.size()));
         for (const auto& tag : tags) {
             append(tag);
+        }
+        if (request_context_sha256) {
+            append("request-context-sha256-v1");
+            append(*request_context_sha256);
         }
         request_payload = std::move(signature_input);
         if (reservation_context) {
@@ -1757,7 +2060,7 @@ CreateItemResult WorkitemOps::create_item(
     if (idempotency_key) {
         const auto existing = find_created_request(
             request_roots, backlog_root, *idempotency_key, request_payload, request_scan_budget,
-            std::nullopt, std::nullopt, parent_metadata ? &*parent_metadata : nullptr);
+            mutation_indexes, std::nullopt, std::nullopt, parent_metadata ? &*parent_metadata : nullptr);
         parent_metadata.reset();
         if (existing) {
             const auto authority = shared_reservations
@@ -1777,22 +2080,34 @@ CreateItemResult WorkitemOps::create_item(
                 throw std::runtime_error(
                     "item_create.reservation_identity_conflict: canonical marker differs from the durable reserved ID or UID");
             }
-            return replay_result(*existing);
+            return replay_result(*existing, authority->number);
         }
     }
     
+    std::optional<int> indexed_max;
+    if (reservation_context || !index.has_sequence(prefix, type_code)) {
+        indexed_max = index.verified_allocation_maximum(backlog_root, prefix, type_code);
+    }
+    const auto active_maximum = [&] {
+        return indexed_max ? *indexed_max : store.get_max_id_number(prefix, type);
+    };
     if (!index.has_sequence(prefix, type_code)) {
         diagnostics::ScopedMutationSpan span("workitem.create_item.seed_sequence", prefix + "-" + type_code);
-        index.ensure_sequence_at_least(prefix, type_code, store.get_max_id_number(prefix, type));
+        index.ensure_sequence_at_least(prefix, type_code, active_maximum());
     }
 
     if (reservation_context) {
         diagnostics::ScopedMutationSpan span("workitem.create_item.seed_shared_reservation", prefix + "-" + type_code);
-        int registered_max = 0;
-        for (const auto& product_root : registered_product_roots(*reservation_context)) {
-            registered_max = std::max(
-                registered_max,
-                CanonicalStore(product_root).get_max_id_number(prefix, type));
+        int registered_max = active_maximum();
+        for (const auto& product_root : request_roots) {
+            if (normalize_path(product_root) != normalize_path(backlog_root)) {
+                auto* sibling_index = mutation_indexes.for_root(product_root, false);
+                const auto sibling_max = sibling_index
+                    ? sibling_index->verified_allocation_maximum(product_root, prefix, type_code)
+                    : std::nullopt;
+                registered_max = std::max(registered_max, sibling_max
+                    ? *sibling_max : CanonicalStore(product_root).get_max_id_number(prefix, type));
+            }
         }
         shared_reservations->ensure_sequence_at_least(prefix, type_code, registered_max);
     }
@@ -1834,14 +2149,14 @@ CreateItemResult WorkitemOps::create_item(
         if (existing_request) {
             if (const auto existing = find_created_request(
                     request_roots, backlog_root, *idempotency_key,
-                    request_payload, request_scan_budget, item.id,
+                    request_payload, request_scan_budget, mutation_indexes, item.id,
                     reserved_uid.empty() ? std::nullopt
                                          : std::optional<std::string>{reserved_uid})) {
                 if (reserved_uid.empty()) {
                     throw std::runtime_error(
                         "item_create.reservation_uid_unbound: canonical marker cannot prove the reserved request UID");
                 }
-                return replay_result(*existing);
+                return replay_result(*existing, reserved_number);
             }
             if (committed_request) {
                 throw std::runtime_error(
@@ -1854,7 +2169,13 @@ CreateItemResult WorkitemOps::create_item(
         diagnostics::ScopedMutationSpan span("workitem.create_item.collision_check", item.id);
         std::vector<std::filesystem::path> existing_paths;
         for (const auto& root : request_roots) {
-            const auto matches = CanonicalStore(root).find_item_paths_by_id(item.id);
+            auto* mutation_index = mutation_indexes.for_root(
+                root, normalize_path(root) == normalize_path(backlog_root));
+            const auto indexed_paths = mutation_index
+                ? mutation_index->verified_mutation_paths(root, item.id)
+                : std::nullopt;
+            const auto matches = indexed_paths ? *indexed_paths
+                : CanonicalStore(root).find_item_paths_by_id(item.id);
             existing_paths.insert(existing_paths.end(), matches.begin(), matches.end());
         }
         std::error_code exists_error;
@@ -1905,10 +2226,15 @@ CreateItemResult WorkitemOps::create_item(
         throw std::runtime_error("item_create.target_path_escape: generated item path escaped active product root");
     }
     if (parent_identity) {
+        diagnostics::ScopedMutationSpan span("workitem.create_item.revalidate_parent", parent_identity->id);
+        const auto indexed_paths = index.verified_mutation_paths(backlog_root, parent_identity->id);
         const auto live_parent = resolve_parent_by_identity(
-            store, backlog_root, parent_identity->id, false, "");
+            store, backlog_root, parent_identity->id, false, "",
+            indexed_paths ? &*indexed_paths : nullptr);
         if (live_parent.uid != parent_identity->uid ||
-            live_parent.file_path != parent_identity->file_path) {
+            live_parent.file_path != parent_identity->file_path ||
+            live_parent.type != parent_identity->type ||
+            live_parent.parent != parent_identity->parent) {
             throw std::runtime_error(
                 "hierarchy.parent_identity_changed: parent changed during item create admission");
         }
@@ -1919,7 +2245,7 @@ CreateItemResult WorkitemOps::create_item(
     }
     {
         diagnostics::ScopedMutationSpan span("workitem.create_item.write_file", item.id);
-        store.write_materialized(item_path, content);
+        store.write_new_materialized(item_path, content);
     }
     if (shared_reservations) {
         shared_reservations->commit_reservation(prefix, type_code, reserved_number);
@@ -1961,7 +2287,7 @@ BacklogItem WorkitemOps::transition_state_action(
     BacklogItem item;
     {
         diagnostics::ScopedMutationSpan span("workitem.transition_state_action.resolve_item", item_ref);
-        item = resolve_item_or_throw(store, item_ref);
+        item = resolve_item_or_throw(store, backlog_root, item_ref, index);
     }
 
     if (action == StateAction::Start) {
@@ -2000,7 +2326,7 @@ UpdateStateResult WorkitemOps::update_state(
     BacklogItem item;
     {
         diagnostics::ScopedMutationSpan span("workitem.update_state.resolve_item", item_ref);
-        item = resolve_item_or_throw(store, item_ref);
+        item = resolve_item_or_throw(store, backlog_root, item_ref, &index);
     }
     if (!item.file_path) {
         throw std::runtime_error("Resolved item has no file path: " + item_ref);
@@ -2032,8 +2358,8 @@ UpdateStateResult WorkitemOps::update_state(
         if (!duplicate_of || trim_text(*duplicate_of).empty()) {
             throw std::runtime_error("Transition to Duplicate requires --duplicate-of <canonical-item-ref>");
         }
-        RefResolver resolver(store);
-        const BacklogItem canonical_item = resolver.resolve(trim_text(*duplicate_of));
+        const BacklogItem canonical_item = resolve_item_or_throw(
+            store, backlog_root, trim_text(*duplicate_of), &index);
         if (canonical_item.id == item.id || canonical_item.uid == item.uid) {
             throw std::runtime_error("Duplicate item cannot point duplicate_of at itself: " + item.id);
         }
@@ -2049,7 +2375,8 @@ UpdateStateResult WorkitemOps::update_state(
         if (message && !trim_text(*message).empty()) {
             diagnostic_item.worklog.push_back(*message);
         }
-        intent_diagnostics = intent_transition_diagnostics(backlog_root, diagnostic_item, old_state, new_state);
+        intent_diagnostics = intent_transition_diagnostics(
+            store, backlog_root, index, diagnostic_item, old_state, new_state);
     }
 
     // 3. Ready Gate Validation
@@ -2149,7 +2476,7 @@ TrashItemResult WorkitemOps::trash_item(
     std::optional<std::string> reason
 ) {
     CanonicalStore store(backlog_root);
-    BacklogItem item = resolve_item_or_throw(store, item_ref);
+    BacklogItem item = resolve_item_or_throw(store, backlog_root, item_ref, &index);
     if (!item.file_path) {
         throw std::runtime_error("Resolved item has no file path: " + item_ref);
     }
@@ -2193,11 +2520,10 @@ void WorkitemOps::remap_parent(
 ) {
     diagnostics::ScopedMutationSpan total_span("workitem.remap_parent.total", item_ref);
     CanonicalStore store(backlog_root);
-    RefResolver resolver(store);
     BacklogItem item;
     {
         diagnostics::ScopedMutationSpan span("workitem.remap_parent.resolve_item", item_ref);
-        item = resolver.resolve(item_ref);
+        item = resolve_item_or_throw(store, backlog_root, item_ref, &index);
     }
 
     // 2. Resolve parent
@@ -2205,8 +2531,10 @@ void WorkitemOps::remap_parent(
         item.parent = std::nullopt;
     } else {
         diagnostics::ScopedMutationSpan span("workitem.remap_parent.resolve_parent", new_parent_ref);
-        BacklogItem parent_item = resolver.resolve(new_parent_ref);
-        validate_parent_relationship(resolver, item, parent_item);
+        BacklogItem parent_item = resolve_item_or_throw(store, backlog_root, new_parent_ref, &index);
+        validate_parent_relationship([&](const std::string& ref) {
+            return resolve_item_or_throw(store, backlog_root, ref, &index);
+        }, item, parent_item);
         item.parent = parent_item.id;
     }
 
@@ -2233,7 +2561,7 @@ DecisionWritebackResult WorkitemOps::add_decision_writeback(
     std::optional<std::string> source
 ) {
     CanonicalStore store(backlog_root);
-    BacklogItem item = resolve_item_or_throw(store, item_ref);
+    BacklogItem item = resolve_item_or_throw(store, backlog_root, item_ref, &index);
     if (!item.file_path) {
         throw std::runtime_error("Resolved item has no file path: " + item_ref);
     }
@@ -2275,7 +2603,7 @@ RemapIdResult WorkitemOps::remap_id(
     const std::string& agent
 ) {
     CanonicalStore store(backlog_root);
-    BacklogItem item = resolve_item_or_throw(store, item_ref);
+    BacklogItem item = resolve_item_or_throw(store, backlog_root, item_ref, &index);
     if (!item.file_path) {
         throw std::runtime_error("Resolved item has no file path: " + item_ref);
     }
@@ -2380,25 +2708,20 @@ RemapIdResult WorkitemOps::remap_id(
     return {old_id, new_id, old_path, new_path, updated_files};
 }
 
-IntentStackResult WorkitemOps::resolve_intent_stack(
-    const std::filesystem::path& backlog_root,
-    const std::string& item_ref,
-    int max_depth
-) {
-    if (max_depth < 1) {
-        max_depth = 1;
-    }
-    if (looks_like_path_ref(item_ref)) {
-        throw std::runtime_error("Intent stack item ref must be an item id or uid, not a path-like ref");
-    }
+namespace {
 
-    CanonicalStore store(backlog_root);
-    RefResolver resolver(store);
+IntentStackResult resolve_intent_stack_from_item(
+    const CanonicalStore& store,
+    const std::filesystem::path& backlog_root,
+    BacklogItem current,
+    int max_depth,
+    BacklogIndex* index
+) {
+    max_depth = std::max(1, max_depth);
     IntentStackResult result;
     std::set<std::string> seen;
     std::set<std::string> evidence_refs;
 
-    BacklogItem current = resolver.resolve(item_ref);
     for (int depth = 0; depth < max_depth; ++depth) {
         const std::string identity = !current.uid.empty() ? current.uid : current.id;
         if (!seen.insert(identity).second) {
@@ -2421,7 +2744,7 @@ IntentStackResult WorkitemOps::resolve_intent_stack(
         }
 
         try {
-            current = resolver.resolve(*current.parent);
+            current = resolve_item_or_throw(store, backlog_root, *current.parent, index);
         } catch (const std::exception& ex) {
             result.warnings.push_back("Parent ref for " + current.id + " could not be resolved: " + *current.parent + " (" + ex.what() + ")");
             break;
@@ -2437,6 +2760,23 @@ IntentStackResult WorkitemOps::resolve_intent_stack(
 
     result.evidence_refs.assign(evidence_refs.begin(), evidence_refs.end());
     return result;
+}
+
+} // namespace
+
+IntentStackResult WorkitemOps::resolve_intent_stack(
+    const std::filesystem::path& backlog_root,
+    const std::string& item_ref,
+    int max_depth
+) {
+    if (looks_like_path_ref(item_ref)) {
+        throw std::runtime_error("Intent stack item ref must be an item id or uid, not a path-like ref");
+    }
+
+    CanonicalStore store(backlog_root);
+    return resolve_intent_stack_from_item(
+        store, backlog_root, resolve_item_or_throw(store, backlog_root, item_ref, nullptr),
+        max_depth, nullptr);
 }
 
 WorkOrderAdmissionResult WorkitemOps::evaluate_work_order_admission(

@@ -78,7 +78,8 @@ public:
         std::string owner_source = "",
         std::string reviewer_source = "",
         DuplicateAdmissionEvidence duplicate_admission = {},
-        std::optional<std::string> idempotency_key = std::nullopt
+        std::optional<std::string> idempotency_key = std::nullopt,
+        std::optional<std::string> request_context_sha256 = std::nullopt
     );
 
     /**

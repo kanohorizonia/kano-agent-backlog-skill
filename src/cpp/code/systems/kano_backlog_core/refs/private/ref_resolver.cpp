@@ -52,11 +52,11 @@ std::vector<std::string> RefResolver::get_references(const BacklogItem& item) {
     std::set<std::string> refs;
 
     static const std::regex canonical_prose_pattern(
-        R"(\b(?:[A-Z][A-Z0-9]{1,15}-(?:INIT|EPIC|FTR|USR|TSK|SUBTSK|BUG|ISS)-\d{4}|ADR-\d{4})\b)"
+        R"(\b(?:[A-Z][A-Z0-9]{1,15}-(?:INIT|EPIC|FTR|USR|TSK|SUBTSK|BUG|ISS)-[0-9]{4,}|ADR-\d{4})\b)"
     );
 
     static const std::regex remapped_id_message_pattern(
-        R"(^Remapped ID: ([A-Z][A-Z0-9]{1,15}-(?:INIT|EPIC|FTR|USR|TSK|SUBTSK|BUG|ISS)-\d{4}) -> ([A-Z][A-Z0-9]{1,15}-(?:INIT|EPIC|FTR|USR|TSK|SUBTSK|BUG|ISS)-\d{4})$)"
+        R"(^Remapped ID: ([A-Z][A-Z0-9]{1,15}-(?:INIT|EPIC|FTR|USR|TSK|SUBTSK|BUG|ISS)-[0-9]{4,}) -> ([A-Z][A-Z0-9]{1,15}-(?:INIT|EPIC|FTR|USR|TSK|SUBTSK|BUG|ISS)-[0-9]{4,})$)"
     );
 
     const auto historical_prose_ids = [&]() {

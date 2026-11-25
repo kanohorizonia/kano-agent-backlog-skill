@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <atomic>
 #include <filesystem>
 #include <fstream>
 #include <future>
@@ -6,11 +7,17 @@
 #include <random>
 #include <sstream>
 #include <stdexcept>
+#include <streambuf>
+#include <string_view>
+#include <utility>
+#include <vector>
 
+#include "kano/backlog_core/diagnostics/mutation_timing.hpp"
 #include "kano/backlog_core/frontmatter/canonical_store.hpp"
 #include "kano/backlog_core/models/models.hpp"
 #include <kano_unattended.hpp>
 #include "kano/backlog_core/refs/ref_resolver.hpp"
+#include "kano/backlog_ops/index/backlog_index.hpp"
 #include "kano/backlog_ops/relation/relation_ops.hpp"
 
 namespace {
@@ -53,6 +60,54 @@ void write_text(const std::filesystem::path& path, const std::string& content) {
     }
     output << content;
 }
+
+std::string read_text(const std::filesystem::path& path) {
+    std::ifstream input(path, std::ios::binary);
+    expect(input.is_open(), "failed to read the canonical fixture");
+    std::ostringstream content;
+    content << input.rdbuf();
+    return content.str();
+}
+
+class InventoryTiming : private std::streambuf {
+public:
+    explicit InventoryTiming(std::string unrelated_filename = {})
+        : unrelated_filename_(std::move(unrelated_filename)),
+          previous_buffer_(std::cerr.rdbuf(this)),
+          previous_timing_(kano::backlog_core::diagnostics::mutation_timing_forced()) {
+        kano::backlog_core::diagnostics::mutation_timing_forced() = true;
+    }
+
+    ~InventoryTiming() override {
+        std::cerr.rdbuf(previous_buffer_);
+        kano::backlog_core::diagnostics::mutation_timing_forced() = previous_timing_;
+    }
+
+    std::size_t inventories() const { return inventories_.load(); }
+    bool touched_unrelated_file() const { return saw_unrelated_file_.load(); }
+
+private:
+    std::streamsize xsputn(const char* bytes, std::streamsize count) override {
+        const std::string_view text(bytes, static_cast<std::size_t>(count));
+        if (text == "canonical_store.list_items" ||
+            text == "canonical_store.visit_item_paths" ||
+            text == "canonical_store.find_item_paths_by_id") {
+            ++inventories_;
+        }
+        if (!unrelated_filename_.empty() && text == unrelated_filename_) {
+            saw_unrelated_file_ = true;
+        }
+        return count;
+    }
+
+    int_type overflow(int_type value) override { return traits_type::not_eof(value); }
+
+    std::string unrelated_filename_;
+    std::streambuf* previous_buffer_;
+    bool previous_timing_;
+    std::atomic<std::size_t> inventories_{0};
+    std::atomic<bool> saw_unrelated_file_{false};
+};
 
 kano::backlog_core::BacklogItem create_item(
     const std::filesystem::path& product_root,
@@ -102,6 +157,105 @@ kano::backlog_ops::RelationMutationRequest request(
     return result;
 }
 
+void test_relation_mutation_projection(
+    const std::filesystem::path& root,
+    const std::filesystem::path& alpha_root,
+    const std::filesystem::path& beta_root,
+    const std::filesystem::path& third_root
+) {
+    using kano::backlog_core::CanonicalStore;
+    using kano::backlog_ops::BacklogIndex;
+    using kano::backlog_ops::RelationOps;
+    using kano::backlog_ops::RelationType;
+
+    const auto source = create_item(alpha_root, "ALP", 20, "Projection source");
+    auto target = create_item(beta_root, "BET", 20, "Projection target");
+    auto bridge = create_item(third_root, "AMB", 20, "Projection cycle bridge");
+    const auto leaf = create_item(third_root, "AMB", 21, "Projection leaf");
+    CanonicalStore alpha_store(alpha_root);
+    CanonicalStore beta_store(beta_root);
+    CanonicalStore third_store(third_root);
+    target.links.blocked_by = {source.uid};
+    target.links.blocks = {leaf.id};
+    beta_store.write(target);
+    bridge.links.blocks = {source.id};
+    third_store.write(bridge);
+
+    const auto cache_path = std::filesystem::path(".cache") / "index" / "backlog.db";
+    const auto shared_index_path = alpha_root.parent_path().parent_path() / cache_path;
+    BacklogIndex alpha_index(shared_index_path, "alpha-product", alpha_root);
+    BacklogIndex beta_index(shared_index_path, "beta-product", beta_root);
+    BacklogIndex third_index(third_root / cache_path, "alp", third_root);
+    alpha_index.rebuild_metadata(alpha_root, "alpha-product");
+    beta_index.rebuild_metadata(beta_root, "beta-product");
+    third_index.rebuild_metadata(third_root, "alp");
+    const bool verified = alpha_index.verified_mutation_paths(alpha_root, source.id).has_value() &&
+        beta_index.verified_mutation_paths(beta_root, target.id).has_value() &&
+        third_index.verified_mutation_paths(third_root, bridge.id).has_value();
+
+    const auto relation = request(root, "repo/alpha", source.id, "repo/beta", target.id, RelationType::Blocks);
+    auto bounded = relation;
+    bounded.max_items = 2;
+    expect_throws_contains([&] { (void)RelationOps::remove(bounded); }, "scan limit",
+        "relation mutation must count the complete catalog against its item cap");
+
+    const auto source_before = read_text(*source.file_path);
+    {
+        InventoryTiming timing(bridge.file_path->filename().string());
+        const auto removed = RelationOps::remove(relation);
+        expect(removed.status == "removed" && removed.applied && removed.read_after_write && removed.index_refreshed,
+            "removing an inverse UID link must succeed through canonical ownership");
+        if (verified) {
+            expect(timing.inventories() == 0 && !timing.touched_unrelated_file(),
+                "verified relation mutation must skip canonical item inventories across all configured roots");
+        }
+    }
+    const auto target_after = beta_store.read(*target.file_path);
+    expect(target_after.links.blocked_by.empty() && target_after.links.blocks == std::vector{leaf.id} &&
+        read_text(*source.file_path) == source_before,
+        "removing a UID link must erase its exact storage token and preserve the reverse endpoint");
+    if (verified) {
+        expect(beta_index.verified_mutation_paths(beta_root, target.id).has_value(),
+            "incremental relation publication must preserve the verified owner projection");
+    }
+
+    {
+        InventoryTiming timing(bridge.file_path->filename().string());
+        const auto added = RelationOps::add(request(root, "repo/alpha", source.id, "AMB", leaf.id, RelationType::Blocks));
+        expect(added.status == "added" && added.applied && added.read_after_write && added.index_refreshed,
+            "confirmed relation add must validate and write an edge to the configured external product");
+        if (verified) {
+            expect(timing.inventories() == 0 && !timing.touched_unrelated_file(),
+                "verified relation add must check the entire dependency graph without an item inventory");
+        }
+    }
+    const auto source_before_cycle = read_text(*source.file_path);
+    const auto path = *target.file_path;
+    const auto original_time = std::filesystem::last_write_time(path);
+    const auto original_revision = beta_store.read_write_revision().current;
+    auto changed = read_text(path);
+    const auto edge = changed.find(leaf.id);
+    expect(edge != std::string::npos && leaf.id.size() == bridge.id.size(),
+        "the external edit must replace one fixed-width canonical link");
+    changed.replace(edge, leaf.id.size(), bridge.id);
+    write_text(path, changed);
+    std::filesystem::last_write_time(path, original_time);
+    expect(std::filesystem::last_write_time(path) == original_time &&
+        beta_store.read_write_revision().current == original_revision,
+        "the raw link edit must bypass the native revision and restore the original mtime");
+    {
+        InventoryTiming timing;
+        const auto cycle = RelationOps::add(relation);
+        expect(cycle.status == "cycle_rejected" && !cycle.applied && cycle.cycle_path.size() == 4 &&
+            cycle.cycle_path[2].uid == bridge.uid && timing.inventories() > 0,
+            "stale graph proof must fall back and detect the cross-root dependency cycle");
+    }
+    expect(read_text(*source.file_path) == source_before_cycle && read_text(path) == changed &&
+        third_store.read(*bridge.file_path).links.blocks == std::vector{source.id},
+        "cycle rejection must preserve all existing canonical edges and bytes");
+    std::cout << "relation mutation projection: " << (verified ? "verified NTFS" : "canonical fallback") << '\n';
+}
+
 } // namespace
 
 int main() {
@@ -133,11 +287,11 @@ int main() {
             "[products.alp]\n"
             "name = \"Alias ambiguity fixture\"\n"
             "prefix = \"AMB\"\n"
-            "backlog_root = \"_kano/backlog/products/alp\"\n");
+            "backlog_root = \"external-alp\"\n");
 
         const auto alpha_root = root / "_kano" / "backlog" / "products" / "alpha-product";
         const auto beta_root = root / "_kano" / "backlog" / "products" / "beta-product";
-        const auto repair_root = root / "_kano" / "backlog" / "products" / "alp";
+        const auto repair_root = root / "external-alp";
         const auto alpha_one = create_item(alpha_root, "ALP", 1, "Alpha one");
         const auto alpha_two = create_item(alpha_root, "ALP", 2, "Alpha two");
         const auto beta_one = create_item(beta_root, "BET", 1, "Beta one");
@@ -304,6 +458,7 @@ int main() {
             (void)RelationOps::list(bounded);
         }, "scan limit", "catalog scans must fail closed at the configured item cap");
 
+        test_relation_mutation_projection(root, alpha_root, beta_root, repair_root);
         std::filesystem::remove_all(root);
         std::cout << "relation_ops_smoke_test: PASS\n";
         return 0;

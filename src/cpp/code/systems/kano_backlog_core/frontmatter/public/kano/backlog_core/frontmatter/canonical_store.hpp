@@ -4,10 +4,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <vector>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace kano::backlog_core {
 
@@ -29,6 +31,8 @@ struct CanonicalWriteRevision {
 
 class CanonicalStore {
 public:
+    using WriteGuard = std::function<bool(std::string_view)>;
+
     explicit CanonicalStore(const std::filesystem::path& product_root);
 
     /**
@@ -36,6 +40,12 @@ public:
      * Throws ItemNotFoundError or ParseError.
      */
     BacklogItem read(const std::filesystem::path& item_path) const;
+
+    /**
+     * Read one bounded binary buffer and parse the item from those exact bytes.
+     * Throws ItemNotFoundError or ParseError.
+     */
+    std::pair<BacklogItem, std::string> read_with_bytes(const std::filesystem::path& item_path) const;
 
     /**
      * Read only frontmatter-backed metadata from a markdown backlog item.
@@ -57,9 +67,15 @@ public:
      * Write item to file, preserving frontmatter and body structure.
      * Throws ValidationError or WriteError.
      */
-    void write(BacklogItem& item) const;
+    void write(BacklogItem& item, const WriteGuard& guard = {}) const;
 
     CanonicalWriteRevision write_materialized(
+        const std::filesystem::path& item_path,
+        std::string_view content,
+        const WriteGuard& guard = {}
+    ) const;
+
+    CanonicalWriteRevision write_new_materialized(
         const std::filesystem::path& item_path,
         std::string_view content
     ) const;
@@ -117,6 +133,13 @@ public:
     static std::string generate_uuid_v7();
 
 private:
+    CanonicalWriteRevision persist_materialized(
+        const std::filesystem::path& item_path,
+        std::string_view content,
+        const WriteGuard& guard,
+        bool create_new
+    ) const;
+
     std::filesystem::path product_root_;
     std::filesystem::path items_root_;
 };

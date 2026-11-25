@@ -171,6 +171,19 @@ bash scripts/kob item create \
 ```
 
 `item create` and `workitem create` require duplicate-search admission evidence.
+
+Callers that apply additional fields after allocation can pass
+`--request-context-sha256` with `--idempotency-key`. KOB binds the lowercase
+SHA-256 digest to the keyed request so a different digest is rejected
+after a timeout or a lost caller receipt.
+
+`workitem set-ready --expected-sha256 <digest>` requires the exact prior
+canonical item bytes. `--expected-ready-sha256 <digest>` also verifies the
+actual input values used for the update. Its input is the UTF-8 prefix
+`kob.ready-values.v1` followed by a newline, then each value encoded as its
+decimal byte count, a colon, and its bytes. The field order is Context, Goal,
+Approach, Acceptance Criteria, Risks, Non-Goals, and Intent Amendments.
+Omitted values have length zero.
 If similar candidates were found, include `--duplicate-candidate <ID>` and
 `--duplicate-candidate-read <ID>` for each candidate you inspected. Creating
 despite similar candidates also requires `--duplicate-override` and a non-empty

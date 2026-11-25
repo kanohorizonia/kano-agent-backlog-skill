@@ -8,6 +8,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <json/json.h>
@@ -103,9 +104,21 @@ int run_native_command(
     return rc;
 }
 
-int run_command_capture(const std::filesystem::path& binary, const std::vector<std::string>& args, const std::filesystem::path& output_path) {
+int run_command_capture(
+    const std::filesystem::path& binary,
+    const std::vector<std::string>& args,
+    const std::filesystem::path& output_path,
+    bool profile_mutations = false
+) {
     log_command_start(args);
     std::string command = shell_command_for(binary, args);
+    if (profile_mutations) {
+#ifdef _WIN32
+        command = "set \"KANO_BACKLOG_PROFILE_MUTATIONS=1\" && " + command;
+#else
+        command = "export KANO_BACKLOG_PROFILE_MUTATIONS=1 && " + command;
+#endif
+    }
     command += " > \"" + output_path.string() + "\" 2>&1";
     const int rc = std::system(command.c_str());
     log_command_result(rc, output_path);
@@ -898,6 +911,64 @@ int main(int argc, char** argv) {
                     registration_external / "views"),
             "registration lifecycle must not scaffold or mutate either product root");
 
+        const std::string external_parent_uid = "019d1000-0001-7000-8000-000000000002";
+        const auto external_parent = registration_external / "items" / "feature" /
+            "0000" / "HQST-FTR-0001_parent-intent.md";
+        write_text(external_parent, replace_frontmatter_scalar(list_fixture_item_markdown(
+            "HQST-FTR-0001", external_parent_uid, "Parent intent", "Ready", "P2", "2026-08-29"),
+            "type", "Feature"));
+        write_text(registration_item, replace_frontmatter_scalar(
+            registration_item_before, "parent", external_parent_uid));
+        const auto external_unrelated = registration_item.parent_path() / "HQST-TSK-0002_unrelated.md";
+        const auto external_unrelated_before = list_fixture_item_markdown(
+            "HQST-TSK-0002", "019d1000-0001-7000-8000-000000000003",
+            "Unrelated task", "Ready", "P2", "2026-08-29");
+        write_text(external_unrelated, external_unrelated_before);
+
+        const auto external_index_output = temp_root / "external-state-index.json";
+        expect_command_capture_success(run_command_capture(binary, {
+            "-p", registration_shared.string(), "-P", "HorizonQuestDemo",
+            "index", "build", "--force", "--format", "json"
+        }, external_index_output), external_index_output, "external state index build failed");
+        const auto external_index = read_json(external_index_output);
+        expect(external_index["status"].asString() == "ready" &&
+                   external_index["items_indexed"].asInt() == 3,
+            "external state index must include the child, parent, and unrelated item");
+
+        const auto external_status_output = temp_root / "external-state-index-status.json";
+        expect_command_capture_success(run_command_capture(binary, {
+            "-p", registration_shared.string(), "-P", "HorizonQuestDemo",
+            "index", "status", "--requested-revision",
+            external_index["product_revision"].asString(), "--format", "json"
+        }, external_status_output), external_status_output, "external state index status failed");
+        const auto external_status = read_json(external_status_output);
+        expect(external_status["indexes"].size() == 1,
+            "external state index status must resolve the configured slug");
+        const auto& external_proof = external_status["indexes"][0];
+
+        const auto external_update_output = temp_root / "external-state-update.txt";
+        expect_command_capture_success(run_command_capture(binary, {
+            "-p", registration_shared.string(), "-P", "HorizonQuestDemo",
+            "workitem", "update-state", "019d1000-0001-7000-8000-000000000001",
+            "--state", "InProgress", "--agent", "tester"
+        }, external_update_output, true), external_update_output, "external state update by UID failed");
+        const auto external_update = read_text(external_update_output);
+        expect(external_update.find("HQST-TSK-0001: Ready -> InProgress [Parent synced]") != std::string::npos &&
+                   external_update.find("Ready->InProgress intent preflight") != std::string::npos &&
+                   external_update.find("no parent intent resolved") == std::string::npos &&
+                   read_text(registration_item).find("state: InProgress") != std::string::npos &&
+                   read_text(external_parent).find("state: InProgress") != std::string::npos &&
+                   read_text(external_unrelated) == external_unrelated_before,
+            "external state update must preserve intent diagnostics and sync only the matching parent");
+        expect(external_update.find("workitem.update_state.total") != std::string::npos,
+            "external state update must emit mutation timing");
+        if (external_proof["status"].asString() == "unchanged") {
+            expect(external_proof["scanned_count"].asUInt64() == 0 &&
+                       external_update.find("canonical_store.list_items") == std::string::npos &&
+                       external_update.find("canonical_store.find_item_paths_by_id") == std::string::npos,
+                "verified external state update must reuse the projection without canonical inventory");
+        }
+
         const auto migration_plan_output = temp_root / "migration-plan-invalid-request.json";
         expect_command_capture_success(
             run_command_capture(binary, {
@@ -976,7 +1047,8 @@ int main(int argc, char** argv) {
         const auto keyed_create_args = with_duplicate_admission({
             "-P", "quick-smoke-product", "workitem", "create", "-t", "task",
             "--title", "Quick smoke task", "--agent", "tester",
-            "--idempotency-key", "quick-task-request", "--format", "json"},
+            "--idempotency-key", "quick-task-request", "--request-context-sha256", std::string(64, 'a'),
+            "--format", "json"},
             "Quick smoke task");
         expect_command_capture_success(
             run_command_capture(binary, keyed_create_args, first_create_output),
@@ -996,6 +1068,18 @@ int main(int argc, char** argv) {
                    retry_create["id"].asString() == first_create["id"].asString() &&
                    retry_create["idempotent_replay"].asBool(),
             "same-key retry must return the committed UID without creating another item");
+        const auto check_request_context = [&](const std::string& digest, std::string_view expected_error) {
+            auto changed_args = keyed_create_args;
+            const auto flag = std::find(changed_args.begin(), changed_args.end(), "--request-context-sha256");
+            expect(flag != changed_args.end(), "keyed create includes a context guard");
+            *(flag + 1) = digest;
+            const auto context_output = temp_root / "quick-create-context-rejection.txt";
+            expect(run_command_capture(binary, changed_args, context_output) != 0 &&
+                read_text(context_output).find(expected_error) != std::string::npos,
+                "create must reject a malformed digest or a changed context under the same key");
+        };
+        check_request_context(std::string(64, 'A'), "item_create.request_context_invalid");
+        check_request_context(std::string(64, 'b'), "conflict");
         const auto task_receipt_path = temp_root / "_kano" / "backlog" / "products" / "quick-smoke-product" / "_meta" / "duplicate-admission" / "QS-TSK-0001.json";
         expect(std::filesystem::exists(task_receipt_path), "workitem create should write duplicate admission receipt");
         const auto task_path = temp_root / "_kano" / "backlog" / "products" / "quick-smoke-product" / "items" / "task" / "0000" / "QS-TSK-0001_quick-smoke-task.md";
@@ -2102,6 +2186,23 @@ int main(int argc, char** argv) {
             "--agent", "tester"
         }) == 0, "set-ready failed");
         const auto task_text = read_text(task_path);
+        const auto stale_ready_output = temp_root / "stale-ready.txt";
+        expect(run_command_capture(binary, {
+            "-P", "quick-smoke-product", "workitem", "set-ready", "QS-TSK-0001",
+            "--goal", "Stale replay must not overwrite this item.",
+            "--expected-sha256", std::string(64, '0'), "--agent", "tester"
+        }, stale_ready_output) != 0, "set-ready accepted a stale canonical snapshot");
+        expect(read_text(stale_ready_output).find("canonical_write_guard_mismatch") != std::string::npos,
+            "set-ready must report the snapshot conflict");
+        expect(read_text(task_path) == task_text, "rejected set-ready must leave canonical content untouched");
+        const auto mismatched_ready_output = temp_root / "mismatched-ready.txt";
+        expect(run_command_capture(binary, {
+            "-P", "quick-smoke-product", "workitem", "set-ready", "QS-TSK-0001",
+            "--goal-file", (text_root / "goal.md").string(),
+            "--expected-ready-sha256", std::string(64, '0'), "--agent", "tester"
+        }, mismatched_ready_output) != 0, "set-ready accepted Ready bytes that differ from the request");
+        expect(read_text(mismatched_ready_output).find("ready_payload_digest_mismatch") != std::string::npos &&
+            read_text(task_path) == task_text, "Ready input mismatch must leave canonical content untouched");
         expect(task_text.find("# Non-Goals / Do Not") != std::string::npos, "set-ready task should render Non-Goals / Do Not heading");
         expect(task_text.find("Quick smoke non-goal.") != std::string::npos, "set-ready task should persist non-goals text");
         expect(task_text.find("# Intent Amendments") != std::string::npos, "set-ready task should render Intent Amendments heading");
@@ -3135,6 +3236,60 @@ int main(int argc, char** argv) {
                 quoted_title_list, "items", "title",
                 boundary_quote_title) != nullptr,
             "compact CLI create should round-trip intentional boundary quotes canonically");
+
+        const auto large_id_root = temp_root / "high-number";
+        write_text(large_id_root / ".kano" / "backlog_config.toml",
+            "[products.quick-smoke-product]\n"
+            "name = \"quick-smoke-product\"\n"
+            "prefix = \"QS\"\n"
+            "backlog_root = \"_kano/backlog/products/quick-smoke-product\"\n");
+        const auto large_id_items = large_id_root / "_kano" / "backlog" / "products" / "quick-smoke-product" / "items";
+        write_text(large_id_items / "task" / "10000" / "QS-TSK-10000_existing-task.md",
+            list_fixture_item_markdown("QS-TSK-10000", "019f2000-0001-7000-8000-000000001000",
+                "Existing high-number task", "Ready", "P1", "2026-07-21"));
+        const auto large_id_args = with_duplicate_admission({
+            "-p", large_id_root.string(), "-P", "quick-smoke-product", "workitem", "create", "-t", "task",
+            "--title", "High-number create regression", "--agent", "tester",
+            "--idempotency-key", "high-number-create-regression", "--format", "json"
+        }, "High-number create regression");
+        const auto large_id_output = temp_root / "high-number-create.json";
+        expect_command_capture_success(run_command_capture(binary, large_id_args, large_id_output),
+            large_id_output, "allocator must advance past existing five-digit IDs");
+        const auto large_id_item = read_json(large_id_output);
+        const auto large_id = large_id_item["id"].asString();
+        expect(large_id == "QS-TSK-10001" && large_id_item["read_after_write"].asBool() &&
+            !large_id_item["idempotent_replay"].asBool(), "create must publish the next five-digit ID");
+
+        expect(run_command(binary, {
+            "-p", large_id_root.string(), "-P", "quick-smoke-product", "workitem", "set-ready", large_id,
+            "--context", "Large allocation regression.", "--goal", "Resolve the allocated ID.",
+            "--approach", "Exercise the CLI lifecycle.", "--acceptance-criteria", "The item remains readable.",
+            "--risks", "None.", "--agent", "tester"
+        }) == 0, "set-ready must resolve the allocated five-digit ID");
+        expect(run_command(binary, {
+            "-p", large_id_root.string(), "-P", "quick-smoke-product", "workitem", "check-ready", large_id
+        }) == 0, "read-by-ID must resolve the five-digit Ready item");
+        expect(run_command(binary, {
+            "-p", large_id_root.string(), "-P", "quick-smoke-product", "workitem", "update-state", large_id,
+            "--state", "InProgress", "--agent", "tester"
+        }) == 0, "state update must resolve the allocated five-digit ID");
+        expect(run_command(binary, {
+            "-p", large_id_root.string(), "-P", "quick-smoke-product", "worklog", "append", large_id,
+            "Record high-number mutation.", "--agent", "tester"
+        }) == 0, "worklog must resolve the allocated five-digit ID");
+        const auto large_id_path = std::filesystem::path(large_id_item["path"].asString());
+        const auto large_id_content = read_text(large_id_path);
+        expect(large_id_content.find("state: InProgress") != std::string::npos &&
+            count_occurrences(large_id_content, "Record high-number mutation.") == 1,
+            "state and worklog must be present in canonical readback");
+        expect_command_capture_success(run_command_capture(binary, large_id_args, large_id_output),
+            large_id_output, "same-key create must replay the five-digit ID");
+        const auto large_id_retry = read_json(large_id_output);
+        expect(large_id_retry["id"].asString() == large_id &&
+            large_id_retry["uid"].asString() == large_id_item["uid"].asString() &&
+            large_id_retry["path"].asString() == large_id_item["path"].asString() &&
+            large_id_retry["idempotent_replay"].asBool() && read_text(large_id_path) == large_id_content,
+            "same-key replay must preserve the ID, UID, path and updated canonical bytes");
 
         const std::string sensitive_marker = "../../private/persisted-snapshot";
         const auto corrupt_index_dir =

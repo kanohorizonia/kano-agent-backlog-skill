@@ -37,6 +37,7 @@
 #include <json/json.h>
 #include <kano_process.h>
 
+#include "kano/backlog_core/diagnostics/mutation_timing.hpp"
 #include "kano/backlog_core/frontmatter/canonical_store.hpp"
 #include "kano/backlog_core/models/models.hpp"
 #include <kano_unattended.hpp>
@@ -1640,6 +1641,180 @@ void validate_stale_cleanup_reservation(const std::filesystem::path& fixture_roo
     std::cout << "stale-cleanup-reservation: PASS stage=published_B\n";
 }
 
+void validate_incremental_receipt_byte_binding(const std::filesystem::path& fixture_root) {
+    const std::string product = "incremental-receipt-bytes";
+    const auto product_root = fixture_root / "products" / product;
+    const auto index_path = fixture_root / ".cache/index/backlog.db";
+    CanonicalStore store(product_root);
+    auto item = store.create("BUF", ItemType::Task, "Initial item", 1);
+    store.write(item);
+    BacklogIndex index(index_path, product, product_root);
+    index.rebuild_metadata(product_root, product);
+    expect(index.query_metadata(product_root, product).diagnostics.index_used,
+        "canonical byte binding fixture must start from a ready snapshot");
+
+    item.title = "Tracked correct";
+    item.links.blocks = {"BUF-TSK-0002"};
+    store.write(item);
+    const auto path = *item.file_path;
+    const auto receipt_bytes = read_text(path);
+    auto raw_bytes = receipt_bytes;
+    const auto edited_link = raw_bytes.find("BUF-TSK-0002");
+    expect(edited_link != std::string::npos, "receipt fixture must include the tracked dependency");
+    raw_bytes.replace(edited_link, std::string_view("BUF-TSK-0002").size(), "BUF-TSK-0003");
+    write_text(path, raw_bytes);
+
+    class RestoreAfterRead : private std::stringbuf {
+    public:
+        RestoreAfterRead(const std::filesystem::path& path, const std::string& bytes)
+            : path_(path), bytes_(bytes), previous_(std::cerr.rdbuf(this)),
+              previous_timing_(kano::backlog_core::diagnostics::mutation_timing_forced()) {
+            kano::backlog_core::diagnostics::mutation_timing_forced() = true;
+        }
+
+        ~RestoreAfterRead() {
+            std::cerr.rdbuf(previous_);
+            kano::backlog_core::diagnostics::mutation_timing_forced() = previous_timing_;
+        }
+
+        void verify() const {
+            if (error_) {
+                std::rethrow_exception(error_);
+            }
+            expect(restored_, "receipt bytes must be restored immediately after parsing");
+        }
+
+    private:
+        int sync() override {
+            if (!restored_ && str().find("\"span\":\"canonical_store.read\"") != std::string::npos) {
+                restored_ = true;
+                try {
+                    write_text(path_, bytes_);
+                } catch (...) {
+                    error_ = std::current_exception();
+                }
+            }
+            return 0;
+        }
+
+        const std::filesystem::path& path_;
+        const std::string& bytes_;
+        std::streambuf* previous_;
+        bool previous_timing_;
+        bool restored_ = false;
+        std::exception_ptr error_;
+    };
+    {
+        RestoreAfterRead restoration(path, receipt_bytes);
+        index.index_item(item);
+        restoration.verify();
+    }
+    const auto result = index.query_metadata(product_root, product);
+    expect(!result.diagnostics.index_used && result.diagnostics.fallback_scan &&
+            read_text(path) == receipt_bytes && store.read(path).links.blocks == item.links.blocks,
+        "bytes restored after parsing must not certify unrelated parsed dependency edges");
+}
+
+void validate_incremental_write_with_stale_proof(const std::filesystem::path& fixture_root) {
+    const std::string product = "stale-proof-write";
+    const auto product_root = fixture_root / "products" / product;
+    CanonicalStore store(product_root);
+    auto target = store.create("DRT", ItemType::Task, "Target initial", 1);
+    auto other = store.create("DRT", ItemType::Task, "Raw marker A", 2);
+    store.write(target);
+    store.write(other);
+    BacklogIndex index(fixture_root / ".cache/index/backlog.db", product, product_root);
+    index.rebuild_metadata(product_root, product);
+    expect(index.query_metadata(product_root, product).diagnostics.index_used,
+        "stale proof write must start with a usable projection");
+
+    const auto other_time = std::filesystem::last_write_time(*other.file_path);
+    auto other_bytes = read_text(*other.file_path);
+    const auto marker = other_bytes.find("Raw marker A");
+    expect(marker != std::string::npos, "unrelated item must include the raw marker");
+    other_bytes.replace(marker, std::string_view("Raw marker A").size(), "Raw marker B");
+    write_text(*other.file_path, other_bytes);
+    std::filesystem::last_write_time(*other.file_path, other_time);
+
+    target.title = "Target updated";
+    store.write(target);
+    index.index_item(target);
+    const auto current = index.query_metadata(product_root, product);
+    expect(!current.diagnostics.index_used && current.diagnostics.fallback_scan &&
+            store.read(*target.file_path).title == target.title &&
+            store.read(*other.file_path).title == "Raw marker B" &&
+            read_text(*other.file_path) == other_bytes,
+        "a verified canonical write must survive unrelated drift without certifying the projection");
+}
+
+void validate_incremental_inventory_membership(const std::filesystem::path& fixture_root) {
+    const std::string product = "incremental-inventory";
+    const auto product_root = fixture_root / "products" / product;
+    const auto index_path = fixture_root / ".cache/index/backlog.db";
+    CanonicalStore store(product_root);
+    auto original = store.create("INV", ItemType::Task, "Canonical inventory member", 1);
+    store.write(original);
+
+    BacklogIndex index(index_path, product, product_root);
+    for (const auto& path : {product_root / "_meta/INV-TSK-0002_off-catalog.md",
+                              original.file_path->parent_path() / "INV-TSK-0002_reserved.index.md"}) {
+        index.rebuild_metadata(product_root, product);
+        auto off_catalog = store.create("INV", ItemType::Task, "Outside canonical inventory", 2);
+        off_catalog.file_path = path;
+        store.write(off_catalog);
+        bool refused = false;
+        try {
+            index.index_item(off_catalog);
+        } catch (const std::runtime_error& e) {
+            refused = std::string_view(e.what()) == "metadata_index_mutation_source_outside_inventory";
+        }
+        const auto rows = index.query_items();
+        expect(refused && rows.size() == 1 && rows.front().uid == original.uid &&
+                std::filesystem::is_regular_file(path),
+            "incremental publication must preserve inventory membership and keep canonical bytes");
+    }
+}
+
+void validate_incremental_display_id_replacement(const std::filesystem::path& fixture_root) {
+    const std::string product = "duplicate-incremental-id";
+    const auto product_root = fixture_root / "products" / product;
+    const auto index_path = fixture_root / ".cache/index/backlog.db";
+    CanonicalStore store(product_root);
+    auto original = store.create("DUP", ItemType::Task, "Original canonical path", 1);
+    store.write(original);
+    BacklogIndex index(index_path, product, product_root);
+    index.rebuild_metadata(product_root, product);
+
+    auto duplicate = store.create("DUP", ItemType::Task, "Second canonical path", 1);
+    duplicate.links.blocks = {"DUP-TSK-0002"};
+    expect(original.id == duplicate.id && original.uid != duplicate.uid &&
+            original.file_path != duplicate.file_path,
+        "duplicate fixture must share a display ID across distinct canonical sources");
+    store.write(duplicate);
+    bool refused = false;
+    try {
+        index.index_item(duplicate);
+    } catch (const std::runtime_error& e) {
+        refused = std::string_view(e.what()) == "metadata_index_mutation_source_identity_changed";
+    }
+    expect(refused && std::filesystem::exists(*original.file_path) &&
+            std::filesystem::exists(*duplicate.file_path),
+        "incremental publication must reject a second source for an indexed display ID");
+    const auto rows = index.query_items();
+    expect(rows.size() == 1 && rows.front().uid == original.uid,
+        "failed incremental publication must preserve the existing row until rebuild");
+    const auto result = index.query_metadata(product_root, product);
+    expect(!result.diagnostics.index_used && result.diagnostics.fallback_scan,
+        "the duplicate canonical display ID must invalidate mutation authority");
+
+    std::filesystem::remove(*original.file_path);
+    index.index_item(duplicate);
+    const auto repaired = index.query_items();
+    expect(repaired.size() == 1 && repaired.front().uid == duplicate.uid &&
+            !index.query_metadata(product_root, product).diagnostics.index_used,
+        "an absent prior source may be rebound only as an incomplete projection");
+}
+
 void validate_ready_ref_publication_race(const std::filesystem::path& fixture_root) {
 #ifdef _WIN32
     const std::string product = "ready-ref-race";
@@ -1800,6 +1975,10 @@ int main(int argc, char** argv) {
             std::cout << "metadata_index_smoke_test: PASS " << focused << "\n";
             return 0;
         }
+        validate_incremental_receipt_byte_binding(fixture_root / "incremental-receipt-bytes");
+        validate_incremental_display_id_replacement(fixture_root / "incremental-display-id");
+        validate_incremental_inventory_membership(fixture_root / "incremental-inventory");
+        validate_incremental_write_with_stale_proof(fixture_root / "stale-proof-write");
         validate_koa_metadata_index_consumer_fixture();
         const auto backlog_root = fixture_root / "backlog";
         const std::string product = "metadata-product";
@@ -1859,6 +2038,9 @@ int main(int argc, char** argv) {
             }
             fixtures.push_back(std::move(item));
         }
+        auto keyed_fixture = store.read(*fixtures.back().file_path);
+        keyed_fixture.external["create_request_key"] = "metadata-fixture-key";
+        store.write(keyed_fixture);
         store.reset_write_revision();
 
         const auto target_id = fixtures.back().id;
@@ -1891,8 +2073,54 @@ int main(int argc, char** argv) {
                    built_proof.root_file_id != "0" &&
                    built_proof.journal_id != "0" && built_proof.watch_count > 0,
             "Windows rebuild must persist verified NTFS identities and watches");
+        {
+            BacklogIndex mutation_index(index_path, product, product_root);
+            const auto by_id = mutation_index.verified_mutation_paths(product_root, target_id);
+            const auto by_uid = mutation_index.verified_mutation_paths(product_root, target_uid);
+            const auto absent = mutation_index.verified_mutation_paths(
+                product_root, "unknown-create-request", true);
+            const auto keyed = mutation_index.verified_mutation_paths(
+                product_root, "metadata-fixture-key", true);
+            expect(by_id && *by_id == std::vector<std::filesystem::path>{*fixtures.back().file_path} &&
+                       by_uid && *by_uid == *by_id && keyed && *keyed == *by_id &&
+                       absent && absent->empty(),
+                "live witness must verify bounded ID, UID, and request lookups");
+            expect(mutation_index.verified_allocation_maximum(product_root, "MDI", "TSK") == 650,
+                "live witness must authorize the filename-based allocation maximum");
+
+            execute_sql(index_path, "DELETE FROM items WHERE product = '" + product +
+                "' AND id = '" + target_id + "'");
+            expect(!mutation_index.verified_mutation_paths(product_root, target_id) &&
+                       !mutation_index.verified_mutation_paths(
+                           product_root, "unknown-create-request", true) &&
+                       !mutation_index.verified_allocation_maximum(product_root, "MDI", "TSK"),
+                "direct projection corruption must invalidate positive and negative mutation lookup");
+            mutation_index.rebuild_metadata(product_root, product);
+            execute_sql(index_path, "DELETE FROM metadata_change_watch WHERE product = '" + product +
+                "' AND is_directory = 1 AND file_id = (SELECT file_id FROM metadata_change_watch "
+                "WHERE product = '" + product + "' AND is_directory = 1 LIMIT 1)");
+            expect(!mutation_index.verified_mutation_paths(
+                       product_root, "unknown-create-request", true),
+                "missing watch coverage must invalidate negative mutation lookup");
+            for (int update = 0; update < 2; ++update) {
+                store.write(keyed_fixture);
+                mutation_index.index_item(keyed_fixture);
+                expect(!mutation_index.verified_mutation_paths(
+                           product_root, "metadata-fixture-key", true),
+                    "incremental updates must tolerate and preserve a dirty projection");
+            }
+            mutation_index.rebuild_metadata(product_root, product);
+        }
 #else
         expect_portable_proof_state(index_path, product, "portable rebuild");
+        {
+            BacklogIndex mutation_index(index_path, product, product_root);
+            expect(!mutation_index.verified_mutation_paths(product_root, target_id) &&
+                       !mutation_index.verified_mutation_paths(
+                           product_root, "unknown-create-request", true) &&
+                       !mutation_index.verified_allocation_maximum(product_root, "MDI", "TSK"),
+                "portable proof state must not authorize mutation lookups or negative results");
+        }
 #endif
 
         const auto baseline_status = kano::backlog_ops::get_index_status(

@@ -409,9 +409,10 @@ void validate_remap_target_id(
     const BacklogItem& item,
     const std::string& new_id
 ) {
-    static const std::regex id_regex(R"(^[A-Z][A-Z0-9]{1,15}-(INIT|EPIC|FTR|USR|TSK|SUBTSK|BUG|ISS)-\d{4}$)");
-    if (!std::regex_match(new_id, id_regex)) {
-        throw std::runtime_error("New item id has invalid format: " + new_id + " (expected <PREFIX>-(INIT|EPIC|FTR|USR|TSK|SUBTSK|BUG|ISS)-<NNNN>)");
+    const auto parsed = RefParser::parse_display_id(new_id);
+    if (!parsed || parsed->raw != new_id) {
+        throw std::runtime_error("New item id has invalid format: " + new_id +
+                                 " (expected <PREFIX>-<TYPE>-<NUMBER> with at least four digits)");
     }
     if (new_id == item.id) {
         throw std::runtime_error("New item id matches current id: " + new_id);
@@ -783,11 +784,13 @@ std::vector<std::filesystem::path> list_item_markdown_paths(const std::filesyste
 }
 
 std::optional<std::string> item_id_from_path(const std::filesystem::path& path) {
-    static const std::regex id_pattern(R"(([A-Z][A-Z0-9]{1,15}-(?:INIT|EPIC|FTR|USR|TSK|SUBTSK|BUG|ISS)-\d{4}))");
+    static const std::regex id_pattern(R"(([A-Z][A-Z0-9]{1,15}-(?:INIT|EPIC|FTR|USR|TSK|SUBTSK|BUG|ISS)-[0-9]{4,}))");
     std::smatch match;
     const std::string stem = path.stem().string();
     if (std::regex_search(stem, match, id_pattern)) {
-        return match[1].str();
+        if (const auto parsed = RefParser::parse_display_id(match[1].str())) {
+            return parsed->raw;
+        }
     }
     return std::nullopt;
 }
@@ -6240,6 +6243,7 @@ std::optional<int> try_run_workitem_create_fast_path(int argc, char** argv) {
     std::string owner;
     std::string reviewer;
     std::optional<std::string> idempotency_key;
+    std::optional<std::string> request_context_sha256;
     std::string format = "plain";
     bool profile_mutations = false;
     DuplicateAdmissionEvidence duplicate_admission;
@@ -6335,6 +6339,10 @@ std::optional<int> try_run_workitem_create_fast_path(int argc, char** argv) {
             idempotency_key = *value;
             continue;
         }
+        if (auto value = option_value(i, "--request-context-sha256")) {
+            request_context_sha256 = *value;
+            continue;
+        }
         if (auto value = option_value(i, "--format")) {
             format = *value;
             continue;
@@ -6387,7 +6395,8 @@ std::optional<int> try_run_workitem_create_fast_path(int argc, char** argv) {
         product.empty() ? std::nullopt : std::optional<std::string>(product),
         sandbox.empty() ? std::nullopt : std::optional<std::string>(sandbox)
     );
-    BacklogIndex index(ctx.backlog_root / ".cache" / "index" / "backlog.db");
+    BacklogIndex index(ctx.backlog_root / ".cache" / "index" / "backlog.db",
+        ctx.product_name, ctx.product_root);
     index.initialize();
 
     auto type_opt = parse_item_type(type_str);
@@ -6434,10 +6443,46 @@ std::optional<int> try_run_workitem_create_fast_path(int argc, char** argv) {
         owner_source,
         reviewer_source,
         duplicate_admission,
-        idempotency_key
+        idempotency_key,
+        request_context_sha256
     );
     print_create_item_result(result, format);
     return 0;
+}
+
+void verify_ready_payload_digest(
+    const std::optional<std::string>& expected_sha256,
+    std::initializer_list<std::string_view> values
+) {
+    if (!expected_sha256) {
+        return;
+    }
+    std::string material = "kob.ready-values.v1\n";
+    for (const auto value : values) {
+        material += std::to_string(value.size()) + ":";
+        material += value;
+    }
+    if (sha256_hex(material) != *expected_sha256) {
+        throw std::runtime_error("ready_payload_digest_mismatch");
+    }
+}
+
+void write_ready_item(
+    const CanonicalStore& store,
+    BacklogItem& item,
+    const std::optional<std::string>& expected_sha256
+) {
+    if (!expected_sha256) {
+        store.write(item);
+        return;
+    }
+    if (expected_sha256->size() != 64 ||
+        expected_sha256->find_first_not_of("0123456789abcdef") != std::string::npos) {
+        throw std::runtime_error("--expected-sha256 requires a lowercase SHA-256 digest");
+    }
+    store.write(item, [&](std::string_view current) {
+        return sha256_hex(std::string(current)) == *expected_sha256;
+    });
 }
 
 std::optional<int> try_run_workitem_set_ready_fast_path(int argc, char** argv) {
@@ -6476,6 +6521,8 @@ std::optional<int> try_run_workitem_set_ready_fast_path(int argc, char** argv) {
     std::string acceptance_criteria_file;
     std::string risks_file;
     std::string agent;
+    std::optional<std::string> expected_sha256;
+    std::optional<std::string> expected_ready_sha256;
     bool consume_input_files = false;
 
     const auto option_value = [&](int& index, const std::string& option) -> std::optional<std::string> {
@@ -6605,6 +6652,14 @@ std::optional<int> try_run_workitem_set_ready_fast_path(int argc, char** argv) {
             agent = *value;
             continue;
         }
+        if (auto value = option_value(i, "--expected-sha256")) {
+            expected_sha256 = *value;
+            continue;
+        }
+        if (auto value = option_value(i, "--expected-ready-sha256")) {
+            expected_ready_sha256 = *value;
+            continue;
+        }
         if (arg == "--consume-input-files") {
             consume_input_files = true;
             continue;
@@ -6634,6 +6689,8 @@ std::optional<int> try_run_workitem_set_ready_fast_path(int argc, char** argv) {
     apply_text_file_option(intent_amendments, intent_amendments_file, "--intent-amendments", "--intent-amendments-file");
     apply_text_file_option(acceptance_criteria, acceptance_criteria_file, "--acceptance-criteria", "--acceptance-criteria-file");
     apply_text_file_option(risks, risks_file, "--risks", "--risks-file");
+    verify_ready_payload_digest(expected_ready_sha256,
+        {context, goal, approach, acceptance_criteria, risks, non_goals, intent_amendments});
 
     std::vector<std::string> updated_fields;
     if (!context.empty()) {
@@ -6670,7 +6727,7 @@ std::optional<int> try_run_workitem_set_ready_fast_path(int argc, char** argv) {
     }
 
     StateMachine::record_worklog(item, agent, "Updated Ready fields: " + join_strings(updated_fields));
-    store.write(item);
+    write_ready_item(store, item, expected_sha256);
     BacklogIndex metadata_index(
         ctx.backlog_root / ".cache" / "index" / "backlog.db",
         ctx.product_name,
@@ -6852,7 +6909,8 @@ std::optional<int> try_run_workitem_update_state_fast_path(int argc, char** argv
         product.empty() ? std::nullopt : std::optional<std::string>(product),
         sandbox.empty() ? std::nullopt : std::optional<std::string>(sandbox)
     );
-    BacklogIndex index(ctx.backlog_root / ".cache" / "index" / "backlog.db");
+    BacklogIndex index(ctx.backlog_root / ".cache" / "index" / "backlog.db",
+        ctx.product_name, ctx.product_root);
     auto result = WorkitemOps::update_state(
         index,
         ctx.product_root,
@@ -7116,7 +7174,12 @@ std::optional<int> try_run_worklog_append_fast_path(int argc, char** argv) {
     );
     CanonicalStore store(ctx.product_root);
     RefResolver resolver(store);
-    auto item = resolver.resolve(item_ref);
+    BacklogIndex metadata_index(
+        ctx.backlog_root / ".cache" / "index" / "backlog.db",
+        ctx.product_name,
+        ctx.product_root);
+    auto indexed_item = metadata_index.read_item_for_mutation(ctx.product_root, item_ref);
+    auto item = indexed_item ? std::move(*indexed_item) : resolver.resolve(item_ref);
 
     apply_text_file_option(message, message_file, "message", "--message-file");
     if (message.empty()) {
@@ -7126,10 +7189,6 @@ std::optional<int> try_run_worklog_append_fast_path(int argc, char** argv) {
     const auto model_opt = model.empty() ? std::nullopt : std::optional<std::string>(model);
     StateMachine::record_worklog(item, agent.empty() ? "cli" : agent, message, model_opt);
     store.write(item);
-    BacklogIndex metadata_index(
-        ctx.backlog_root / ".cache" / "index" / "backlog.db",
-        ctx.product_name,
-        ctx.product_root);
     metadata_index.index_item(item);
 
     std::cout << "OK: Appended worklog to " << item.id << "\n";
@@ -8152,6 +8211,20 @@ std::optional<int> try_run_links_remap_ref_fast_path(int argc, char** argv) {
     return 0;
 }
 
+BacklogItem read_set_parent_item(
+    const BacklogContext& ctx,
+    const RefResolver& resolver,
+    const std::string& ref,
+    BacklogIndex* mutation_index
+) {
+    if (mutation_index) {
+        if (auto item = mutation_index->read_item_for_mutation(ctx.product_root, ref)) {
+            return *std::move(item);
+        }
+    }
+    return resolver.resolve(ref);
+}
+
 std::optional<int> try_run_admin_items_fast_path(int argc, char** argv) {
     if (argc < 5 || argv == nullptr) {
         return std::nullopt;
@@ -8293,10 +8366,10 @@ std::optional<int> try_run_admin_items_fast_path(int argc, char** argv) {
 
     const std::string effective_product = !product.empty() ? product : global_product;
     auto ctx = resolve_product_context(path_str, effective_product, sandbox, backlog_root);
-    BacklogIndex index(ctx.backlog_root / ".cache" / "index" / "backlog.db");
-    index.initialize();
 
     if (command == "trash") {
+        BacklogIndex index(ctx.backlog_root / ".cache" / "index" / "backlog.db");
+        index.initialize();
         TrashItemResult result;
         if (apply) {
             result = WorkitemOps::trash_item(
@@ -8364,14 +8437,16 @@ std::optional<int> try_run_admin_items_fast_path(int argc, char** argv) {
         throw std::runtime_error("Provide --parent or --clear.");
     }
 
+    BacklogIndex index(ctx.backlog_root / ".cache" / "index" / "backlog.db",
+        ctx.product_name, ctx.product_root);
+    index.initialize();
     CanonicalStore store(ctx.product_root);
     RefResolver resolver(store);
-    auto item = resolver.resolve(item_ref);
+    auto item = read_set_parent_item(ctx, resolver, item_ref, apply ? &index : nullptr);
     const auto old_parent = item.parent;
     std::optional<std::string> new_parent;
-    if (!clear) {
-        auto parent_item = resolver.resolve(parent);
-        new_parent = parent_item.id;
+    if (!clear && !apply) {
+        new_parent = resolver.resolve(parent).id;
     }
 
     if (apply) {
@@ -8381,7 +8456,7 @@ std::optional<int> try_run_admin_items_fast_path(int argc, char** argv) {
             item_ref,
             clear ? std::string("none") : parent,
             agent);
-        item = resolver.resolve(item_ref);
+        item = read_set_parent_item(ctx, resolver, item_ref, &index);
     }
 
     const std::string status = apply ? "updated" : "dry-run";
@@ -9344,6 +9419,7 @@ int main(int InArgc, char* InArgv[]) {
             auto& owner = cli11_state.keep<std::string>();
             auto& reviewer = cli11_state.keep<std::string>();
             auto& idempotency_key = cli11_state.keep<std::string>();
+            auto& request_context_sha256 = cli11_state.keep<std::string>();
             auto& create_format = cli11_state.keep<std::string>("plain");
             auto& profile_mutations = cli11_state.keep<bool>(false);
             auto duplicate_admission = cli11_state.make_shared<DuplicateAdmissionEvidence>();
@@ -9356,6 +9432,9 @@ int main(int InArgc, char* InArgv[]) {
             auto* idempotency_key_option = createCmd->add_option(
                 "--idempotency-key", idempotency_key,
                 "Optional non-secret request identity for same-UID retry");
+            auto* request_context_sha256_option = createCmd->add_option(
+                "--request-context-sha256", request_context_sha256,
+                "Bind the idempotency key to a lowercase SHA-256 of caller-owned request context");
             createCmd->add_option("--format", create_format, "Output format: plain|json");
             createCmd->add_option("--duplicate-search-query", duplicate_admission->search_query, "Duplicate search query used before item creation");
             createCmd->add_option("--duplicate-search-scope", duplicate_admission->search_scope, "Duplicate search scope or product set inspected before item creation");
@@ -9366,13 +9445,14 @@ int main(int InArgc, char* InArgv[]) {
             createCmd->add_flag("--duplicate-override", duplicate_admission->override_requested, "Allow create when duplicate candidates were found and read");
             createCmd->add_flag("--profile-mutations", profile_mutations, "Emit bounded KOB_TIMING mutation spans");
 
-            createCmd->callback([&, duplicate_admission, idempotency_key_option]() {
+            createCmd->callback([&, duplicate_admission, idempotency_key_option, request_context_sha256_option]() {
                 validate_create_item_format(create_format);
                 if (profile_mutations) {
                     kano::backlog_core::diagnostics::enable_mutation_timing();
                 }
                 auto ctx = resolve_ctx();
-                BacklogIndex index(ctx.backlog_root / ".cache" / "index" / "backlog.db");
+                BacklogIndex index(ctx.backlog_root / ".cache" / "index" / "backlog.db",
+                    ctx.product_name, ctx.product_root);
                 index.initialize();
 
                 auto type_opt = parse_item_type(type_str);
@@ -9419,6 +9499,9 @@ int main(int InArgc, char* InArgv[]) {
                     *duplicate_admission,
                     idempotency_key_option->count() > 0
                         ? std::optional<std::string>(idempotency_key)
+                        : std::nullopt,
+                    request_context_sha256_option->count() > 0
+                        ? std::optional<std::string>(request_context_sha256)
                         : std::nullopt
                 );
                 print_create_item_result(result, create_format);
@@ -9462,7 +9545,8 @@ int main(int InArgc, char* InArgv[]) {
 
             updateStateCmd->callback([&]() {
                 auto ctx = resolve_ctx();
-                BacklogIndex index(ctx.backlog_root / ".cache" / "index" / "backlog.db");
+                BacklogIndex index(ctx.backlog_root / ".cache" / "index" / "backlog.db",
+                    ctx.product_name, ctx.product_root);
 
                 std::string effective_state = !state_opt_str.empty() ? state_opt_str : state_str;
                 if (effective_state.empty()) {
@@ -9522,6 +9606,8 @@ int main(int InArgc, char* InArgv[]) {
             auto& acceptance_criteria_file = cli11_state.keep<std::string>();
             auto& risks_file = cli11_state.keep<std::string>();
             auto& set_ready_consume_input_files = cli11_state.keep<bool>(false);
+            auto& expected_item_sha256 = cli11_state.keep<std::string>();
+            auto& expected_ready_sha256 = cli11_state.keep<std::string>();
             setReadyCmd->add_option("ref", ref, "Item ID or UID")->required();
             setReadyCmd->add_option("--context", context, "Context text");
             setReadyCmd->add_option("--goal", goal, "Goal text");
@@ -9540,9 +9626,13 @@ int main(int InArgc, char* InArgv[]) {
             setReadyCmd->add_option("--acceptance-criteria-file", acceptance_criteria_file, "Read Acceptance Criteria text from file");
             setReadyCmd->add_option("--risks-file", risks_file, "Read Risks / Dependencies text from file");
             setReadyCmd->add_flag("--consume-input-files", set_ready_consume_input_files, "Delete input files after a successful update; files must be under ~/.kano/tmp/backlog or KANO_BACKLOG_TEXT_TMP");
+            auto* expected_item_sha256_option = setReadyCmd->add_option(
+                "--expected-sha256", expected_item_sha256, "Require these canonical item bytes before updating");
+            auto* expected_ready_sha256_option = setReadyCmd->add_option(
+                "--expected-ready-sha256", expected_ready_sha256, "Require these Ready field values");
             setReadyCmd->add_option("--agent", set_ready_agent, "Agent ID")->required();
 
-            setReadyCmd->callback([&]() {
+            setReadyCmd->callback([&, expected_item_sha256_option, expected_ready_sha256_option]() {
                 kano::backlog_core::diagnostics::ScopedMutationSpan total_span("command.workitem_set_ready.total", ref);
                 auto ctx = resolve_ctx();
                 CanonicalStore store(ctx.product_root);
@@ -9556,6 +9646,9 @@ int main(int InArgc, char* InArgv[]) {
                 apply_text_file_option(intent_amendments, intent_amendments_file, "--intent-amendments", "--intent-amendments-file");
                 apply_text_file_option(acceptance_criteria, acceptance_criteria_file, "--acceptance-criteria", "--acceptance-criteria-file");
                 apply_text_file_option(risks, risks_file, "--risks", "--risks-file");
+                verify_ready_payload_digest(expected_ready_sha256_option->count() != 0
+                    ? std::optional<std::string>(expected_ready_sha256) : std::nullopt,
+                    {context, goal, approach, acceptance_criteria, risks, non_goals, intent_amendments});
 
                 std::vector<std::string> updated_fields;
 
@@ -9593,7 +9686,8 @@ int main(int InArgc, char* InArgv[]) {
                 }
 
                 StateMachine::record_worklog(item, set_ready_agent, "Updated Ready fields: " + join_strings(updated_fields));
-                store.write(item);
+                write_ready_item(store, item, expected_item_sha256_option->count() != 0
+                    ? std::optional<std::string>(expected_item_sha256) : std::nullopt);
                 BacklogIndex metadata_index(
                     ctx.backlog_root / ".cache" / "index" / "backlog.db",
                     ctx.product_name,
@@ -10376,7 +10470,8 @@ int main(int InArgc, char* InArgv[]) {
 
             remapCmd->callback([&]() {
                 auto ctx = resolve_ctx();
-                BacklogIndex index(ctx.backlog_root / ".cache" / "index" / "backlog.db");
+                BacklogIndex index(ctx.backlog_root / ".cache" / "index" / "backlog.db",
+                    ctx.product_name, ctx.product_root);
 
                 WorkitemOps::remap_parent(index, ctx.product_root, remap_ref, parent_ref, remap_agent);
                 std::cout << "Successfully remapped parent for " << remap_ref << "\n";
@@ -12149,16 +12244,16 @@ int main(int InArgc, char* InArgv[]) {
                     }
 
                     auto ctx = resolve_ctx_for_product_and_backlog(sp_product, sp_backlog_root);
-                    BacklogIndex index(ctx.backlog_root / ".cache" / "index" / "backlog.db");
+                    BacklogIndex index(ctx.backlog_root / ".cache" / "index" / "backlog.db",
+                        ctx.product_name, ctx.product_root);
                     index.initialize();
                     CanonicalStore store(ctx.product_root);
                     RefResolver resolver(store);
-                    auto item = resolver.resolve(sp_item_ref);
+                    auto item = read_set_parent_item(ctx, resolver, sp_item_ref, sp_apply ? &index : nullptr);
                     const auto old_parent = item.parent;
                     std::optional<std::string> new_parent;
-                    if (!sp_clear) {
-                        auto parent_item = resolver.resolve(sp_parent);
-                        new_parent = parent_item.id;
+                    if (!sp_clear && !sp_apply) {
+                        new_parent = resolver.resolve(sp_parent).id;
                     }
 
                     if (sp_apply) {
@@ -12168,7 +12263,7 @@ int main(int InArgc, char* InArgv[]) {
                             sp_item_ref,
                             sp_clear ? std::string("none") : sp_parent,
                             sp_agent);
-                        item = resolver.resolve(sp_item_ref);
+                        item = read_set_parent_item(ctx, resolver, sp_item_ref, &index);
                     }
 
                     const std::string status = sp_apply ? "updated" : "dry-run";
@@ -19677,8 +19772,12 @@ int main(int InArgc, char* InArgv[]) {
                     auto ctx = resolve_ctx();
                     CanonicalStore store(ctx.product_root);
                     RefResolver resolver(store);
-
-                    auto item = resolver.resolve(item_ref);
+                    BacklogIndex metadata_index(
+                        ctx.backlog_root / ".cache" / "index" / "backlog.db",
+                        ctx.product_name,
+                        ctx.product_root);
+                    auto indexed_item = metadata_index.read_item_for_mutation(ctx.product_root, item_ref);
+                    auto item = indexed_item ? std::move(*indexed_item) : resolver.resolve(item_ref);
 
                     apply_text_file_option(message, message_file, "message", "--message-file");
                     if (message.empty()) {
@@ -19690,10 +19789,6 @@ int main(int InArgc, char* InArgv[]) {
 
                     StateMachine::record_worklog(item, agent.empty() ? "cli" : agent, message, model_opt);
                     store.write(item);
-                    BacklogIndex metadata_index(
-                        ctx.backlog_root / ".cache" / "index" / "backlog.db",
-                        ctx.product_name,
-                        ctx.product_root);
                     metadata_index.index_item(item);
 
                     std::cout << "OK: Appended worklog to " << item.id << "\n";

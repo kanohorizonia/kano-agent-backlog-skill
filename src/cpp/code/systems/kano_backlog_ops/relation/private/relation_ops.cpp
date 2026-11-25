@@ -49,8 +49,13 @@ struct Catalog {
     std::vector<ProductRuntime> products;
 };
 
+struct ScannedRelation {
+    RelationEntry relation;
+    std::string raw_target;
+};
+
 struct ScanResult {
-    std::vector<RelationEntry> relations;
+    std::vector<ScannedRelation> relations;
     std::size_t items_scanned = 0;
     std::size_t unresolved_links = 0;
 };
@@ -58,12 +63,12 @@ struct ScanResult {
 struct ItemReadTask {
     const ProductRuntime* product = nullptr;
     std::filesystem::path path;
+    std::size_t metadata_index = 0;
 };
 
 struct ScannedMetadata {
     const ProductRuntime* product = nullptr;
-    BacklogItem item;
-    bool valid = false;
+    std::optional<ProjectedRelationItem> item;
 };
 
 std::string lower_copy(std::string value) {
@@ -183,15 +188,43 @@ const ProductRuntime* product_for_prefix(const Catalog& catalog, const std::stri
     return match;
 }
 
+BacklogItem read_relation_item(const ProductRuntime& product, const std::string& ref) {
+    if (auto index = BacklogIndex::open_existing_mutation_index(product.product_root, product.name)) {
+        if (auto item = index->read_item_for_mutation(product.product_root, ref)) {
+            return std::move(*item);
+        }
+    }
+    CanonicalStore store(product.product_root);
+    return RefResolver(store).resolve(ref);
+}
+
+bool has_canonical_display_id(const ProductRuntime& product, const std::string& id) {
+    CanonicalStore store(product.product_root);
+    if (auto index = BacklogIndex::open_existing_mutation_index(product.product_root, product.name)) {
+        if (auto paths = index->verified_mutation_paths(product.product_root, id)) {
+            try {
+                return std::any_of(paths->begin(), paths->end(), [&](const auto& path) {
+                    const auto filename = path.filename().string();
+                    return (filename.starts_with(id + "_") || filename.starts_with(id + ".")) &&
+                        store.read_metadata(path).id == id;
+                });
+            } catch (const std::exception&) {
+                // Recheck canonically if a projected candidate changed while being read.
+            }
+        }
+    }
+    return !store.find_item_paths_by_id(id).empty();
+}
+
 RelationEndpoint resolve_endpoint(
     const ProductRuntime& product,
     const std::string& item_ref,
-    const std::string& field
+    const std::string& field,
+    bool use_projection = false
 ) {
     require_safe_item_ref(item_ref, field);
     CanonicalStore store(product.product_root);
-    RefResolver resolver(store);
-    const auto item = resolver.resolve(item_ref);
+    const auto item = use_projection ? read_relation_item(product, item_ref) : RefResolver(store).resolve(item_ref);
     return RelationEndpoint{product.name, item.id, item.uid};
 }
 
@@ -214,12 +247,11 @@ MutationTargetResolution resolve_mutation_target(
                 "Missing target display ID prefix does not match target product: " + item_ref +
                 " vs " + product.prefix);
         }
-        CanonicalStore store(product.product_root);
-        if (store.find_item_paths_by_id(item_ref).empty()) {
+        if (!has_canonical_display_id(product, item_ref)) {
             return MutationTargetResolution{RelationEndpoint{product.name, item_ref, ""}, false};
         }
     }
-    return MutationTargetResolution{resolve_endpoint(product, item_ref, "target_item"), true};
+    return MutationTargetResolution{resolve_endpoint(product, item_ref, "target_item", true), true};
 }
 
 const ProductRuntime& product_by_name(const Catalog& catalog, const std::string& name) {
@@ -253,20 +285,39 @@ RelationEntry make_entry(
     return entry;
 }
 
-ScanResult scan_catalog(const Catalog& catalog, std::size_t max_items) {
+ScanResult scan_catalog(const Catalog& catalog, std::size_t max_items, bool use_projection = false) {
     ScanResult result;
     std::vector<ItemReadTask> tasks;
+    std::vector<ScannedMetadata> metadata;
+    const auto limit_exceeded = [&]() {
+        return std::runtime_error("Relation item scan limit exceeded: " + std::to_string(max_items));
+    };
     for (const auto& product : catalog.products) {
-        CanonicalStore store(product.product_root);
-        for (const auto& path : store.list_items()) {
-            if (tasks.size() >= max_items) {
-                throw std::runtime_error("Relation item scan limit exceeded: " + std::to_string(max_items));
+        const auto remaining = max_items - metadata.size();
+        if (use_projection) {
+            auto index = BacklogIndex::open_existing_mutation_index(product.product_root, product.name);
+            auto projection = index ? index->verified_relation_metadata(product.product_root, remaining) : std::nullopt;
+            if (projection) {
+                if (projection->item_count > remaining) {
+                    throw limit_exceeded();
+                }
+                for (auto& item : projection->items) {
+                    metadata.push_back(ScannedMetadata{&product, std::move(item)});
+                }
+                continue;
             }
-            tasks.push_back(ItemReadTask{&product, path});
+        }
+        CanonicalStore store(product.product_root);
+        auto paths = store.list_items();
+        if (paths.size() > remaining) {
+            throw limit_exceeded();
+        }
+        for (auto& path : paths) {
+            tasks.push_back(ItemReadTask{&product, std::move(path), metadata.size()});
+            metadata.push_back(ScannedMetadata{&product, std::nullopt});
         }
     }
 
-    std::vector<ScannedMetadata> metadata(tasks.size());
     std::atomic<std::size_t> next_task{0};
     const auto hardware_threads = static_cast<std::size_t>(std::thread::hardware_concurrency());
     const std::size_t worker_count = std::min<std::size_t>(
@@ -278,13 +329,12 @@ ScanResult scan_catalog(const Catalog& catalog, std::size_t max_items) {
                 return;
             }
             const auto& task = tasks[index];
-            auto& scanned = metadata[index];
-            scanned.product = task.product;
             try {
                 CanonicalStore store(task.product->product_root);
-                scanned.item = store.read_metadata(task.path);
-                scanned.valid = true;
-            } catch (...) {
+                auto item = store.read_metadata(task.path);
+                metadata[task.metadata_index].item = ProjectedRelationItem{
+                    std::move(item.id), std::move(item.uid), std::move(item.links)};
+            } catch (const std::exception&) {
             }
         }
     };
@@ -298,18 +348,19 @@ ScanResult scan_catalog(const Catalog& catalog, std::size_t max_items) {
         active_worker.get();
     }
 
-    result.items_scanned = tasks.size();
+    result.items_scanned = metadata.size();
     using EndpointMap = std::map<std::string, std::vector<RelationEndpoint>>;
     std::map<std::string, EndpointMap> endpoints_by_product_and_id;
     EndpointMap endpoints_by_uid;
     for (const auto& scanned : metadata) {
-        if (!scanned.valid) {
+        if (!scanned.item) {
             ++result.unresolved_links;
             continue;
         }
-        RelationEndpoint endpoint{scanned.product->name, scanned.item.id, scanned.item.uid};
-        endpoints_by_product_and_id[scanned.product->name][scanned.item.id].push_back(endpoint);
-        endpoints_by_uid[scanned.item.uid].push_back(std::move(endpoint));
+        const auto& item = *scanned.item;
+        RelationEndpoint endpoint{scanned.product->name, item.id, item.uid};
+        endpoints_by_product_and_id[scanned.product->name][item.id].push_back(endpoint);
+        endpoints_by_uid[item.uid].push_back(std::move(endpoint));
     }
 
     const auto resolve_stored_ref = [&](const std::string& ref) -> std::optional<RelationEndpoint> {
@@ -345,10 +396,11 @@ ScanResult scan_catalog(const Catalog& catalog, std::size_t max_items) {
     };
 
     for (const auto& scanned : metadata) {
-        if (!scanned.valid) {
+        if (!scanned.item) {
             continue;
         }
-        const RelationEndpoint source{scanned.product->name, scanned.item.id, scanned.item.uid};
+        const auto& item = *scanned.item;
+        const RelationEndpoint source{scanned.product->name, item.id, item.uid};
         const auto append = [&](const std::vector<std::string>& refs, RelationType type) {
             for (const auto& ref : refs) {
                 auto target = resolve_stored_ref(ref);
@@ -356,12 +408,12 @@ ScanResult scan_catalog(const Catalog& catalog, std::size_t max_items) {
                     ++result.unresolved_links;
                     continue;
                 }
-                result.relations.push_back(make_entry(source, *target, type));
+                result.relations.push_back(ScannedRelation{make_entry(source, *target, type), ref});
             }
         };
-        append(scanned.item.links.relates, RelationType::Relates);
-        append(scanned.item.links.blocks, RelationType::Blocks);
-        append(scanned.item.links.blocked_by, RelationType::BlockedBy);
+        append(item.links.relates, RelationType::Relates);
+        append(item.links.blocks, RelationType::Blocks);
+        append(item.links.blocked_by, RelationType::BlockedBy);
     }
     return result;
 }
@@ -391,11 +443,11 @@ RelationEntry requested_entry(
     return make_entry(source, target, type);
 }
 
-std::vector<RelationEntry> matching_relations(const ScanResult& scan, const RelationEntry& requested) {
-    std::vector<RelationEntry> matches;
-    for (const auto& relation : scan.relations) {
-        if (equivalent_relation(relation, requested)) {
-            matches.push_back(relation);
+std::vector<const ScannedRelation*> matching_relations(const ScanResult& scan, const RelationEntry& requested) {
+    std::vector<const ScannedRelation*> matches;
+    for (const auto& stored : scan.relations) {
+        if (equivalent_relation(stored.relation, requested)) {
+            matches.push_back(&stored);
         }
     }
     return matches;
@@ -409,7 +461,8 @@ std::vector<RelationEndpoint> find_cycle_path(
         return {};
     }
     std::map<std::string, std::vector<RelationEndpoint>> adjacency;
-    for (const auto& relation : scan.relations) {
+    for (const auto& stored : scan.relations) {
+        const auto& relation = stored.relation;
         if (relation.relation_type == RelationType::Blocks) {
             adjacency[endpoint_key(relation.source)].push_back(relation.target);
         }
@@ -480,6 +533,18 @@ void validate_mutation_request(const RelationMutationRequest& request) {
     }
 }
 
+bool refresh_relation_index(const ProductRuntime& product, const BacklogItem& item) {
+    try {
+        BacklogIndex index(product.backlog_root / ".cache" / "index" / "backlog.db",
+            product.name, product.product_root);
+        index.index_item(item);
+        return true;
+    } catch (const std::exception&) {
+        // Canonical readback still determines the result when the derived cache cannot be updated.
+        return false;
+    }
+}
+
 RelationMutationResult remove_unresolved_target_relation(
     const RelationMutationRequest& request,
     const Catalog& catalog,
@@ -496,8 +561,7 @@ RelationMutationResult remove_unresolved_target_relation(
     result.unresolved_links = 1;
 
     CanonicalStore source_store(source_product.product_root);
-    RefResolver source_resolver(source_store);
-    auto source_item = source_resolver.resolve(source.item_id);
+    auto source_item = read_relation_item(source_product, source.item_id);
     const auto& current_values = relation_values(source_item, request.relation_type);
     const auto current_matches = std::count(current_values.begin(), current_values.end(), target.item_id);
     if (current_matches == 0) {
@@ -514,12 +578,11 @@ RelationMutationResult remove_unresolved_target_relation(
         return result;
     }
 
-    CanonicalStore target_store(target_product.product_root);
-    if (!target_store.find_item_paths_by_id(target.item_id).empty()) {
+    if (has_canonical_display_id(target_product, target.item_id)) {
         throw std::runtime_error("Missing relation target appeared before apply; retry through canonical removal: " + target.item_id);
     }
 
-    source_item = source_resolver.resolve(source.item_id);
+    source_item = read_relation_item(source_product, source.item_id);
     auto& values = relation_values(source_item, request.relation_type);
     if (std::count(values.begin(), values.end(), target.item_id) > 1) {
         throw std::runtime_error("Duplicate unresolved relation storage detected before apply; refusing multi-value removal");
@@ -541,14 +604,11 @@ RelationMutationResult remove_unresolved_target_relation(
     result.changed = true;
     result.worklog_appended = true;
 
-    BacklogIndex index(source_product.backlog_root / ".cache" / "index" / "backlog.db");
-    index.initialize();
-    index.index_item(source_item);
-    result.index_refreshed = true;
+    result.index_refreshed = refresh_relation_index(source_product, source_item);
 
-    auto readback = source_resolver.resolve(source.item_id);
+    auto readback = source_store.read(*source_item.file_path);
     const auto& readback_values = relation_values(readback, request.relation_type);
-    result.read_after_write =
+    result.read_after_write = readback.id == source_item.id && readback.uid == source_item.uid &&
         std::find(readback_values.begin(), readback_values.end(), target.item_id) == readback_values.end();
     result.status = result.read_after_write ? "removed" : "read_after_write_failed";
     result.safe_retry = result.read_after_write;
@@ -560,7 +620,7 @@ RelationMutationResult mutate(const RelationMutationRequest& request, bool add) 
     auto catalog = load_catalog(request.start_path, request.max_products);
     const auto& source_product = resolve_product(catalog, request.source_product, "source_product");
     const auto& target_product = resolve_product(catalog, request.target_product, "target_product");
-    const auto source = resolve_endpoint(source_product, request.source_item, "source_item");
+    const auto source = resolve_endpoint(source_product, request.source_item, "source_item", true);
     const auto target_resolution = resolve_mutation_target(target_product, request.target_item, add);
     const auto target = target_resolution.endpoint;
     if (!add && !target_resolution.exists) {
@@ -572,7 +632,7 @@ RelationMutationResult mutate(const RelationMutationRequest& request, bool add) 
     }
 
     const auto requested = requested_entry(source, target, request.relation_type);
-    auto scan = scan_catalog(catalog, request.max_items);
+    auto scan = scan_catalog(catalog, request.max_items, true);
     auto matches = matching_relations(scan, requested);
 
     RelationMutationResult result;
@@ -612,10 +672,10 @@ RelationMutationResult mutate(const RelationMutationRequest& request, bool add) 
     catalog = load_catalog(request.start_path, request.max_products);
     const auto& fresh_source_product = resolve_product(catalog, request.source_product, "source_product");
     const auto& fresh_target_product = resolve_product(catalog, request.target_product, "target_product");
-    const auto fresh_source = resolve_endpoint(fresh_source_product, request.source_item, "source_item");
-    const auto fresh_target = resolve_endpoint(fresh_target_product, request.target_item, "target_item");
+    const auto fresh_source = resolve_endpoint(fresh_source_product, request.source_item, "source_item", true);
+    const auto fresh_target = resolve_endpoint(fresh_target_product, request.target_item, "target_item", true);
     const auto fresh_requested = requested_entry(fresh_source, fresh_target, request.relation_type);
-    scan = scan_catalog(catalog, request.max_items);
+    scan = scan_catalog(catalog, request.max_items, true);
     matches = matching_relations(scan, fresh_requested);
     result.products_scanned = catalog.products.size();
     result.items_scanned = scan.items_scanned;
@@ -646,22 +706,30 @@ RelationMutationResult mutate(const RelationMutationRequest& request, bool add) 
     RelationEndpoint owner_endpoint = fresh_source;
     RelationEndpoint stored_target = fresh_target;
     RelationType stored_type = request.relation_type;
+    std::string stored_ref = stored_target.item_id;
     if (!add) {
-        owner_endpoint = matches.front().stored_source;
-        stored_target = matches.front().stored_target;
-        stored_type = matches.front().stored_relation_type;
+        const auto& match = *matches.front();
+        owner_endpoint = match.relation.stored_source;
+        stored_target = match.relation.stored_target;
+        stored_type = match.relation.stored_relation_type;
+        stored_ref = match.raw_target;
     }
     const auto& owner_product = product_by_name(catalog, owner_endpoint.product);
     CanonicalStore owner_store(owner_product.product_root);
-    RefResolver owner_resolver(owner_store);
-    auto owner_item = owner_resolver.resolve(owner_endpoint.item_id);
+    auto owner_item = read_relation_item(owner_product, owner_endpoint.item_id);
+    if (owner_item.uid != owner_endpoint.uid) {
+        throw std::runtime_error("Canonical relation owner changed before apply; retry");
+    }
     auto& values = relation_values(owner_item, stored_type);
     if (add) {
-        values.push_back(stored_target.item_id);
+        values.push_back(stored_ref);
         std::sort(values.begin(), values.end());
         values.erase(std::unique(values.begin(), values.end()), values.end());
     } else {
-        values.erase(std::remove(values.begin(), values.end(), stored_target.item_id), values.end());
+        if (std::count(values.begin(), values.end(), stored_ref) != 1) {
+            throw std::runtime_error("Canonical relation storage changed before apply; retry");
+        }
+        values.erase(std::remove(values.begin(), values.end(), stored_ref), values.end());
     }
     StateMachine::record_worklog(
         owner_item,
@@ -673,15 +741,13 @@ RelationMutationResult mutate(const RelationMutationRequest& request, bool add) 
     result.changed = true;
     result.worklog_appended = true;
 
-    BacklogIndex index(owner_product.backlog_root / ".cache" / "index" / "backlog.db");
-    index.initialize();
-    index.index_item(owner_item);
-    result.index_refreshed = true;
+    result.index_refreshed = refresh_relation_index(owner_product, owner_item);
 
-    auto readback = owner_resolver.resolve(owner_endpoint.item_id);
+    auto readback = owner_store.read(*owner_item.file_path);
     const auto& readback_values = relation_values(readback, stored_type);
-    const bool present = std::find(readback_values.begin(), readback_values.end(), stored_target.item_id) != readback_values.end();
-    result.read_after_write = add ? present : !present;
+    const bool present = std::find(readback_values.begin(), readback_values.end(), stored_ref) != readback_values.end();
+    result.read_after_write = readback.id == owner_item.id && readback.uid == owner_item.uid &&
+        (add ? present : !present);
     if (!result.read_after_write) {
         result.status = "read_after_write_failed";
         result.safe_retry = false;
@@ -770,7 +836,8 @@ RelationListResult RelationOps::list(const RelationListRequest& request) {
     const auto scan = scan_catalog(catalog, request.max_items);
 
     std::vector<RelationEntry> matches;
-    for (const auto& relation : scan.relations) {
+    for (const auto& stored : scan.relations) {
+        const auto& relation = stored.relation;
         const bool outgoing = same_endpoint(relation.source, selected);
         const bool incoming = same_endpoint(relation.target, selected);
         const bool direction_match =

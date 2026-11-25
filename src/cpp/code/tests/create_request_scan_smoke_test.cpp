@@ -1,16 +1,20 @@
 #include <exception>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <iomanip>
 #include <iostream>
+#include <optional>
 #include <random>
 #include <sstream>
 #include <stdexcept>
 #include "kano/backlog_core/frontmatter/canonical_store.hpp"
 #include "kano/backlog_core/diagnostics/mutation_timing.hpp"
 #include <kano_unattended.hpp>
+#include <kano_process.h>
 #include "kano/backlog_ops/index/backlog_index.hpp"
+#include "kano/backlog_ops/templates/template_ops.hpp"
 #include "kano/backlog_ops/workitem/workitem_ops.hpp"
 
 namespace {
@@ -139,17 +143,346 @@ private:
     std::exception_ptr callback_error_;
 };
 
+constexpr int injected_crash_exit = 77;
+
+kano::backlog_core::CreateItemResult create_crash_fixture(const std::filesystem::path& root) {
+    kano::backlog_ops::BacklogIndex index(root / ".cache" / "index" / "backlog.db");
+    return kano::backlog_ops::WorkitemOps::create_item(
+        index, root, "CRS", kano::backlog_core::ItemType::Task, "Crash boundary", "codex",
+        std::nullopt, "P2", {}, "general", "backlog", std::nullopt, std::nullopt,
+        "", "", duplicate_admission("Crash boundary"), "boundary-key");
+}
+
+void run_crash_fixture(
+    const std::filesystem::path& binary,
+    const std::filesystem::path& root,
+    const std::string& span
+) {
+    const auto executable = std::filesystem::absolute(binary).string();
+    const auto path = root.string();
+    const char* args[] = {
+#ifdef _WIN32
+        executable.c_str(),
+#endif
+        "--crash-fixture", path.c_str(), span.c_str()
+    };
+    KanoProcessOptions options{};
+    options.executable = executable.c_str();
+    options.argv = args;
+    options.argv_count = sizeof(args) / sizeof(args[0]);
+    options.mode = KANO_PROCESS_MODE_CAPTURE;
+    options.timeout_ms = 10000;
+    KanoProcessResult result{};
+    expect(kano_process_run_ex(&options, &result), "crash fixture must launch as a native child");
+    const bool exited_at_boundary = !result.timed_out && result.exit_code == injected_crash_exit;
+    const std::string error = result.stderr_data ? result.stderr_data : "";
+    kano_process_free_result(&result);
+    expect(exited_at_boundary, "child must terminate at " + span + ": " + error);
+}
+
+void test_registered_sibling_projection(const std::filesystem::path& root) {
+    using kano::backlog_core::CanonicalStore;
+    using kano::backlog_core::ItemType;
+    using kano::backlog_ops::BacklogIndex;
+    using kano::backlog_ops::WorkitemOps;
+    const auto primary = root / "primary";
+    const auto linked = root / "linked # 100%";
+    const auto linked_git = primary / ".git" / "worktrees" / "side";
+    const auto relative_product = std::filesystem::path("products") / "sibling-product";
+    const auto active = primary / relative_product;
+    const auto sibling = linked / relative_product;
+    const auto db_relative = std::filesystem::path(".cache") / "index" / "backlog.db";
+    const auto sibling_db = linked / db_relative;
+    write_text(linked_git / "gitdir", "../../../../linked # 100%/.git\n");
+    write_text(linked_git / "commondir", "../..\n");
+    write_text(linked / ".git", "gitdir: ../primary/.git/worktrees/side\n");
+    const auto create = [](BacklogIndex& index, const std::filesystem::path& product,
+        const std::string& title, const std::string& key) {
+        return WorkitemOps::create_item(index, product, "SIB", ItemType::Task, title, "codex",
+            std::nullopt, "P2", {}, "general", "backlog", std::nullopt, std::nullopt,
+            "", "", duplicate_admission(title), key);
+    };
+
+    CanonicalStore sibling_store(sibling);
+    auto original = sibling_store.create("SIB", ItemType::Task, "Sibling seed", 280);
+    sibling_store.write(original);
+    BacklogIndex active_index(primary / db_relative, "sibling-product", active);
+    {
+        MutationTimingCapture timing;
+        const auto item = create(active_index, active, "First local item", "primary-first");
+        expect(item.id == "SIB-TSK-0281" &&
+            timing.metadata_reads(original.file_path->filename().string()) == 1 &&
+            !std::filesystem::exists(sibling_db.parent_path()),
+            "missing sibling index must scan canonical data without creating a cache");
+    }
+
+    BacklogIndex sibling_writer(sibling_db, "sibling-product", sibling);
+    const auto committed = create(sibling_writer, sibling, "Sibling request", "sibling-request");
+    auto higher = sibling_store.create("SIB", ItemType::Task, "Higher sibling allocation", 375);
+    sibling_store.write(higher);
+    sibling_writer.rebuild_metadata(sibling, "sibling-product");
+    const auto cached_bytes = read_text(sibling_db);
+    const auto probe = active_index.open_sibling_mutation_index(sibling);
+#ifdef _WIN32
+    expect(probe != nullptr, "Windows must open the existing fixed sibling projection read-only");
+#endif
+    const auto candidates = probe
+        ? probe->verified_mutation_paths(sibling, "sibling-request", true) : std::nullopt;
+    expect(candidates == sibling_writer.verified_mutation_paths(sibling, "sibling-request", true),
+        "read-only sibling lookup must accept a witness verified by the existing index reader");
+    const bool verified = candidates.has_value();
+    if (verified) {
+        expect(*candidates == std::vector<std::filesystem::path>{committed.path},
+            "sibling proof must resolve the matching request in that checkout");
+        expect(probe->verified_allocation_maximum(sibling, "SIB", "TSK") == 375,
+            "sibling proof must resolve the sibling allocation high-water mark");
+        expect(probe->verified_mutation_paths(sibling, higher.id) ==
+            std::vector<std::filesystem::path>{*higher.file_path},
+            "sibling proof must find occupied sibling filenames");
+        expect(!probe->verified_mutation_paths(active, "sibling-request", true) &&
+            !probe->verified_allocation_maximum(active, "SIB", "TSK"),
+            "sibling proof must refuse any other checkout root");
+    }
+    {
+        MutationTimingCapture timing;
+        const auto replay = create(active_index, active, "Sibling request", "sibling-request");
+        expect(replay.idempotent_replay && replay.id == committed.id &&
+            replay.uid == committed.uid && replay.path == committed.path,
+            "sibling replay must preserve its canonical ID, UID and checkout");
+        expect(timing.metadata_reads(committed.path.filename().string()) == 1 &&
+            timing.metadata_reads(higher.file_path->filename().string()) == (verified ? 0 : 1),
+            "a verified sibling lookup must read the matched canonical marker and skip unrelated metadata");
+    }
+    expect_throws_contains([&] {
+        (void)create(active_index, active, "Different sibling request", "sibling-request");
+    }, "item_create.idempotency_conflict", "sibling lookup must reject changed payload");
+    {
+        MutationTimingCapture timing;
+        const auto item = create(active_index, active, "Next local request", "primary-next");
+        expect(item.id == "SIB-TSK-0376" &&
+            timing.metadata_reads(higher.file_path->filename().string()) == (verified ? 0 : 1),
+            "normal create must include sibling allocation and skip unrelated verified metadata");
+    }
+    auto conflict = sibling_store.create("SIB", ItemType::Task, "Legacy marker", 450);
+    conflict.external["create_request_key"] = "sibling-request";
+    conflict.external["create_request_payload"] = "different request";
+    const auto revision = sibling_store.read_write_revision().current;
+    write_text(*conflict.file_path,
+        kano::backlog_ops::TemplateOps::render_item_body(conflict, "codex", "Raw canonical fixture"));
+    expect(sibling_store.read_write_revision().current == revision,
+        "external keyed fixture must bypass the native write receipt");
+    {
+        MutationTimingCapture timing;
+        expect_throws_contains([&] {
+            (void)create(active_index, active, "Sibling request", "sibling-request");
+        }, "item_create.idempotency_conflict", "a stale sibling must reveal the new canonical conflict");
+        expect(timing.metadata_reads(conflict.file_path->filename().string()) == 1,
+            "a stale sibling proof must fall back to canonical metadata");
+    }
+    expect(read_text(sibling_db) == cached_bytes,
+        "sibling projection queries must not modify its SQLite cache");
+    std::cout << "sibling mutation projection: " << (verified ? "verified NTFS" : "canonical fallback") << "\n";
+}
+
+void test_indexed_uid_parent_chain(const std::filesystem::path& root) {
+    using kano::backlog_core::CanonicalStore;
+    using kano::backlog_core::ItemType;
+    using kano::backlog_ops::BacklogIndex;
+    using kano::backlog_ops::WorkitemOps;
+
+    CanonicalStore store(root);
+    auto unrelated = store.create("ANC", ItemType::Epic, "Unrelated epic", 1);
+    store.write(unrelated);
+    auto ancestor = store.create("ANC", ItemType::Epic, "UID ancestor", 2);
+    store.write(ancestor);
+    auto parent = store.create("ANC", ItemType::Feature, "Direct parent", 1, ancestor.uid);
+    store.write(parent);
+    BacklogIndex index(root / ".cache" / "index" / "backlog.db", "configured-product", root);
+    const auto create = [&](const std::string& title, const std::string& key) {
+        return WorkitemOps::create_item(index, root, "ANC", ItemType::Task, title, "codex",
+            parent.id, "P2", {}, "general", "backlog", std::nullopt, std::nullopt,
+            "", "", duplicate_admission(title), key);
+    };
+    {
+        MutationTimingCapture timing;
+        const auto child = create("Cold child with UID ancestor", "cold-uid-ancestor");
+        expect(child.read_after_write && timing.full_reads(unrelated.file_path->filename().string()) == 0,
+            "keyed create must reuse the bounded ancestor metadata inventory when its index is cold");
+    }
+
+    index.rebuild_metadata(root, "configured-product");
+    const auto projected = index.verified_mutation_paths(root, ancestor.uid);
+    const bool verified = projected == std::vector<std::filesystem::path>{*ancestor.file_path};
+    {
+        MutationTimingCapture timing;
+        const auto child = create("Child with UID ancestor", "uid-ancestor");
+        expect(child.read_after_write && store.read(child.path).parent == parent.id,
+            "create must preserve the direct parent ID after resolving its UID ancestor");
+        expect(timing.full_reads(unrelated.file_path->filename().string()) == 0,
+            "UID ancestor validation must skip unrelated canonical bodies");
+        if (verified) {
+            expect(timing.reads("canonical_store.list_items", "all") == 0,
+                "verified UID ancestor validation must skip canonical inventory");
+        }
+    }
+
+    ancestor.parent = parent.uid;
+    store.write(ancestor);
+    index.index_item(ancestor);
+    const auto count = store.list_items().size();
+    expect_throws_contains([&] {
+        (void)create("Child of cyclic UID chain", "uid-ancestor-cycle");
+    }, "hierarchy.parent_cycle", "create must reject a cycle reached through canonical UID edges");
+    expect(store.list_items().size() == count,
+        "a UID ancestor cycle must fail before writing a child");
+    std::cout << "UID parent-chain mutation: "
+              << (verified ? "verified NTFS" : "canonical fallback") << "\n";
+}
+
+void test_linked_create_registry_scope(const std::filesystem::path& root) {
+    using kano::backlog_core::CanonicalStore;
+    using kano::backlog_core::ItemType;
+    using kano::backlog_ops::BacklogIndex;
+    using kano::backlog_ops::WorkitemOps;
+    const auto primary = root / "primary";
+    const auto linked = root / "linked";
+    const auto common = primary / ".git";
+    const auto registry = common / "worktrees";
+    const auto primary_product = primary / "products" / "fixture";
+    const auto linked_product = linked / "products" / "fixture";
+    const auto ledger_path = common / "kano" / "backlog-id-reservations.db";
+    const auto link = [&](const std::string& name) {
+        write_text(registry / name / "gitdir", "../../../../" + name + "/.git\n");
+        write_text(registry / name / "commondir", "../..\n");
+        write_text(root / name / ".git", "gitdir: ../primary/.git/worktrees/" + name + "\n");
+    };
+    link("linked");
+    link("without-product");
+    write_text(registry / "prunable" / "gitdir", "../../../../missing-parent/absent/checkout/.git\n");
+    BacklogIndex index(linked / ".cache" / "index" / "backlog.db", "fixture", linked_product);
+    const auto create = [&](const std::string& title, const std::optional<std::string>& key) {
+        return WorkitemOps::create_item(index, linked_product, "REG", ItemType::Task, title, "codex",
+            std::nullopt, "P2", {}, "general", "backlog", std::nullopt, std::nullopt,
+            "", "", duplicate_admission(title), key);
+    };
+
+    CanonicalStore primary_store(primary_product);
+    CanonicalStore linked_store(linked_product);
+    auto legacy = primary_store.create("REG", ItemType::Task, "Primary legacy request", 700);
+    legacy.external["create_request_key"] = "primary-legacy";
+    legacy.external["create_request_payload"] = "historical fingerprint";
+    primary_store.write(legacy);
+    expect_throws_contains([&] {
+        (void)create("Primary legacy request", "primary-legacy");
+    }, "item_create.idempotency_conflict", "linked admission must find a primary-only legacy marker");
+    expect(linked_store.list_items().empty(), "primary marker conflict must preserve the linked checkout");
+    expect(create("Allocate past primary", "primary-maximum").id == "REG-TSK-0701",
+        "linked allocation must advance past the primary checkout's highest filename");
+
+    const auto payload = [](const std::string& title) {
+        std::string fingerprint;
+        for (const auto& field : {"REG", "TSK", title.c_str(), "codex", "", "P2", "general",
+                 "backlog", "", "", "", "", title.c_str(), "test-product", "create", "", "false", "0", "0", "0"}) {
+            const std::string value(field);
+            fingerprint += std::to_string(value.size()) + ":" + value;
+        }
+        return fingerprint;
+    };
+    const std::string scope = "products/fixture";
+    const std::string key_prefix = std::to_string(scope.size()) + ":" + scope;
+    BacklogIndex ledger(ledger_path);
+    const std::string collision_title = "Reserved primary collision";
+    const auto reservation = ledger.reserve_next_number_for_request(
+        "REG", "TSK", "codex", key_prefix + "primary-collision", payload(collision_title));
+    auto collision = primary_store.create("REG", ItemType::Task, "Primary filename", reservation.number);
+    primary_store.write(collision);
+    expect_throws_contains([&] {
+        (void)create(collision_title, "primary-collision");
+    }, "duplicate_item_id.allocation_collision", "linked retry must detect its pending ID in the primary checkout");
+    expect(linked_store.list_items().size() == 1 &&
+        !std::filesystem::exists(primary / ".cache" / "index"),
+        "linked admission must neither write the colliding item nor create a primary cache");
+
+#ifdef _WIN32
+    const std::string foreign = "/unmounted-container/checkout/.git";
+#else
+    const std::string foreign = "C:/unmounted-host/checkout/.git";
+#endif
+    write_text(registry / "foreign" / "gitdir", foreign + "\n");
+    const std::string blocked_title = "Unverified registration";
+    expect_throws_contains([&] {
+        (void)create(blocked_title, "unverified-foreign");
+    }, "item_create.worktree_registry_incomplete", "a foreign checkout must fail closed");
+    expect_throws_contains([&] {
+        (void)create(blocked_title, std::nullopt);
+    }, "item_create.worktree_registry_incomplete", "unkeyed allocation must also verify the collision scope");
+    expect(!ledger.find_request_reservation(
+            "REG", "TSK", key_prefix + "unverified-foreign", payload(blocked_title)) &&
+        linked_store.list_items().size() == 1,
+        "unverified registry scope must fail before durable reservation or canonical mutation");
+    write_text(registry / "foreign" / "gitdir", "../../../../without-product/.git\n");
+    expect_throws_contains([&] {
+        (void)create(blocked_title, "unverified-reciprocal");
+    }, "item_create.worktree_registry_incomplete", "a visible backlink must identify its own registry entry");
+    std::filesystem::remove(registry / "foreign" / "gitdir");
+    std::filesystem::remove(registry / "foreign");
+    write_text(registry / "prunable" / "locked", "temporarily offline\n");
+    expect_throws_contains([&] {
+        (void)create(blocked_title, "unverified-locked");
+    }, "item_create.worktree_registry_incomplete", "a locked missing checkout cannot be treated as prunable");
+}
+
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
     kano::infra::ConfigureUnattendedExecution();
     using kano::backlog_core::ItemType;
     using kano::backlog_core::CanonicalStore;
     using kano::backlog_ops::BacklogIndex;
     using kano::backlog_ops::WorkitemOps;
+    if (argc == 4 && std::string_view(argv[1]) == "--crash-fixture") {
+        MutationTimingCapture timing([] { std::_Exit(injected_crash_exit); }, argv[3]);
+        (void)create_crash_fixture(argv[2]);
+        return 1;
+    }
     std::filesystem::path root;
     try {
         root = make_temp_root();
+        if (argc == 2 && std::string_view(argv[1]) == "--sibling-projection") {
+            test_registered_sibling_projection(root);
+            test_linked_create_registry_scope(root / "registry");
+            std::filesystem::remove_all(root);
+            return 0;
+        }
+        test_indexed_uid_parent_chain(root / "uid-parent-chain");
+        {
+            const std::string spans[] = {
+                "workitem.create_item.request_scan",
+                "workitem.create_item.render_template",
+                "workitem.create_item.write_file",
+                "workitem.create_item.duplicate_admission_receipt",
+            };
+            for (std::size_t stage = 0; stage < 4; ++stage) {
+                const auto product = root / ("crash-stage-" + std::to_string(stage));
+                std::filesystem::create_directories(product / ".git");
+                run_crash_fixture(argv[0], product, spans[stage]);
+                const CanonicalStore store(product);
+                const auto before = store.list_items();
+                const auto receipt = product / "_meta" / "duplicate-admission" / "CRS-TSK-0001.json";
+                const bool canonical_already_written = stage >= 2;
+                expect(before.size() == (canonical_already_written ? 1 : 0) &&
+                    std::filesystem::exists(receipt) == (stage == 3),
+                    "crash fixture must preserve the expected canonical and receipt boundary");
+                const std::string previous_uid =
+                    canonical_already_written ? store.read(before.front()).uid : "";
+                const auto retried = create_crash_fixture(product);
+                expect(retried.id == "CRS-TSK-0001" && retried.read_after_write &&
+                    retried.idempotent_replay == canonical_already_written &&
+                    (!canonical_already_written || retried.uid == previous_uid) &&
+                    store.list_items().size() == 1 && std::filesystem::exists(receipt),
+                    "same-key retry must converge to one item and receipt after abrupt termination");
+            }
+        }
         {
             // Keyed parent admission shares one bounded scan, still checking
             // both input forms, unrelated identities and the final live parent.
@@ -181,9 +514,9 @@ int main() {
                     std::nullopt, std::nullopt, "", "", duplicate_admission("Parent identity child"),
                     use_key ? std::optional<std::string>{"parent-key"} : std::nullopt);
                 expect(timing.full_reads(parent_path.filename().string()) == (use_key ? 2 : (use_uid ? 3 : 2)),
-                    "parent admission must retain its matched read and final fresh scan");
-                expect(timing.full_reads(unrelated_path.filename().string()) == (use_key ? 1 : (use_uid ? 3 : 2)),
-                    "keyed initial admission must not fully parse unrelated item bodies");
+                    "parent admission must retain its matched reads and final live canonical read");
+                expect(timing.full_reads(unrelated_path.filename().string()) == 0,
+                    "neither initial admission nor final parent verification may parse unrelated item bodies");
                 expect(timing.metadata_reads(parent_path.filename().string()) == (use_key ? 1 : 0) &&
                     timing.metadata_reads(unrelated_path.filename().string()) == (use_key ? 1 : 0),
                     "keyed parent and first request verification must share exactly one bounded scan");
@@ -407,7 +740,33 @@ int main() {
                     "reserved recovery must scan fresh after the cached pass and replay only the exact bound UID");
                 expect(timing.metadata_reads("parent.md") == 2,
                     "reserved recovery must not reuse the first parent/request inventory");
+                const auto finalized = index.find_request_reservation(
+                    "RCP", "TSK", "fresh-parent-key", payload);
+                expect(finalized && finalized->committed_request && finalized->uid == reserved_uid,
+                    "recovering a canonical write must finalize the original reservation");
             }
+        }
+        {
+            const auto product = root / "atomic-create-collision";
+            CanonicalStore store(product);
+            BacklogIndex index(product / ".cache" / "index" / "backlog.db");
+            auto unrelated = store.create("ATM", ItemType::Task, "Atomic create collision", 1);
+            const auto path = *unrelated.file_path;
+            std::string inserted_bytes;
+            MutationTimingCapture timing([&] {
+                store.write(unrelated);
+                inserted_bytes = read_text(path);
+            });
+            expect_throws_contains([&] {
+                (void)WorkitemOps::create_item(
+                    index, product, "ATM", ItemType::Task, "Atomic create collision", "opencode",
+                    std::nullopt, "P2", {}, "general", "backlog", std::nullopt, std::nullopt,
+                    "", "", duplicate_admission("Atomic create collision"), "atomic-collision-key");
+            }, "canonical_create_no_replace_failed", "existing destination must survive the final write race");
+            timing.verify_callback();
+            expect(read_text(path) == inserted_bytes && store.read(path).uid == unrelated.uid &&
+                !std::filesystem::exists(product / "_meta" / "duplicate-admission" / (unrelated.id + ".json")),
+                "atomic no-replace failure must preserve the existing item and produce no create receipt");
         }
         {
             // PR5 must never write metadata that its next canonical request

@@ -1,6 +1,7 @@
 #include "kano/backlog_core/refs/ref_parser.hpp"
 #include <algorithm>
 #include <cctype>
+#include <charconv>
 
 namespace kano::backlog_core {
 
@@ -54,12 +55,15 @@ std::optional<PathRef> RefParser::parse_path(const std::string& ref) {
 std::optional<DisplayIdRef> RefParser::parse_display_id(const std::string& ref) {
     std::string s = trim(ref);
     const size_t number_dash = s.rfind('-');
-    if (number_dash == std::string::npos || number_dash + 5 != s.size()) {
+    if (number_dash == std::string::npos || s.size() - number_dash - 1 < 4) {
         return std::nullopt;
     }
 
-    const std::string number_part = s.substr(number_dash + 1);
-    if (!std::all_of(number_part.begin(), number_part.end(), [](unsigned char ch) { return std::isdigit(ch); })) {
+    const char* number_begin = s.data() + number_dash + 1;
+    const char* number_end = s.data() + s.size();
+    int number = 0;
+    const auto [parsed_end, error] = std::from_chars(number_begin, number_end, number);
+    if (error != std::errc{} || parsed_end != number_end) {
         return std::nullopt;
     }
 
@@ -90,7 +94,7 @@ std::optional<DisplayIdRef> RefParser::parse_display_id(const std::string& ref) 
     DisplayIdRef res;
     res.product = product;
     res.type_abbrev = type_abbrev;
-    res.number = std::stoi(number_part);
+    res.number = number;
     res.raw = s;
     return res;
 }

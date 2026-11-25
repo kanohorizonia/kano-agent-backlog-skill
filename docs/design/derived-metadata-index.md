@@ -19,7 +19,7 @@ Raw workspace paths are not part of the read contract. `source_ref` is
 product-relative and rejects absolute paths or parent traversal.
 
 The disposable SQLite row schema and snapshot schema are both internal version
-3 contracts (`schema_version=3` and `snapshot_schema_version=3`). They include
+4 contracts (`schema_version=4` and `snapshot_schema_version=4`). They include
 the indexed rows, inventory and content revisions, item count, generation,
 canonical-write receipt fence, platform change-proof state, status, and optional
 invalidation reason. Inventory revision is deterministic over sorted source
@@ -156,6 +156,16 @@ writes finish.
 An incremental row update keeps a previously verified snapshot ready. If no
 verified snapshot exists, the projection remains `incomplete` until a rebuild.
 This prevents a partial producer run from becoming an authoritative read source.
+On portable proof state, a contiguous write receipt and canonical readback
+advance only the affected source. Ordinary readers still verify full canonical
+content against the recorded revision before trusting the snapshot.
+
+Create admission can seek canonical source paths by ID, UID, request key, and
+filename allocation number when a current NTFS witness and mutation receipt
+verify the product inventory. It reads the matched canonical records before
+accepting the parent or replay. Changes to projection rows invalidate mutation
+lookups until a verified rebuild or a verified contiguous row publication.
+Products without a supported change witness retain canonical admission scans.
 
 On Windows, the `windows-ntfs-usn-v1` witness contains the product root's NTFS
 volume serial and file ID, USN journal identity and verified USN endpoint, plus
@@ -169,7 +179,7 @@ canonical rows, captures the resulting watch set, then verifies that neither
 fence changed inside the rebuild window. Portable rebuild repeats canonical
 write-receipt, inventory, and full-content validation as a second validation
 fence after scanning and before publication. Only then does one SQLite
-transaction replace product rows, compute revisions, and publish the ready v3
+transaction replace product rows, compute revisions, and publish the ready v4
 snapshot and next `product_revision`. A failed proof, validation, or transaction
 publishes nothing; recovery is an explicit product-scoped rebuild.
 

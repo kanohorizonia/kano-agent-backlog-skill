@@ -8,6 +8,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <json/json.h>
@@ -976,7 +977,8 @@ int main(int argc, char** argv) {
         const auto keyed_create_args = with_duplicate_admission({
             "-P", "quick-smoke-product", "workitem", "create", "-t", "task",
             "--title", "Quick smoke task", "--agent", "tester",
-            "--idempotency-key", "quick-task-request", "--format", "json"},
+            "--idempotency-key", "quick-task-request", "--request-context-sha256", std::string(64, 'a'),
+            "--format", "json"},
             "Quick smoke task");
         expect_command_capture_success(
             run_command_capture(binary, keyed_create_args, first_create_output),
@@ -996,6 +998,18 @@ int main(int argc, char** argv) {
                    retry_create["id"].asString() == first_create["id"].asString() &&
                    retry_create["idempotent_replay"].asBool(),
             "same-key retry must return the committed UID without creating another item");
+        const auto check_request_context = [&](const std::string& digest, std::string_view expected_error) {
+            auto changed_args = keyed_create_args;
+            const auto flag = std::find(changed_args.begin(), changed_args.end(), "--request-context-sha256");
+            expect(flag != changed_args.end(), "keyed create includes a context guard");
+            *(flag + 1) = digest;
+            const auto context_output = temp_root / "quick-create-context-rejection.txt";
+            expect(run_command_capture(binary, changed_args, context_output) != 0 &&
+                read_text(context_output).find(expected_error) != std::string::npos,
+                "create must reject a malformed digest or a changed context under the same key");
+        };
+        check_request_context(std::string(64, 'A'), "item_create.request_context_invalid");
+        check_request_context(std::string(64, 'b'), "conflict");
         const auto task_receipt_path = temp_root / "_kano" / "backlog" / "products" / "quick-smoke-product" / "_meta" / "duplicate-admission" / "QS-TSK-0001.json";
         expect(std::filesystem::exists(task_receipt_path), "workitem create should write duplicate admission receipt");
         const auto task_path = temp_root / "_kano" / "backlog" / "products" / "quick-smoke-product" / "items" / "task" / "0000" / "QS-TSK-0001_quick-smoke-task.md";
@@ -2102,6 +2116,23 @@ int main(int argc, char** argv) {
             "--agent", "tester"
         }) == 0, "set-ready failed");
         const auto task_text = read_text(task_path);
+        const auto stale_ready_output = temp_root / "stale-ready.txt";
+        expect(run_command_capture(binary, {
+            "-P", "quick-smoke-product", "workitem", "set-ready", "QS-TSK-0001",
+            "--goal", "Stale replay must not overwrite this item.",
+            "--expected-sha256", std::string(64, '0'), "--agent", "tester"
+        }, stale_ready_output) != 0, "set-ready accepted a stale canonical snapshot");
+        expect(read_text(stale_ready_output).find("canonical_write_guard_mismatch") != std::string::npos,
+            "set-ready must report the snapshot conflict");
+        expect(read_text(task_path) == task_text, "rejected set-ready must leave canonical content untouched");
+        const auto mismatched_ready_output = temp_root / "mismatched-ready.txt";
+        expect(run_command_capture(binary, {
+            "-P", "quick-smoke-product", "workitem", "set-ready", "QS-TSK-0001",
+            "--goal-file", (text_root / "goal.md").string(),
+            "--expected-ready-sha256", std::string(64, '0'), "--agent", "tester"
+        }, mismatched_ready_output) != 0, "set-ready accepted Ready bytes that differ from the request");
+        expect(read_text(mismatched_ready_output).find("ready_payload_digest_mismatch") != std::string::npos &&
+            read_text(task_path) == task_text, "Ready input mismatch must leave canonical content untouched");
         expect(task_text.find("# Non-Goals / Do Not") != std::string::npos, "set-ready task should render Non-Goals / Do Not heading");
         expect(task_text.find("Quick smoke non-goal.") != std::string::npos, "set-ready task should persist non-goals text");
         expect(task_text.find("# Intent Amendments") != std::string::npos, "set-ready task should render Intent Amendments heading");

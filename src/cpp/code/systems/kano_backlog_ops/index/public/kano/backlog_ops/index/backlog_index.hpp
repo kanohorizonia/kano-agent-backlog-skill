@@ -15,8 +15,8 @@
 
 namespace kano::backlog_ops {
 
-inline constexpr int kMetadataIndexSchemaVersion = 3;
-inline constexpr int kMetadataSnapshotSchemaVersion = 3;
+inline constexpr int kMetadataIndexSchemaVersion = 4;
+inline constexpr int kMetadataSnapshotSchemaVersion = 4;
 
 struct IndexItem {
     std::string id;
@@ -28,6 +28,7 @@ struct IndexItem {
     std::optional<std::string> priority;
     std::optional<std::string> parent;
     std::optional<std::string> duplicate_of;
+    std::optional<std::string> create_request_key;
     std::string slug;
     std::string source_ref;
     std::string source_hash;
@@ -170,6 +171,23 @@ public:
 
     std::optional<std::filesystem::path> get_path_by_id(const std::string& id);
     std::optional<std::filesystem::path> get_path_by_uid(const std::string& uid);
+
+    // A populated result, including an empty match list, requires a current
+    // platform witness for the complete canonical product inventory.
+    std::optional<std::vector<std::filesystem::path>> verified_mutation_paths(
+        const std::filesystem::path& product_root,
+        const std::string& reference,
+        bool create_request_key = false
+    );
+    std::optional<int> verified_allocation_maximum(
+        const std::filesystem::path& product_root,
+        const std::string& prefix,
+        const std::string& type_code
+    );
+    std::optional<kano::backlog_core::BacklogItem> read_item_for_mutation(
+        const std::filesystem::path& product_root,
+        const std::string& reference
+    );
 
     std::vector<IndexItem> query_items(
         std::optional<kano::backlog_core::ItemType> type = std::nullopt,

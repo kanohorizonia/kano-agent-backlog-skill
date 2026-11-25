@@ -1859,6 +1859,9 @@ int main(int argc, char** argv) {
             }
             fixtures.push_back(std::move(item));
         }
+        auto keyed_fixture = store.read(*fixtures.back().file_path);
+        keyed_fixture.external["create_request_key"] = "metadata-fixture-key";
+        store.write(keyed_fixture);
         store.reset_write_revision();
 
         const auto target_id = fixtures.back().id;
@@ -1891,8 +1894,54 @@ int main(int argc, char** argv) {
                    built_proof.root_file_id != "0" &&
                    built_proof.journal_id != "0" && built_proof.watch_count > 0,
             "Windows rebuild must persist verified NTFS identities and watches");
+        {
+            BacklogIndex mutation_index(index_path, product, product_root);
+            const auto by_id = mutation_index.verified_mutation_paths(product_root, target_id);
+            const auto by_uid = mutation_index.verified_mutation_paths(product_root, target_uid);
+            const auto absent = mutation_index.verified_mutation_paths(
+                product_root, "unknown-create-request", true);
+            const auto keyed = mutation_index.verified_mutation_paths(
+                product_root, "metadata-fixture-key", true);
+            expect(by_id && *by_id == std::vector<std::filesystem::path>{*fixtures.back().file_path} &&
+                       by_uid && *by_uid == *by_id && keyed && *keyed == *by_id &&
+                       absent && absent->empty(),
+                "live witness must verify bounded ID, UID, and request lookups");
+            expect(mutation_index.verified_allocation_maximum(product_root, "MDI", "TSK") == 650,
+                "live witness must authorize the filename-based allocation maximum");
+
+            execute_sql(index_path, "DELETE FROM items WHERE product = '" + product +
+                "' AND id = '" + target_id + "'");
+            expect(!mutation_index.verified_mutation_paths(product_root, target_id) &&
+                       !mutation_index.verified_mutation_paths(
+                           product_root, "unknown-create-request", true) &&
+                       !mutation_index.verified_allocation_maximum(product_root, "MDI", "TSK"),
+                "direct projection corruption must invalidate positive and negative mutation lookup");
+            mutation_index.rebuild_metadata(product_root, product);
+            execute_sql(index_path, "DELETE FROM metadata_change_watch WHERE product = '" + product +
+                "' AND is_directory = 1 AND file_id = (SELECT file_id FROM metadata_change_watch "
+                "WHERE product = '" + product + "' AND is_directory = 1 LIMIT 1)");
+            expect(!mutation_index.verified_mutation_paths(
+                       product_root, "unknown-create-request", true),
+                "missing watch coverage must invalidate negative mutation lookup");
+            for (int update = 0; update < 2; ++update) {
+                store.write(keyed_fixture);
+                mutation_index.index_item(keyed_fixture);
+                expect(!mutation_index.verified_mutation_paths(
+                           product_root, "metadata-fixture-key", true),
+                    "incremental updates must tolerate and preserve a dirty projection");
+            }
+            mutation_index.rebuild_metadata(product_root, product);
+        }
 #else
         expect_portable_proof_state(index_path, product, "portable rebuild");
+        {
+            BacklogIndex mutation_index(index_path, product, product_root);
+            expect(!mutation_index.verified_mutation_paths(product_root, target_id) &&
+                       !mutation_index.verified_mutation_paths(
+                           product_root, "unknown-create-request", true) &&
+                       !mutation_index.verified_allocation_maximum(product_root, "MDI", "TSK"),
+                "portable proof state must not authorize mutation lookups or negative results");
+        }
 #endif
 
         const auto baseline_status = kano::backlog_ops::get_index_status(

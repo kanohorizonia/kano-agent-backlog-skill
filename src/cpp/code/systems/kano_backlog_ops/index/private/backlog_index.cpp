@@ -614,6 +614,10 @@ IndexItem index_item_from_metadata(
     indexed.priority = item.priority;
     indexed.parent = item.parent;
     indexed.duplicate_of = item.duplicate_of;
+    const auto request_key = item.external.find("create_request_key");
+    if (request_key != item.external.end() && !request_key->second.empty()) {
+        indexed.create_request_key = request_key->second;
+    }
     indexed.slug = slug_from_source(item.id, source.path);
     indexed.source_ref = source.source_ref;
     indexed.source_hash = std::move(source_hash);
@@ -1399,17 +1403,51 @@ void bind_optional_text(const Statement& statement, int index, const std::option
     }
 }
 
+bool mutation_projection_dirty(sqlite3* db, const std::string& product) {
+    Statement statement(db, "SELECT 1 FROM metadata_mutation_dirty WHERE product = ?",
+        "check mutation projection integrity");
+    statement.bind_text(1, product);
+    return statement.step() == SQLITE_ROW;
+}
+
+void mark_mutation_projection_verified(sqlite3* db, const std::string& product) {
+    Statement statement(db, "DELETE FROM metadata_mutation_dirty WHERE product = ?",
+        "record verified mutation projection publication");
+    statement.bind_text(1, product);
+    statement.step_done();
+}
+
+std::pair<std::string, int> allocation_from_source(const std::string& source_ref) {
+    const auto filename = std::filesystem::path(source_ref).filename().string();
+    const auto delimiter = filename.find_first_of("_.");
+    const auto separator = filename.rfind('-', delimiter);
+    if (delimiter == std::string::npos || separator == std::string::npos || separator >= delimiter) {
+        return {};
+    }
+    const char* first = filename.data() + separator + 1;
+    const char* last = filename.data() + delimiter;
+    int number = 0;
+    const auto parsed = std::from_chars(first, last, number);
+    if (parsed.ec != std::errc{} || parsed.ptr != last || number <= 0) {
+        return {};
+    }
+    return {filename.substr(0, separator), number};
+}
+
 void upsert_index_row(sqlite3* db, const IndexItem& item) {
     Statement statement(
         db,
         "INSERT INTO items "
         "(product, id, uid, type, title, state, priority, parent_ref, duplicate_of, slug, "
+        "create_request_key, allocation_key, allocation_number, "
         "source_ref, source_hash, source_size, source_mtime_ns, estimated_tokens, updated) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
         "ON CONFLICT(product, id) DO UPDATE SET "
         "uid=excluded.uid, type=excluded.type, title=excluded.title, state=excluded.state, "
         "priority=excluded.priority, parent_ref=excluded.parent_ref, "
         "duplicate_of=excluded.duplicate_of, slug=excluded.slug, "
+        "create_request_key=excluded.create_request_key, "
+        "allocation_key=excluded.allocation_key, allocation_number=excluded.allocation_number, "
         "source_ref=excluded.source_ref, source_hash=excluded.source_hash, "
         "source_size=excluded.source_size, source_mtime_ns=excluded.source_mtime_ns, "
         "estimated_tokens=excluded.estimated_tokens, updated=excluded.updated",
@@ -1424,12 +1462,16 @@ void upsert_index_row(sqlite3* db, const IndexItem& item) {
     bind_optional_text(statement, 8, item.parent);
     bind_optional_text(statement, 9, item.duplicate_of);
     statement.bind_text(10, item.slug);
-    statement.bind_text(11, item.source_ref);
-    statement.bind_text(12, item.source_hash);
-    statement.bind_int64(13, static_cast<std::int64_t>(item.source_size));
-    statement.bind_int64(14, item.source_mtime_ns);
-    statement.bind_int64(15, static_cast<std::int64_t>(item.estimated_tokens));
-    statement.bind_text(16, item.updated);
+    bind_optional_text(statement, 11, item.create_request_key);
+    const auto [allocation_key, allocation_number] = allocation_from_source(item.source_ref);
+    statement.bind_text(12, allocation_key);
+    statement.bind_int(13, allocation_number);
+    statement.bind_text(14, item.source_ref);
+    statement.bind_text(15, item.source_hash);
+    statement.bind_int64(16, static_cast<std::int64_t>(item.source_size));
+    statement.bind_int64(17, item.source_mtime_ns);
+    statement.bind_int64(18, static_cast<std::int64_t>(item.estimated_tokens));
+    statement.bind_text(19, item.updated);
     statement.step_done();
 }
 
@@ -1690,7 +1732,8 @@ bool metadata_columns_current(sqlite3* db) {
     const std::set<std::string> required_items = {
         "product", "id", "uid", "type", "title", "state", "priority", "parent_ref",
         "duplicate_of", "slug", "source_ref", "source_hash", "source_size",
-        "source_mtime_ns", "estimated_tokens", "updated"
+        "source_mtime_ns", "estimated_tokens", "updated", "create_request_key",
+        "allocation_key", "allocation_number"
     };
     const auto snapshot_columns = table_columns(db, "metadata_snapshots");
     const std::set<std::string> required_snapshots = {
@@ -1704,7 +1747,16 @@ bool metadata_columns_current(sqlite3* db) {
     const std::set<std::string> required_watch = {
         "product", "source_ref", "file_id", "is_directory"
     };
-    return std::includes(
+    Statement guard_triggers(
+        db,
+        "SELECT count(*) FROM sqlite_master WHERE type = 'trigger' AND name IN ("
+        "'metadata_mutation_dirty_insert', 'metadata_mutation_dirty_update', 'metadata_mutation_dirty_delete', "
+        "'metadata_mutation_watch_insert', 'metadata_mutation_watch_update', 'metadata_mutation_watch_delete')",
+        "check mutation projection guards");
+    const bool mutation_guards_available =
+        table_columns(db, "metadata_mutation_dirty").contains("product") &&
+        guard_triggers.step() == SQLITE_ROW && sqlite3_column_int(guard_triggers.get(), 0) == 6;
+    return mutation_guards_available && std::includes(
                item_columns.begin(), item_columns.end(),
                required_items.begin(), required_items.end()) &&
         std::includes(
@@ -1812,6 +1864,7 @@ void BacklogIndex::initialize() {
             execute("DROP TABLE IF EXISTS items");
             execute("DROP TABLE IF EXISTS metadata_snapshots");
             execute("DROP TABLE IF EXISTS metadata_change_watch");
+            execute("DROP TABLE IF EXISTS metadata_mutation_dirty");
             execute(
                 "CREATE TABLE items ("
                 "  product TEXT NOT NULL,"
@@ -1823,6 +1876,9 @@ void BacklogIndex::initialize() {
                 "  priority TEXT,"
                 "  parent_ref TEXT,"
                 "  duplicate_of TEXT,"
+                "  create_request_key TEXT,"
+                "  allocation_key TEXT NOT NULL,"
+                "  allocation_number INTEGER NOT NULL,"
                 "  slug TEXT NOT NULL,"
                 "  source_ref TEXT NOT NULL,"
                 "  source_hash TEXT NOT NULL,"
@@ -1834,6 +1890,30 @@ void BacklogIndex::initialize() {
                 "  UNIQUE(product, uid),"
                 "  UNIQUE(product, source_ref)"
                 ")"
+            );
+            execute(
+                "CREATE INDEX metadata_create_request_key ON items(product, create_request_key)"
+            );
+            execute(
+                "CREATE INDEX metadata_allocation_number ON items(product, allocation_key, allocation_number)"
+            );
+            execute("CREATE TABLE metadata_mutation_dirty (product TEXT PRIMARY KEY)");
+            execute(
+                "CREATE TRIGGER metadata_mutation_dirty_insert AFTER INSERT ON items "
+                "BEGIN INSERT INTO metadata_mutation_dirty SELECT NEW.product WHERE NOT EXISTS "
+                "(SELECT 1 FROM metadata_mutation_dirty WHERE product = NEW.product); END"
+            );
+            execute(
+                "CREATE TRIGGER metadata_mutation_dirty_update AFTER UPDATE ON items "
+                "BEGIN INSERT INTO metadata_mutation_dirty SELECT OLD.product WHERE NOT EXISTS "
+                "(SELECT 1 FROM metadata_mutation_dirty WHERE product = OLD.product); "
+                "INSERT INTO metadata_mutation_dirty SELECT NEW.product WHERE NOT EXISTS "
+                "(SELECT 1 FROM metadata_mutation_dirty WHERE product = NEW.product); END"
+            );
+            execute(
+                "CREATE TRIGGER metadata_mutation_dirty_delete AFTER DELETE ON items "
+                "BEGIN INSERT INTO metadata_mutation_dirty SELECT OLD.product WHERE NOT EXISTS "
+                "(SELECT 1 FROM metadata_mutation_dirty WHERE product = OLD.product); END"
             );
             execute(
                 "CREATE TABLE metadata_snapshots ("
@@ -1866,6 +1946,23 @@ void BacklogIndex::initialize() {
                 "  is_directory INTEGER NOT NULL CHECK(is_directory IN (0, 1)),"
                 "  PRIMARY KEY(product, file_id, source_ref)"
                 ")"
+            );
+            execute(
+                "CREATE TRIGGER metadata_mutation_watch_insert AFTER INSERT ON metadata_change_watch "
+                "BEGIN INSERT INTO metadata_mutation_dirty SELECT NEW.product WHERE NOT EXISTS "
+                "(SELECT 1 FROM metadata_mutation_dirty WHERE product = NEW.product); END"
+            );
+            execute(
+                "CREATE TRIGGER metadata_mutation_watch_update AFTER UPDATE ON metadata_change_watch "
+                "BEGIN INSERT INTO metadata_mutation_dirty SELECT OLD.product WHERE NOT EXISTS "
+                "(SELECT 1 FROM metadata_mutation_dirty WHERE product = OLD.product); "
+                "INSERT INTO metadata_mutation_dirty SELECT NEW.product WHERE NOT EXISTS "
+                "(SELECT 1 FROM metadata_mutation_dirty WHERE product = NEW.product); END"
+            );
+            execute(
+                "CREATE TRIGGER metadata_mutation_watch_delete AFTER DELETE ON metadata_change_watch "
+                "BEGIN INSERT INTO metadata_mutation_dirty SELECT OLD.product WHERE NOT EXISTS "
+                "(SELECT 1 FROM metadata_mutation_dirty WHERE product = OLD.product); END"
             );
             {
                 Statement statement(
@@ -1975,7 +2072,7 @@ void BacklogIndex::index_item(const BacklogItem& item) {
     IndexItem indexed;
     CanonicalWriteRevision write_revision;
     std::optional<change_probe::Checkpoint> proof_endpoint;
-    std::optional<RowRevisions> portable_canonical;
+    bool portable_receipt_verified = false;
     std::vector<change_probe::WatchEntry> next_watch;
     std::string failure_reason = "mutation_read_after_write_failed";
     try {
@@ -2042,10 +2139,9 @@ void BacklogIndex::index_item(const BacklogItem& item) {
                     throw std::runtime_error(
                         "metadata_index_mutation_read_after_write_mismatch");
                 }
-                portable_canonical = canonical_revisions(canonical_inventory(root));
                 const auto write_validated = store.read_write_revision();
-                if (write_validated.current != write_revision.current) {
-                    portable_canonical.reset();
+                portable_receipt_verified = write_validated.current == write_revision.current;
+                if (!portable_receipt_verified) {
                     failure_reason = "canonical_mutation_receipt_invalid";
                 }
             }
@@ -2065,6 +2161,22 @@ void BacklogIndex::index_item(const BacklogItem& item) {
 
     execute("BEGIN IMMEDIATE");
     try {
+        if (previous_mode == SnapshotReadinessMode::PortableUnsupported) {
+            // A tracked receipt proves this row changed. Portable readers
+            // still validate the complete canonical revision before trusting
+            // the snapshot, including writes made outside CanonicalStore.
+            const auto current = read_snapshot(db_, product);
+            if (!same_snapshot_publication_identity(previous, current)) {
+                execute("ROLLBACK");
+                return;
+            }
+            if (portable_receipt_verified &&
+                CanonicalStore(root).read_write_revision().current != write_revision.current) {
+                portable_receipt_verified = false;
+                failure_reason = "canonical_mutation_receipt_invalid";
+            }
+        }
+        const bool mutation_projection_was_clean = !mutation_projection_dirty(db_, product);
         upsert_index_row(db_, indexed);
         const auto revisions = revisions_from_rows(db_, product);
         const bool verified_ready =
@@ -2072,13 +2184,8 @@ void BacklogIndex::index_item(const BacklogItem& item) {
             proof_endpoint.has_value();
         const bool portable_ready =
             previous_mode == SnapshotReadinessMode::PortableUnsupported &&
-            portable_canonical &&
-            !revision_mismatch_reason(revisions, *portable_canonical);
+            portable_receipt_verified;
         const bool remains_ready = verified_ready || portable_ready;
-        if (previous_mode == SnapshotReadinessMode::PortableUnsupported &&
-            portable_canonical && !portable_ready) {
-            failure_reason = "mutation_read_after_write_failed";
-        }
         const auto generation = remains_ready
             ? next_generation(previous)
             : previous.generation;
@@ -2087,6 +2194,9 @@ void BacklogIndex::index_item(const BacklogItem& item) {
             : previous.product_revision;
         if (verified_ready) {
             replace_change_watch(db_, product, next_watch);
+            if (mutation_projection_was_clean) {
+                mark_mutation_projection_verified(db_, product);
+            }
         } else if (previous_mode == SnapshotReadinessMode::PortableUnsupported) {
             replace_change_watch(db_, product, {});
         }
@@ -2561,6 +2671,7 @@ void BacklogIndex::rebuild_metadata(
             generation,
             std::nullopt,
             proof_endpoint);
+        mark_mutation_projection_verified(db_, product);
         execute("COMMIT");
     } catch (...) {
         try {
@@ -3472,6 +3583,144 @@ std::optional<std::filesystem::path> BacklogIndex::get_path_by_uid(const std::st
         product_root_,
         column_text(statement.get(), 0),
         column_text(statement.get(), 1));
+}
+
+namespace {
+
+struct MutationSnapshot {
+    Snapshot snapshot;
+    std::vector<change_probe::WatchEntry> watch;
+};
+
+std::optional<MutationSnapshot> read_mutation_snapshot(
+    sqlite3* db,
+    const std::filesystem::path& product_root,
+    const std::string& product
+) {
+    const auto snapshot = read_snapshot(db, product);
+    if (snapshot_readiness_mode(snapshot) != SnapshotReadinessMode::VerifiedNtfs ||
+        !snapshot.proof ||
+        snapshot.canonical_write_revision != CanonicalStore(product_root).read_write_revision().current ||
+        mutation_projection_dirty(db, product)) {
+        return std::nullopt;
+    }
+    auto watch = read_change_watch(db, product);
+    if (!watch) {
+        return std::nullopt;
+    }
+    return MutationSnapshot{snapshot, std::move(*watch)};
+}
+
+bool verify_mutation_snapshot(
+    sqlite3* db,
+    const std::filesystem::path& product_root,
+    const std::string& product,
+    const MutationSnapshot& data
+) {
+    const auto proof = change_probe::verify_window(product_root, *data.snapshot.proof, data.watch);
+    return proof.status == change_probe::Status::Clean && proof.endpoint &&
+        same_snapshot_publication_identity(data.snapshot, read_snapshot(db, product)) &&
+        !mutation_projection_dirty(db, product) &&
+        CanonicalStore(product_root).read_write_revision().current == data.snapshot.canonical_write_revision;
+}
+
+}  // namespace
+
+std::optional<std::vector<std::filesystem::path>> BacklogIndex::verified_mutation_paths(
+    const std::filesystem::path& product_root,
+    const std::string& reference,
+    const bool create_request_key
+) {
+    try {
+        initialize();
+        const std::string product = product_name_.value_or(infer_product_name(product_root));
+        const auto snapshot = read_mutation_snapshot(db_, product_root, product);
+        if (!snapshot) {
+            return std::nullopt;
+        }
+        Statement matches(db_, create_request_key
+            ? "SELECT source_ref, source_size, source_hash FROM items "
+              "WHERE product = ?1 AND create_request_key = ?2 LIMIT 17"
+            : "SELECT source_ref, source_size, source_hash FROM items "
+              "WHERE product = ?1 AND id = ?2 "
+              "UNION SELECT source_ref, source_size, source_hash FROM items "
+              "WHERE product = ?1 AND uid = ?2 "
+              "UNION SELECT source_ref, source_size, source_hash FROM items "
+              "WHERE product = ?1 AND allocation_key = ?3 AND allocation_number = ?4 "
+              "AND allocation_number > 0 LIMIT 17", "lookup verified mutation sources");
+        matches.bind_text(1, product);
+        matches.bind_text(2, reference);
+        if (!create_request_key) {
+            const auto [allocation_key, allocation_number] = allocation_from_source(reference + ".md");
+            matches.bind_text(3, allocation_key);
+            matches.bind_int(4, allocation_number);
+        }
+        std::vector<std::filesystem::path> results;
+        while (matches.step() == SQLITE_ROW) {
+            const auto source_ref = column_text(matches.get(), 0);
+            const auto path = materialize_source_path(db_path_, product_root, product, source_ref);
+            if (results.size() == 16 || !path || !source_ref.starts_with("items/") ||
+                bounded_source_ref(*path, product_root) != source_ref ||
+                bounded_source_ref(std::filesystem::weakly_canonical(*path),
+                    std::filesystem::weakly_canonical(product_root)) != source_ref ||
+                hash_file(*path, static_cast<std::uint64_t>(sqlite3_column_int64(matches.get(), 1))) !=
+                    column_text(matches.get(), 2)) {
+                return std::nullopt;
+            }
+            results.push_back(*path);
+        }
+        if (!verify_mutation_snapshot(db_, product_root, product, *snapshot)) {
+            return std::nullopt;
+        }
+        return results;
+    } catch (const std::exception&) {
+        return std::nullopt;
+    }
+}
+
+std::optional<int> BacklogIndex::verified_allocation_maximum(
+    const std::filesystem::path& product_root,
+    const std::string& prefix,
+    const std::string& type_code
+) {
+    try {
+        initialize();
+        const std::string product = product_name_.value_or(infer_product_name(product_root));
+        const auto snapshot = read_mutation_snapshot(db_, product_root, product);
+        if (!snapshot) {
+            return std::nullopt;
+        }
+        Statement maximum(db_,
+            "SELECT allocation_number FROM items WHERE product = ? AND allocation_key = ? "
+            "ORDER BY allocation_number DESC LIMIT 1", "lookup verified allocation maximum");
+        maximum.bind_text(1, product);
+        maximum.bind_text(2, prefix + "-" + type_code);
+        const int number = maximum.step() == SQLITE_ROW ? sqlite3_column_int(maximum.get(), 0) : 0;
+        if (number < 0 || !verify_mutation_snapshot(db_, product_root, product, *snapshot)) {
+            return std::nullopt;
+        }
+        return number;
+    } catch (const std::exception&) {
+        return std::nullopt;
+    }
+}
+
+std::optional<BacklogItem> BacklogIndex::read_item_for_mutation(
+    const std::filesystem::path& product_root,
+    const std::string& reference
+) {
+    try {
+        const auto paths = verified_mutation_paths(product_root, reference);
+        if (!paths || paths->size() != 1) {
+            return std::nullopt;
+        }
+        auto item = CanonicalStore(product_root).read(paths->front());
+        if (item.id == reference || item.uid == reference) {
+            return item;
+        }
+    } catch (const std::exception&) {
+    }
+    return std::nullopt;
 }
 
 std::vector<IndexItem> BacklogIndex::query_items(

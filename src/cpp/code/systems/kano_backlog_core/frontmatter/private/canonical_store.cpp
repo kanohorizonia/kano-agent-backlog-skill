@@ -231,6 +231,24 @@ void replace_file_atomically(
 #endif
 }
 
+void publish_new_file_atomically(
+    const std::filesystem::path& temporary,
+    const std::filesystem::path& destination
+) {
+#ifdef _WIN32
+    if (!MoveFileExW(temporary.c_str(), destination.c_str(), MOVEFILE_WRITE_THROUGH)) {
+        throw WriteError("canonical_create_no_replace_failed");
+    }
+#else
+    std::error_code error;
+    std::filesystem::create_hard_link(temporary, destination, error);
+    if (error) {
+        throw WriteError("canonical_create_no_replace_failed");
+    }
+    std::filesystem::remove(temporary, error);
+#endif
+}
+
 void write_canonical_write_revision(
     const std::filesystem::path& product_root,
     const CanonicalWriteRevision& revision
@@ -680,7 +698,24 @@ CanonicalWriteRevision CanonicalStore::reset_write_revision() const {
 
 CanonicalWriteRevision CanonicalStore::write_materialized(
     const std::filesystem::path& item_path,
+    const std::string_view content,
+    const WriteGuard& guard
+) const {
+    return persist_materialized(item_path, content, guard, false);
+}
+
+CanonicalWriteRevision CanonicalStore::write_new_materialized(
+    const std::filesystem::path& item_path,
     const std::string_view content
+) const {
+    return persist_materialized(item_path, content, {}, true);
+}
+
+CanonicalWriteRevision CanonicalStore::persist_materialized(
+    const std::filesystem::path& item_path,
+    const std::string_view content,
+    const WriteGuard& guard,
+    bool create_new
 ) const {
     if (!is_inside_path(item_path, product_root_)) {
         throw WriteError("canonical_write_source_outside_product");
@@ -712,21 +747,44 @@ CanonicalWriteRevision CanonicalStore::write_materialized(
     if (error) {
         throw WriteError("canonical_write_parent_create_failed");
     }
-    std::ofstream output(item_path, std::ios::binary | std::ios::trunc);
-    if (!output.is_open()) {
-        throw WriteError("canonical_write_open_failed");
+    auto write_path = item_path;
+    const bool atomic_publish = guard || create_new;
+    if (atomic_publish) {
+        write_path += ".tmp-" + generate_uuid_v7();
     }
-    output.write(content.data(), static_cast<std::streamsize>(content.size()));
-    output.flush();
-    if (!output.good()) {
-        throw WriteError("canonical_write_failed");
-    }
-    output.close();
-    if (output.fail()) {
-        throw WriteError("canonical_write_close_failed");
-    }
-    if (read_exact_bytes(item_path, kMaximumCanonicalItemBytes) != content) {
-        throw WriteError("canonical_write_readback_mismatch");
+    try {
+        std::ofstream output(write_path, std::ios::binary | std::ios::trunc);
+        if (!output.is_open()) {
+            throw WriteError("canonical_write_open_failed");
+        }
+        output.write(content.data(), static_cast<std::streamsize>(content.size()));
+        output.flush();
+        if (!output.good()) {
+            throw WriteError("canonical_write_failed");
+        }
+        output.close();
+        if (output.fail()) {
+            throw WriteError("canonical_write_close_failed");
+        }
+        if (read_exact_bytes(write_path, kMaximumCanonicalItemBytes) != content) {
+            throw WriteError("canonical_write_readback_mismatch");
+        }
+        if (create_new) {
+            publish_new_file_atomically(write_path, item_path);
+        } else if (guard) {
+            if (!guard(read_exact_bytes(item_path, kMaximumCanonicalItemBytes))) {
+                throw WriteError("canonical_write_guard_mismatch");
+            }
+            const auto permissions = std::filesystem::status(item_path).permissions();
+            std::filesystem::permissions(write_path, permissions);
+            replace_file_atomically(write_path, item_path);
+        }
+    } catch (...) {
+        if (atomic_publish) {
+            std::error_code cleanup_error;
+            std::filesystem::remove(write_path, cleanup_error);
+        }
+        throw;
     }
 
     CanonicalWriteRevision revision{
@@ -952,7 +1010,7 @@ BacklogItem CanonicalStore::read_metadata_bounded(
     return item_from_context(item_path, ctx, false);
 }
 
-void CanonicalStore::write(BacklogItem& item) const {
+void CanonicalStore::write(BacklogItem& item, const WriteGuard& guard) const {
     diagnostics::ScopedMutationSpan span("canonical_store.write", item.id);
     auto errors = Validator::validate_schema(item);
     if (!errors.empty()) {
@@ -1065,7 +1123,7 @@ void CanonicalStore::write(BacklogItem& item) const {
     ctx.metadata = metadata;
     ctx.body = Frontmatter::serialize_body_sections(sections);
 
-    write_materialized(*item.file_path, Frontmatter::serialize(ctx));
+    write_materialized(*item.file_path, Frontmatter::serialize(ctx), guard);
 }
 
 BacklogItem CanonicalStore::create(const std::string& prefix, ItemType type, const std::string& title, int next_number, const std::optional<std::string>& parent) const {

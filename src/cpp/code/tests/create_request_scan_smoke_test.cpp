@@ -1,4 +1,5 @@
 #include <exception>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -10,6 +11,7 @@
 #include "kano/backlog_core/frontmatter/canonical_store.hpp"
 #include "kano/backlog_core/diagnostics/mutation_timing.hpp"
 #include <kano_unattended.hpp>
+#include <kano_process.h>
 #include "kano/backlog_ops/index/backlog_index.hpp"
 #include "kano/backlog_ops/workitem/workitem_ops.hpp"
 
@@ -139,17 +141,87 @@ private:
     std::exception_ptr callback_error_;
 };
 
+constexpr int injected_crash_exit = 77;
+
+kano::backlog_core::CreateItemResult create_crash_fixture(const std::filesystem::path& root) {
+    kano::backlog_ops::BacklogIndex index(root / ".cache" / "index" / "backlog.db");
+    return kano::backlog_ops::WorkitemOps::create_item(
+        index, root, "CRS", kano::backlog_core::ItemType::Task, "Crash boundary", "codex",
+        std::nullopt, "P2", {}, "general", "backlog", std::nullopt, std::nullopt,
+        "", "", duplicate_admission("Crash boundary"), "boundary-key");
+}
+
+void run_crash_fixture(
+    const std::filesystem::path& binary,
+    const std::filesystem::path& root,
+    const std::string& span
+) {
+    const auto executable = std::filesystem::absolute(binary).string();
+    const auto path = root.string();
+    const char* args[] = {
+#ifdef _WIN32
+        executable.c_str(),
+#endif
+        "--crash-fixture", path.c_str(), span.c_str()
+    };
+    KanoProcessOptions options{};
+    options.executable = executable.c_str();
+    options.argv = args;
+    options.argv_count = sizeof(args) / sizeof(args[0]);
+    options.mode = KANO_PROCESS_MODE_CAPTURE;
+    options.timeout_ms = 10000;
+    KanoProcessResult result{};
+    expect(kano_process_run_ex(&options, &result), "crash fixture must launch as a native child");
+    const bool exited_at_boundary = !result.timed_out && result.exit_code == injected_crash_exit;
+    const std::string error = result.stderr_data ? result.stderr_data : "";
+    kano_process_free_result(&result);
+    expect(exited_at_boundary, "child must terminate at " + span + ": " + error);
+}
+
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
     kano::infra::ConfigureUnattendedExecution();
     using kano::backlog_core::ItemType;
     using kano::backlog_core::CanonicalStore;
     using kano::backlog_ops::BacklogIndex;
     using kano::backlog_ops::WorkitemOps;
+    if (argc == 4 && std::string_view(argv[1]) == "--crash-fixture") {
+        MutationTimingCapture timing([] { std::_Exit(injected_crash_exit); }, argv[3]);
+        (void)create_crash_fixture(argv[2]);
+        return 1;
+    }
     std::filesystem::path root;
     try {
         root = make_temp_root();
+        {
+            const std::string spans[] = {
+                "workitem.create_item.request_scan",
+                "workitem.create_item.render_template",
+                "workitem.create_item.write_file",
+                "workitem.create_item.duplicate_admission_receipt",
+            };
+            for (std::size_t stage = 0; stage < 4; ++stage) {
+                const auto product = root / ("crash-stage-" + std::to_string(stage));
+                std::filesystem::create_directories(product / ".git");
+                run_crash_fixture(argv[0], product, spans[stage]);
+                const CanonicalStore store(product);
+                const auto before = store.list_items();
+                const auto receipt = product / "_meta" / "duplicate-admission" / "CRS-TSK-0001.json";
+                const bool canonical_already_written = stage >= 2;
+                expect(before.size() == (canonical_already_written ? 1 : 0) &&
+                    std::filesystem::exists(receipt) == (stage == 3),
+                    "crash fixture must preserve the expected canonical and receipt boundary");
+                const std::string previous_uid =
+                    canonical_already_written ? store.read(before.front()).uid : "";
+                const auto retried = create_crash_fixture(product);
+                expect(retried.id == "CRS-TSK-0001" && retried.read_after_write &&
+                    retried.idempotent_replay == canonical_already_written &&
+                    (!canonical_already_written || retried.uid == previous_uid) &&
+                    store.list_items().size() == 1 && std::filesystem::exists(receipt),
+                    "same-key retry must converge to one item and receipt after abrupt termination");
+            }
+        }
         {
             // Keyed parent admission shares one bounded scan, still checking
             // both input forms, unrelated identities and the final live parent.
@@ -181,9 +253,9 @@ int main() {
                     std::nullopt, std::nullopt, "", "", duplicate_admission("Parent identity child"),
                     use_key ? std::optional<std::string>{"parent-key"} : std::nullopt);
                 expect(timing.full_reads(parent_path.filename().string()) == (use_key ? 2 : (use_uid ? 3 : 2)),
-                    "parent admission must retain its matched read and final fresh scan");
-                expect(timing.full_reads(unrelated_path.filename().string()) == (use_key ? 1 : (use_uid ? 3 : 2)),
-                    "keyed initial admission must not fully parse unrelated item bodies");
+                    "parent admission must retain its matched reads and final live canonical read");
+                expect(timing.full_reads(unrelated_path.filename().string()) == 0,
+                    "neither initial admission nor final parent verification may parse unrelated item bodies");
                 expect(timing.metadata_reads(parent_path.filename().string()) == (use_key ? 1 : 0) &&
                     timing.metadata_reads(unrelated_path.filename().string()) == (use_key ? 1 : 0),
                     "keyed parent and first request verification must share exactly one bounded scan");
@@ -407,7 +479,33 @@ int main() {
                     "reserved recovery must scan fresh after the cached pass and replay only the exact bound UID");
                 expect(timing.metadata_reads("parent.md") == 2,
                     "reserved recovery must not reuse the first parent/request inventory");
+                const auto finalized = index.find_request_reservation(
+                    "RCP", "TSK", "fresh-parent-key", payload);
+                expect(finalized && finalized->committed_request && finalized->uid == reserved_uid,
+                    "recovering a canonical write must finalize the original reservation");
             }
+        }
+        {
+            const auto product = root / "atomic-create-collision";
+            CanonicalStore store(product);
+            BacklogIndex index(product / ".cache" / "index" / "backlog.db");
+            auto unrelated = store.create("ATM", ItemType::Task, "Atomic create collision", 1);
+            const auto path = *unrelated.file_path;
+            std::string inserted_bytes;
+            MutationTimingCapture timing([&] {
+                store.write(unrelated);
+                inserted_bytes = read_text(path);
+            });
+            expect_throws_contains([&] {
+                (void)WorkitemOps::create_item(
+                    index, product, "ATM", ItemType::Task, "Atomic create collision", "opencode",
+                    std::nullopt, "P2", {}, "general", "backlog", std::nullopt, std::nullopt,
+                    "", "", duplicate_admission("Atomic create collision"), "atomic-collision-key");
+            }, "canonical_create_no_replace_failed", "existing destination must survive the final write race");
+            timing.verify_callback();
+            expect(read_text(path) == inserted_bytes && store.read(path).uid == unrelated.uid &&
+                !std::filesystem::exists(product / "_meta" / "duplicate-admission" / (unrelated.id + ".json")),
+                "atomic no-replace failure must preserve the existing item and produce no create receipt");
         }
         {
             // PR5 must never write metadata that its next canonical request

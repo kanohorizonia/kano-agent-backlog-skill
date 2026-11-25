@@ -20,6 +20,8 @@
 #include <thread>
 #include <json/json.h>
 #include <limits>
+#include <map>
+#include <memory>
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -1425,16 +1427,36 @@ struct CreateParentMetadata {
     }
 };
 
+class CreateMutationIndexes {
+public:
+    explicit CreateMutationIndexes(BacklogIndex& active) : active_(active) {}
+
+    BacklogIndex* for_root(const std::filesystem::path& registered_root, bool active_root) {
+        if (active_root) {
+            return &active_;
+        }
+        auto [entry, inserted] = siblings_.try_emplace(registered_root);
+        if (inserted) {
+            entry->second = active_.open_sibling_mutation_index(registered_root);
+        }
+        return entry->second.get();
+    }
+
+private:
+    BacklogIndex& active_;
+    std::map<std::filesystem::path, std::unique_ptr<BacklogIndex>> siblings_;
+};
+
 std::optional<BacklogItem> find_created_request(
     const std::vector<std::filesystem::path>& product_roots,
     const std::filesystem::path& active_root,
     const std::string& request_key,
     const std::string& request_payload,
     CreateRequestScanBudget& budget,
+    CreateMutationIndexes& indexes,
     const std::optional<std::string>& reserved_id = std::nullopt,
     const std::optional<std::string>& reserved_uid = std::nullopt,
-    const CreateParentMetadata* parent_metadata = nullptr,
-    BacklogIndex* mutation_index = nullptr
+    const CreateParentMetadata* parent_metadata = nullptr
 ) {
     diagnostics::ScopedMutationSpan span("workitem.create_item.request_scan");
     if (parent_metadata) parent_metadata->verify_root(active_root);
@@ -1473,7 +1495,8 @@ std::optional<BacklogItem> find_created_request(
             parent_metadata->verify_root(active_root);
             for (const auto& candidate : parent_metadata->items) inspect(candidate);
         } else {
-            const auto paths = mutation_index && active
+            auto* mutation_index = indexes.for_root(root, active);
+            const auto paths = mutation_index
                 ? mutation_index->verified_mutation_paths(root, request_key, true)
                 : std::nullopt;
             if (paths) {
@@ -1612,6 +1635,7 @@ CreateItemResult WorkitemOps::create_item(
         request_lock.emplace(lock_path);
     }
     CreateRequestScanBudget request_scan_budget;
+    CreateMutationIndexes mutation_indexes(index);
     std::optional<CreateParentMetadata> parent_metadata;
     std::optional<CreateParentMetadata::RootIdentity> parent_root_identity;
     std::optional<std::vector<std::filesystem::path>> indexed_parent_paths;
@@ -1819,7 +1843,7 @@ CreateItemResult WorkitemOps::create_item(
     if (idempotency_key) {
         const auto existing = find_created_request(
             request_roots, backlog_root, *idempotency_key, request_payload, request_scan_budget,
-            std::nullopt, std::nullopt, parent_metadata ? &*parent_metadata : nullptr, &index);
+            mutation_indexes, std::nullopt, std::nullopt, parent_metadata ? &*parent_metadata : nullptr);
         parent_metadata.reset();
         if (existing) {
             const auto authority = shared_reservations
@@ -1860,9 +1884,12 @@ CreateItemResult WorkitemOps::create_item(
         int registered_max = active_maximum();
         for (const auto& product_root : request_roots) {
             if (normalize_path(product_root) != normalize_path(backlog_root)) {
-                registered_max = std::max(
-                    registered_max,
-                    CanonicalStore(product_root).get_max_id_number(prefix, type));
+                auto* sibling_index = mutation_indexes.for_root(product_root, false);
+                const auto sibling_max = sibling_index
+                    ? sibling_index->verified_allocation_maximum(product_root, prefix, type_code)
+                    : std::nullopt;
+                registered_max = std::max(registered_max, sibling_max
+                    ? *sibling_max : CanonicalStore(product_root).get_max_id_number(prefix, type));
             }
         }
         shared_reservations->ensure_sequence_at_least(prefix, type_code, registered_max);
@@ -1905,10 +1932,9 @@ CreateItemResult WorkitemOps::create_item(
         if (existing_request) {
             if (const auto existing = find_created_request(
                     request_roots, backlog_root, *idempotency_key,
-                    request_payload, request_scan_budget, item.id,
+                    request_payload, request_scan_budget, mutation_indexes, item.id,
                     reserved_uid.empty() ? std::nullopt
-                                         : std::optional<std::string>{reserved_uid},
-                    nullptr, &index)) {
+                                         : std::optional<std::string>{reserved_uid})) {
                 if (reserved_uid.empty()) {
                     throw std::runtime_error(
                         "item_create.reservation_uid_unbound: canonical marker cannot prove the reserved request UID");
@@ -1926,8 +1952,10 @@ CreateItemResult WorkitemOps::create_item(
         diagnostics::ScopedMutationSpan span("workitem.create_item.collision_check", item.id);
         std::vector<std::filesystem::path> existing_paths;
         for (const auto& root : request_roots) {
-            const auto indexed_paths = normalize_path(root) == normalize_path(backlog_root)
-                ? index.verified_mutation_paths(root, item.id)
+            auto* mutation_index = mutation_indexes.for_root(
+                root, normalize_path(root) == normalize_path(backlog_root));
+            const auto indexed_paths = mutation_index
+                ? mutation_index->verified_mutation_paths(root, item.id)
                 : std::nullopt;
             const auto matches = indexed_paths ? *indexed_paths
                 : CanonicalStore(root).find_item_paths_by_id(item.id);

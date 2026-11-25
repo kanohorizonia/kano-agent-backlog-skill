@@ -1767,6 +1767,15 @@ bool metadata_columns_current(sqlite3* db) {
                required_watch.begin(), required_watch.end());
 }
 
+bool metadata_schema_current(sqlite3* db) {
+    Statement statement(db,
+        "SELECT value FROM metadata_index_meta WHERE key = 'schema_version'",
+        "read metadata schema version");
+    return statement.step() == SQLITE_ROW &&
+        column_text(statement.get(), 0) == std::to_string(kMetadataIndexSchemaVersion) &&
+        metadata_columns_current(db);
+}
+
 double elapsed_ms(const std::chrono::steady_clock::time_point start) {
     return std::chrono::duration<double, std::milli>(
         std::chrono::steady_clock::now() - start).count();
@@ -1832,6 +1841,67 @@ BacklogIndex::~BacklogIndex() {
     }
 }
 
+BacklogIndex::BacklogIndex(
+    const std::filesystem::path& db_path,
+    std::optional<std::string> product_name,
+    const std::filesystem::path& product_root,
+    ReadOnlyMutation
+) : initialized_(true), read_only_mutation_(true), db_path_(db_path),
+    product_name_(std::move(product_name)), product_root_(product_root) {
+    const auto characters = db_path.generic_u8string();
+    std::string uri = "file:/";
+    constexpr std::string_view hex = "0123456789ABCDEF";
+    for (const auto character : characters) {
+        if ((character >= 'A' && character <= 'Z') || (character >= 'a' && character <= 'z') ||
+            (character >= '0' && character <= '9') || character == '/' || character == ':' ||
+            character == '_' || character == '-' || character == '.') {
+            uri.push_back(static_cast<char>(character));
+        } else {
+            uri.push_back('%');
+            uri.push_back(hex[character >> 4]);
+            uri.push_back(hex[character & 15]);
+        }
+    }
+    // The bundled SQLite Windows VFS honors readonly_shm for a WAL database.
+    // A reader must never create or write a sibling database's sidecars.
+    uri += "?readonly_shm=1";
+    sqlite3* db = nullptr;
+    const int rc = sqlite3_open_v2(uri.c_str(), &db,
+        SQLITE_OPEN_READONLY | SQLITE_OPEN_URI | SQLITE_OPEN_NOFOLLOW | SQLITE_OPEN_FULLMUTEX, nullptr);
+    std::unique_ptr<sqlite3, decltype(&sqlite3_close)> handle(db, sqlite3_close);
+    if (rc != SQLITE_OK || sqlite3_busy_timeout(db, 0) != SQLITE_OK ||
+        !metadata_schema_current(db)) {
+        throw std::runtime_error("metadata_index_sibling_open_failed");
+    }
+    db_ = handle.release();
+}
+
+std::unique_ptr<BacklogIndex> BacklogIndex::open_sibling_mutation_index(
+    const std::filesystem::path& product_root
+) const {
+#ifdef _WIN32
+    try {
+        const auto& parent = product_root.parent_path();
+        const auto cache_root = std::filesystem::canonical(
+            parent.filename() == "products" ? parent.parent_path() : product_root);
+        const auto db_path = cache_root / ".cache" / "index" / "backlog.db";
+        if (cache_root.root_name().native().size() != 2 ||
+            !std::filesystem::is_regular_file(std::filesystem::symlink_status(db_path)) ||
+            std::filesystem::canonical(db_path) != db_path) {
+            return nullptr;
+        }
+        return std::unique_ptr<BacklogIndex>(
+            new BacklogIndex(db_path, product_name_, product_root, ReadOnlyMutation{}));
+    } catch (const std::exception&) {
+        return nullptr;
+    }
+#else
+    // The portable backend has no authority for a verified mutation lookup.
+    (void)product_root;
+    return nullptr;
+#endif
+}
+
 void BacklogIndex::initialize() {
     if (initialized_) {
         return;
@@ -1843,22 +1913,7 @@ void BacklogIndex::initialize() {
         ")"
     );
 
-    bool schema_current = false;
-    {
-        Statement statement(
-            db_,
-            "SELECT value FROM metadata_index_meta WHERE key = 'schema_version'",
-            "read metadata schema version");
-        if (statement.step() == SQLITE_ROW) {
-            schema_current =
-                column_text(statement.get(), 0) == std::to_string(kMetadataIndexSchemaVersion);
-        }
-    }
-    if (schema_current) {
-        schema_current = metadata_columns_current(db_);
-    }
-
-    if (!schema_current) {
+    if (!metadata_schema_current(db_)) {
         execute("BEGIN IMMEDIATE");
         try {
             execute("DROP TABLE IF EXISTS items");
@@ -3632,6 +3687,9 @@ std::optional<std::vector<std::filesystem::path>> BacklogIndex::verified_mutatio
     const bool create_request_key
 ) {
     try {
+        if (read_only_mutation_ && product_root != *product_root_) {
+            return std::nullopt;
+        }
         initialize();
         const std::string product = product_name_.value_or(infer_product_name(product_root));
         const auto snapshot = read_mutation_snapshot(db_, product_root, product);
@@ -3684,6 +3742,9 @@ std::optional<int> BacklogIndex::verified_allocation_maximum(
     const std::string& type_code
 ) {
     try {
+        if (read_only_mutation_ && product_root != *product_root_) {
+            return std::nullopt;
+        }
         initialize();
         const std::string product = product_name_.value_or(infer_product_name(product_root));
         const auto snapshot = read_mutation_snapshot(db_, product_root, product);

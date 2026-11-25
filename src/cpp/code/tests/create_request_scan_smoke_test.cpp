@@ -13,6 +13,7 @@
 #include <kano_unattended.hpp>
 #include <kano_process.h>
 #include "kano/backlog_ops/index/backlog_index.hpp"
+#include "kano/backlog_ops/templates/template_ops.hpp"
 #include "kano/backlog_ops/workitem/workitem_ops.hpp"
 
 namespace {
@@ -178,6 +179,110 @@ void run_crash_fixture(
     expect(exited_at_boundary, "child must terminate at " + span + ": " + error);
 }
 
+void test_registered_sibling_projection(const std::filesystem::path& root) {
+    using kano::backlog_core::CanonicalStore;
+    using kano::backlog_core::ItemType;
+    using kano::backlog_ops::BacklogIndex;
+    using kano::backlog_ops::WorkitemOps;
+    const auto primary = root / "primary";
+    const auto linked = root / "linked # 100%";
+    const auto linked_git = primary / ".git" / "worktrees" / "side";
+    const auto relative_product = std::filesystem::path("products") / "sibling-product";
+    const auto active = primary / relative_product;
+    const auto sibling = linked / relative_product;
+    const auto db_relative = std::filesystem::path(".cache") / "index" / "backlog.db";
+    const auto sibling_db = linked / db_relative;
+    write_text(linked_git / "gitdir", (linked / ".git").generic_string() + "\n");
+    write_text(linked_git / "commondir", "../..\n");
+    write_text(linked / ".git", "gitdir: " + linked_git.generic_string() + "\n");
+    const auto create = [](BacklogIndex& index, const std::filesystem::path& product,
+        const std::string& title, const std::string& key) {
+        return WorkitemOps::create_item(index, product, "SIB", ItemType::Task, title, "codex",
+            std::nullopt, "P2", {}, "general", "backlog", std::nullopt, std::nullopt,
+            "", "", duplicate_admission(title), key);
+    };
+
+    CanonicalStore sibling_store(sibling);
+    auto original = sibling_store.create("SIB", ItemType::Task, "Sibling seed", 280);
+    sibling_store.write(original);
+    BacklogIndex active_index(primary / db_relative, "sibling-product", active);
+    {
+        MutationTimingCapture timing;
+        const auto item = create(active_index, active, "First local item", "primary-first");
+        expect(item.id == "SIB-TSK-0281" &&
+            timing.metadata_reads(original.file_path->filename().string()) == 1 &&
+            !std::filesystem::exists(sibling_db.parent_path()),
+            "missing sibling index must scan canonical data without creating a cache");
+    }
+
+    BacklogIndex sibling_writer(sibling_db, "sibling-product", sibling);
+    const auto committed = create(sibling_writer, sibling, "Sibling request", "sibling-request");
+    auto higher = sibling_store.create("SIB", ItemType::Task, "Higher sibling allocation", 375);
+    sibling_store.write(higher);
+    sibling_writer.rebuild_metadata(sibling, "sibling-product");
+    const auto cached_bytes = read_text(sibling_db);
+    const auto probe = active_index.open_sibling_mutation_index(sibling);
+#ifdef _WIN32
+    expect(probe != nullptr, "Windows must open the existing fixed sibling projection read-only");
+#endif
+    const auto candidates = probe
+        ? probe->verified_mutation_paths(sibling, "sibling-request", true) : std::nullopt;
+    expect(candidates == sibling_writer.verified_mutation_paths(sibling, "sibling-request", true),
+        "read-only sibling lookup must accept a witness verified by the existing index reader");
+    const bool verified = candidates.has_value();
+    if (verified) {
+        expect(*candidates == std::vector<std::filesystem::path>{committed.path},
+            "sibling proof must resolve the matching request in that checkout");
+        expect(probe->verified_allocation_maximum(sibling, "SIB", "TSK") == 375,
+            "sibling proof must resolve the sibling allocation high-water mark");
+        expect(probe->verified_mutation_paths(sibling, higher.id) ==
+            std::vector<std::filesystem::path>{*higher.file_path},
+            "sibling proof must find occupied sibling filenames");
+        expect(!probe->verified_mutation_paths(active, "sibling-request", true) &&
+            !probe->verified_allocation_maximum(active, "SIB", "TSK"),
+            "sibling proof must refuse any other checkout root");
+    }
+    {
+        MutationTimingCapture timing;
+        const auto replay = create(active_index, active, "Sibling request", "sibling-request");
+        expect(replay.idempotent_replay && replay.id == committed.id &&
+            replay.uid == committed.uid && replay.path == committed.path,
+            "sibling replay must preserve its canonical ID, UID and checkout");
+        expect(timing.metadata_reads(committed.path.filename().string()) == 1 &&
+            timing.metadata_reads(higher.file_path->filename().string()) == (verified ? 0 : 1),
+            "a verified sibling lookup must read the matched canonical marker and skip unrelated metadata");
+    }
+    expect_throws_contains([&] {
+        (void)create(active_index, active, "Different sibling request", "sibling-request");
+    }, "item_create.idempotency_conflict", "sibling lookup must reject changed payload");
+    {
+        MutationTimingCapture timing;
+        const auto item = create(active_index, active, "Next local request", "primary-next");
+        expect(item.id == "SIB-TSK-0376" &&
+            timing.metadata_reads(higher.file_path->filename().string()) == (verified ? 0 : 1),
+            "normal create must include sibling allocation and skip unrelated verified metadata");
+    }
+    auto conflict = sibling_store.create("SIB", ItemType::Task, "Legacy marker", 450);
+    conflict.external["create_request_key"] = "sibling-request";
+    conflict.external["create_request_payload"] = "different request";
+    const auto revision = sibling_store.read_write_revision().current;
+    write_text(*conflict.file_path,
+        kano::backlog_ops::TemplateOps::render_item_body(conflict, "codex", "Raw canonical fixture"));
+    expect(sibling_store.read_write_revision().current == revision,
+        "external keyed fixture must bypass the native write receipt");
+    {
+        MutationTimingCapture timing;
+        expect_throws_contains([&] {
+            (void)create(active_index, active, "Sibling request", "sibling-request");
+        }, "item_create.idempotency_conflict", "a stale sibling must reveal the new canonical conflict");
+        expect(timing.metadata_reads(conflict.file_path->filename().string()) == 1,
+            "a stale sibling proof must fall back to canonical metadata");
+    }
+    expect(read_text(sibling_db) == cached_bytes,
+        "sibling projection queries must not modify its SQLite cache");
+    std::cout << "sibling mutation projection: " << (verified ? "verified NTFS" : "canonical fallback") << "\n";
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -194,6 +299,11 @@ int main(int argc, char** argv) {
     std::filesystem::path root;
     try {
         root = make_temp_root();
+        if (argc == 2 && std::string_view(argv[1]) == "--sibling-projection") {
+            test_registered_sibling_projection(root);
+            std::filesystem::remove_all(root);
+            return 0;
+        }
         {
             const std::string spans[] = {
                 "workitem.create_item.request_scan",

@@ -167,6 +167,12 @@ accepting the parent or replay. Changes to projection rows invalidate mutation
 lookups until a verified rebuild or a verified contiguous row publication.
 Products without a supported change witness retain canonical admission scans.
 
+Each visible registered Git worktree can supply its own verified product
+projection for create request lookup, filename collision checks, and allocation.
+KOB opens the checkout's existing cache read-only and verifies its witness
+against that checkout's product root. Missing or stale proof falls back to
+canonical checks for that root. Worktree registration determines scan scope.
+
 On Windows, the `windows-ntfs-usn-v1` witness contains the product root's NTFS
 volume serial and file ID, USN journal identity and verified USN endpoint, plus
 watched canonical file and directory IDs. Verification fails closed on a

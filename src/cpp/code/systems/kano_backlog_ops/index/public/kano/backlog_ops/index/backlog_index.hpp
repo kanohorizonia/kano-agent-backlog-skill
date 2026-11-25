@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -172,6 +173,10 @@ public:
     std::optional<std::filesystem::path> get_path_by_id(const std::string& id);
     std::optional<std::filesystem::path> get_path_by_uid(const std::string& uid);
 
+    // Open only the existing projection for this registered product root.
+    std::unique_ptr<BacklogIndex> open_sibling_mutation_index(
+        const std::filesystem::path& product_root) const;
+
     // A populated result, including an empty match list, requires a current
     // platform witness for the complete canonical product inventory.
     std::optional<std::vector<std::filesystem::path>> verified_mutation_paths(
@@ -217,8 +222,16 @@ public:
     void invalidate_metadata(const std::string& product, const std::string& reason);
 
 private:
+    struct ReadOnlyMutation {};
+    BacklogIndex(
+        const std::filesystem::path& db_path,
+        std::optional<std::string> product_name,
+        const std::filesystem::path& product_root,
+        ReadOnlyMutation);
+
     sqlite3* db_ = nullptr;
     bool initialized_ = false;
+    bool read_only_mutation_ = false;
     std::filesystem::path db_path_;
     std::optional<std::string> product_name_;
     std::optional<std::filesystem::path> product_root_;

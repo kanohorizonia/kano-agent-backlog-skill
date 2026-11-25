@@ -192,7 +192,8 @@ std::string read_exact_bytes(
     if (!result.empty()) {
         input.read(result.data(), static_cast<std::streamsize>(result.size()));
     }
-    if (input.bad() || static_cast<std::size_t>(input.gcount()) != result.size()) {
+    if (input.bad() || static_cast<std::size_t>(input.gcount()) != result.size() ||
+        input.peek() != std::char_traits<char>::eof() || !input.eof() || input.bad()) {
         throw WriteError("canonical_write_readback_failed");
     }
     return result;
@@ -903,6 +904,27 @@ BacklogItem CanonicalStore::read(const std::filesystem::path& item_path) const {
 
     auto ctx = Frontmatter::parse(content);
     return item_from_context(item_path, ctx, true);
+}
+
+std::pair<BacklogItem, std::string> CanonicalStore::read_with_bytes(
+    const std::filesystem::path& item_path
+) const {
+    diagnostics::ScopedMutationSpan span("canonical_store.read", item_path.filename().string());
+    if (!is_inside_path(item_path, product_root_)) {
+        throw ParseError(item_path, "Item path is outside active product root");
+    }
+    if (!std::filesystem::exists(item_path)) {
+        throw ItemNotFoundError(item_path.string());
+    }
+
+    std::string content;
+    try {
+        content = read_exact_bytes(item_path, kMaximumCanonicalItemBytes);
+    } catch (const WriteError&) {
+        throw ParseError(item_path, "Failed to read bounded item bytes");
+    }
+    auto item = item_from_context(item_path, Frontmatter::parse(content), true);
+    return {std::move(item), std::move(content)};
 }
 
 BacklogItem CanonicalStore::read_metadata(const std::filesystem::path& item_path) const {

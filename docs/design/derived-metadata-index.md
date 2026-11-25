@@ -2,7 +2,8 @@
 
 KOB keeps canonical item Markdown and frontmatter authoritative. The local
 SQLite metadata index is a disposable projection used by bounded list, search,
-status, and exact-item reads. A cache row never overrides canonical content.
+status, exact-item reads, and relation graph verification. A cache row never
+overrides canonical content.
 
 ## Contract
 
@@ -11,6 +12,7 @@ Each metadata row is product-scoped and records:
 - display ID and UID
 - product, item type, state, priority, title, and slug
 - parent and duplicate references
+- stored `relates`, `blocks`, and `blocked_by` references
 - updated date and estimated token count
 - product-relative source reference
 - source size, high-resolution modification time, and content hash
@@ -18,8 +20,8 @@ Each metadata row is product-scoped and records:
 Raw workspace paths are not part of the read contract. `source_ref` is
 product-relative and rejects absolute paths or parent traversal.
 
-The disposable SQLite row schema and snapshot schema are both internal version
-4 contracts (`schema_version=4` and `snapshot_schema_version=4`). They include
+The disposable SQLite row schema uses internal version 5. The snapshot schema
+uses version 4 (`schema_version=5` and `snapshot_schema_version=4`). They include
 the indexed rows, inventory and content revisions, item count, generation,
 canonical-write receipt fence, platform change-proof state, status, and optional
 invalidation reason. Inventory revision is deterministic over sorted source
@@ -148,10 +150,11 @@ content size, and content hash where applicable. Successful create, state,
 Ready-field, reparent, relation, worklog, decision, and artifact mutations then
 update the affected derived row. Tracked deletion removes its row. The index
 accepts the incremental update only when the receipt is contiguous with the
-snapshot fence and matches the canonical readback. A missing, malformed,
-noncontiguous, or mismatched receipt invalidates the snapshot and requires a
-rebuild. Batch schema repair rebuilds the product snapshot once after canonical
-writes finish.
+snapshot fence and matches the bytes used to parse the canonical readback.
+A second source with the same display ID invalidates the snapshot and preserves
+both canonical files. A missing, malformed, noncontiguous, or mismatched receipt
+also invalidates the snapshot. Batch schema repair rebuilds the product snapshot
+once after canonical writes finish.
 
 An incremental row update keeps a previously verified snapshot ready. If no
 verified snapshot exists, the projection remains `incomplete` until a rebuild.
@@ -166,6 +169,14 @@ verify the product inventory. It reads the matched canonical records before
 accepting the parent or replay. Changes to projection rows invalidate mutation
 lookups until a verified rebuild or a verified contiguous row publication.
 Products without a supported change witness retain canonical admission scans.
+
+Relation mutations can read the configured product graph from read-only
+projections with verified NTFS change witnesses. The item limit applies across
+all configured products. A missing, stale, or unsupported projection falls
+back to canonical frontmatter for that product. The mutation rechecks the
+graph before writing and reads the affected canonical item before and after the
+write. Canonical Markdown retains the exact stored direction and display ID or
+UID spelling of each relation.
 
 Each visible registered Git worktree can supply its own verified product
 projection for create request lookup, filename collision checks, and allocation.

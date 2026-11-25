@@ -3,6 +3,8 @@
 #include "kano/backlog_core/frontmatter/canonical_store.hpp"
 #include "change_probe.hpp"
 
+#include <json/json.h>
+
 #include <algorithm>
 #include <array>
 #include <charconv>
@@ -342,6 +344,17 @@ std::string bounded_source_ref(
     return value;
 }
 
+bool is_canonical_item_source(
+    const std::filesystem::path& path,
+    const std::filesystem::path& product_root,
+    const std::string& source_ref
+) {
+    return source_ref.starts_with("items/") && path.extension() == ".md" &&
+        !source_ref.ends_with(".index.md") && std::filesystem::is_regular_file(path) &&
+        bounded_source_ref(std::filesystem::weakly_canonical(path),
+            std::filesystem::weakly_canonical(product_root)) == source_ref;
+}
+
 std::filesystem::path infer_product_root(const std::filesystem::path& item_path) {
     auto current = item_path.parent_path();
     while (!current.empty()) {
@@ -625,6 +638,7 @@ IndexItem index_item_from_metadata(
     indexed.source_mtime_ns = source.mtime_ns;
     indexed.estimated_tokens = (source.size + 3ULL) / 4ULL;
     indexed.updated = item.updated;
+    indexed.links = item.links;
     return indexed;
 }
 
@@ -1434,14 +1448,51 @@ std::pair<std::string, int> allocation_from_source(const std::string& source_ref
     return {filename.substr(0, separator), number};
 }
 
+std::string encode_relation_links(const ItemLinks& links) {
+    Json::Value encoded(Json::arrayValue);
+    for (const auto* refs : {&links.relates, &links.blocks, &links.blocked_by}) {
+        Json::Value array(Json::arrayValue);
+        for (const auto& ref : *refs) {
+            array.append(ref);
+        }
+        encoded.append(std::move(array));
+    }
+    Json::StreamWriterBuilder writer;
+    writer["indentation"] = "";
+    return Json::writeString(writer, encoded);
+}
+
+std::optional<ItemLinks> decode_relation_links(std::string_view json, Json::CharReader& reader) {
+    Json::Value encoded;
+    if (json.empty() || !reader.parse(json.data(), json.data() + json.size(), &encoded, nullptr) ||
+        !encoded.isArray() || encoded.size() != 3) {
+        return std::nullopt;
+    }
+    ItemLinks links;
+    Json::ArrayIndex index = 0;
+    for (auto* refs : {&links.relates, &links.blocks, &links.blocked_by}) {
+        const auto& array = encoded[index++];
+        if (!array.isArray()) {
+            return std::nullopt;
+        }
+        for (const auto& ref : array) {
+            if (!ref.isString()) {
+                return std::nullopt;
+            }
+            refs->push_back(ref.asString());
+        }
+    }
+    return links;
+}
+
 void upsert_index_row(sqlite3* db, const IndexItem& item) {
     Statement statement(
         db,
         "INSERT INTO items "
         "(product, id, uid, type, title, state, priority, parent_ref, duplicate_of, slug, "
         "create_request_key, allocation_key, allocation_number, "
-        "source_ref, source_hash, source_size, source_mtime_ns, estimated_tokens, updated) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+        "source_ref, source_hash, source_size, source_mtime_ns, estimated_tokens, updated, relations_json) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
         "ON CONFLICT(product, id) DO UPDATE SET "
         "uid=excluded.uid, type=excluded.type, title=excluded.title, state=excluded.state, "
         "priority=excluded.priority, parent_ref=excluded.parent_ref, "
@@ -1450,7 +1501,8 @@ void upsert_index_row(sqlite3* db, const IndexItem& item) {
         "allocation_key=excluded.allocation_key, allocation_number=excluded.allocation_number, "
         "source_ref=excluded.source_ref, source_hash=excluded.source_hash, "
         "source_size=excluded.source_size, source_mtime_ns=excluded.source_mtime_ns, "
-        "estimated_tokens=excluded.estimated_tokens, updated=excluded.updated",
+        "estimated_tokens=excluded.estimated_tokens, updated=excluded.updated, "
+        "relations_json=excluded.relations_json",
         "upsert metadata index row");
     statement.bind_text(1, item.product);
     statement.bind_text(2, item.id);
@@ -1472,6 +1524,7 @@ void upsert_index_row(sqlite3* db, const IndexItem& item) {
     statement.bind_int64(17, item.source_mtime_ns);
     statement.bind_int64(18, static_cast<std::int64_t>(item.estimated_tokens));
     statement.bind_text(19, item.updated);
+    statement.bind_text(20, encode_relation_links(item.links));
     statement.step_done();
 }
 
@@ -1733,7 +1786,7 @@ bool metadata_columns_current(sqlite3* db) {
         "product", "id", "uid", "type", "title", "state", "priority", "parent_ref",
         "duplicate_of", "slug", "source_ref", "source_hash", "source_size",
         "source_mtime_ns", "estimated_tokens", "updated", "create_request_key",
-        "allocation_key", "allocation_number"
+        "allocation_key", "allocation_number", "relations_json"
     };
     const auto snapshot_columns = table_columns(db, "metadata_snapshots");
     const std::set<std::string> required_snapshots = {
@@ -1879,6 +1932,13 @@ BacklogIndex::BacklogIndex(
 std::unique_ptr<BacklogIndex> BacklogIndex::open_sibling_mutation_index(
     const std::filesystem::path& product_root
 ) const {
+    return open_existing_mutation_index(product_root, product_name_);
+}
+
+std::unique_ptr<BacklogIndex> BacklogIndex::open_existing_mutation_index(
+    const std::filesystem::path& product_root,
+    std::optional<std::string> product_name
+) {
 #ifdef _WIN32
     try {
         const auto& parent = product_root.parent_path();
@@ -1891,13 +1951,14 @@ std::unique_ptr<BacklogIndex> BacklogIndex::open_sibling_mutation_index(
             return nullptr;
         }
         return std::unique_ptr<BacklogIndex>(
-            new BacklogIndex(db_path, product_name_, product_root, ReadOnlyMutation{}));
+            new BacklogIndex(db_path, std::move(product_name), product_root, ReadOnlyMutation{}));
     } catch (const std::exception&) {
         return nullptr;
     }
 #else
     // The portable backend has no authority for a verified mutation lookup.
     (void)product_root;
+    (void)product_name;
     return nullptr;
 #endif
 }
@@ -1941,6 +2002,7 @@ void BacklogIndex::initialize() {
                 "  source_mtime_ns INTEGER NOT NULL,"
                 "  estimated_tokens INTEGER NOT NULL,"
                 "  updated TEXT NOT NULL,"
+                "  relations_json TEXT NOT NULL,"
                 "  PRIMARY KEY(product, id),"
                 "  UNIQUE(product, uid),"
                 "  UNIQUE(product, source_ref)"
@@ -2117,7 +2179,7 @@ void BacklogIndex::index_item(const BacklogItem& item) {
         throw std::runtime_error("metadata_index_item_has_no_source");
     }
 
-    const auto root = product_root_.value_or(infer_product_root(*item.file_path));
+    const auto root = product_root_ ? *product_root_ : infer_product_root(*item.file_path);
     const auto product = product_name_.value_or(infer_product_name(root));
     const auto previous = read_snapshot(db_, product);
     const auto previous_mode = snapshot_readiness_mode(previous);
@@ -2134,13 +2196,20 @@ void BacklogIndex::index_item(const BacklogItem& item) {
         SourceFingerprint source;
         source.path = *item.file_path;
         source.source_ref = bounded_source_ref(source.path, root);
+        if (!is_canonical_item_source(source.path, root, source.source_ref)) {
+            failure_reason = "mutation_source_outside_inventory";
+            throw std::runtime_error("metadata_index_" + failure_reason);
+        }
         CanonicalStore store(root);
-        const auto readback = store.read(source.path);
+        const auto [readback, canonical_bytes] = store.read_with_bytes(source.path);
         const auto stat = source_stat_checked(source.path);
+        if (canonical_bytes.size() != stat.size || stat.size > kMaximumIndexedItemBytes) {
+            throw std::runtime_error("metadata_index_mutation_read_after_write_mismatch");
+        }
         source.size = stat.size;
         source.mtime_ns = stat.mtime_ns;
         indexed = index_item_from_metadata(
-            readback, product, source, hash_file(source.path, source.size));
+            readback, product, source, hash_content(canonical_bytes));
         if (previous_mode != SnapshotReadinessMode::Invalid) {
             write_revision = store.read_write_revision();
             if (write_revision.current == previous.canonical_write_revision) {
@@ -2214,6 +2283,7 @@ void BacklogIndex::index_item(const BacklogItem& item) {
         throw std::runtime_error("metadata_index_" + failure_reason);
     }
 
+    std::string commit_failure_reason = "mutation_index_commit_failed";
     execute("BEGIN IMMEDIATE");
     try {
         if (previous_mode == SnapshotReadinessMode::PortableUnsupported) {
@@ -2229,6 +2299,34 @@ void BacklogIndex::index_item(const BacklogItem& item) {
                 CanonicalStore(root).read_write_revision().current != write_revision.current) {
                 portable_receipt_verified = false;
                 failure_reason = "canonical_mutation_receipt_invalid";
+            }
+        }
+        {
+            Statement existing(db_, "SELECT source_ref FROM items WHERE product = ? AND id = ?",
+                "check incremental mutation source identity");
+            existing.bind_text(1, product);
+            existing.bind_text(2, indexed.id);
+            if (existing.step() == SQLITE_ROW) {
+                const auto previous_ref = column_text(existing.get(), 0);
+                if (previous_ref != indexed.source_ref) {
+                    const auto old_path = materialize_source_path(db_path_, root, product, previous_ref);
+                    std::error_code status_error;
+                    const auto status = old_path
+                        ? std::filesystem::symlink_status(*old_path, status_error)
+                        : std::filesystem::file_status{};
+                    const bool absent = status_error == std::errc::no_such_file_or_directory ||
+                        (!status_error && status.type() == std::filesystem::file_type::not_found);
+                    if (!absent || !old_path || !previous_ref.starts_with("items/") ||
+                        bounded_source_ref(std::filesystem::weakly_canonical(*old_path),
+                            std::filesystem::weakly_canonical(root)) != previous_ref) {
+                        commit_failure_reason = "mutation_source_identity_changed";
+                        throw std::runtime_error("metadata_index_" + commit_failure_reason);
+                    }
+                    // Rebinding a missing path is a cache repair. Only a rebuild can prove inventory parity.
+                    proof_endpoint.reset();
+                    portable_receipt_verified = false;
+                    failure_reason = "mutation_source_moved_requires_rebuild";
+                }
             }
         }
         const bool mutation_projection_was_clean = !mutation_projection_dirty(db_, product);
@@ -2282,7 +2380,7 @@ void BacklogIndex::index_item(const BacklogItem& item) {
         } catch (...) {
         }
         try {
-            invalidate_metadata(product, "mutation_index_commit_failed");
+            invalidate_metadata(product, commit_failure_reason);
         } catch (...) {
         }
         throw;
@@ -3717,10 +3815,9 @@ std::optional<std::vector<std::filesystem::path>> BacklogIndex::verified_mutatio
         while (matches.step() == SQLITE_ROW) {
             const auto source_ref = column_text(matches.get(), 0);
             const auto path = materialize_source_path(db_path_, product_root, product, source_ref);
-            if (results.size() == 16 || !path || !source_ref.starts_with("items/") ||
+            if (results.size() == 16 || !path ||
                 bounded_source_ref(*path, product_root) != source_ref ||
-                bounded_source_ref(std::filesystem::weakly_canonical(*path),
-                    std::filesystem::weakly_canonical(product_root)) != source_ref ||
+                !is_canonical_item_source(*path, product_root, source_ref) ||
                 hash_file(*path, static_cast<std::uint64_t>(sqlite3_column_int64(matches.get(), 1))) !=
                     column_text(matches.get(), 2)) {
                 return std::nullopt;
@@ -3761,6 +3858,55 @@ std::optional<int> BacklogIndex::verified_allocation_maximum(
             return std::nullopt;
         }
         return number;
+    } catch (const std::exception&) {
+        return std::nullopt;
+    }
+}
+
+std::optional<VerifiedRelationProjection> BacklogIndex::verified_relation_metadata(
+    const std::filesystem::path& product_root,
+    std::size_t max_items
+) {
+    try {
+        if (read_only_mutation_ && product_root != *product_root_) {
+            return std::nullopt;
+        }
+        initialize();
+        const std::string product = product_name_.value_or(infer_product_name(product_root));
+        const auto snapshot = read_mutation_snapshot(db_, product_root, product);
+        if (!snapshot) {
+            return std::nullopt;
+        }
+
+        VerifiedRelationProjection result;
+        result.item_count = snapshot->snapshot.item_count;
+        if (result.item_count <= max_items) {
+            Statement rows(db_, "SELECT id, uid, relations_json FROM items WHERE product = ?",
+                "read verified relation metadata");
+            rows.bind_text(1, product);
+            Json::CharReaderBuilder builder;
+            Json::CharReaderBuilder::strictMode(&builder.settings_);
+            std::unique_ptr<Json::CharReader> reader(builder.newCharReader());
+            while (rows.step() == SQLITE_ROW) {
+                if (result.items.size() == result.item_count ||
+                    static_cast<std::uint64_t>(sqlite3_column_bytes(rows.get(), 2)) > kMaximumIndexedItemBytes) {
+                    return std::nullopt;
+                }
+                auto links = decode_relation_links(column_text(rows.get(), 2), *reader);
+                if (!links) {
+                    return std::nullopt;
+                }
+                result.items.push_back(ProjectedRelationItem{
+                    column_text(rows.get(), 0), column_text(rows.get(), 1), std::move(*links)});
+            }
+            if (result.items.size() != result.item_count) {
+                return std::nullopt;
+            }
+        }
+        if (!verify_mutation_snapshot(db_, product_root, product, *snapshot)) {
+            return std::nullopt;
+        }
+        return result;
     } catch (const std::exception&) {
         return std::nullopt;
     }

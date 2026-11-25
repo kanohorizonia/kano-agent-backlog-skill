@@ -1708,7 +1708,7 @@ int main() {
                 root / "items" / "feature" / "9900" /
                 (parent_created.id + "_stale-index-source.md");
             store.write(stale_parent_item);
-            index.index_item(stale_parent_item);
+            index.index_materialized_item(stale_parent_item, read_text(*stale_parent_item.file_path));
             std::filesystem::remove(*stale_parent_item.file_path);
 
             auto update_result = WorkitemOps::update_state(
@@ -1774,7 +1774,7 @@ int main() {
                 (shared_parent_created.id + "_host-only.md");
             host_only_parent.file_path = host_only_parent_path;
             write_text(host_only_parent_path, read_text(shared_parent_created.path));
-            shared_index.index_item(host_only_parent);
+            shared_index.index_materialized_item(host_only_parent, read_text(host_only_parent_path));
             std::filesystem::remove(host_only_parent_path);
 
             auto shared_update = WorkitemOps::update_state(
@@ -1985,7 +1985,7 @@ int main() {
             auto stale_renamed_item = renamed_parent_after;
             stale_renamed_item.file_path = renamed_parent_path;
             store.write(stale_renamed_item);
-            index.index_item(stale_renamed_item);
+            index.index_materialized_item(stale_renamed_item, read_text(renamed_parent_path));
             std::filesystem::remove(renamed_parent_path);
 
             auto renamed_child_created = create_item_with_admission(

@@ -16,7 +16,7 @@
 
 namespace kano::backlog_ops {
 
-inline constexpr int kMetadataIndexSchemaVersion = 4;
+inline constexpr int kMetadataIndexSchemaVersion = 5;
 inline constexpr int kMetadataSnapshotSchemaVersion = 4;
 
 struct IndexItem {
@@ -37,6 +37,18 @@ struct IndexItem {
     std::int64_t source_mtime_ns = 0;
     std::uint64_t estimated_tokens = 0;
     std::string updated;
+    kano::backlog_core::ItemLinks links;
+};
+
+struct ProjectedRelationItem {
+    std::string id;
+    std::string uid;
+    kano::backlog_core::ItemLinks links;
+};
+
+struct VerifiedRelationProjection {
+    std::size_t item_count = 0;
+    std::vector<ProjectedRelationItem> items;
 };
 
 struct MaterializedIndexInput {
@@ -174,6 +186,10 @@ public:
     std::optional<std::filesystem::path> get_path_by_uid(const std::string& uid);
 
     // Open only the existing projection for this registered product root.
+    static std::unique_ptr<BacklogIndex> open_existing_mutation_index(
+        const std::filesystem::path& product_root,
+        std::optional<std::string> product_name
+    );
     std::unique_ptr<BacklogIndex> open_sibling_mutation_index(
         const std::filesystem::path& product_root) const;
 
@@ -188,6 +204,11 @@ public:
         const std::filesystem::path& product_root,
         const std::string& prefix,
         const std::string& type_code
+    );
+    // When the verified count exceeds max_items, returns the count without materializing rows.
+    std::optional<VerifiedRelationProjection> verified_relation_metadata(
+        const std::filesystem::path& product_root,
+        std::size_t max_items
     );
     std::optional<kano::backlog_core::BacklogItem> read_item_for_mutation(
         const std::filesystem::path& product_root,

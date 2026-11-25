@@ -9,6 +9,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace kano::backlog_core {
 
@@ -39,6 +40,12 @@ public:
      * Throws ItemNotFoundError or ParseError.
      */
     BacklogItem read(const std::filesystem::path& item_path) const;
+
+    /**
+     * Read one bounded binary buffer and parse the item from those exact bytes.
+     * Throws ItemNotFoundError or ParseError.
+     */
+    std::pair<BacklogItem, std::string> read_with_bytes(const std::filesystem::path& item_path) const;
 
     /**
      * Read only frontmatter-backed metadata from a markdown backlog item.

@@ -1,6 +1,7 @@
 #include "kano/backlog_core/frontmatter/canonical_store.hpp"
 #include "kano/backlog_core/diagnostics/mutation_timing.hpp"
 #include "kano/backlog_core/frontmatter/frontmatter.hpp"
+#include "kano/backlog_core/refs/ref_parser.hpp"
 #include "kano/backlog_core/validation/validator.hpp"
 #include "kano/backlog_core/models/errors.hpp"
 #include <algorithm>
@@ -10,8 +11,8 @@
 #include <chrono>
 #include <fstream>
 #include <iomanip>
+#include <limits>
 #include <random>
-#include <regex>
 #include <sstream>
 #include <string_view>
 #include <system_error>
@@ -372,23 +373,12 @@ bool is_inside_path(const std::filesystem::path& child_path, const std::filesyst
 }
 
 std::optional<std::pair<ItemType, int>> parse_display_id_type_and_number(const std::string& id) {
-    const auto last_dash = id.rfind('-');
-    if (last_dash == std::string::npos || last_dash + 1 >= id.size()) {
-        return std::nullopt;
-    }
-    const auto type_dash = id.rfind('-', last_dash - 1);
-    if (type_dash == std::string::npos || type_dash + 1 >= last_dash) {
+    const auto parsed = RefParser::parse_display_id(id);
+    if (!parsed || parsed->raw != id) {
         return std::nullopt;
     }
 
-    const std::string type_code = id.substr(type_dash + 1, last_dash - type_dash - 1);
-    const std::string number_text = id.substr(last_dash + 1);
-    if (number_text.empty() || !std::all_of(number_text.begin(), number_text.end(), [](unsigned char ch) {
-            return std::isdigit(ch);
-        })) {
-        return std::nullopt;
-    }
-
+    const auto& type_code = parsed->type_abbrev;
     std::optional<ItemType> type;
     if (type_code == "INIT") type = ItemType::Initiative;
     else if (type_code == "EPIC") type = ItemType::Epic;
@@ -402,7 +392,7 @@ std::optional<std::pair<ItemType, int>> parse_display_id_type_and_number(const s
     if (!type) {
         return std::nullopt;
     }
-    return std::make_pair(*type, std::stoi(number_text));
+    return std::make_pair(*type, parsed->number);
 }
 
 std::string item_type_directory(ItemType type) {
@@ -1144,7 +1134,7 @@ BacklogItem CanonicalStore::create(const std::string& prefix, ItemType type, con
         case ItemType::Issue: abbrev = "ISS"; type_dir = "issue"; break;
     }
 
-    // ID format: PREFIX-ABBREV-0001
+    // Four digits is the minimum width, including leading zeroes for low numbers.
     std::stringstream id_ss;
     id_ss << prefix << "-" << abbrev << "-" << std::setfill('0') << std::setw(4) << next_number;
     item.id = id_ss.str();
@@ -1298,14 +1288,15 @@ int CanonicalStore::get_next_id_number(ItemType type) const {
             }
         } catch (const std::exception&) {
             // Fall back to the filename so malformed legacy items still reserve their number.
-            static const std::regex filename_number_regex(R"(-(\d{4})_)");
-            std::string name = p.filename().string();
-            std::smatch match;
-            if (std::regex_search(name, match, filename_number_regex)) {
-                int num = std::stoi(match[1].str());
-                if (num > max_num) max_num = num;
+            const auto name = p.stem().string();
+            const auto parsed = parse_display_id_type_and_number(name.substr(0, name.find('_')));
+            if (parsed && parsed->first == type) {
+                max_num = std::max(max_num, parsed->second);
             }
         }
+    }
+    if (max_num == std::numeric_limits<int>::max()) {
+        throw std::runtime_error("Workitem ID range exhausted");
     }
     return max_num + 1;
 }

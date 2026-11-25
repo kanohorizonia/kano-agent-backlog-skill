@@ -16,7 +16,6 @@
 #include <array>
 #include <cerrno>
 #include <cstdint>
-#include <regex>
 #include <string_view>
 #include <thread>
 #include <json/json.h>
@@ -1088,11 +1087,11 @@ void validate_remap_target_id(
     const std::string& new_id,
     const std::filesystem::path& product_root
 ) {
-    static const std::regex id_regex(R"(^[A-Z][A-Z0-9]{1,15}-(INIT|EPIC|FTR|USR|TSK|SUBTSK|BUG|ISS)-\d{4}$)");
-    if (!std::regex_match(new_id, id_regex)) {
+    const auto parsed = RefParser::parse_display_id(new_id);
+    if (!parsed || parsed->raw != new_id) {
         throw std::runtime_error(
             "duplicate_item_id.remap_target_invalid: new item id has invalid format: " +
-            new_id + " (expected <PREFIX>-(INIT|EPIC|FTR|USR|TSK|SUBTSK|BUG|ISS)-<NNNN>)");
+            new_id + " (expected <PREFIX>-<TYPE>-<NUMBER> with at least four digits)");
     }
     if (new_id == item.id) {
         throw std::runtime_error("duplicate_item_id.remap_target_same: new item id matches current id: " + new_id);

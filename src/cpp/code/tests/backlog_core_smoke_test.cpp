@@ -204,6 +204,10 @@ int main() {
         const auto listed_items = store.list_items();
         expect(listed_items.size() == 1 && listed_items.front() == *persisted.file_path,
             "canonical item enumeration should exclude adjacent .index.md navigation artifacts");
+        write_text(temp_root / "items" / "task" / "10000" / "GT-TSK-10001_unreadable.md",
+            "Invalid frontmatter.\n");
+        expect(store.get_next_id_number(ItemType::Task) == 10002,
+            "filename fallback should reserve a five-digit ID from an unreadable canonical item");
         std::filesystem::remove_all(temp_root);
 
         {
@@ -493,12 +497,22 @@ int main() {
         auto subtask_ref = RefParser::parse_display_id("GT-SUBTSK-0001");
         expect(subtask_ref.has_value(), "SUBTSK display id should parse");
         expect(subtask_ref->type_abbrev == "SUBTSK", "SUBTSK display id should preserve type abbreviation");
+        auto high_number_item = item;
+        high_number_item.id = "GT-TSK-10001";
+        const auto high_number_ref = RefParser::parse_display_id(high_number_item.id);
+        expect(high_number_ref && high_number_ref->number == 10001 && high_number_ref->raw == high_number_item.id,
+            "display ID parser must preserve numbers wider than four digits");
+        expect(Validator::validate_schema(high_number_item).empty(), "schema must accept allocator-produced five-digit IDs");
+        expect(!RefParser::parse_display_id("GT-TSK-123") &&
+            !RefParser::parse_display_id("GT-TSK-10001x") &&
+            !RefParser::parse_display_id("GT-TSK-999999999999999999"),
+            "display ID parser must reject short, nondecimal, and out-of-range numbers");
 
         BacklogItem reference_source = item;
         reference_source.links.relates = {"GT-TSK-0002"};
         reference_source.decisions = {
             "Evidence sentence with a source/path marker (source: implementation/preflight).",
-            "Canonical dependency GT-BUG-0003 remains reviewable in prose.",
+            "Canonical dependencies GT-BUG-0003 and GT-BUG-10001 remain reviewable in prose.",
             "Historical identities GT-TSK-9998 and GT-TSK-9999 belong to this item."
         };
         reference_source.links.blocks = {"019cdf6a-0000-7000-8000-000000000099"};
@@ -518,6 +532,8 @@ int main() {
             "structured item links should remain references");
         expect(std::find(extracted_refs.begin(), extracted_refs.end(), "GT-BUG-0003") != extracted_refs.end(),
             "canonical tokens embedded in decision prose should remain references");
+        expect(std::find(extracted_refs.begin(), extracted_refs.end(), "GT-BUG-10001") != extracted_refs.end(),
+            "five-digit canonical tokens embedded in prose should remain full references");
         expect(std::find(extracted_refs.begin(), extracted_refs.end(), "ADR-0013") != extracted_refs.end(),
             "canonical tokens embedded in body prose should remain references");
         expect(std::find(extracted_refs.begin(), extracted_refs.end(), "019cdf6a-0000-7000-8000-000000000099") != extracted_refs.end(),

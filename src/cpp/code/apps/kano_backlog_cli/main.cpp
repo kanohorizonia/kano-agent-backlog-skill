@@ -409,9 +409,10 @@ void validate_remap_target_id(
     const BacklogItem& item,
     const std::string& new_id
 ) {
-    static const std::regex id_regex(R"(^[A-Z][A-Z0-9]{1,15}-(INIT|EPIC|FTR|USR|TSK|SUBTSK|BUG|ISS)-\d{4}$)");
-    if (!std::regex_match(new_id, id_regex)) {
-        throw std::runtime_error("New item id has invalid format: " + new_id + " (expected <PREFIX>-(INIT|EPIC|FTR|USR|TSK|SUBTSK|BUG|ISS)-<NNNN>)");
+    const auto parsed = RefParser::parse_display_id(new_id);
+    if (!parsed || parsed->raw != new_id) {
+        throw std::runtime_error("New item id has invalid format: " + new_id +
+                                 " (expected <PREFIX>-<TYPE>-<NUMBER> with at least four digits)");
     }
     if (new_id == item.id) {
         throw std::runtime_error("New item id matches current id: " + new_id);
@@ -783,11 +784,13 @@ std::vector<std::filesystem::path> list_item_markdown_paths(const std::filesyste
 }
 
 std::optional<std::string> item_id_from_path(const std::filesystem::path& path) {
-    static const std::regex id_pattern(R"(([A-Z][A-Z0-9]{1,15}-(?:INIT|EPIC|FTR|USR|TSK|SUBTSK|BUG|ISS)-\d{4}))");
+    static const std::regex id_pattern(R"(([A-Z][A-Z0-9]{1,15}-(?:INIT|EPIC|FTR|USR|TSK|SUBTSK|BUG|ISS)-[0-9]{4,}))");
     std::smatch match;
     const std::string stem = path.stem().string();
     if (std::regex_search(stem, match, id_pattern)) {
-        return match[1].str();
+        if (const auto parsed = RefParser::parse_display_id(match[1].str())) {
+            return parsed->raw;
+        }
     }
     return std::nullopt;
 }

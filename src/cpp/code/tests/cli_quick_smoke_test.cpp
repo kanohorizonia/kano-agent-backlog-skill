@@ -3167,6 +3167,60 @@ int main(int argc, char** argv) {
                 boundary_quote_title) != nullptr,
             "compact CLI create should round-trip intentional boundary quotes canonically");
 
+        const auto large_id_root = temp_root / "high-number";
+        write_text(large_id_root / ".kano" / "backlog_config.toml",
+            "[products.quick-smoke-product]\n"
+            "name = \"quick-smoke-product\"\n"
+            "prefix = \"QS\"\n"
+            "backlog_root = \"_kano/backlog/products/quick-smoke-product\"\n");
+        const auto large_id_items = large_id_root / "_kano" / "backlog" / "products" / "quick-smoke-product" / "items";
+        write_text(large_id_items / "task" / "10000" / "QS-TSK-10000_existing-task.md",
+            list_fixture_item_markdown("QS-TSK-10000", "019f2000-0001-7000-8000-000000001000",
+                "Existing high-number task", "Ready", "P1", "2026-07-21"));
+        const auto large_id_args = with_duplicate_admission({
+            "-p", large_id_root.string(), "-P", "quick-smoke-product", "workitem", "create", "-t", "task",
+            "--title", "High-number create regression", "--agent", "tester",
+            "--idempotency-key", "high-number-create-regression", "--format", "json"
+        }, "High-number create regression");
+        const auto large_id_output = temp_root / "high-number-create.json";
+        expect_command_capture_success(run_command_capture(binary, large_id_args, large_id_output),
+            large_id_output, "allocator must advance past existing five-digit IDs");
+        const auto large_id_item = read_json(large_id_output);
+        const auto large_id = large_id_item["id"].asString();
+        expect(large_id == "QS-TSK-10001" && large_id_item["read_after_write"].asBool() &&
+            !large_id_item["idempotent_replay"].asBool(), "create must publish the next five-digit ID");
+
+        expect(run_command(binary, {
+            "-p", large_id_root.string(), "-P", "quick-smoke-product", "workitem", "set-ready", large_id,
+            "--context", "Large allocation regression.", "--goal", "Resolve the allocated ID.",
+            "--approach", "Exercise the CLI lifecycle.", "--acceptance-criteria", "The item remains readable.",
+            "--risks", "None.", "--agent", "tester"
+        }) == 0, "set-ready must resolve the allocated five-digit ID");
+        expect(run_command(binary, {
+            "-p", large_id_root.string(), "-P", "quick-smoke-product", "workitem", "check-ready", large_id
+        }) == 0, "read-by-ID must resolve the five-digit Ready item");
+        expect(run_command(binary, {
+            "-p", large_id_root.string(), "-P", "quick-smoke-product", "workitem", "update-state", large_id,
+            "--state", "InProgress", "--agent", "tester"
+        }) == 0, "state update must resolve the allocated five-digit ID");
+        expect(run_command(binary, {
+            "-p", large_id_root.string(), "-P", "quick-smoke-product", "worklog", "append", large_id,
+            "Record high-number mutation.", "--agent", "tester"
+        }) == 0, "worklog must resolve the allocated five-digit ID");
+        const auto large_id_path = std::filesystem::path(large_id_item["path"].asString());
+        const auto large_id_content = read_text(large_id_path);
+        expect(large_id_content.find("state: InProgress") != std::string::npos &&
+            count_occurrences(large_id_content, "Record high-number mutation.") == 1,
+            "state and worklog must be present in canonical readback");
+        expect_command_capture_success(run_command_capture(binary, large_id_args, large_id_output),
+            large_id_output, "same-key create must replay the five-digit ID");
+        const auto large_id_retry = read_json(large_id_output);
+        expect(large_id_retry["id"].asString() == large_id &&
+            large_id_retry["uid"].asString() == large_id_item["uid"].asString() &&
+            large_id_retry["path"].asString() == large_id_item["path"].asString() &&
+            large_id_retry["idempotent_replay"].asBool() && read_text(large_id_path) == large_id_content,
+            "same-key replay must preserve the ID, UID, path and updated canonical bytes");
+
         const std::string sensitive_marker = "../../private/persisted-snapshot";
         const auto corrupt_index_dir =
             temp_root / "_kano" / "backlog" / ".cache" / "index";

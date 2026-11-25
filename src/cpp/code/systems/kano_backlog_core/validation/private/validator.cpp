@@ -1,4 +1,5 @@
 #include "kano/backlog_core/validation/validator.hpp"
+#include "kano/backlog_core/refs/ref_parser.hpp"
 #include <algorithm>
 #include <array>
 #include <regex>
@@ -84,11 +85,13 @@ std::vector<std::string> Validator::validate_schema(const BacklogItem& item) {
     if (item.created.empty()) errors.push_back("Missing required field: created");
     if (item.updated.empty()) errors.push_back("Missing required field: updated");
 
-    // 2. Validate ID format
-    // Pattern: ^[A-Z][A-Z0-9]{1,15}-(INIT|EPIC|FTR|USR|TSK|SUBTSK|BUG|ISS)-\d{4}$
-    static const std::regex id_regex(R"(^[A-Z][A-Z0-9]{1,15}-(INIT|EPIC|FTR|USR|TSK|SUBTSK|BUG|ISS)-\d{4}$)");
-    if (!item.id.empty() && !std::regex_match(item.id, id_regex)) {
-        errors.push_back("Invalid id format: " + item.id + " (expected <PREFIX>-(INIT|EPIC|FTR|USR|TSK|SUBTSK|BUG|ISS)-<NNNN>)");
+    // 2. Validate the untrimmed canonical ID.
+    if (!item.id.empty()) {
+        const auto id = RefParser::parse_display_id(item.id);
+        if (!id || id->raw != item.id) {
+            errors.push_back("Invalid id format: " + item.id +
+                             " (expected <PREFIX>-<TYPE>-<NUMBER> with at least four digits)");
+        }
     }
 
     // 3. Validate UID format (strict UUIDv7)

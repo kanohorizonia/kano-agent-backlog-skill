@@ -1715,6 +1715,38 @@ void validate_incremental_receipt_byte_binding(const std::filesystem::path& fixt
         "bytes restored after parsing must not certify unrelated parsed dependency edges");
 }
 
+void validate_incremental_write_with_stale_proof(const std::filesystem::path& fixture_root) {
+    const std::string product = "stale-proof-write";
+    const auto product_root = fixture_root / "products" / product;
+    CanonicalStore store(product_root);
+    auto target = store.create("DRT", ItemType::Task, "Target initial", 1);
+    auto other = store.create("DRT", ItemType::Task, "Raw marker A", 2);
+    store.write(target);
+    store.write(other);
+    BacklogIndex index(fixture_root / ".cache/index/backlog.db", product, product_root);
+    index.rebuild_metadata(product_root, product);
+    expect(index.query_metadata(product_root, product).diagnostics.index_used,
+        "stale proof write must start with a usable projection");
+
+    const auto other_time = std::filesystem::last_write_time(*other.file_path);
+    auto other_bytes = read_text(*other.file_path);
+    const auto marker = other_bytes.find("Raw marker A");
+    expect(marker != std::string::npos, "unrelated item must include the raw marker");
+    other_bytes.replace(marker, std::string_view("Raw marker A").size(), "Raw marker B");
+    write_text(*other.file_path, other_bytes);
+    std::filesystem::last_write_time(*other.file_path, other_time);
+
+    target.title = "Target updated";
+    store.write(target);
+    index.index_item(target);
+    const auto current = index.query_metadata(product_root, product);
+    expect(!current.diagnostics.index_used && current.diagnostics.fallback_scan &&
+            store.read(*target.file_path).title == target.title &&
+            store.read(*other.file_path).title == "Raw marker B" &&
+            read_text(*other.file_path) == other_bytes,
+        "a verified canonical write must survive unrelated drift without certifying the projection");
+}
+
 void validate_incremental_inventory_membership(const std::filesystem::path& fixture_root) {
     const std::string product = "incremental-inventory";
     const auto product_root = fixture_root / "products" / product;
@@ -1946,6 +1978,7 @@ int main(int argc, char** argv) {
         validate_incremental_receipt_byte_binding(fixture_root / "incremental-receipt-bytes");
         validate_incremental_display_id_replacement(fixture_root / "incremental-display-id");
         validate_incremental_inventory_membership(fixture_root / "incremental-inventory");
+        validate_incremental_write_with_stale_proof(fixture_root / "stale-proof-write");
         validate_koa_metadata_index_consumer_fixture();
         const auto backlog_root = fixture_root / "backlog";
         const std::string product = "metadata-product";

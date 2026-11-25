@@ -153,7 +153,10 @@ accepts the incremental update only when the receipt is contiguous with the
 snapshot fence and matches the bytes used to parse the canonical readback.
 A second source with the same display ID invalidates the snapshot and preserves
 both canonical files. A missing, malformed, noncontiguous, or mismatched receipt
-also invalidates the snapshot. Batch schema repair rebuilds the product snapshot
+also invalidates the snapshot. If the NTFS journal reports other canonical
+changes after the tracked write, a stable contiguous receipt and matching
+canonical bytes still verify that write. The product projection stays
+incomplete until rebuilt. Batch schema repair rebuilds the product snapshot
 once after canonical writes finish.
 
 An incremental row update keeps a previously verified snapshot ready. If no

@@ -2190,6 +2190,7 @@ void BacklogIndex::index_item(const BacklogItem& item) {
     CanonicalWriteRevision write_revision;
     std::optional<change_probe::Checkpoint> proof_endpoint;
     bool portable_receipt_verified = false;
+    bool canonical_write_verified_with_stale_proof = false;
     std::vector<change_probe::WatchEntry> next_watch;
     std::string failure_reason = "mutation_read_after_write_failed";
     try {
@@ -2242,9 +2243,10 @@ void BacklogIndex::index_item(const BacklogItem& item) {
                     *previous.proof,
                     verification_watch,
                     mutation_allowed_file_ids(verification_watch, changed_sources));
-                if (proof.status != change_probe::Status::Clean || !proof.endpoint) {
+                const bool stale_proof = proof.status == change_probe::Status::RelevantChange;
+                if (!stale_proof && (proof.status != change_probe::Status::Clean || !proof.endpoint)) {
                     failure_reason = std::string(change_probe::reason(proof.status));
-                    throw std::runtime_error(std::string(change_probe::reason(proof.status)));
+                    throw std::runtime_error(failure_reason);
                 }
                 const auto final_stat = source_stat_checked(source.path);
                 if (final_stat.size != indexed.source_size
@@ -2252,9 +2254,21 @@ void BacklogIndex::index_item(const BacklogItem& item) {
                     failure_reason = "mutation_read_after_write_failed";
                     throw std::runtime_error("metadata_index_mutation_read_after_write_mismatch");
                 }
-                proof_endpoint = proof.endpoint;
-                next_watch = updated_change_watch(
-                    *previous_watch, current_watch.entries, changed_sources);
+                if (stale_proof) {
+                    // The write receipt proves this row. The journal cannot certify the other rows.
+                    const auto validated_receipt = store.read_write_revision();
+                    if (validated_receipt.current != write_revision.current ||
+                        !write_receipt_matches(validated_receipt, indexed)) {
+                        failure_reason = "canonical_mutation_receipt_invalid";
+                        throw std::runtime_error(failure_reason);
+                    }
+                    canonical_write_verified_with_stale_proof = true;
+                    failure_reason = std::string(change_probe::reason(proof.status));
+                } else {
+                    proof_endpoint = proof.endpoint;
+                    next_watch = updated_change_watch(
+                        *previous_watch, current_watch.entries, changed_sources);
+                }
             } else {
                 const auto final_stat = source_stat_checked(source.path);
                 if (final_stat.size != indexed.source_size ||
@@ -2286,20 +2300,17 @@ void BacklogIndex::index_item(const BacklogItem& item) {
     std::string commit_failure_reason = "mutation_index_commit_failed";
     execute("BEGIN IMMEDIATE");
     try {
-        if (previous_mode == SnapshotReadinessMode::PortableUnsupported) {
-            // A tracked receipt proves this row changed. Portable readers
-            // still validate the complete canonical revision before trusting
-            // the snapshot, including writes made outside CanonicalStore.
-            const auto current = read_snapshot(db_, product);
-            if (!same_snapshot_publication_identity(previous, current)) {
-                execute("ROLLBACK");
-                return;
-            }
-            if (portable_receipt_verified &&
-                CanonicalStore(root).read_write_revision().current != write_revision.current) {
-                portable_receipt_verified = false;
-                failure_reason = "canonical_mutation_receipt_invalid";
-            }
+        if ((previous_mode == SnapshotReadinessMode::PortableUnsupported ||
+                canonical_write_verified_with_stale_proof) &&
+            !same_snapshot_publication_identity(previous, read_snapshot(db_, product))) {
+            execute("ROLLBACK");
+            return;
+        }
+        // Portable readers validate the complete revision before trusting the snapshot.
+        if (portable_receipt_verified &&
+            CanonicalStore(root).read_write_revision().current != write_revision.current) {
+            portable_receipt_verified = false;
+            failure_reason = "canonical_mutation_receipt_invalid";
         }
         {
             Statement existing(db_, "SELECT source_ref FROM items WHERE product = ? AND id = ?",

@@ -284,6 +284,61 @@ void test_registered_sibling_projection(const std::filesystem::path& root) {
     std::cout << "sibling mutation projection: " << (verified ? "verified NTFS" : "canonical fallback") << "\n";
 }
 
+void test_indexed_uid_parent_chain(const std::filesystem::path& root) {
+    using kano::backlog_core::CanonicalStore;
+    using kano::backlog_core::ItemType;
+    using kano::backlog_ops::BacklogIndex;
+    using kano::backlog_ops::WorkitemOps;
+
+    CanonicalStore store(root);
+    auto unrelated = store.create("ANC", ItemType::Epic, "Unrelated epic", 1);
+    store.write(unrelated);
+    auto ancestor = store.create("ANC", ItemType::Epic, "UID ancestor", 2);
+    store.write(ancestor);
+    auto parent = store.create("ANC", ItemType::Feature, "Direct parent", 1, ancestor.uid);
+    store.write(parent);
+    BacklogIndex index(root / ".cache" / "index" / "backlog.db", "configured-product", root);
+    const auto create = [&](const std::string& title, const std::string& key) {
+        return WorkitemOps::create_item(index, root, "ANC", ItemType::Task, title, "codex",
+            parent.id, "P2", {}, "general", "backlog", std::nullopt, std::nullopt,
+            "", "", duplicate_admission(title), key);
+    };
+    {
+        MutationTimingCapture timing;
+        const auto child = create("Cold child with UID ancestor", "cold-uid-ancestor");
+        expect(child.read_after_write && timing.full_reads(unrelated.file_path->filename().string()) == 0,
+            "keyed create must reuse the bounded ancestor metadata inventory when its index is cold");
+    }
+
+    index.rebuild_metadata(root, "configured-product");
+    const auto projected = index.verified_mutation_paths(root, ancestor.uid);
+    const bool verified = projected == std::vector<std::filesystem::path>{*ancestor.file_path};
+    {
+        MutationTimingCapture timing;
+        const auto child = create("Child with UID ancestor", "uid-ancestor");
+        expect(child.read_after_write && store.read(child.path).parent == parent.id,
+            "create must preserve the direct parent ID after resolving its UID ancestor");
+        expect(timing.full_reads(unrelated.file_path->filename().string()) == 0,
+            "UID ancestor validation must skip unrelated canonical bodies");
+        if (verified) {
+            expect(timing.reads("canonical_store.list_items", "all") == 0,
+                "verified UID ancestor validation must skip canonical inventory");
+        }
+    }
+
+    ancestor.parent = parent.uid;
+    store.write(ancestor);
+    index.index_item(ancestor);
+    const auto count = store.list_items().size();
+    expect_throws_contains([&] {
+        (void)create("Child of cyclic UID chain", "uid-ancestor-cycle");
+    }, "hierarchy.parent_cycle", "create must reject a cycle reached through canonical UID edges");
+    expect(store.list_items().size() == count,
+        "a UID ancestor cycle must fail before writing a child");
+    std::cout << "UID parent-chain mutation: "
+              << (verified ? "verified NTFS" : "canonical fallback") << "\n";
+}
+
 void test_linked_create_registry_scope(const std::filesystem::path& root) {
     using kano::backlog_core::CanonicalStore;
     using kano::backlog_core::ItemType;
@@ -399,6 +454,7 @@ int main(int argc, char** argv) {
             std::filesystem::remove_all(root);
             return 0;
         }
+        test_indexed_uid_parent_chain(root / "uid-parent-chain");
         {
             const std::string spans[] = {
                 "workitem.create_item.request_scan",

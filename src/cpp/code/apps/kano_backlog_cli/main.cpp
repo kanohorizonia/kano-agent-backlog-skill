@@ -8211,6 +8211,20 @@ std::optional<int> try_run_links_remap_ref_fast_path(int argc, char** argv) {
     return 0;
 }
 
+BacklogItem read_set_parent_item(
+    const BacklogContext& ctx,
+    const RefResolver& resolver,
+    const std::string& ref,
+    BacklogIndex* mutation_index
+) {
+    if (mutation_index) {
+        if (auto item = mutation_index->read_item_for_mutation(ctx.product_root, ref)) {
+            return *std::move(item);
+        }
+    }
+    return resolver.resolve(ref);
+}
+
 std::optional<int> try_run_admin_items_fast_path(int argc, char** argv) {
     if (argc < 5 || argv == nullptr) {
         return std::nullopt;
@@ -8352,10 +8366,10 @@ std::optional<int> try_run_admin_items_fast_path(int argc, char** argv) {
 
     const std::string effective_product = !product.empty() ? product : global_product;
     auto ctx = resolve_product_context(path_str, effective_product, sandbox, backlog_root);
-    BacklogIndex index(ctx.backlog_root / ".cache" / "index" / "backlog.db");
-    index.initialize();
 
     if (command == "trash") {
+        BacklogIndex index(ctx.backlog_root / ".cache" / "index" / "backlog.db");
+        index.initialize();
         TrashItemResult result;
         if (apply) {
             result = WorkitemOps::trash_item(
@@ -8423,14 +8437,16 @@ std::optional<int> try_run_admin_items_fast_path(int argc, char** argv) {
         throw std::runtime_error("Provide --parent or --clear.");
     }
 
+    BacklogIndex index(ctx.backlog_root / ".cache" / "index" / "backlog.db",
+        ctx.product_name, ctx.product_root);
+    index.initialize();
     CanonicalStore store(ctx.product_root);
     RefResolver resolver(store);
-    auto item = resolver.resolve(item_ref);
+    auto item = read_set_parent_item(ctx, resolver, item_ref, apply ? &index : nullptr);
     const auto old_parent = item.parent;
     std::optional<std::string> new_parent;
-    if (!clear) {
-        auto parent_item = resolver.resolve(parent);
-        new_parent = parent_item.id;
+    if (!clear && !apply) {
+        new_parent = resolver.resolve(parent).id;
     }
 
     if (apply) {
@@ -8440,7 +8456,7 @@ std::optional<int> try_run_admin_items_fast_path(int argc, char** argv) {
             item_ref,
             clear ? std::string("none") : parent,
             agent);
-        item = resolver.resolve(item_ref);
+        item = read_set_parent_item(ctx, resolver, item_ref, &index);
     }
 
     const std::string status = apply ? "updated" : "dry-run";
@@ -10454,7 +10470,8 @@ int main(int InArgc, char* InArgv[]) {
 
             remapCmd->callback([&]() {
                 auto ctx = resolve_ctx();
-                BacklogIndex index(ctx.backlog_root / ".cache" / "index" / "backlog.db");
+                BacklogIndex index(ctx.backlog_root / ".cache" / "index" / "backlog.db",
+                    ctx.product_name, ctx.product_root);
 
                 WorkitemOps::remap_parent(index, ctx.product_root, remap_ref, parent_ref, remap_agent);
                 std::cout << "Successfully remapped parent for " << remap_ref << "\n";
@@ -12227,16 +12244,16 @@ int main(int InArgc, char* InArgv[]) {
                     }
 
                     auto ctx = resolve_ctx_for_product_and_backlog(sp_product, sp_backlog_root);
-                    BacklogIndex index(ctx.backlog_root / ".cache" / "index" / "backlog.db");
+                    BacklogIndex index(ctx.backlog_root / ".cache" / "index" / "backlog.db",
+                        ctx.product_name, ctx.product_root);
                     index.initialize();
                     CanonicalStore store(ctx.product_root);
                     RefResolver resolver(store);
-                    auto item = resolver.resolve(sp_item_ref);
+                    auto item = read_set_parent_item(ctx, resolver, sp_item_ref, sp_apply ? &index : nullptr);
                     const auto old_parent = item.parent;
                     std::optional<std::string> new_parent;
-                    if (!sp_clear) {
-                        auto parent_item = resolver.resolve(sp_parent);
-                        new_parent = parent_item.id;
+                    if (!sp_clear && !sp_apply) {
+                        new_parent = resolver.resolve(sp_parent).id;
                     }
 
                     if (sp_apply) {
@@ -12246,7 +12263,7 @@ int main(int InArgc, char* InArgv[]) {
                             sp_item_ref,
                             sp_clear ? std::string("none") : sp_parent,
                             sp_agent);
-                        item = resolver.resolve(sp_item_ref);
+                        item = read_set_parent_item(ctx, resolver, sp_item_ref, &index);
                     }
 
                     const std::string status = sp_apply ? "updated" : "dry-run";

@@ -1622,6 +1622,21 @@ struct CreateParentMetadata {
         }
         return require_unique_parent(matches, {}, root, ref, false, "");
     }
+
+    BacklogItem read_live_parent(
+        const CanonicalStore& store,
+        const std::filesystem::path& root,
+        const BacklogItem& candidate
+    ) const {
+        const auto live = store.read(*candidate.file_path);
+        if (live.id != candidate.id || live.uid != candidate.uid ||
+            live.type != candidate.type || live.parent != candidate.parent ||
+            live.external != candidate.external) {
+            throw std::runtime_error("hierarchy.parent_identity_changed: parent changed during metadata admission");
+        }
+        verify_root(root);
+        return live;
+    }
 };
 
 class CreateMutationIndexes {
@@ -1726,8 +1741,9 @@ bool same_item_identity(const BacklogItem& left, const BacklogItem& right) {
     return !left.uid.empty() && left.uid == right.uid;
 }
 
+template <typename ResolveAncestor>
 void validate_parent_relationship(
-    const RefResolver& resolver,
+    ResolveAncestor&& resolve_ancestor,
     const BacklogItem& item,
     const BacklogItem& parent_item
 ) {
@@ -1758,7 +1774,7 @@ void validate_parent_relationship(
         }
 
         try {
-            current = resolver.resolve(*current.parent);
+            current = resolve_ancestor(*current.parent);
         } catch (const std::exception& ex) {
             throw std::runtime_error(
                 "hierarchy.parent_cycle_unverified: cannot verify proposed parent chain at " +
@@ -1868,19 +1884,23 @@ CreateItemResult WorkitemOps::create_item(
         if (parent_metadata) {
             // Metadata identifies the only candidate; verify its live canonical
             // identity and hierarchy before normalizing the request payload.
-            const auto live_parent = store.read(*parent_identity->file_path);
-            if (live_parent.id != parent_identity->id || live_parent.uid != parent_identity->uid ||
-                live_parent.type != parent_identity->type || live_parent.parent != parent_identity->parent ||
-                live_parent.external != parent_identity->external) {
-                throw std::runtime_error("hierarchy.parent_identity_changed: parent changed during metadata admission");
-            }
-            parent_identity = live_parent;
-            parent_metadata->verify_root(backlog_root);
+            parent_identity = parent_metadata->read_live_parent(store, backlog_root, *parent_identity);
         }
         BacklogItem child_proposal;
         child_proposal.type = type;
-        RefResolver resolver(store);
-        validate_parent_relationship(resolver, child_proposal, *parent_identity);
+        validate_parent_relationship([&](const std::string& ref) {
+            if (parent_metadata) {
+                const auto resolved = RefParser::parse(ref);
+                if (resolved && (std::holds_alternative<DisplayIdRef>(*resolved) ||
+                                 std::holds_alternative<UuidRef>(*resolved))) {
+                    const auto canonical_ref = std::holds_alternative<DisplayIdRef>(*resolved)
+                        ? std::get<DisplayIdRef>(*resolved).raw : std::get<UuidRef>(*resolved).uuid;
+                    const auto candidate = parent_metadata->resolve_parent(backlog_root, canonical_ref);
+                    return parent_metadata->read_live_parent(store, backlog_root, candidate);
+                }
+            }
+            return resolve_item_or_throw(store, backlog_root, ref, &index);
+        }, child_proposal, *parent_identity);
         parent = parent_identity->id;
     }
     
@@ -2500,7 +2520,6 @@ void WorkitemOps::remap_parent(
 ) {
     diagnostics::ScopedMutationSpan total_span("workitem.remap_parent.total", item_ref);
     CanonicalStore store(backlog_root);
-    RefResolver resolver(store);
     BacklogItem item;
     {
         diagnostics::ScopedMutationSpan span("workitem.remap_parent.resolve_item", item_ref);
@@ -2513,7 +2532,9 @@ void WorkitemOps::remap_parent(
     } else {
         diagnostics::ScopedMutationSpan span("workitem.remap_parent.resolve_parent", new_parent_ref);
         BacklogItem parent_item = resolve_item_or_throw(store, backlog_root, new_parent_ref, &index);
-        validate_parent_relationship(resolver, item, parent_item);
+        validate_parent_relationship([&](const std::string& ref) {
+            return resolve_item_or_throw(store, backlog_root, ref, &index);
+        }, item, parent_item);
         item.parent = parent_item.id;
     }
 

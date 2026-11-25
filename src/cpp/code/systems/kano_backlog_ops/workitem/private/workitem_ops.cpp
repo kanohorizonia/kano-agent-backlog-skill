@@ -20,6 +20,7 @@
 #include <thread>
 #include <json/json.h>
 #include <limits>
+#include <iterator>
 #include <map>
 #include <memory>
 
@@ -36,6 +37,12 @@
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#if defined(__linux__)
+#include <linux/magic.h>
+#include <sys/vfs.h>
+#elif defined(__APPLE__) || defined(__FreeBSD__)
+#include <sys/mount.h>
+#endif
 #endif
 
 namespace kano::backlog_ops {
@@ -154,10 +161,129 @@ std::optional<std::string> read_first_line(const std::filesystem::path& path) {
 }
 
 struct SharedIdReservationContext {
+    std::filesystem::path git_dir;
     std::filesystem::path git_common_dir;
     std::filesystem::path repository_root;
     std::filesystem::path product_relative_path;
 };
+
+[[noreturn]] void unverified_worktree_registry() {
+    throw std::runtime_error(
+        "item_create.worktree_registry_incomplete: cannot verify the registered Git worktree scope "
+        "on this storage route; no new item ID reserved");
+}
+
+std::filesystem::file_status worktree_status(const std::filesystem::path& path) {
+    std::error_code error;
+    const auto status = std::filesystem::symlink_status(path, error);
+    if (error && error != std::errc::no_such_file_or_directory) {
+        unverified_worktree_registry();
+    }
+    return status;
+}
+
+std::filesystem::path read_worktree_pointer(
+    const std::filesystem::path& file,
+    const std::string_view prefix = {}
+) {
+    if (!std::filesystem::is_regular_file(worktree_status(file))) {
+        unverified_worktree_registry();
+    }
+    const auto line = read_first_line(file);
+    if (!line || !line->starts_with(prefix)) {
+        unverified_worktree_registry();
+    }
+    const auto text = trim_text(line->substr(prefix.size()));
+#ifndef _WIN32
+    if ((text.size() >= 2 && std::isalpha(static_cast<unsigned char>(text[0])) && text[1] == ':') ||
+        text.starts_with("\\") || text.starts_with("//")) {
+        unverified_worktree_registry();
+    }
+#endif
+    const std::filesystem::path target(text);
+    if (text.empty() || text.find('\0') != std::string::npos ||
+        (target.has_root_path() && !target.is_absolute())) {
+        unverified_worktree_registry();
+    }
+    return file.parent_path() / target;
+}
+
+std::filesystem::path canonical_worktree_directory(const std::filesystem::path& directory) {
+    std::error_code error;
+    const auto resolved = std::filesystem::canonical(directory, error);
+    if (error || !std::filesystem::is_directory(worktree_status(resolved))) {
+        unverified_worktree_registry();
+    }
+    return resolved;
+}
+
+bool local_worktree_volume(
+    const std::filesystem::path& directory,
+    const std::filesystem::path& common_git_dir
+) {
+#ifdef _WIN32
+    (void)common_git_dir;
+    std::wstring mount(32768, L'\0');
+    return GetVolumePathNameW(directory.c_str(), mount.data(), static_cast<DWORD>(mount.size())) &&
+        GetDriveTypeW(mount.c_str()) == DRIVE_FIXED;
+#else
+    struct stat parent{};
+    struct stat registry{};
+    if (::stat(directory.c_str(), &parent) != 0 || ::stat(common_git_dir.c_str(), &registry) != 0 ||
+        parent.st_dev != registry.st_dev) {
+        return false;
+    }
+#if defined(__linux__)
+    struct statfs volume{};
+    return ::statfs(directory.c_str(), &volume) == 0 &&
+        (volume.f_type == EXT4_SUPER_MAGIC || volume.f_type == XFS_SUPER_MAGIC ||
+            volume.f_type == BTRFS_SUPER_MAGIC || volume.f_type == TMPFS_MAGIC ||
+            volume.f_type == OVERLAYFS_SUPER_MAGIC);
+#elif defined(__APPLE__) || defined(__FreeBSD__)
+    struct statfs volume{};
+    return ::statfs(directory.c_str(), &volume) == 0 && (volume.f_flags & MNT_LOCAL) != 0;
+#else
+    return false;
+#endif
+#endif
+}
+
+bool missing_native_worktree(
+    const std::filesystem::path& checkout,
+    const std::filesystem::path& common_git_dir
+) {
+    auto visible = checkout.root_path();
+    if (!std::filesystem::is_directory(worktree_status(visible))) {
+        return false;
+    }
+    const auto components = checkout.relative_path();
+    for (auto component = components.begin(); component != components.end(); ++component) {
+        if (*component == ".") {
+            continue;
+        }
+        if (*component == "..") {
+            visible = visible.parent_path();
+            continue;
+        }
+        const auto next = visible / *component;
+        const auto status = worktree_status(next);
+        if (status.type() == std::filesystem::file_type::not_found) {
+            return std::find(std::next(component), components.end(), "..") == components.end() &&
+                local_worktree_volume(visible, common_git_dir);
+        }
+        if (!std::filesystem::is_directory(status)) {
+            return false;
+        }
+#ifdef _WIN32
+        const auto attributes = GetFileAttributesW(next.c_str());
+        if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_REPARSE_POINT)) {
+            return false;
+        }
+#endif
+        visible = next;
+    }
+    return false;
+}
 
 std::optional<SharedIdReservationContext> find_shared_id_reservation_context(
     const std::filesystem::path& backlog_root
@@ -165,30 +291,29 @@ std::optional<SharedIdReservationContext> find_shared_id_reservation_context(
     auto cursor = normalize_path(backlog_root);
     while (!cursor.empty()) {
         const auto dot_git = cursor / ".git";
-        std::error_code ec;
+        const auto status = worktree_status(dot_git);
         std::filesystem::path git_dir;
-        if (std::filesystem::is_directory(dot_git, ec)) {
-            git_dir = dot_git;
-        } else if (std::filesystem::is_regular_file(dot_git, ec)) {
-            const auto line = read_first_line(dot_git);
-            constexpr std::string_view prefix = "gitdir:";
-            if (!line || !line->starts_with(prefix)) {
-                return std::nullopt;
-            }
-            git_dir = normalize_path(cursor / trim_text(line->substr(prefix.size())));
+        if (std::filesystem::is_directory(status)) {
+            git_dir = canonical_worktree_directory(dot_git);
+        } else if (std::filesystem::is_regular_file(status)) {
+            git_dir = canonical_worktree_directory(read_worktree_pointer(dot_git, "gitdir:"));
+        } else if (status.type() != std::filesystem::file_type::not_found) {
+            unverified_worktree_registry();
         }
 
         if (!git_dir.empty()) {
             auto common_dir = git_dir;
-            if (const auto common = read_first_line(git_dir / "commondir")) {
-                common_dir = normalize_path(git_dir / *common);
+            const auto common_pointer = git_dir / "commondir";
+            if (std::filesystem::exists(worktree_status(common_pointer))) {
+                common_dir = canonical_worktree_directory(read_worktree_pointer(common_pointer));
             }
             std::error_code relative_error;
             auto product_relative = std::filesystem::relative(normalize_path(backlog_root), cursor, relative_error);
-            if (relative_error || product_relative.empty() || product_relative.is_absolute()) {
-                return std::nullopt;
+            if (relative_error || product_relative.empty() || product_relative.has_root_path() ||
+                std::find(product_relative.begin(), product_relative.end(), "..") != product_relative.end()) {
+                unverified_worktree_registry();
             }
-            return SharedIdReservationContext{normalize_path(common_dir), cursor, product_relative};
+            return SharedIdReservationContext{git_dir, common_dir, cursor, product_relative};
         }
 
         const auto parent = cursor.parent_path();
@@ -203,20 +328,82 @@ std::optional<SharedIdReservationContext> find_shared_id_reservation_context(
 std::vector<std::filesystem::path> registered_product_roots(const SharedIdReservationContext& context) {
     std::set<std::filesystem::path> roots{normalize_path(context.repository_root / context.product_relative_path)};
     const auto worktrees_dir = context.git_common_dir / "worktrees";
-    std::error_code ec;
-    if (!std::filesystem::is_directory(worktrees_dir, ec)) {
-        return {roots.begin(), roots.end()};
-    }
-    for (const auto& entry : std::filesystem::directory_iterator(worktrees_dir, ec)) {
-        if (ec) break;
-        const auto gitdir = read_first_line(entry.path() / "gitdir");
-        if (!gitdir) continue;
-        auto worktree_root = normalize_path(std::filesystem::path(*gitdir)).parent_path();
-        auto product_root = normalize_path(worktree_root / context.product_relative_path);
-        if (std::filesystem::is_directory(product_root, ec)) {
-            roots.insert(product_root);
+    const auto add_product = [&](const std::filesystem::path& checkout) {
+        auto product = checkout;
+        for (const auto& component : context.product_relative_path) {
+            if (component == ".") {
+                continue;
+            }
+            product /= component;
+            const auto status = worktree_status(product);
+            if (status.type() == std::filesystem::file_type::not_found) {
+                return;
+            }
+            if (!std::filesystem::is_directory(status)) {
+                unverified_worktree_registry();
+            }
         }
-        ec.clear();
+        roots.insert(product);
+    };
+    const bool active_linked = context.git_dir != context.git_common_dir;
+    if (active_linked) {
+        // This layout gives the primary checkout a physical .git directory.
+        if (context.git_dir.parent_path() != worktrees_dir ||
+            context.git_common_dir.filename() != ".git") {
+            unverified_worktree_registry();
+        }
+        add_product(context.git_common_dir.parent_path());
+    }
+    bool active_verified = !active_linked;
+    const auto registry_status = worktree_status(worktrees_dir);
+    if (std::filesystem::is_directory(registry_status)) {
+        std::error_code error;
+        std::filesystem::directory_iterator entry(worktrees_dir, error);
+        const std::filesystem::directory_iterator end;
+        for (; !error && entry != end; entry.increment(error)) {
+            const auto entry_status = entry->symlink_status(error);
+            if (!std::filesystem::is_directory(entry_status)) {
+                if (error || !std::filesystem::is_regular_file(entry_status)) {
+                    unverified_worktree_registry();
+                }
+                continue;
+            }
+            const auto git_dir = entry->path();
+            const auto marker = read_worktree_pointer(git_dir / "gitdir");
+            const auto checkout = marker.parent_path();
+            if (marker.filename() != ".git") {
+                unverified_worktree_registry();
+            }
+            const auto marker_status = worktree_status(marker);
+            if (marker_status.type() == std::filesystem::file_type::not_found &&
+                worktree_status(git_dir / "locked").type() == std::filesystem::file_type::not_found &&
+                missing_native_worktree(checkout, context.git_common_dir)) {
+                // An unlocked checkout missing on a visible local volume is prunable.
+                continue;
+            }
+            if (!std::filesystem::is_regular_file(marker_status) ||
+                canonical_worktree_directory(read_worktree_pointer(marker, "gitdir:")) != git_dir ||
+                canonical_worktree_directory(read_worktree_pointer(git_dir / "commondir")) !=
+                    context.git_common_dir) {
+                unverified_worktree_registry();
+            }
+            const auto checkout_root = canonical_worktree_directory(checkout);
+            if (git_dir == context.git_dir) {
+                if (checkout_root != context.repository_root) {
+                    unverified_worktree_registry();
+                }
+                active_verified = true;
+            }
+            add_product(checkout_root);
+        }
+        if (error) {
+            unverified_worktree_registry();
+        }
+    } else if (registry_status.type() != std::filesystem::file_type::not_found) {
+        unverified_worktree_registry();
+    }
+    if (!active_verified) {
+        unverified_worktree_registry();
     }
     return {roots.begin(), roots.end()};
 }
@@ -1621,9 +1808,6 @@ CreateItemResult WorkitemOps::create_item(
     }
 
     const auto reservation_context = find_shared_id_reservation_context(backlog_root);
-    const auto request_roots = reservation_context
-        ? registered_product_roots(*reservation_context)
-        : std::vector<std::filesystem::path>{backlog_root};
     std::optional<CreateRequestLock> request_lock;
     if (idempotency_key) {
         const auto lock_path = reservation_context
@@ -1634,6 +1818,9 @@ CreateItemResult WorkitemOps::create_item(
         }
         request_lock.emplace(lock_path);
     }
+    const auto request_roots = reservation_context
+        ? registered_product_roots(*reservation_context)
+        : std::vector<std::filesystem::path>{backlog_root};
     CreateRequestScanBudget request_scan_budget;
     CreateMutationIndexes mutation_indexes(index);
     std::optional<CreateParentMetadata> parent_metadata;

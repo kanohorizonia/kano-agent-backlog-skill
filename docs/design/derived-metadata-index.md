@@ -173,6 +173,17 @@ KOB opens the checkout's existing cache read-only and verifies its witness
 against that checkout's product root. Missing or stale proof falls back to
 canonical checks for that root. Worktree registration determines scan scope.
 
+Create includes the primary checkout when initiated from a conventional linked
+worktree. A relative Git pointer is resolved next to the file that contains it.
+The checkout marker, registry backlink, and common-directory pointer must
+agree. A visible checkout can omit the product. An unlocked registration for
+a missing checkout on a verified local volume can be treated as prunable.
+Foreign paths, inaccessible roots, and mismatched pointers stop create before
+ID reservation. KOB checks the registry under its keyed create lock. Git
+maintenance and direct edits still require storage-host coordination. A
+container that cannot see host-registered checkouts must send creates through
+the storage host.
+
 On Windows, the `windows-ntfs-usn-v1` witness contains the product root's NTFS
 volume serial and file ID, USN journal identity and verified USN endpoint, plus
 watched canonical file and directory IDs. Verification fails closed on a

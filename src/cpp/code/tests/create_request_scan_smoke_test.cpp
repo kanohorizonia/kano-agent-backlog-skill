@@ -5,6 +5,7 @@
 #include <functional>
 #include <iomanip>
 #include <iostream>
+#include <optional>
 #include <random>
 #include <sstream>
 #include <stdexcept>
@@ -192,9 +193,9 @@ void test_registered_sibling_projection(const std::filesystem::path& root) {
     const auto sibling = linked / relative_product;
     const auto db_relative = std::filesystem::path(".cache") / "index" / "backlog.db";
     const auto sibling_db = linked / db_relative;
-    write_text(linked_git / "gitdir", (linked / ".git").generic_string() + "\n");
+    write_text(linked_git / "gitdir", "../../../../linked # 100%/.git\n");
     write_text(linked_git / "commondir", "../..\n");
-    write_text(linked / ".git", "gitdir: " + linked_git.generic_string() + "\n");
+    write_text(linked / ".git", "gitdir: ../primary/.git/worktrees/side\n");
     const auto create = [](BacklogIndex& index, const std::filesystem::path& product,
         const std::string& title, const std::string& key) {
         return WorkitemOps::create_item(index, product, "SIB", ItemType::Task, title, "codex",
@@ -283,6 +284,99 @@ void test_registered_sibling_projection(const std::filesystem::path& root) {
     std::cout << "sibling mutation projection: " << (verified ? "verified NTFS" : "canonical fallback") << "\n";
 }
 
+void test_linked_create_registry_scope(const std::filesystem::path& root) {
+    using kano::backlog_core::CanonicalStore;
+    using kano::backlog_core::ItemType;
+    using kano::backlog_ops::BacklogIndex;
+    using kano::backlog_ops::WorkitemOps;
+    const auto primary = root / "primary";
+    const auto linked = root / "linked";
+    const auto common = primary / ".git";
+    const auto registry = common / "worktrees";
+    const auto primary_product = primary / "products" / "fixture";
+    const auto linked_product = linked / "products" / "fixture";
+    const auto ledger_path = common / "kano" / "backlog-id-reservations.db";
+    const auto link = [&](const std::string& name) {
+        write_text(registry / name / "gitdir", "../../../../" + name + "/.git\n");
+        write_text(registry / name / "commondir", "../..\n");
+        write_text(root / name / ".git", "gitdir: ../primary/.git/worktrees/" + name + "\n");
+    };
+    link("linked");
+    link("without-product");
+    write_text(registry / "prunable" / "gitdir", "../../../../missing-parent/absent/checkout/.git\n");
+    BacklogIndex index(linked / ".cache" / "index" / "backlog.db", "fixture", linked_product);
+    const auto create = [&](const std::string& title, const std::optional<std::string>& key) {
+        return WorkitemOps::create_item(index, linked_product, "REG", ItemType::Task, title, "codex",
+            std::nullopt, "P2", {}, "general", "backlog", std::nullopt, std::nullopt,
+            "", "", duplicate_admission(title), key);
+    };
+
+    CanonicalStore primary_store(primary_product);
+    CanonicalStore linked_store(linked_product);
+    auto legacy = primary_store.create("REG", ItemType::Task, "Primary legacy request", 700);
+    legacy.external["create_request_key"] = "primary-legacy";
+    legacy.external["create_request_payload"] = "historical fingerprint";
+    primary_store.write(legacy);
+    expect_throws_contains([&] {
+        (void)create("Primary legacy request", "primary-legacy");
+    }, "item_create.idempotency_conflict", "linked admission must find a primary-only legacy marker");
+    expect(linked_store.list_items().empty(), "primary marker conflict must preserve the linked checkout");
+    expect(create("Allocate past primary", "primary-maximum").id == "REG-TSK-0701",
+        "linked allocation must advance past the primary checkout's highest filename");
+
+    const auto payload = [](const std::string& title) {
+        std::string fingerprint;
+        for (const auto& field : {"REG", "TSK", title.c_str(), "codex", "", "P2", "general",
+                 "backlog", "", "", "", "", title.c_str(), "test-product", "create", "", "false", "0", "0", "0"}) {
+            const std::string value(field);
+            fingerprint += std::to_string(value.size()) + ":" + value;
+        }
+        return fingerprint;
+    };
+    const std::string scope = "products/fixture";
+    const std::string key_prefix = std::to_string(scope.size()) + ":" + scope;
+    BacklogIndex ledger(ledger_path);
+    const std::string collision_title = "Reserved primary collision";
+    const auto reservation = ledger.reserve_next_number_for_request(
+        "REG", "TSK", "codex", key_prefix + "primary-collision", payload(collision_title));
+    auto collision = primary_store.create("REG", ItemType::Task, "Primary filename", reservation.number);
+    primary_store.write(collision);
+    expect_throws_contains([&] {
+        (void)create(collision_title, "primary-collision");
+    }, "duplicate_item_id.allocation_collision", "linked retry must detect its pending ID in the primary checkout");
+    expect(linked_store.list_items().size() == 1 &&
+        !std::filesystem::exists(primary / ".cache" / "index"),
+        "linked admission must neither write the colliding item nor create a primary cache");
+
+#ifdef _WIN32
+    const std::string foreign = "/unmounted-container/checkout/.git";
+#else
+    const std::string foreign = "C:/unmounted-host/checkout/.git";
+#endif
+    write_text(registry / "foreign" / "gitdir", foreign + "\n");
+    const std::string blocked_title = "Unverified registration";
+    expect_throws_contains([&] {
+        (void)create(blocked_title, "unverified-foreign");
+    }, "item_create.worktree_registry_incomplete", "a foreign checkout must fail closed");
+    expect_throws_contains([&] {
+        (void)create(blocked_title, std::nullopt);
+    }, "item_create.worktree_registry_incomplete", "unkeyed allocation must also verify the collision scope");
+    expect(!ledger.find_request_reservation(
+            "REG", "TSK", key_prefix + "unverified-foreign", payload(blocked_title)) &&
+        linked_store.list_items().size() == 1,
+        "unverified registry scope must fail before durable reservation or canonical mutation");
+    write_text(registry / "foreign" / "gitdir", "../../../../without-product/.git\n");
+    expect_throws_contains([&] {
+        (void)create(blocked_title, "unverified-reciprocal");
+    }, "item_create.worktree_registry_incomplete", "a visible backlink must identify its own registry entry");
+    std::filesystem::remove(registry / "foreign" / "gitdir");
+    std::filesystem::remove(registry / "foreign");
+    write_text(registry / "prunable" / "locked", "temporarily offline\n");
+    expect_throws_contains([&] {
+        (void)create(blocked_title, "unverified-locked");
+    }, "item_create.worktree_registry_incomplete", "a locked missing checkout cannot be treated as prunable");
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -301,6 +395,7 @@ int main(int argc, char** argv) {
         root = make_temp_root();
         if (argc == 2 && std::string_view(argv[1]) == "--sibling-projection") {
             test_registered_sibling_projection(root);
+            test_linked_create_registry_scope(root / "registry");
             std::filesystem::remove_all(root);
             return 0;
         }

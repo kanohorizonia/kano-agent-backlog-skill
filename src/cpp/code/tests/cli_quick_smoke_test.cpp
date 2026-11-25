@@ -104,9 +104,21 @@ int run_native_command(
     return rc;
 }
 
-int run_command_capture(const std::filesystem::path& binary, const std::vector<std::string>& args, const std::filesystem::path& output_path) {
+int run_command_capture(
+    const std::filesystem::path& binary,
+    const std::vector<std::string>& args,
+    const std::filesystem::path& output_path,
+    bool profile_mutations = false
+) {
     log_command_start(args);
     std::string command = shell_command_for(binary, args);
+    if (profile_mutations) {
+#ifdef _WIN32
+        command = "set \"KANO_BACKLOG_PROFILE_MUTATIONS=1\" && " + command;
+#else
+        command = "export KANO_BACKLOG_PROFILE_MUTATIONS=1 && " + command;
+#endif
+    }
     command += " > \"" + output_path.string() + "\" 2>&1";
     const int rc = std::system(command.c_str());
     log_command_result(rc, output_path);
@@ -898,6 +910,64 @@ int main(int argc, char** argv) {
                 !std::filesystem::exists(
                     registration_external / "views"),
             "registration lifecycle must not scaffold or mutate either product root");
+
+        const std::string external_parent_uid = "019d1000-0001-7000-8000-000000000002";
+        const auto external_parent = registration_external / "items" / "feature" /
+            "0000" / "HQST-FTR-0001_parent-intent.md";
+        write_text(external_parent, replace_frontmatter_scalar(list_fixture_item_markdown(
+            "HQST-FTR-0001", external_parent_uid, "Parent intent", "Ready", "P2", "2026-08-29"),
+            "type", "Feature"));
+        write_text(registration_item, replace_frontmatter_scalar(
+            registration_item_before, "parent", external_parent_uid));
+        const auto external_unrelated = registration_item.parent_path() / "HQST-TSK-0002_unrelated.md";
+        const auto external_unrelated_before = list_fixture_item_markdown(
+            "HQST-TSK-0002", "019d1000-0001-7000-8000-000000000003",
+            "Unrelated task", "Ready", "P2", "2026-08-29");
+        write_text(external_unrelated, external_unrelated_before);
+
+        const auto external_index_output = temp_root / "external-state-index.json";
+        expect_command_capture_success(run_command_capture(binary, {
+            "-p", registration_shared.string(), "-P", "HorizonQuestDemo",
+            "index", "build", "--force", "--format", "json"
+        }, external_index_output), external_index_output, "external state index build failed");
+        const auto external_index = read_json(external_index_output);
+        expect(external_index["status"].asString() == "ready" &&
+                   external_index["items_indexed"].asInt() == 3,
+            "external state index must include the child, parent, and unrelated item");
+
+        const auto external_status_output = temp_root / "external-state-index-status.json";
+        expect_command_capture_success(run_command_capture(binary, {
+            "-p", registration_shared.string(), "-P", "HorizonQuestDemo",
+            "index", "status", "--requested-revision",
+            external_index["product_revision"].asString(), "--format", "json"
+        }, external_status_output), external_status_output, "external state index status failed");
+        const auto external_status = read_json(external_status_output);
+        expect(external_status["indexes"].size() == 1,
+            "external state index status must resolve the configured slug");
+        const auto& external_proof = external_status["indexes"][0];
+
+        const auto external_update_output = temp_root / "external-state-update.txt";
+        expect_command_capture_success(run_command_capture(binary, {
+            "-p", registration_shared.string(), "-P", "HorizonQuestDemo",
+            "workitem", "update-state", "019d1000-0001-7000-8000-000000000001",
+            "--state", "InProgress", "--agent", "tester"
+        }, external_update_output, true), external_update_output, "external state update by UID failed");
+        const auto external_update = read_text(external_update_output);
+        expect(external_update.find("HQST-TSK-0001: Ready -> InProgress [Parent synced]") != std::string::npos &&
+                   external_update.find("Ready->InProgress intent preflight") != std::string::npos &&
+                   external_update.find("no parent intent resolved") == std::string::npos &&
+                   read_text(registration_item).find("state: InProgress") != std::string::npos &&
+                   read_text(external_parent).find("state: InProgress") != std::string::npos &&
+                   read_text(external_unrelated) == external_unrelated_before,
+            "external state update must preserve intent diagnostics and sync only the matching parent");
+        expect(external_update.find("workitem.update_state.total") != std::string::npos,
+            "external state update must emit mutation timing");
+        if (external_proof["status"].asString() == "unchanged") {
+            expect(external_proof["scanned_count"].asUInt64() == 0 &&
+                       external_update.find("canonical_store.list_items") == std::string::npos &&
+                       external_update.find("canonical_store.find_item_paths_by_id") == std::string::npos,
+                "verified external state update must reuse the projection without canonical inventory");
+        }
 
         const auto migration_plan_output = temp_root / "migration-plan-invalid-request.json";
         expect_command_capture_success(

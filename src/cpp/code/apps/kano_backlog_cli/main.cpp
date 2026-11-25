@@ -6909,7 +6909,8 @@ std::optional<int> try_run_workitem_update_state_fast_path(int argc, char** argv
         product.empty() ? std::nullopt : std::optional<std::string>(product),
         sandbox.empty() ? std::nullopt : std::optional<std::string>(sandbox)
     );
-    BacklogIndex index(ctx.backlog_root / ".cache" / "index" / "backlog.db");
+    BacklogIndex index(ctx.backlog_root / ".cache" / "index" / "backlog.db",
+        ctx.product_name, ctx.product_root);
     auto result = WorkitemOps::update_state(
         index,
         ctx.product_root,
@@ -9528,7 +9529,8 @@ int main(int InArgc, char* InArgv[]) {
 
             updateStateCmd->callback([&]() {
                 auto ctx = resolve_ctx();
-                BacklogIndex index(ctx.backlog_root / ".cache" / "index" / "backlog.db");
+                BacklogIndex index(ctx.backlog_root / ".cache" / "index" / "backlog.db",
+                    ctx.product_name, ctx.product_root);
 
                 std::string effective_state = !state_opt_str.empty() ? state_opt_str : state_str;
                 if (effective_state.empty()) {

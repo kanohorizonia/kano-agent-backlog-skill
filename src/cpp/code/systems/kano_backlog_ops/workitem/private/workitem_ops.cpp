@@ -1023,8 +1023,18 @@ bool is_high_risk_item(const BacklogItem& item) {
     return text_contains_any(item.risks, {"high risk", "high-risk", "security", "data loss", "migration"});
 }
 
-std::vector<std::string> intent_transition_diagnostics(
+IntentStackResult resolve_intent_stack_from_item(
+    const CanonicalStore& store,
     const std::filesystem::path& backlog_root,
+    BacklogItem current,
+    int max_depth,
+    BacklogIndex* index
+);
+
+std::vector<std::string> intent_transition_diagnostics(
+    const CanonicalStore& store,
+    const std::filesystem::path& backlog_root,
+    BacklogIndex& index,
     const BacklogItem& item,
     ItemState old_state,
     ItemState new_state
@@ -1041,7 +1051,7 @@ std::vector<std::string> intent_transition_diagnostics(
     }
 
     if (old_state == ItemState::Ready && new_state == ItemState::InProgress) {
-        const auto stack = WorkitemOps::resolve_intent_stack(backlog_root, item.id, 8);
+        const auto stack = resolve_intent_stack_from_item(store, backlog_root, item, 8, &index);
         diagnostics.push_back("Ready->InProgress intent preflight: run or review `workitem intent-template " + item.id + " --kind preflight` before implementation.");
         for (const auto& warning : stack.warnings) {
             diagnostics.push_back("Ready->InProgress intent-stack: " + warning);
@@ -2345,7 +2355,8 @@ UpdateStateResult WorkitemOps::update_state(
         if (message && !trim_text(*message).empty()) {
             diagnostic_item.worklog.push_back(*message);
         }
-        intent_diagnostics = intent_transition_diagnostics(backlog_root, diagnostic_item, old_state, new_state);
+        intent_diagnostics = intent_transition_diagnostics(
+            store, backlog_root, index, diagnostic_item, old_state, new_state);
     }
 
     // 3. Ready Gate Validation
@@ -2676,25 +2687,20 @@ RemapIdResult WorkitemOps::remap_id(
     return {old_id, new_id, old_path, new_path, updated_files};
 }
 
-IntentStackResult WorkitemOps::resolve_intent_stack(
-    const std::filesystem::path& backlog_root,
-    const std::string& item_ref,
-    int max_depth
-) {
-    if (max_depth < 1) {
-        max_depth = 1;
-    }
-    if (looks_like_path_ref(item_ref)) {
-        throw std::runtime_error("Intent stack item ref must be an item id or uid, not a path-like ref");
-    }
+namespace {
 
-    CanonicalStore store(backlog_root);
-    RefResolver resolver(store);
+IntentStackResult resolve_intent_stack_from_item(
+    const CanonicalStore& store,
+    const std::filesystem::path& backlog_root,
+    BacklogItem current,
+    int max_depth,
+    BacklogIndex* index
+) {
+    max_depth = std::max(1, max_depth);
     IntentStackResult result;
     std::set<std::string> seen;
     std::set<std::string> evidence_refs;
 
-    BacklogItem current = resolver.resolve(item_ref);
     for (int depth = 0; depth < max_depth; ++depth) {
         const std::string identity = !current.uid.empty() ? current.uid : current.id;
         if (!seen.insert(identity).second) {
@@ -2717,7 +2723,7 @@ IntentStackResult WorkitemOps::resolve_intent_stack(
         }
 
         try {
-            current = resolver.resolve(*current.parent);
+            current = resolve_item_or_throw(store, backlog_root, *current.parent, index);
         } catch (const std::exception& ex) {
             result.warnings.push_back("Parent ref for " + current.id + " could not be resolved: " + *current.parent + " (" + ex.what() + ")");
             break;
@@ -2733,6 +2739,23 @@ IntentStackResult WorkitemOps::resolve_intent_stack(
 
     result.evidence_refs.assign(evidence_refs.begin(), evidence_refs.end());
     return result;
+}
+
+} // namespace
+
+IntentStackResult WorkitemOps::resolve_intent_stack(
+    const std::filesystem::path& backlog_root,
+    const std::string& item_ref,
+    int max_depth
+) {
+    if (looks_like_path_ref(item_ref)) {
+        throw std::runtime_error("Intent stack item ref must be an item id or uid, not a path-like ref");
+    }
+
+    CanonicalStore store(backlog_root);
+    return resolve_intent_stack_from_item(
+        store, backlog_root, resolve_item_or_throw(store, backlog_root, item_ref, nullptr),
+        max_depth, nullptr);
 }
 
 WorkOrderAdmissionResult WorkitemOps::evaluate_work_order_admission(

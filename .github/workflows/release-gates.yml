@@ -63,6 +63,9 @@ jobs:
         run: bash src/shell/support/self-build.sh release
 
       - name: Run native release smoke tests
+        env:
+          # Keep fixture discovery outside the checkout's shared Git metadata.
+          KANO_UNATTENDED_TEMP_ROOT: ${{ runner.temp }}/kob-native-tests
         run: bash src/shell/test/native-test.sh linux-ninja-clang Release
 
       - name: Verify native runtime gate
